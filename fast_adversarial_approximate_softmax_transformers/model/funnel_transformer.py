@@ -166,7 +166,7 @@ class FunnelConfig(PretrainedConfig):
         layer_norm_eps=1e-9,
         pooling_type="mean",
         attention_type="relative_shift",
-        ffn_groups=1,
+        ffn_groups=4,
         ffn_layers=1,
         ffn_width=4,
         # qkv_transform_groups=1,
@@ -927,8 +927,8 @@ class FunnelPreTrainedModel(PreTrainedModel):
         if classname.find("Conv1d") != -1:
             if getattr(module, "weight", None) is not None:
                 if self.config.initializer_std is None:
-                    fan_out, fan_in = module.weight.shape
-                    fan_out, fan_in = fan_out/module.groups, fan_in/module.groups
+                    fan_out, fan_in = module.weight.shape[:2]
+                    fan_out, fan_in = fan_out, fan_in
                     std = np.sqrt(1.0 / float(fan_in + fan_out))
                 else:
                     std = self.config.initializer_std
@@ -1392,6 +1392,9 @@ if __name__ == "__main__":
     from transformers import AutoTokenizer
     model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=True, stride=4))
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print("Trainable Params = %s" % (params/1_000_000))
 
     model = model.eval()
 
