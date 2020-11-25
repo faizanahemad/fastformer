@@ -169,7 +169,7 @@ class FunnelConfig(PretrainedConfig):
         ffn_groups=4,
         ffn_layers=1,
         ffn_width=4,
-        # qkv_transform_groups=1,
+        qkv_transform_groups=4,
         embedding_size=768,
         num_highway_cls_tokens=7,
         position_biased_input=True,
@@ -213,7 +213,7 @@ class FunnelConfig(PretrainedConfig):
         self.attention_type = attention_type
         self.ffn_groups = ffn_groups
         self.ffn_layers = ffn_layers
-        # self.qkv_transform_groups = qkv_transform_groups
+        self.qkv_transform_groups = qkv_transform_groups
         self.embedding_size = embedding_size
         self.position_biased_input = position_biased_input
         self.num_highway_cls_tokens = num_highway_cls_tokens
@@ -567,6 +567,24 @@ class FunnelAttentionStructure(nn.Module):
         return attention_inputs
 
 
+class Conv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True):
+        super().__init__()
+        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups, bias=bias)
+
+    def forward(self, x):
+        unsqueeze = False
+        if len(x.shape) == 2:
+            x = x.unsqueeze(0)
+            unsqueeze = True
+        x = x.permute(0, 2, 1)
+        x = self.conv(x)
+        x = x.permute(0, 2, 1)
+        if unsqueeze:
+            x = x.squeeze(0)
+        return x
+
+
 class FunnelRelMultiheadAttention(nn.Module):
     def __init__(self, config: FunnelConfig, block_index):
         super().__init__()
@@ -579,13 +597,24 @@ class FunnelRelMultiheadAttention(nn.Module):
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
         self.approximate_attention = self.config.approximate_attention
 
-        self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
-        self.k_head = nn.Linear(d_model, n_head * d_head)
-        self.v_head = nn.Linear(d_model, n_head * d_head)
+        qkv_transform_groups = self.config.qkv_transform_groups
+        if qkv_transform_groups > 1:
+            assert n_head % qkv_transform_groups == 0 and n_head > qkv_transform_groups
+            self.q_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+            self.k_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+            self.v_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+        else:
+            self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
+            self.k_head = nn.Linear(d_model, n_head * d_head)
+            self.v_head = nn.Linear(d_model, n_head * d_head)
 
         if self.separate_content_and_position_attention:
-            self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head)
-            self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head)
+            if qkv_transform_groups > 1:
+                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+                self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+            else:
+                self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head)
+                self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head)
             self.c2p_bias = nn.Parameter(torch.zeros([n_head, d_head]))
             self.p2c_bias = nn.Parameter(torch.zeros([n_head, d_head]))
             self.pos_qln = nn.LayerNorm(n_head * d_head, eps=config.layer_norm_eps)
