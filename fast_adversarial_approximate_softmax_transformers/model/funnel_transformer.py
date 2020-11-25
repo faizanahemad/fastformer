@@ -143,20 +143,13 @@ class FunnelConfig(PretrainedConfig):
         attention_type (:obj:`str`, `optional`, defaults to :obj:`"relative_shift"`):
             Possible values are ``"relative_shift"`` or ``"factorized"``. The former is faster on CPU/GPU while the
             latter is faster on TPU.
-        separate_cls (:obj:`bool`, `optional`, defaults to :obj:`True`):
-            Whether or not to separate the cls token when applying pooling.
-        truncate_seq (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            When using ``separate_cls``, whether or not to truncate the last token when pooling, to avoid getting a
-            sequence length that is not a multiple of 2.
-        pool_q_only (:obj:`bool`, `optional`, defaults to :obj:`False`):
-            Whether or not to apply the pooling only to the query or to query, key and values for the attention layers.
     """
     model_type = "funnel"
 
     def __init__(
         self,
         vocab_size=30522,
-        block_sizes=[4, 4, 4],
+        block_sizes=[6, 6, 6],
         block_repeats=None,
         num_decoder_layers=2,
         d_model=768,
@@ -167,19 +160,23 @@ class FunnelConfig(PretrainedConfig):
         attention_dropout=0.1,
         activation_dropout=0.0,
         max_position_embeddings=512,
-        type_vocab_size=3,
+        type_vocab_size=0,
         initializer_range=0.1,
         initializer_std=None,
         layer_norm_eps=1e-9,
         pooling_type="mean",
         attention_type="relative_shift",
-        separate_cls=True,
-        truncate_seq=True,
-        pool_q_only=True,
         ffn_groups=1,
         ffn_layers=1,
         ffn_width=4,
-        qkv_transform_groups=1,
+        # qkv_transform_groups=1,
+        embedding_size=768,
+        num_highway_cls_tokens=7,
+        position_biased_input=True,
+        stride=2,
+        untie_cls=False,
+        separate_content_and_position_attention=False,
+        approximate_attention=False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -214,12 +211,17 @@ class FunnelConfig(PretrainedConfig):
             "factorized",
         ], f"Got {attention_type} for `attention_type` but only 'relative_shift' and 'factorized' are supported."
         self.attention_type = attention_type
-        self.separate_cls = separate_cls
-        self.truncate_seq = truncate_seq
-        self.pool_q_only = pool_q_only
         self.ffn_groups = ffn_groups
         self.ffn_layers = ffn_layers
-        self.qkv_transform_groups = qkv_transform_groups
+        # self.qkv_transform_groups = qkv_transform_groups
+        self.embedding_size = embedding_size
+        self.position_biased_input = position_biased_input
+        self.num_highway_cls_tokens = num_highway_cls_tokens
+        self.approximate_attention = approximate_attention
+        self.untie_cls = untie_cls
+        self.separate_content_and_position_attention = separate_content_and_position_attention
+        self.stride = stride
+        assert position_biased_input or separate_content_and_position_attention
 
 
     @property
@@ -239,19 +241,192 @@ class FunnelConfig(PretrainedConfig):
         return len(self.block_sizes)
 
 
+class DropoutContext(object):
+    def __init__(self):
+        self.dropout = 0
+        self.mask = None
+        self.scale = 1
+        self.reuse_mask = True
+
+
+def get_mask(input, local_context):
+    if not isinstance(local_context, DropoutContext):
+        dropout = local_context
+        mask = None
+    else:
+        dropout = local_context.dropout
+        dropout *= local_context.scale
+        mask = local_context.mask if local_context.reuse_mask else None
+
+    if dropout > 0 and mask is None:
+
+        mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).bool()
+
+    if isinstance(local_context, DropoutContext):
+        if local_context.mask is None:
+            local_context.mask = mask
+
+    return mask, dropout
+
+
+class XDropout(torch.autograd.Function):
+    """Optimized dropout function to save computation and memory by using mask operation instead of multiplication."""
+
+    @staticmethod
+    def forward(ctx, input, local_ctx):
+        mask, dropout = get_mask(input, local_ctx)
+        ctx.scale = 1.0 / (1 - dropout)
+        if dropout > 0:
+            ctx.save_for_backward(mask)
+            return input.masked_fill(mask, 0) * ctx.scale
+        else:
+            return input
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.scale > 1:
+            (mask,) = ctx.saved_tensors
+            return grad_output.masked_fill(mask, 0) * ctx.scale, None
+        else:
+            return grad_output, None
+
+
+class StableDropout(torch.nn.Module):
+    """
+    Optimized dropout module for stabilizing the training
+
+    Args:
+
+        drop_prob (float): the dropout probabilities
+
+    """
+
+    def __init__(self, drop_prob):
+        super().__init__()
+        self.drop_prob = drop_prob
+        self.count = 0
+        self.context_stack = None
+
+    def forward(self, x):
+        """
+        Call the module
+
+        Args:
+            x (:obj:`torch.tensor`): The input tensor to apply dropout
+
+
+        """
+        if self.training and self.drop_prob > 0:
+            return XDropout.apply(x, self.get_context())
+        return x
+
+    def clear_context(self):
+        self.count = 0
+        self.context_stack = None
+
+    def init_context(self, reuse_mask=True, scale=1):
+        if self.context_stack is None:
+            self.context_stack = []
+        self.count = 0
+        for c in self.context_stack:
+            c.reuse_mask = reuse_mask
+            c.scale = scale
+
+    def get_context(self):
+        if self.context_stack is not None:
+            if self.count >= len(self.context_stack):
+                self.context_stack.append(DropoutContext())
+            ctx = self.context_stack[self.count]
+            ctx.dropout = self.drop_prob
+            self.count += 1
+            return ctx
+        else:
+            return self.drop_prob
+
+
 class FunnelEmbeddings(nn.Module):
+    """Construct the embeddings from word, position and token_type embeddings."""
+
     def __init__(self, config):
         super().__init__()
-        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
-        self.layer_norm = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout)
+        pad_token_id = getattr(config, "pad_token_id", 0)
+        hidden_size = getattr(config, "d_model", config.hidden_size)
+        self.hidden_size = hidden_size
+        self.embedding_size = getattr(config, "embedding_size", )
+        self.word_embeddings = nn.Embedding(config.vocab_size + config.num_highway_cls_tokens, self.embedding_size, padding_idx=pad_token_id)
 
-    def forward(self, input_ids=None, inputs_embeds=None):
-        if inputs_embeds is None:
+        self.position_biased_input = getattr(config, "position_biased_input", True)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings, self.embedding_size)
+
+        if config.type_vocab_size > 0:
+            self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
+
+        self.embed_proj = None
+        if self.embedding_size != hidden_size:
+            self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
+        self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
+        self.dropout = StableDropout(config.hidden_dropout)
+        self.output_to_half = False
+        self.config = config
+
+        # position_ids (1, len position emb) is contiguous in memory and exported when serialized
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings + config.num_highway_cls_tokens).expand((1, -1)))
+        self.register_buffer("highway_position_ids", torch.arange(config.num_highway_cls_tokens).expand((1, -1)))
+        if config.num_highway_cls_tokens > 0:
+            self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
+
+    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None):
+        if input_embeds is None:
+            input_shape = input_ids.size()
+            input_shape = list(input_shape)
+            input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
+            input_shape = tuple(input_shape)
+
+            seq_length = input_shape[1]
             inputs_embeds = self.word_embeddings(input_ids)
-        embeddings = self.layer_norm(inputs_embeds)
+
+            if self.config.num_highway_cls_tokens > 0:
+                highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
+                inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
+        else:
+            input_shape = input_embeds.size()
+            seq_length = input_shape[1]
+
+        if position_ids is None:
+            position_ids = self.position_ids[:, :seq_length]
+        else:
+            position_ids = torch.cat((self.highway_position_ids.expand((position_ids.size(0), -1)), position_ids + self.config.num_highway_cls_tokens), dim=1)
+
+        position_embeddings = self.position_embeddings(position_ids.long())
+
+        embeddings = inputs_embeds
+        if self.position_biased_input:
+            embeddings += position_embeddings
+        if self.config.type_vocab_size > 0:
+            if token_type_ids is None:
+                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+            else:
+                token_type_ids = torch.cat((torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids), dim=1)
+            token_type_embeddings = self.token_type_embeddings(token_type_ids)
+            embeddings += token_type_embeddings
+
+        if self.embed_proj:
+            embeddings = self.embed_proj(embeddings)
+
+        embeddings = self.LayerNorm(embeddings)
+
+        if mask is not None:
+            if mask.dim() != embeddings.dim():
+                if mask.dim() == 4:
+                    mask = mask.squeeze(1).squeeze(1)
+                mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device),mask), dim=1)
+                mask = mask.unsqueeze(2)
+            mask = mask.to(embeddings.dtype)
+
+            embeddings = embeddings * mask
+
         embeddings = self.dropout(embeddings)
-        return embeddings
+        return embeddings, position_embeddings.squeeze(0)
 
 
 class FunnelAttentionStructure(nn.Module):
@@ -259,41 +434,25 @@ class FunnelAttentionStructure(nn.Module):
     Contains helpers for `FunnelRelMultiheadAttention `.
     """
 
-    cls_token_type_id: int = 2
-
-    def __init__(self, config):
+    def __init__(self, config: FunnelConfig):
         super().__init__()
         self.config = config
         self.sin_dropout = nn.Dropout(config.hidden_dropout)
         self.cos_dropout = nn.Dropout(config.hidden_dropout)
         # Track where we are at in terms of pooling from the original input, e.g., by how much the sequence length was
         # dividide.
-        self.pooling_mult = None
+        self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
+        self.stride = self.config.stride
 
-    def init_attention_inputs(self, inputs_embeds, attention_mask=None, token_type_ids=None):
+    def init_attention_inputs(self, inputs_embeds, position_embeds, attention_mask=None):
         """ Returns the attention inputs associated to the inputs of the model. """
         # inputs_embeds has shape batch_size x seq_len x d_model
         # attention_mask and token_type_ids have shape batch_size x seq_len
-        self.pooling_mult = 1
         self.seq_len = seq_len = inputs_embeds.size(1)
-        position_embeds = self.get_position_embeds(seq_len, inputs_embeds.dtype, inputs_embeds.device)
-        token_type_mat = self.token_type_ids_to_mat(token_type_ids) if token_type_ids is not None else None
-        cls_mask = (
-            F.pad(inputs_embeds.new_ones([seq_len - 1, seq_len - 1]), (1, 0, 1, 0))
-            if self.config.separate_cls
-            else None
-        )
-        return (position_embeds, token_type_mat, attention_mask, cls_mask)
+        position_embeds = self.get_position_embeds(seq_len, position_embeds, inputs_embeds.dtype, inputs_embeds.device)
+        return (position_embeds, attention_mask)
 
-    def token_type_ids_to_mat(self, token_type_ids):
-        """Convert `token_type_ids` to `token_type_mat`."""
-        token_type_mat = token_type_ids[:, :, None] == token_type_ids[:, None]
-        # Treat <cls> as in the same segment as both A & B
-        cls_ids = token_type_ids == self.cls_token_type_id
-        cls_mat = cls_ids[:, :, None] | cls_ids[:, None]
-        return cls_mat | token_type_mat
-
-    def get_position_embeds(self, seq_len, dtype, device):
+    def get_position_embeds(self, seq_len, pos_embed, dtype, device):
         """
         Create and cache inputs related to relative position encoding. Those are very different depending on whether we
         are using the factorized or the relative shift attention:
@@ -307,127 +466,50 @@ class FunnelAttentionStructure(nn.Module):
         Paper link: https://arxiv.org/abs/2006.03236
         """
         d_model = self.config.d_model
-        if self.config.attention_type == "factorized":
-            # Notations from the paper, appending A.2.2, final formula.
-            # We need to create and return the matrices phi, psi, pi and omega.
-            pos_seq = torch.arange(0, seq_len, 1.0, dtype=dtype, device=device)
-            freq_seq = torch.arange(0, d_model // 2, 1.0, dtype=dtype, device=device)
-            inv_freq = 1 / (10000 ** (freq_seq / (d_model // 2)))
-            sinusoid = pos_seq[:, None] * inv_freq[None]
-            sin_embed = torch.sin(sinusoid)
-            sin_embed_d = self.sin_dropout(sin_embed)
-            cos_embed = torch.cos(sinusoid)
-            cos_embed_d = self.cos_dropout(cos_embed)
-            # This is different from the formula on the paper...
-            phi = torch.cat([sin_embed_d, sin_embed_d], dim=-1)
-            psi = torch.cat([cos_embed, sin_embed], dim=-1)
-            pi = torch.cat([cos_embed_d, cos_embed_d], dim=-1)
-            omega = torch.cat([-sin_embed, cos_embed], dim=-1)
-            return (phi, pi, psi, omega)
-        else:
-            # Notations from the paper, appending A.2.1, final formula.
-            # We need to create and return all the possible vectors R for all blocks and shifts.
-            freq_seq = torch.arange(0, d_model // 2, 1.0, dtype=dtype, device=device)
-            inv_freq = 1 / (10000 ** (freq_seq / (d_model // 2)))
-            # Maximum relative positions for the first input
-            rel_pos_id = torch.arange(-seq_len * 2, seq_len * 2, 1.0, dtype=dtype, device=device)
-            zero_offset = seq_len * 2
-            sinusoid = rel_pos_id[:, None] * inv_freq[None]
-            sin_embed = self.sin_dropout(torch.sin(sinusoid))
-            cos_embed = self.cos_dropout(torch.cos(sinusoid))
-            pos_embed = torch.cat([sin_embed, cos_embed], dim=-1)
+        stride = self.stride
+        # Notations from the paper, appending A.2.1, final formula.
+        # We need to create and return all the possible vectors R for all blocks and shifts.
 
-            pos = torch.arange(0, seq_len, dtype=dtype, device=device)
-            pooled_pos = pos
-            position_embeds_list = []
-            for block_index in range(0, self.config.num_blocks):
-                # For each block with block_index > 0, we need two types position embeddings:
-                #   - Attention(pooled-q, unpooled-kv)
-                #   - Attention(pooled-q, pooled-kv)
-                # For block_index = 0 we only need the second one and leave the first one as None.
+        pos = torch.arange(0, seq_len, dtype=dtype, device=device)
+        pooled_pos = pos
+        position_embeds_list = []
+        for block_index in range(0, self.config.num_blocks):
+            # For each block with block_index > 0, we need two types position embeddings:
+            #   - Attention(pooled-q, unpooled-kv)
+            #   - Attention(pooled-q, pooled-kv)
+            # For block_index = 0 we only need the second one and leave the first one as None.
 
-                # First type
-                if block_index == 0:
-                    position_embeds_pooling = None
+            # First type
+            if block_index == 0:
+                position_embeds_pooling = pos_embed
+                position_embeds_no_pooling = pos_embed
+            else:
+                pooled_pos = self.stride_pool_pos(pos, block_index, stride)
+                pooled_pos = pooled_pos[:2 * (pooled_pos.size(0)//2)]
+                ppos = pooled_pos[:, None].expand(pooled_pos.size(0), pos_embed.size(1)).type(torch.long)
+                position_embeds_pooling = torch.gather(pos_embed, 0, ppos)
+                if block_index == 1:
+                    position_embeds_no_pooling = pos_embed
                 else:
-                    pooled_pos = self.stride_pool_pos(pos, block_index)
-
-                    # construct rel_pos_id
-                    stride = 2 ** (block_index - 1)
-                    rel_pos = self.relative_pos(pos, stride, pooled_pos, shift=2)
-                    rel_pos = rel_pos[:, None] + zero_offset
-                    rel_pos = rel_pos.expand(rel_pos.size(0), d_model)
-                    position_embeds_pooling = torch.gather(pos_embed, 0, rel_pos)
-
-                # Second type
+                    apos = pos[:, None].expand(pos.size(0), pos_embed.size(1)).type(torch.long)
+                    position_embeds_no_pooling = torch.gather(pos_embed, 0, apos)
                 pos = pooled_pos
-                stride = 2 ** block_index
-                rel_pos = self.relative_pos(pos, stride)
 
-                rel_pos = rel_pos[:, None] + zero_offset
-                rel_pos = rel_pos.expand(rel_pos.size(0), d_model)
-                position_embeds_no_pooling = torch.gather(pos_embed, 0, rel_pos)
+            position_embeds_list.append([position_embeds_no_pooling, position_embeds_pooling])
+        return position_embeds_list
 
-                position_embeds_list.append([position_embeds_no_pooling, position_embeds_pooling])
-            return position_embeds_list
-
-    def stride_pool_pos(self, pos_id, block_index):
+    def stride_pool_pos(self, pos_id, block_index, stride):
         """
         Pool `pos_id` while keeping the cls token separate (if `config.separate_cls=True`).
         """
-        if self.config.separate_cls:
-            # Under separate <cls>, we treat the <cls> as the first token in
-            # the previous block of the 1st real block. Since the 1st real
-            # block always has position 1, the position of the previous block
-            # will be at `1 - 2 ** block_index`.
-            cls_pos = pos_id.new_tensor([-(2 ** block_index) + 1])
-            pooled_pos_id = pos_id[1:-1] if self.config.truncate_seq else pos_id[1:]
-            return torch.cat([cls_pos, pooled_pos_id[::2]], 0)
-        else:
-            return pos_id[::2]
 
-    def relative_pos(self, pos, stride, pooled_pos=None, shift=1):
-        """
-        Build the relative positional vector between `pos` and `pooled_pos`.
-        """
-        if pooled_pos is None:
-            pooled_pos = pos
-
-        ref_point = pooled_pos[0] - pos[0]
-        num_remove = shift * len(pooled_pos)
-        max_dist = ref_point + num_remove * stride
-        min_dist = pooled_pos[0] - pos[-1]
-
-        return torch.arange(max_dist, min_dist - 1, -stride, dtype=torch.long, device=pos.device)
-
-    def stride_pool(self, tensor, axis):
-        """
-        Perform pooling by stride slicing the tensor along the given axis.
-        """
-        if tensor is None:
-            return None
-
-        # Do the stride pool recursively if axis is a list or a tuple of ints.
-        if isinstance(axis, (list, tuple)):
-            for ax in axis:
-                tensor = self.stride_pool(tensor, ax)
-            return tensor
-
-        # Do the stride pool recursively if tensor is a list or tuple of tensors.
-        if isinstance(tensor, (tuple, list)):
-            return type(tensor)(self.stride_pool(x, axis) for x in tensor)
-
-        # Deal with negative axis
-        axis %= tensor.ndim
-
-        axis_slice = (
-            slice(None, -1, 2) if self.config.separate_cls and self.config.truncate_seq else slice(None, None, 2)
-        )
-        enc_slice = [slice(None)] * axis + [axis_slice]
-        if self.config.separate_cls:
-            cls_slice = [slice(None)] * axis + [slice(None, 1)]
-            tensor = torch.cat([tensor[cls_slice], tensor], axis=axis)
-        return tensor[enc_slice]
+        # Under separate <cls>, we treat the <cls> as the first token in
+        # the previous block of the 1st real block. Since the 1st real
+        # block always has position 1, the position of the previous block
+        # will be at `1 - 2 ** block_index`.
+        cls_pos = pos_id[:self.cls_tokens_total]
+        pooled_pos_id = pos_id[self.cls_tokens_total:-1]
+        return torch.cat([cls_pos, pooled_pos_id[::stride]], 0)
 
     def pool_tensor(self, tensor, mode="mean", stride=2):
         """Apply 1D pooling to a tensor of size [B x T (x H)]."""
@@ -438,9 +520,10 @@ class FunnelAttentionStructure(nn.Module):
         if isinstance(tensor, (tuple, list)):
             return type(tensor)(self.pool_tensor(tensor, mode=mode, stride=stride) for x in tensor)
 
-        if self.config.separate_cls:
-            suffix = tensor[:, :-1] if self.config.truncate_seq else tensor
-            tensor = torch.cat([tensor[:, :1], suffix], dim=1)
+
+        # TODO: check if even length in dim=1 (seq dim)
+        cls_tokens = tensor[:, :self.cls_tokens_total]
+        tensor = tensor[:, self.cls_tokens_total:]
 
         ndim = tensor.ndim
         if ndim == 2:
@@ -460,153 +543,65 @@ class FunnelAttentionStructure(nn.Module):
             raise NotImplementedError("The supported modes are 'mean', 'max' and 'min'.")
 
         if ndim == 2:
-            return tensor[:, 0, :, 0]
+            tensor = tensor[:, 0, :, 0]
         elif ndim == 3:
-            return tensor[:, 0]
+            tensor = tensor[:, 0]
+
+        tensor = torch.cat([cls_tokens, tensor.squeeze(1)], dim=1)
+        tensor = tensor[:, :2 * (tensor.size(1) // 2)]
         return tensor
 
     def pre_attention_pooling(self, output, attention_inputs):
         """ Pool `output` and the proper parts of `attention_inputs` before the attention layer. """
-        position_embeds, token_type_mat, attention_mask, cls_mask = attention_inputs
-        if self.config.pool_q_only:
-            if self.config.attention_type == "factorized":
-                position_embeds = self.stride_pool(position_embeds[:2], 0) + position_embeds[2:]
-            token_type_mat = self.stride_pool(token_type_mat, 1)
-            cls_mask = self.stride_pool(cls_mask, 0)
-            output = self.pool_tensor(output, mode=self.config.pooling_type)
-        else:
-            self.pooling_mult *= 2
-            if self.config.attention_type == "factorized":
-                position_embeds = self.stride_pool(position_embeds, 0)
-            token_type_mat = self.stride_pool(token_type_mat, [1, 2])
-            cls_mask = self.stride_pool(cls_mask, [1, 2])
-            attention_mask = self.pool_tensor(attention_mask, mode="min")
-            output = self.pool_tensor(output, mode=self.config.pooling_type)
-        attention_inputs = (position_embeds, token_type_mat, attention_mask, cls_mask)
+        position_embeds, attention_mask = attention_inputs
+        output = self.pool_tensor(output, mode=self.config.pooling_type, stride=self.stride)
+        attention_inputs = (position_embeds, attention_mask)
         return output, attention_inputs
 
-    def post_attention_pooling(self, attention_inputs):
+    def post_attention_pooling(self, attention_inputs, block_index):
         """ Pool the proper parts of `attention_inputs` after the attention layer. """
-        position_embeds, token_type_mat, attention_mask, cls_mask = attention_inputs
-        if self.config.pool_q_only:
-            self.pooling_mult *= 2
-            if self.config.attention_type == "factorized":
-                position_embeds = position_embeds[:2] + self.stride_pool(position_embeds[2:], 0)
-            token_type_mat = self.stride_pool(token_type_mat, 2)
-            cls_mask = self.stride_pool(cls_mask, 1)
-            attention_mask = self.pool_tensor(attention_mask, mode="min")
-        attention_inputs = (position_embeds, token_type_mat, attention_mask, cls_mask)
+        position_embeds, attention_mask = attention_inputs
+        attention_mask = self.pool_tensor(attention_mask, mode="min", stride=self.stride)
+        position_embeds[block_index][0] = position_embeds[block_index][1]
+        attention_inputs = (position_embeds, attention_mask)
         return attention_inputs
 
 
-def _relative_shift_gather(positional_attn, context_len, shift):
-    batch_size, n_head, seq_len, max_rel_len = positional_attn.shape
-    # max_rel_len = 2 * context_len + shift -1 is the numbers of possible relative positions i-j
-
-    # What's next is the same as doing the following gather, which might be clearer code but less efficient.
-    # idxs = context_len + torch.arange(0, context_len).unsqueeze(0) - torch.arange(0, seq_len).unsqueeze(1)
-    # # matrix of context_len + i-j
-    # return positional_attn.gather(3, idxs.expand([batch_size, n_head, context_len, context_len]))
-
-    positional_attn = torch.reshape(positional_attn, [batch_size, n_head, max_rel_len, seq_len])
-    positional_attn = positional_attn[:, :, shift:, :]
-    positional_attn = torch.reshape(positional_attn, [batch_size, n_head, seq_len, max_rel_len - shift])
-    positional_attn = positional_attn[..., :context_len]
-    return positional_attn
-
-
 class FunnelRelMultiheadAttention(nn.Module):
-    def __init__(self, config, block_index):
+    def __init__(self, config: FunnelConfig, block_index):
         super().__init__()
         self.config = config
         self.block_index = block_index
         d_model, n_head, d_head = config.d_model, config.n_head, config.d_head
         self.attention_dropout = nn.Dropout(config.attention_dropout)
 
+        self.untie_cls = self.config.untie_cls
+        self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
+        self.approximate_attention = self.config.approximate_attention
+
         self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
         self.k_head = nn.Linear(d_model, n_head * d_head)
         self.v_head = nn.Linear(d_model, n_head * d_head)
 
-        self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
-        self.r_r_bias = nn.Parameter(torch.zeros([n_head, d_head]))
-        self.r_kernel = nn.Parameter(torch.zeros([d_model, n_head, d_head]))
-        self.r_s_bias = nn.Parameter(torch.zeros([n_head, d_head]))
-        self.seg_embed = nn.Parameter(torch.zeros([2, n_head, d_head]))
+        if self.separate_content_and_position_attention:
+            self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head)
+            self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head)
+            self.c2p_bias = nn.Parameter(torch.zeros([n_head, d_head]))
+            self.p2c_bias = nn.Parameter(torch.zeros([n_head, d_head]))
+            self.pos_qln = nn.LayerNorm(n_head * d_head, eps=config.layer_norm_eps)
+            self.pos_kln = nn.LayerNorm(n_head * d_head, eps=config.layer_norm_eps)
 
+        self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
         self.layer_norm = nn.LayerNorm(d_model, eps=config.layer_norm_eps)
         self.scale = 1.0 / (d_head ** 0.5)
-
-    def relative_positional_attention(self, position_embeds, q_head, context_len, cls_mask=None):
-        """ Relative attention score for the positional encodings """
-        # q_head has shape batch_size x sea_len x n_head x d_head
-        if self.config.attention_type == "factorized":
-            # Notations from the paper, appending A.2.2, final formula (https://arxiv.org/abs/2006.03236)
-            # phi and pi have shape seq_len x d_model, psi and omega have shape context_len x d_model
-            phi, pi, psi, omega = position_embeds
-            # Shape n_head x d_head
-            u = self.r_r_bias * self.scale
-            # Shape d_model x n_head x d_head
-            w_r = self.r_kernel
-
-            # Shape batch_size x sea_len x n_head x d_model
-            q_r_attention = torch.einsum("binh,dnh->bind", q_head + u, w_r)
-            q_r_attention_1 = q_r_attention * phi[:, None]
-            q_r_attention_2 = q_r_attention * pi[:, None]
-
-            # Shape batch_size x n_head x seq_len x context_len
-            positional_attn = torch.einsum("bind,jd->bnij", q_r_attention_1, psi) + torch.einsum(
-                "bind,jd->bnij", q_r_attention_2, omega
-            )
-        else:
-            shift = 2 if q_head.shape[1] != context_len else 1
-            # Notations from the paper, appending A.2.1, final formula (https://arxiv.org/abs/2006.03236)
-            # Grab the proper positional encoding, shape max_rel_len x d_model
-            r = position_embeds[self.block_index][shift - 1]
-            # Shape n_head x d_head
-            v = self.r_r_bias * self.scale
-            # Shape d_model x n_head x d_head
-            w_r = self.r_kernel
-
-            # Shape max_rel_len x n_head x d_model
-            r_head = torch.einsum("td,dnh->tnh", r, w_r)
-            # Shape batch_size x n_head x seq_len x max_rel_len
-            positional_attn = torch.einsum("binh,tnh->bnit", q_head + v, r_head)
-            # Shape batch_size x n_head x seq_len x context_len
-            positional_attn = _relative_shift_gather(positional_attn, context_len, shift)
-
-        if cls_mask is not None:
-            positional_attn *= cls_mask
-        return positional_attn
-
-    def relative_token_type_attention(self, token_type_mat, q_head, cls_mask=None):
-        """ Relative attention score for the token_type_ids """
-        if token_type_mat is None:
-            return 0
-        batch_size, seq_len, context_len = token_type_mat.shape
-        # q_head has shape batch_size x seq_len x n_head x d_head
-        # Shape n_head x d_head
-        r_s_bias = self.r_s_bias * self.scale
-
-        # Shape batch_size x n_head x seq_len x 2
-        token_type_bias = torch.einsum("bind,snd->bnis", q_head + r_s_bias, self.seg_embed)
-        # Shape batch_size x n_head x seq_len x context_len
-        token_type_mat = token_type_mat[:, None].expand([batch_size, q_head.shape[2], seq_len, context_len])
-        # Shapes batch_size x n_head x seq_len
-        diff_token_type, same_token_type = torch.split(token_type_bias, 1, dim=-1)
-        # Shape batch_size x n_head x seq_len x context_len
-        token_type_attn = torch.where(
-            token_type_mat, same_token_type.expand(token_type_mat.shape), diff_token_type.expand(token_type_mat.shape)
-        )
-
-        if cls_mask is not None:
-            token_type_attn *= cls_mask
-        return token_type_attn
+        self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
 
     def forward(self, query, key, value, attention_inputs, output_attentions=False):
         # query has shape batch_size x seq_len x d_model
         # key and value have shapes batch_size x context_len x d_model
-        position_embeds, token_type_mat, attention_mask, cls_mask = attention_inputs
-
+        position_embeds, attention_mask = attention_inputs
+        position_embeds = position_embeds[self.block_index]
+        position_embed_of_key, position_embed_of_query = position_embeds
         batch_size, seq_len, _ = query.shape
         context_len = key.shape[1]
         n_head, d_head = self.config.n_head, self.config.d_head
@@ -621,27 +616,49 @@ class FunnelRelMultiheadAttention(nn.Module):
         # Shape n_head x d_head
         r_w_bias = self.r_w_bias * self.scale
         # Shapes batch_size x n_head x seq_len x context_len
-        content_score = torch.einsum("bind,bjnd->bnij", q_head + r_w_bias, k_head)
-        positional_attn = self.relative_positional_attention(position_embeds, q_head, context_len, cls_mask)
-        token_type_attn = self.relative_token_type_attention(token_type_mat, q_head, cls_mask)
+        if self.separate_content_and_position_attention:
+            v = self.c2p_bias * self.scale
+            w = self.p2c_bias * self.scale
+            pos_k_head = self.pos_kln(self.pos_k_head(position_embed_of_key)).view(context_len, n_head, d_head)
+            pos_q_head = self.pos_qln(self.pos_q_head(position_embed_of_query)).view(seq_len, n_head, d_head)
+            # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
 
-        # merge attention scores
-        attn_score = content_score + positional_attn + token_type_attn
+            if self.untie_cls:
+                pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens_total, pos_k_head.size(1), pos_k_head.size(2)]),
+                                              (self.cls_tokens_total, 0, 0, 0, 0, 0))
+                pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0) - self.cls_tokens_total, pos_q_head.size(1), pos_q_head.size(2)]),
+                                                (self.cls_tokens_total, 0, 0, 0, 0, 0))
 
-        # precision safe in case of mixed precision training
-        dtype = attn_score.dtype
-        attn_score = attn_score.float()
-        # perform masking
-        if attention_mask is not None:
-            attn_score = attn_score - INF * (1 - attention_mask[:, None, None].float())
-        # attention probability
-        attn_prob = torch.softmax(attn_score, dim=-1, dtype=dtype)
-        attn_prob = self.attention_dropout(attn_prob)
+        if self.approximate_attention:
+            if self.separate_content_and_position_attention:
+                pass
+            else:
+                pass
+        else:
+            content_score = torch.einsum("bind,bjnd->bnij", q_head + r_w_bias, k_head)
+            attn_score = content_score
 
-        # attention output, shape batch_size x seq_len x n_head x d_head
-        attn_vec = torch.einsum("bnij,bjnd->bind", attn_prob, v_head)
-        attn_out = attn_vec.reshape(batch_size, seq_len, n_head * d_head)
-        # Shape shape batch_size x seq_len x d_model
+            if self.separate_content_and_position_attention:
+                c2p_score = torch.einsum("bind,jnd->bnij", q_head + v, pos_k_head)
+                p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head + w)
+                p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
+                # merge attention scores
+                attn_score = attn_score + c2p_score + p2c_score + p2p_score
+
+            # precision safe in case of mixed precision training
+            dtype = attn_score.dtype
+            attn_score = attn_score.float()
+            # perform masking
+            if attention_mask is not None:
+                attn_score = attn_score - INF * (1 - attention_mask[:, None, None].float())
+            # attention probability
+            attn_prob = torch.softmax(attn_score, dim=-1, dtype=dtype)
+            attn_prob = self.attention_dropout(attn_prob)
+
+            # attention output, shape batch_size x seq_len x n_head x d_head
+            attn_vec = torch.einsum("bnij,bjnd->bind", attn_prob, v_head)
+            attn_out = attn_vec.reshape(batch_size, seq_len, n_head * d_head)
+            # Shape shape batch_size x seq_len x d_model
 
         output = self.layer_norm(query + attn_out)
         return (output, attn_prob) if output_attentions else (output,)
@@ -754,8 +771,8 @@ class FunnelEncoder(nn.Module):
     def forward(
         self,
         inputs_embeds,
+        position_embeds,
         attention_mask=None,
-        token_type_ids=None,
         output_attentions=False,
         output_hidden_states=False,
         return_dict=False,
@@ -764,8 +781,8 @@ class FunnelEncoder(nn.Module):
         attention_mask = attention_mask.type_as(inputs_embeds)
         attention_inputs = self.attention_structure.init_attention_inputs(
             inputs_embeds,
+            position_embeds,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
         )
         hidden = inputs_embeds
 
@@ -773,7 +790,7 @@ class FunnelEncoder(nn.Module):
         all_attentions = () if output_attentions else None
 
         for block_index, block in enumerate(self.blocks):
-            pooling_flag = hidden.size(1) > (2 if self.config.separate_cls else 1)
+            pooling_flag = hidden.size(1) > 2
             pooling_flag = pooling_flag and block_index > 0
             if pooling_flag:
                 pooled_hidden, attention_inputs = self.attention_structure.pre_attention_pooling(
@@ -784,13 +801,14 @@ class FunnelEncoder(nn.Module):
                     do_pooling = (repeat_index == 0) and (layer_index == 0) and pooling_flag
                     if do_pooling:
                         query = pooled_hidden
-                        key = value = hidden if self.config.pool_q_only else pooled_hidden
+                        key = value = hidden
                     else:
                         query = key = value = hidden
                     layer_output = layer(query, key, value, attention_inputs, output_attentions=output_attentions)
+
                     hidden = layer_output[0]
                     if do_pooling:
-                        attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs)
+                        attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index)
 
                     if output_attentions:
                         all_attentions = all_attentions + layer_output[1:]
@@ -802,28 +820,26 @@ class FunnelEncoder(nn.Module):
         return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
 
 
-def upsample(x, stride, target_len, separate_cls=True, truncate_seq=False):
+def upsample(x, stride, target_len):
     """
     Upsample tensor `x` to match `target_len` by repeating the tokens `stride` time on the sequence length dimension.
     """
     if stride == 1:
         return x
-    if separate_cls:
-        cls = x[:, :1]
-        x = x[:, 1:]
+
+    cls = x[:, :1]
+    x = x[:, 1:]
     output = torch.repeat_interleave(x, repeats=stride, dim=1)
-    if separate_cls:
-        if truncate_seq:
-            output = nn.functional.pad(output, (0, 0, 0, stride - 1, 0, 0))
-        output = output[:, : target_len - 1]
-        output = torch.cat([cls, output], dim=1)
-    else:
-        output = output[:, :target_len]
+
+    output = nn.functional.pad(output, (0, 0, 0, stride - 1, 0, 0))
+    output = output[:, : target_len - 1]
+    output = torch.cat([cls, output], dim=1)
+
     return output
 
 
 class FunnelDecoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: FunnelConfig):
         super().__init__()
         self.config = config
         self.attention_structure = FunnelAttentionStructure(config)
@@ -833,18 +849,16 @@ class FunnelDecoder(nn.Module):
         self,
         final_hidden,
         first_block_hidden,
+        position_embeds,
         attention_mask=None,
-        token_type_ids=None,
         output_attentions=False,
         output_hidden_states=False,
         return_dict=False,
     ):
         upsampled_hidden = upsample(
             final_hidden,
-            stride=2 ** (len(self.config.block_sizes) - 1),
+            stride=self.config.stride ** (len(self.config.block_sizes) - 1),
             target_len=first_block_hidden.shape[1],
-            separate_cls=self.config.separate_cls,
-            truncate_seq=self.config.truncate_seq,
         )
 
         hidden = upsampled_hidden + first_block_hidden
@@ -853,8 +867,8 @@ class FunnelDecoder(nn.Module):
 
         attention_inputs = self.attention_structure.init_attention_inputs(
             hidden,
+            position_embeds,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
         )
 
         for layer in self.layers:
@@ -894,7 +908,6 @@ class FunnelPreTrainedModel(PreTrainedModel):
     """
 
     config_class = FunnelConfig
-    load_tf_weights = load_tf_weights_in_funnel
     base_model_prefix = "funnel"
 
     def _init_weights(self, module):
@@ -907,17 +920,35 @@ class FunnelPreTrainedModel(PreTrainedModel):
                 else:
                     std = self.config.initializer_std
                 nn.init.normal_(module.weight, std=std)
+
+            if getattr(module, "bias", None) is not None:
+                nn.init.constant_(module.bias, 0.0)
+
+        if classname.find("Conv1d") != -1:
+            if getattr(module, "weight", None) is not None:
+                if self.config.initializer_std is None:
+                    fan_out, fan_in = module.weight.shape
+                    fan_out, fan_in = fan_out/module.groups, fan_in/module.groups
+                    std = np.sqrt(1.0 / float(fan_in + fan_out))
+                else:
+                    std = self.config.initializer_std
+                nn.init.normal_(module.weight, std=std)
+
             if getattr(module, "bias", None) is not None:
                 nn.init.constant_(module.bias, 0.0)
         elif classname == "FunnelRelMultiheadAttention":
             nn.init.uniform_(module.r_w_bias, b=self.config.initializer_range)
-            nn.init.uniform_(module.r_r_bias, b=self.config.initializer_range)
-            nn.init.uniform_(module.r_kernel, b=self.config.initializer_range)
-            nn.init.uniform_(module.r_s_bias, b=self.config.initializer_range)
-            nn.init.uniform_(module.seg_embed, b=self.config.initializer_range)
+            if hasattr(module, "c2p_bias"):
+                nn.init.uniform_(module.c2p_bias, b=self.config.initializer_range)
+            if hasattr(module, "p2c_bias"):
+                nn.init.uniform_(module.p2c_bias, b=self.config.initializer_range)
         elif classname == "FunnelEmbeddings":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
             nn.init.normal_(module.word_embeddings.weight, std=std)
+            nn.init.normal_(module.position_embeddings.weight, std=std)
+            if hasattr(module, "token_type_embeddings"):
+                nn.init.normal_(module.token_type_embeddings.weight, std=std)
+
 
 
 class FunnelClassificationHead(nn.Module):
@@ -1000,14 +1031,6 @@ FUNNEL_INPUTS_DOCSTRING = r"""
             - 0 for tokens that are **masked**.
 
             `What are attention masks? <../glossary.html#attention-mask>`__
-        token_type_ids (:obj:`torch.LongTensor` of shape :obj:`({0})`, `optional`):
-            Segment token indices to indicate first and second portions of the inputs. Indices are selected in ``[0,
-            1]``:
-
-            - 0 corresponds to a `sentence A` token,
-            - 1 corresponds to a `sentence B` token.
-
-            `What are token type IDs? <../glossary.html#token-type-ids>`_
         inputs_embeds (:obj:`torch.FloatTensor` of shape :obj:`({0}, hidden_size)`, `optional`):
             Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert :obj:`input_ids` indices into associated
@@ -1083,8 +1106,6 @@ class FunnelBaseModel(FunnelPreTrainedModel):
 
         if attention_mask is None:
             attention_mask = torch.ones(input_shape, device=device)
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
         # TODO: deal with head_mask
         if inputs_embeds is None:
@@ -1093,7 +1114,6 @@ class FunnelBaseModel(FunnelPreTrainedModel):
         encoder_outputs = self.encoder(
             inputs_embeds,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -1107,7 +1127,7 @@ class FunnelBaseModel(FunnelPreTrainedModel):
     FUNNEL_START_DOCSTRING,
 )
 class FunnelModel(FunnelPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config: FunnelConfig):
         super().__init__(config)
         self.config = config
         self.embeddings = FunnelEmbeddings(config)
@@ -1162,13 +1182,17 @@ class FunnelModel(FunnelPreTrainedModel):
             token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
         # TODO: deal with head_mask
-        if inputs_embeds is None:
-            inputs_embeds = self.embeddings(input_ids)
+        if self.config.num_highway_cls_tokens > 0:
+            attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
+
+        inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids)
+
+
 
         encoder_outputs = self.encoder(
             inputs_embeds,
+            position_embeds,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
             output_attentions=output_attentions,
             output_hidden_states=True,
             return_dict=return_dict,
@@ -1177,8 +1201,8 @@ class FunnelModel(FunnelPreTrainedModel):
         decoder_outputs = self.decoder(
             final_hidden=encoder_outputs[0],
             first_block_hidden=encoder_outputs[1][self.config.block_sizes[0]],
+            position_embeds=position_embeds,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -1363,340 +1387,33 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
         )
 
 
-@add_start_docstrings(
-    """
-    Funnel Transformer Model with a sequence classification/regression head on top (two linear layer on top of the
-    first timestep of the last hidden state) e.g. for GLUE tasks.
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-class FunnelForSequenceClassification(FunnelPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.num_labels = config.num_labels
+if __name__ == "__main__":
 
-        self.funnel = FunnelBaseModel(config)
-        self.classifier = FunnelClassificationHead(config, config.num_labels)
-        self.init_weights()
+    from transformers import AutoTokenizer
+    model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=True, stride=4))
+    tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small-base",
-        output_type=SequenceClassifierOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for computing the sequence classification/regression loss. Indices should be in :obj:`[0, ...,
-            config.num_labels - 1]`. If :obj:`config.num_labels == 1` a regression loss is computed (Mean-Square loss),
-            If :obj:`config.num_labels > 1` a classification loss is computed (Cross-Entropy).
-        """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+    model = model.eval()
 
-        outputs = self.funnel(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
+    def run():
+        pt_batch = tokenizer(["We are running a BERT_large model in production on a Sagemaker instance, p2.xlarge, and running into P50 inference times of 9 seconds! While we’re switching to the g4xdn family of instances, there’s also an Inf1 instance to which we could switch. I’m also getting advice on switching to the compute optimized (c-family) or memory optimized (r6, r5, x1) instances.",
+                              "Are you measuring time with model load time as well? If you measure model load time too then it will appear slow but once model is loaded subsequent.",
+                              "Are you running the model on eval mode and with no gradient backprop? If you run model in training mode then it will be slower."
+                              ],
+                             padding=True, truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            pt_outputs = model(**pt_batch)
+        return [o.cpu() for o in pt_outputs]
 
-        last_hidden_state = outputs[0]
-        pooled_output = last_hidden_state[:, 0]
-        logits = self.classifier(pooled_output)
+    _ = run()
+    _ = run()
+    import time
+    times = []
+    for _ in range(10):
+        st = time.time()
+        _ = run()
+        et = time.time() - st
+        times.append(et)
+    import numpy as np
+    print(np.mean(times), np.std(times))
 
-        loss = None
-        if labels is not None:
-            if self.num_labels == 1:
-                #  We are doing regression
-                loss_fct = MSELoss()
-                loss = loss_fct(logits.view(-1), labels.view(-1))
-            else:
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return ((loss,) + output) if loss is not None else output
-
-        return SequenceClassifierOutput(
-            loss=loss,
-            logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
-
-
-@add_start_docstrings(
-    """
-    Funnel Transformer Model with a multiple choice classification head on top (two linear layer on top of the first
-    timestep of the last hidden state, and a softmax) e.g. for RocStories/SWAG tasks.
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-class FunnelForMultipleChoice(FunnelPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-
-        self.funnel = FunnelBaseModel(config)
-        self.classifier = FunnelClassificationHead(config, 1)
-        self.init_weights()
-
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small-base",
-        output_type=MultipleChoiceModelOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for computing the multiple choice classification loss. Indices should be in ``[0, ...,
-            num_choices-1]`` where :obj:`num_choices` is the size of the second dimension of the input tensors. (See
-            :obj:`input_ids` above)
-        """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        num_choices = input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
-
-        input_ids = input_ids.view(-1, input_ids.size(-1)) if input_ids is not None else None
-        attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
-        token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
-        inputs_embeds = (
-            inputs_embeds.view(-1, inputs_embeds.size(-2), inputs_embeds.size(-1))
-            if inputs_embeds is not None
-            else None
-        )
-
-        outputs = self.funnel(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        last_hidden_state = outputs[0]
-        pooled_output = last_hidden_state[:, 0]
-        logits = self.classifier(pooled_output)
-        reshaped_logits = logits.view(-1, num_choices)
-
-        loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(reshaped_logits, labels)
-
-        if not return_dict:
-            output = (reshaped_logits,) + outputs[1:]
-            return ((loss,) + output) if loss is not None else output
-
-        return MultipleChoiceModelOutput(
-            loss=loss,
-            logits=reshaped_logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
-
-
-@add_start_docstrings(
-    """
-    Funnel Transformer Model with a token classification head on top (a linear layer on top of the hidden-states
-    output) e.g. for Named-Entity-Recognition (NER) tasks.
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-class FunnelForTokenClassification(FunnelPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.num_labels = config.num_labels
-
-        self.funnel = FunnelModel(config)
-        self.dropout = nn.Dropout(config.hidden_dropout)
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-
-        self.init_weights()
-
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small",
-        output_type=TokenClassifierOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
-            Labels for computing the token classification loss. Indices should be in ``[0, ..., config.num_labels -
-            1]``.
-        """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        outputs = self.funnel(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        last_hidden_state = outputs[0]
-        last_hidden_state = self.dropout(last_hidden_state)
-        logits = self.classifier(last_hidden_state)
-
-        loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            # Only keep active parts of the loss
-            if attention_mask is not None:
-                active_loss = attention_mask.view(-1) == 1
-                active_logits = logits.view(-1, self.num_labels)
-                active_labels = torch.where(
-                    active_loss, labels.view(-1), torch.tensor(loss_fct.ignore_index).type_as(labels)
-                )
-                loss = loss_fct(active_logits, active_labels)
-            else:
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return ((loss,) + output) if loss is not None else output
-
-        return TokenClassifierOutput(
-            loss=loss,
-            logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
-
-
-@add_start_docstrings(
-    """
-    Funnel Transformer Model with a span classification head on top for extractive question-answering tasks like SQuAD
-    (a linear layer on top of the hidden-states output to compute `span start logits` and `span end logits`).
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-class FunnelForQuestionAnswering(FunnelPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.num_labels = config.num_labels
-
-        self.funnel = FunnelModel(config)
-        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
-
-        self.init_weights()
-
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small",
-        output_type=QuestionAnsweringModelOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        start_positions=None,
-        end_positions=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        r"""
-        start_positions (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for position (index) of the start of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (:obj:`sequence_length`). Position outside of the
-            sequence are not taken into account for computing the loss.
-        end_positions (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
-            Labels for position (index) of the end of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (:obj:`sequence_length`). Position outside of the
-            sequence are not taken into account for computing the loss.
-        """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        outputs = self.funnel(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        last_hidden_state = outputs[0]
-
-        logits = self.qa_outputs(last_hidden_state)
-        start_logits, end_logits = logits.split(1, dim=-1)
-        start_logits = start_logits.squeeze(-1)
-        end_logits = end_logits.squeeze(-1)
-
-        total_loss = None
-        if start_positions is not None and end_positions is not None:
-            # If we are on multi-GPU, split add a dimension
-            if len(start_positions.size()) > 1:
-                start_positions = start_positions.squeze(-1)
-            if len(end_positions.size()) > 1:
-                end_positions = end_positions.squeeze(-1)
-            # sometimes the start/end positions are outside our model inputs, we ignore these terms
-            ignored_index = start_logits.size(1)
-            start_positions.clamp_(0, ignored_index)
-            end_positions.clamp_(0, ignored_index)
-
-            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
-            total_loss = (start_loss + end_loss) / 2
-
-        if not return_dict:
-            output = (start_logits, end_logits) + outputs[1:]
-            return ((total_loss,) + output) if total_loss is not None else output
-
-        return QuestionAnsweringModelOutput(
-            loss=total_loss,
-            start_logits=start_logits,
-            end_logits=end_logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
