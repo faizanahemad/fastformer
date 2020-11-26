@@ -153,8 +153,8 @@ class FunnelConfig(PretrainedConfig):
         block_repeats=None,
         num_decoder_layers=2,
         d_model=768,
-        n_head=12,
-        d_head=64,
+        n_head=12, # 8
+        d_head=64, # 32
         hidden_act="gelu_new",
         hidden_dropout=0.1,
         attention_dropout=0.1,
@@ -591,6 +591,8 @@ class FunnelRelMultiheadAttention(nn.Module):
         self.config = config
         self.block_index = block_index
         d_model, n_head, d_head = config.d_model, config.n_head, config.d_head
+        assert d_model % d_head == 0
+        assert d_model % n_head == 0
         self.attention_dropout = nn.Dropout(config.attention_dropout)
 
         self.untie_cls = self.config.untie_cls
@@ -602,11 +604,11 @@ class FunnelRelMultiheadAttention(nn.Module):
             assert n_head % qkv_transform_groups == 0 and n_head > qkv_transform_groups
             self.q_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
             self.k_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
-            self.v_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+            self.v_head = Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
         else:
             self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
             self.k_head = nn.Linear(d_model, n_head * d_head)
-            self.v_head = nn.Linear(d_model, n_head * d_head)
+            self.v_head = nn.Linear(d_model, d_model)
 
         if self.separate_content_and_position_attention:
             if qkv_transform_groups > 1:
@@ -634,12 +636,13 @@ class FunnelRelMultiheadAttention(nn.Module):
         batch_size, seq_len, _ = query.shape
         context_len = key.shape[1]
         n_head, d_head = self.config.n_head, self.config.d_head
+        d_model = self.config.d_model
 
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
         k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
-        v_head = self.v_head(value).view(batch_size, context_len, n_head, d_head)
+        v_head = self.v_head(value).view(batch_size, context_len, n_head, d_model // n_head)
 
         q_head = q_head * self.scale
         # Shape n_head x d_head
@@ -686,7 +689,7 @@ class FunnelRelMultiheadAttention(nn.Module):
 
             # attention output, shape batch_size x seq_len x n_head x d_head
             attn_vec = torch.einsum("bnij,bjnd->bind", attn_prob, v_head)
-            attn_out = attn_vec.reshape(batch_size, seq_len, n_head * d_head)
+            attn_out = attn_vec.reshape(batch_size, seq_len, d_model)
             # Shape shape batch_size x seq_len x d_model
 
         output = self.layer_norm(query + attn_out)
