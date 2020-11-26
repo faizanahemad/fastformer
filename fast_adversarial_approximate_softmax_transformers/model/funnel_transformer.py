@@ -24,6 +24,7 @@ from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 from performer_pytorch import SelfAttention, FastAttention
+from collections import defaultdict
 
 from transformers.activations import ACT2FN
 # from transformers.configuration_funnel import FunnelConfig
@@ -151,7 +152,8 @@ class FunnelConfig(PretrainedConfig):
         vocab_size=30522,
         block_sizes=[6, 6, 6],
         block_channel_size=[480, 768, 960], # [512, 768, 1024]
-        block_repeats=None,
+        block_repeats=True,
+        separate_compressiion_layer=False,
         num_decoder_layers=2,
         d_model=768,
         n_head=[8, 12, 12], # 8
@@ -168,7 +170,7 @@ class FunnelConfig(PretrainedConfig):
         pooling_type="mean",
         attention_type="relative_shift",
         ffn_groups=4,
-        ffn_layers=1,
+        ffn_layers=0,
         ffn_width=4,
         qkv_transform_groups=4,
         embedding_size=128,
@@ -178,16 +180,15 @@ class FunnelConfig(PretrainedConfig):
         untie_cls=False,
         separate_content_and_position_attention=False,
         approximate_attention=False,
+        sequence_dependent_position_transform=False,
         **kwargs
     ):
         super().__init__(**kwargs)
 
         self.vocab_size = vocab_size
         self.block_sizes = block_sizes
-        self.block_repeats = [1] * len(block_sizes) if block_repeats is None else block_repeats
-        assert len(block_sizes) == len(
-            self.block_repeats
-        ), "`block_sizes` and `block_repeats` should have the same length."
+        self.block_repeats = block_repeats
+        self.separate_compressiion_layer = separate_compressiion_layer
         self.num_decoder_layers = num_decoder_layers
         self.d_model = d_model
         self.n_head = [n_head] * len(block_sizes) if isinstance(n_head, int) else n_head
@@ -223,12 +224,17 @@ class FunnelConfig(PretrainedConfig):
         self.approximate_attention = approximate_attention
         self.untie_cls = untie_cls
         self.separate_content_and_position_attention = separate_content_and_position_attention
+        self.sequence_dependent_position_transform = sequence_dependent_position_transform
+        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform and not separate_content_and_position_attention)
+        assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
         if block_channel_size is None:
             block_channel_size = [d_model] * len(block_sizes)
         assert len(block_channel_size) == len(block_sizes)
         self.block_channel_size = block_channel_size
         assert position_biased_input or separate_content_and_position_attention
+        assert not (separate_content_and_position_attention and approximate_attention)
+        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
 
 
     @property
@@ -247,13 +253,27 @@ class FunnelConfig(PretrainedConfig):
     def num_blocks(self):
         return len(self.block_sizes)
 
+
 vanilla_bert_base = FunnelConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
                                  ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                 untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False,)
-vanilla_funnel_base = FunnelConfig(vocab_size=30522, block_sizes=[6,6,6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
-                                 ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                 untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False,)
-vanilla_albert_base = FunnelConfig()
+                                 untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False, block_repeats=False)
+vanilla_funnel_base = FunnelConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
+                                   ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
+                                   untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False, )
+repeated_funnel_base = FunnelConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
+                                    ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
+                                    untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False,
+                                    block_repeats=True, separate_compressiion_layer=True,)
+repeated_funnel_channel_expanded_base = FunnelConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[480, 768, 960],
+                                                     num_decoder_layers=2, n_head=[8, 12, 12], d_head=[48, 64, 80],
+                                                     ffn_groups=4, qkv_transform_groups=4, embedding_size=128, num_highway_cls_tokens=0,
+                                                     untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False,
+                                                     block_repeats=True, separate_compressiion_layer=False, )
+vanilla_albert_base = FunnelConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
+                                   ffn_groups=1, qkv_transform_groups=1, embedding_size=128, num_highway_cls_tokens=0,
+                                   untie_cls=False, separate_content_and_position_attention=False, approximate_attention=False,
+                                   block_repeats=True)
+
 
 
 class DropoutContext(object):
@@ -452,8 +472,6 @@ class FunnelAttentionStructure(nn.Module):
     def __init__(self, config: FunnelConfig):
         super().__init__()
         self.config = config
-        self.sin_dropout = nn.Dropout(config.hidden_dropout)
-        self.cos_dropout = nn.Dropout(config.hidden_dropout)
         # Track where we are at in terms of pooling from the original input, e.g., by how much the sequence length was
         # dividide.
         self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
@@ -600,6 +618,26 @@ class Conv1d(nn.Module):
         return x
 
 
+class SequenceDependentPositionTransform(nn.Module):
+    def __init__(self, config: FunnelConfig, d_pos_in, d_model_in, d_out, qkv_transform_groups):
+        super().__init__()
+        act = config.hidden_act
+        self.act = ACT2FN[act]
+        self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1, groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
+        self.d_pos_in = d_pos_in
+        self.ffn = ConvFFN(config, 2 * d_pos_in, 4 * d_pos_in, qkv_transform_groups, 0) if qkv_transform_groups > 1 else BertFFN(config, 2 * d_pos_in, 4 * d_pos_in)
+        self.out = Conv1d(in_channels= 2 * d_pos_in, out_channels=d_out, kernel_size=1, groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(2 * d_pos_in, d_out)
+
+    def forward(self, seq, position_embeds):
+        seq_len, _ = position_embeds.shape
+        batch_size, _, _ = seq.shape
+        cls_token = seq[:, 0:1, :]
+        cls_token = self.cls_transform(cls_token).expand(batch_size, seq_len, self.d_pos_in)
+        position_embeds = position_embeds.expand(batch_size, -1, -1)
+        embeds = torch.cat([cls_token, position_embeds], dim=2)
+        return self.out(self.act(self.ffn(embeds)))
+
+
 class FunnelRelMultiheadAttention(nn.Module):
     def __init__(self, config: FunnelConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer):
         super().__init__()
@@ -620,6 +658,7 @@ class FunnelRelMultiheadAttention(nn.Module):
 
         self.untie_cls = self.config.untie_cls
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
+        self.sequence_dependent_position_transform = self.config.sequence_dependent_position_transform
         self.approximate_attention = self.config.approximate_attention
 
         qkv_transform_groups = self.config.qkv_transform_groups
@@ -639,8 +678,13 @@ class FunnelRelMultiheadAttention(nn.Module):
             if d_model_out != d_model:
                 self.q_exp = nn.Linear(d_model, d_model_out)
 
+        if self.approximate_attention:
+            self.attn = FastAttention(dim_heads=d_head, nb_features=d_model, )
         if self.separate_content_and_position_attention:
-            if qkv_transform_groups > 1:
+            if self.sequence_dependent_position_transform:
+                self.pos_q_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups)
+                self.pos_k_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups)
+            elif qkv_transform_groups > 1:
                 self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
                 self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
             else:
@@ -679,29 +723,54 @@ class FunnelRelMultiheadAttention(nn.Module):
         if self.separate_content_and_position_attention:
             v = self.c2p_bias * self.scale
             w = self.p2c_bias * self.scale
-            pos_k_head = self.pos_kln(self.pos_k_head(position_embed_of_key)).view(context_len, n_head, d_head)
-            pos_q_head = self.pos_qln(self.pos_q_head(position_embed_of_query)).view(seq_len, n_head, d_head)
+            if self.sequence_dependent_position_transform:
+                pos_k_head = self.pos_kln(self.pos_k_head(key, position_embed_of_key)).view(batch_size, context_len, n_head, d_head)
+                pos_q_head = self.pos_qln(self.pos_q_head(query, position_embed_of_query)).view(batch_size, seq_len, n_head, d_head)
+                if self.untie_cls:
+                    pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0), pos_k_head.size(1) - self.cls_tokens_total, pos_k_head.size(2), pos_k_head.size(3)]),
+                                                  (0, 0, self.cls_tokens_total, 0, 0, 0, 0, 0))
+                    pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0), pos_q_head.size(1) - self.cls_tokens_total, pos_q_head.size(2), pos_q_head.size(3)]),
+                                                    (0, 0, self.cls_tokens_total, 0, 0, 0, 0, 0))
+            else:
+
+                pos_k_head = self.pos_kln(self.pos_k_head(position_embed_of_key)).view(context_len, n_head, d_head)
+                pos_q_head = self.pos_qln(self.pos_q_head(position_embed_of_query)).view(seq_len, n_head, d_head)
             # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
 
-            if self.untie_cls:
-                pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens_total, pos_k_head.size(1), pos_k_head.size(2)]),
-                                              (self.cls_tokens_total, 0, 0, 0, 0, 0))
-                pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0) - self.cls_tokens_total, pos_q_head.size(1), pos_q_head.size(2)]),
-                                                (self.cls_tokens_total, 0, 0, 0, 0, 0))
+                if self.untie_cls:
+                    pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens_total, pos_k_head.size(1), pos_k_head.size(2)]),
+                                                  (self.cls_tokens_total, 0, 0, 0, 0, 0))
+                    pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0) - self.cls_tokens_total, pos_q_head.size(1), pos_q_head.size(2)]),
+                                                    (self.cls_tokens_total, 0, 0, 0, 0, 0))
 
         if self.approximate_attention:
+            q_h = q_head.permute(0, 2, 1, 3)
+            k_h = k_head.permute(0, 2, 1, 3)
+            v_head = v_head.permute(0, 2, 1, 3)
+            attn_vec = self.attn(q_h, k_h, v_head).permute(0, 2, 1, 3)
             if self.separate_content_and_position_attention:
-                pass
-            else:
-                pass
+                c2p_score = self.attn((q_head + v).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                                                                                                                                                       3)
+                p2c_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), (k_head + w).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                                                                                                                                                       3)
+                p2p_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                                                                                                                                                       3)
+                attn_vec = attn_vec + c2p_score + p2c_score + p2p_score
+                # TODO: try adaptive weighting
+
         else:
             content_score = torch.einsum("bind,bjnd->bnij", q_head + r_w_bias, k_head)
             attn_score = content_score
 
             if self.separate_content_and_position_attention:
-                c2p_score = torch.einsum("bind,jnd->bnij", q_head + v, pos_k_head)
-                p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head + w)
-                p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
+                if self.sequence_dependent_position_transform:
+                    c2p_score = torch.einsum("bind,bjnd->bnij", q_head + v, pos_k_head)
+                    p2c_score = torch.einsum("bind,bjnd->bnij", pos_q_head, k_head + w)
+                    p2p_score = torch.einsum("bind,bjnd->bnij", pos_q_head, pos_k_head)
+                else:
+                    c2p_score = torch.einsum("bind,jnd->bnij", q_head + v, pos_k_head)
+                    p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head + w)
+                    p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
                 # merge attention scores
                 attn_score = attn_score + c2p_score + p2c_score + p2p_score
 
@@ -717,8 +786,8 @@ class FunnelRelMultiheadAttention(nn.Module):
 
             # attention output, shape batch_size x seq_len x n_head x d_head
             attn_vec = torch.einsum("bnij,bjnd->bind", attn_prob, v_head)
-            attn_out = attn_vec.reshape(batch_size, seq_len, self.d_model_out)
-            # Shape shape batch_size x seq_len x d_model
+        attn_out = attn_vec.reshape(batch_size, seq_len, self.d_model_out)
+        # Shape shape batch_size x seq_len x d_model
 
         if self.d_model != self.d_model_out:
             query = self.q_exp(query)
@@ -731,9 +800,8 @@ class ConvFFN(nn.Module):
     ConvActivation: Conv, Activation
     """
 
-    def __init__(self, config: FunnelConfig, d_model, d_inner):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers):
         super().__init__()
-        groups, layers = config.ffn_groups, config.ffn_layers
         cin, cout = d_model, d_model
         act = config.hidden_act
         self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
@@ -758,7 +826,6 @@ class ConvFFN(nn.Module):
                 output = self.activation_dropout(output)
         output = self.conv1d_out(output)
         output = self.dropout(output)
-        output = self.act(output)
         output = output.permute(0, 2, 1)
         return output
 
@@ -773,6 +840,7 @@ class BertFFN(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout)
 
     def forward(self, hidden):
+        # TODO: support multiple ffn layers like conv ffn?
         h = self.linear_1(hidden)
         h = self.activation_function(h)
         h = self.activation_dropout(h)
@@ -793,7 +861,7 @@ class FunnelPositionwiseFFN(nn.Module):
         if groups > 1:
             assert config.d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
-            self.ffn = ConvFFN(config, d_model, d_inner)
+            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
             self.lin = None
             self.ffn = BertFFN(config, d_model, d_inner)
@@ -820,16 +888,45 @@ class FunnelLayer(nn.Module):
 
 
 class FunnelEncoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: FunnelConfig):
         super().__init__()
         self.config = config
         self.attention_structure = FunnelAttentionStructure(config)
-        self.blocks = nn.ModuleList(
-            [
-                nn.ModuleList([FunnelLayer(config, block_index, i == block_size - 1, i == 0, True) for i in range(block_size)])
-                for block_index, block_size in enumerate(config.block_sizes)
-            ]
-        )
+
+        block_channel_size = config.block_channel_size
+        repeats = defaultdict(dict) if config.block_repeats else defaultdict(lambda: defaultdict(lambda: 1))
+        self.blocks = nn.ModuleList()
+        for block_index, block_size in enumerate(config.block_sizes):
+            cur_channels = block_channel_size[block_index]
+            next_channels = block_channel_size[min(block_index+1, len(block_channel_size) - 1)]
+            self.blocks.append(nn.ModuleList())
+            i = 0
+            j = 0
+            while i < block_size:
+                if config.block_repeats:
+
+                    if i == 0 and config.separate_compressiion_layer and block_index > 0:
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                        repeats[block_index][j] = 1
+                        j += 1
+                        i += 1
+                    elif i < block_size - 1:
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                        repeats[block_index][j] = (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
+                        j += 1
+                        i += (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
+                    elif cur_channels != next_channels and i == block_size - 1:
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                        repeats[block_index][j] = 1
+                        i += 1
+                        j += 1
+                    else:
+                        ValueError()
+                else:
+                    self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                    repeats[block_index][i] = 1
+                    i += 1
+        self.repeats = repeats
 
     def forward(
         self,
@@ -854,13 +951,14 @@ class FunnelEncoder(nn.Module):
 
         for block_index, block in enumerate(self.blocks):
             pooling_flag = hidden.size(1) > 2
-            pooling_flag = pooling_flag and block_index > 0
+            pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
             if pooling_flag:
                 pooled_hidden, attention_inputs = self.attention_structure.pre_attention_pooling(
                     hidden, attention_inputs
                 )
             for (layer_index, layer) in enumerate(block):
-                for repeat_index in range(self.config.block_repeats[block_index]):
+                repeats = self.repeats[block_index][layer_index]
+                for repeat_index in range(repeats):
                     do_pooling = (repeat_index == 0) and (layer_index == 0) and pooling_flag
                     if do_pooling:
                         query = pooled_hidden
@@ -906,7 +1004,17 @@ class FunnelDecoder(nn.Module):
         super().__init__()
         self.config = config
         self.attention_structure = FunnelAttentionStructure(config)
-        self.layers = nn.ModuleList([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False) for i in range(config.num_decoder_layers)])
+        if config.num_decoder_layers > 0:
+            if config.block_repeats:
+
+                self.layers = nn.ModuleList([FunnelLayer(config, 0, True, True, False)])
+                self.repeats = config.num_decoder_layers
+            else:
+                self.layers = nn.ModuleList([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False) for i in range(config.num_decoder_layers)])
+                self.repeats = 1
+        else:
+            self.layers = None
+
         block_channel_size = self.config.block_channel_size
         self.final_hidden_fc = None
         qkv_transform_groups = self.config.qkv_transform_groups
@@ -932,7 +1040,7 @@ class FunnelDecoder(nn.Module):
         if self.final_hidden_fc:
             final_hidden = self.final_hidden_fc(final_hidden)
             first_block_hidden = self.first_block_hidden_fc(first_block_hidden)
-        if len(self.layers) == 0:
+        if not self.layers:
             hidden = final_hidden
             all_hidden_states = (hidden,) if output_hidden_states else None
             all_attentions = () if output_attentions else None
@@ -957,13 +1065,14 @@ class FunnelDecoder(nn.Module):
         )
 
         for layer in self.layers:
-            layer_output = layer(hidden, hidden, hidden, attention_inputs, output_attentions=output_attentions)
-            hidden = layer_output[0]
+            for _ in range(self.repeats):
+                layer_output = layer(hidden, hidden, hidden, attention_inputs, output_attentions=output_attentions)
+                hidden = layer_output[0]
 
-            if output_attentions:
-                all_attentions = all_attentions + layer_output[1:]
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden,)
+                if output_attentions:
+                    all_attentions = all_attentions + layer_output[1:]
+                if output_hidden_states:
+                    all_hidden_states = all_hidden_states + (hidden,)
 
         if not return_dict:
             return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
@@ -1480,11 +1589,16 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
 if __name__ == "__main__":
 
     from transformers import AutoTokenizer
-    model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=True, stride=4))
+    model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=True, sequence_dependent_position_transform=True, stride=4))
+    # repeated_funnel_channel_expanded_base
+    # FunnelConfig(separate_content_and_position_attention=True, stride=4)
+    # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
+    print(model)
+    print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
