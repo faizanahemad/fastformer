@@ -235,6 +235,7 @@ class FunnelConfig(PretrainedConfig):
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and approximate_attention)
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
+        assert (approximate_attention and position_biased_input) or not approximate_attention
 
 
     @property
@@ -391,7 +392,7 @@ class FunnelEmbeddings(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size + config.num_highway_cls_tokens, self.embedding_size, padding_idx=pad_token_id)
 
         self.position_biased_input = getattr(config, "position_biased_input", True)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings, self.embedding_size)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings + config.num_highway_cls_tokens, self.embedding_size)
 
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
@@ -831,19 +832,27 @@ class ConvFFN(nn.Module):
 
 
 class BertFFN(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, layers):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         self.linear_2 = nn.Linear(d_inner, d_model)
         self.dropout = nn.Dropout(config.hidden_dropout)
+        self.layers = nn.ModuleList() if layers > 0 else None
+        for _ in range(layers):
+            self.layers.append(nn.Linear(d_inner, d_inner))
 
     def forward(self, hidden):
         # TODO: support multiple ffn layers like conv ffn?
         h = self.linear_1(hidden)
         h = self.activation_function(h)
         h = self.activation_dropout(h)
+        if self.layers:
+            for ll in self.layers:
+                h = ll(h)
+                h = self.act(h)
+                h = self.activation_dropout(h)
         h = self.linear_2(h)
         h = self.dropout(h)
         return h
@@ -1142,6 +1151,10 @@ class FunnelPreTrainedModel(PreTrainedModel):
             nn.init.normal_(module.position_embeddings.weight, std=std)
             if hasattr(module, "token_type_embeddings"):
                 nn.init.normal_(module.token_type_embeddings.weight, std=std)
+        elif classname == "FastAttention":
+            if not hasattr(module,  'projection_matrix'):
+                projection_matrix = module.create_projection(device = next(self.parameters()).device)
+                module.register_buffer('projection_matrix', projection_matrix)
 
 
 
@@ -1588,12 +1601,26 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
 
 if __name__ == "__main__":
 
-    from transformers import AutoTokenizer
-    model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=True, sequence_dependent_position_transform=True, stride=4))
+    from transformers import AutoTokenizer, AutoModel
+
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
+    model = FunnelForMaskedLM(FunnelConfig(separate_content_and_position_attention=False, sequence_dependent_position_transform=False, stride=1, approximate_attention=True))
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+
+    # model = AutoModel.from_pretrained("funnel-transformer/intermediate-base")
+    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    #
+    # model = AutoModel.from_pretrained("bert-base-uncased")
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    #
+    # model = AutoModel.from_pretrained("albert-base-v2")
+    # tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    #
+    # model = AutoModel.from_pretrained("distilbert-base-uncased")
+    # tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
@@ -1602,16 +1629,51 @@ if __name__ == "__main__":
 
     model = model.eval()
 
+    t1 = """
+With the success of language pretraining, it is highly desirable to develop more
+efficient architectures of good scalability that can exploit the abundant unlabeled
+data at a lower cost. To improve the efficiency, we examine the much-overlooked
+redundancy in maintaining a full-length token-level presentation, especially for
+tasks that only require a single-vector presentation of the sequence. With this intuition, we propose Funnel-Transformer which gradually compresses the sequence of hidden states to a shorter one and hence reduces the computation cost. More
+importantly, by re-investing the saved FLOPs from length reduction in constructing
+a deeper or wider model, we further improve the model capacity. In addition, to
+perform token-level predictions as required by common pretraining objectives,
+Funnel-Transformer is able to recover a deep representation for each token from
+the reduced hidden sequence via a decoder. Empirically, with comparable or fewer
+FLOPs, Funnel-Transformer outperforms the standard Transformer on a wide
+variety of sequence-level prediction tasks, including text classification, language
+understanding, and reading comprehension. Increasing model size when pretraining natural language representations often results in improved performance on downstream tasks. However, at some point further model increases become harder due to GPU/TPU memory limitations and
+longer training times. To address these problems, we present two parameterreduction techniques to lower memory consumption and increase the training
+speed of BERT (Devlin et al., 2019). Comprehensive empirical evidence shows
+that our proposed methods lead to models that scale much better compared to
+the original BERT. We also use a self-supervised loss that focuses on modeling
+inter-sentence coherence, and show it consistently helps downstream tasks with
+multi-sentence inputs. As a result, our best model establishes new state-of-the-art
+results on the GLUE, RACE, and SQuAD benchmarks while having fewer parameters compared to BERT-large.
+Self-attention is a useful mechanism to build generative models for language and images. It determines the importance of context elements by comparing each element to the current time step. In this paper, we show that a very lightweight convolution can perform competitively to the best reported self-attention results. Next, we introduce dynamic convolutions which are simpler and more efficient than self-attention. We predict separate convolution kernels based solely on the current time-step in order to determine the importance of context elements. The number of operations required by this approach scales linearly in the input length, whereas self-attention is quadratic. Experiments on large-scale machine translation, language modeling and abstractive summarization show that dynamic convolutions improve over strong self-attention models. On the WMT'14 English-German test set dynamic convolutions achieve a new state of the art of 29.7 BLEU.
+"""
+    t2 = """
+    Most popular optimizers for deep learning can be broadly categorized as adaptive methods (e.g. Adam) and accelerated schemes (e.g. stochastic gradient descent (SGD) with momentum). For many models such as convolutional neural networks (CNNs), adaptive methods typically converge faster but generalize worse compared to SGD; for complex settings such as generative adversarial networks (GANs), adaptive methods are typically the default because of their stability.We propose AdaBelief to simultaneously achieve three goals: fast convergence as in adaptive methods, good generalization as in SGD, and training stability. The intuition for AdaBelief is to adapt the stepsize according to the "belief" in the current gradient direction. Viewing the exponential moving average (EMA) of the noisy gradient as the prediction of the gradient at the next time step, if the observed gradient greatly deviates from the prediction, we distrust the current observation and take a small step; if the observed gradient is close to the prediction, we trust it and take a large step. We validate AdaBelief in extensive experiments, showing that it outperforms other methods with fast convergence and high accuracy on image classification and language modeling. Specifically, on ImageNet, AdaBelief achieves comparable accuracy to SGD. Furthermore, in the training of a GAN on Cifar10, AdaBelief demonstrates high stability and improves the quality of generated samples compared to a well-tuned Adam optimizer.
+    """
+    t3 = """
+    We present the Open Graph Benchmark (OGB), a diverse set of challenging and realistic benchmark datasets to facilitate scalable, robust, and reproducible graph machine learning (ML) research. OGB datasets are large-scale, encompass multiple important graph ML tasks, and cover a diverse range of domains, ranging from social and information networks to biological networks, molecular graphs, source code ASTs, and knowledge graphs. For each dataset, we provide a unified evaluation protocol using meaningful application-specific data splits and evaluation metrics. In addition to building the datasets, we also perform extensive benchmark experiments for each dataset. Our experiments suggest that OGB datasets present significant challenges of scalability to large-scale graphs and out-of-distribution generalization under realistic data splits, indicating fruitful opportunities for future research. Finally, OGB provides an automated end-to-end graph ML pipeline that simplifies and standardizes the process of graph data loading, experimental setup, and model evaluation. OGB will be regularly updated and welcomes inputs from the community. OGB datasets as well as data loaders, evaluation scripts, baseline code, and leaderboards are publicly available.
+    """
+    large_texts = [
+        t1,
+        t2,
+        t3,
+        t2+t3
+        ]
+
+    pt_batch = tokenizer(large_texts, padding=True, truncation=True, return_tensors="pt", max_length=505)
+    print("Input Sizes", pt_batch["input_ids"].size())
+
     def run():
-        pt_batch = tokenizer(["We are running a BERT_large model in production on a Sagemaker instance, p2.xlarge, and running into P50 inference times of 9 seconds! While we’re switching to the g4xdn family of instances, there’s also an Inf1 instance to which we could switch. I’m also getting advice on switching to the compute optimized (c-family) or memory optimized (r6, r5, x1) instances.",
-                              "Are you measuring time with model load time as well? If you measure model load time too then it will appear slow but once model is loaded subsequent.",
-                              "Are you running the model on eval mode and with no gradient backprop? If you run model in training mode then it will be slower."
-                              ],
-                             padding=True, truncation=True, return_tensors="pt")
         with torch.no_grad():
             pt_outputs = model(**pt_batch)
         return [o.cpu() for o in pt_outputs]
 
+    _ = run()
     _ = run()
     _ = run()
     import time
@@ -1622,5 +1684,12 @@ if __name__ == "__main__":
         et = time.time() - st
         times.append(et)
     import numpy as np
-    print(np.mean(times), np.std(times))
+    print("Time Taken = %.4f, variance = %.4f" % (np.mean(times), np.std(times)))
 
+# Time Taken = 2.6298, variance = 0.0371
+# Time Taken = 1.1078, variance = 0.0187
+
+# Time Taken = 9.8372, variance = 0.6968
+# Time Taken = 5.2917, variance = 0.2338
+
+# Time Taken = 10.9500, variance = 1.6771
