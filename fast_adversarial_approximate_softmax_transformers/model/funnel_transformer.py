@@ -185,6 +185,7 @@ class FunnelConfig(PretrainedConfig):
         combine_k_v_transform=False,
         qkv_squeeze_fraction=1,
         first_layer_as_conv=False,
+        last_layer_as_conv=False,
         compressed_query_attention=False,
         compressed_query_attention_fraction=1,
         **kwargs
@@ -230,6 +231,9 @@ class FunnelConfig(PretrainedConfig):
         self.qkv_squeeze_fraction = qkv_squeeze_fraction
         self.approximate_attention = approximate_attention
         self.first_layer_as_conv = first_layer_as_conv
+        self.last_layer_as_conv = last_layer_as_conv
+        if first_layer_as_conv:
+            assert position_biased_input
         self.compressed_query_attention = compressed_query_attention
         self.compressed_query_attention_fraction = compressed_query_attention_fraction
         assert (compressed_query_attention_fraction == 1 and not compressed_query_attention) or (compressed_query_attention_fraction > 1 and compressed_query_attention)
@@ -964,6 +968,30 @@ class FunnelPositionwiseFFN(nn.Module):
         return self.layer_norm(hidden + h)
 
 
+class Conv1DLayer(nn.Module):
+    def __init__(self, config, block_index, is_encoder_layer):
+        cin = cout = config.block_channel_size[block_index]
+        self.is_encoder_layer = is_encoder_layer
+        super().__init__()
+        self.c1 = nn.Conv1d(in_channels=cin, out_channels=cout, kernel_size=3, groups=config.n_head[block_index], padding=1, padding_mode='reflect')
+        self.c2 = nn.Conv1d(in_channels=cin, out_channels=cout, kernel_size=3, groups=config.n_head[block_index], padding=1, padding_mode='reflect')
+        self.layer_norm = nn.LayerNorm(cout, config.layer_norm_eps)
+        self.activation_function = ACT2FN[config.hidden_act]
+        self.dropout = nn.Dropout(config.attention_dropout)
+        # padding
+
+    def forward(self, query, key, value, attention_inputs, output_attentions=False):
+        q = query.permute(0, 2, 1)
+        if not self.is_encoder_layer:
+            q = q + q[:, :, 0:1]
+        q = self.c1(q)
+        q = self.activation_function(q)
+        q = self.dropout(q)
+        q = self.c2(q)
+        q = q.permute(0, 2, 1)
+        return (self.layer_norm(query + q),)
+
+
 class FunnelLayer(nn.Module):
     def __init__(self, config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer):
         super().__init__()
@@ -1000,10 +1028,16 @@ class FunnelEncoder(nn.Module):
                         j += 1
                         i += 1
                     elif i < block_size - 1:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
-                        repeats[block_index][j] = (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
-                        j += 1
-                        i += (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
+                        if config.first_layer_as_conv and block_index == 0 and i == 0:
+                            self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
+                            repeats[block_index][j] = 1
+                            i += 1
+                            j += 1
+                        else:
+                            self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                            repeats[block_index][j] = (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
+                            j += 1
+                            i += (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
                     elif cur_channels != next_channels and i == block_size - 1:
                         self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
                         repeats[block_index][j] = 1
@@ -1012,7 +1046,10 @@ class FunnelEncoder(nn.Module):
                     else:
                         ValueError()
                 else:
-                    self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
+                    if config.first_layer_as_conv:
+                        self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
+                    else:
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True))
                     repeats[block_index][i] = 1
                     i += 1
         self.repeats = repeats
@@ -1093,14 +1130,24 @@ class FunnelDecoder(nn.Module):
         super().__init__()
         self.config = config
         self.attention_structure = FunnelAttentionStructure(config)
+        self.layers = nn.ModuleList()
         if config.num_decoder_layers > 0:
             if config.block_repeats:
-
-                self.layers = nn.ModuleList([FunnelLayer(config, 0, True, True, False)])
-                self.repeats = config.num_decoder_layers
+                self.layers.extend([FunnelLayer(config, 0, True, True, False)])
+                if config.last_layer_as_conv:
+                    self.layers.extend([Conv1DLayer(config, 0, False)])
+                    self.repeats = [config.num_decoder_layers - 1] + [1]
+                else:
+                    self.repeats = [config.num_decoder_layers]
             else:
-                self.layers = nn.ModuleList([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False) for i in range(config.num_decoder_layers)])
-                self.repeats = 1
+                if config.last_layer_as_conv:
+                    self.layers.extend([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False) for i in range(config.num_decoder_layers - 1)])
+                    self.repeats = [1] * config.num_decoder_layers
+                    self.layers = nn.ModuleList([Conv1DLayer(config, 0, False)])
+                else:
+                    self.layers.extend([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False) for i in range(config.num_decoder_layers)])
+                    self.repeats = [1] * config.num_decoder_layers
+
         else:
             self.layers = None
 
@@ -1153,8 +1200,8 @@ class FunnelDecoder(nn.Module):
             attention_mask=attention_mask,
         )
 
-        for layer in self.layers:
-            for _ in range(self.repeats):
+        for layer, repeats in zip(self.layers, self.repeats):
+            for _ in range(repeats):
                 layer_output = layer(hidden, hidden, hidden, attention_inputs, output_attentions=output_attentions)
                 hidden = layer_output[0]
 
@@ -1687,8 +1734,8 @@ if __name__ == "__main__":
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
     config = FunnelConfig(separate_content_and_position_attention=False, sequence_dependent_position_transform=False, stride=2,
-                          approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[60, 64, 80],
-                          combine_k_v_transform=True, qkv_squeeze_fraction=4)
+                          approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[60, 64, 80], separate_compressiion_layer=False,
+                          combine_k_v_transform=True, qkv_squeeze_fraction=4, last_layer_as_conv=True, first_layer_as_conv=True)
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
