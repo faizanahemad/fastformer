@@ -16,7 +16,7 @@
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -86,6 +86,7 @@ from transformers import PretrainedConfig
 
 # TODO: check if all heads are aligned
 # TODO: check if repeats are happening properly for layers
+# TODO: check if upsampling (interleaving) is happening properly
 
 class FunnelConfig(PretrainedConfig):
     r"""
@@ -187,7 +188,7 @@ class FunnelConfig(PretrainedConfig):
         qkv_squeeze_fraction=1,
         first_layer_as_conv=False,
         last_layer_as_conv=False,
-        compressed_query_attention=False,
+        compressed_query_attention: Union[bool, int]=False,
         compressed_query_attention_layers=[(0, 1), (1, 1), (2,1)],
         **kwargs
     ):
@@ -235,6 +236,7 @@ class FunnelConfig(PretrainedConfig):
         self.last_layer_as_conv = last_layer_as_conv
         if first_layer_as_conv:
             assert position_biased_input
+        assert not compressed_query_attention or compressed_query_attention in [2, 4, 8]
         self.compressed_query_attention = compressed_query_attention
         self.compressed_query_attention_layers = compressed_query_attention_layers
         self.untie_cls = untie_cls
@@ -638,6 +640,46 @@ class Conv1d(nn.Module):
         return x
 
 
+class CompressQuery(nn.Module):
+    def __init__(self, config: FunnelConfig, block_index):
+        super().__init__()
+        self.config = config
+        self.compressed_query_attention = config.compressed_query_attention
+        d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
+        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        qkv_squeeze = self.config.qkv_squeeze_fraction > 1
+        sq_frac = self.config.qkv_squeeze_fraction
+        qkv_transform_groups = self.config.qkv_transform_groups
+        if qkv_transform_groups > 1:
+            self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+        else:
+            self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model // sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+                                                                                                                                  bias=False)
+        self.ffn = BertFFN(config, self.compressed_query_attention * d_model // n_head,
+                           2 * self.compressed_query_attention * d_model // n_head, 0, self.compressed_query_attention)
+
+    def forward(self, query):
+
+        cls = query[:, :self.cls_tokens]
+        query = query[:, self.cls_tokens: self.compressed_query_attention * (query.size(1)//self.compressed_query_attention)]
+        batch_size, seq_len, dim = query.shape
+        assert seq_len % self.compressed_query_attention == 0
+        seq_groups = seq_len // self.compressed_query_attention
+
+        q = query.view(batch_size,
+                       seq_groups, self.compressed_query_attention,
+                       self.n_head, dim // self.n_head) # B, S/r, r, H, Dh
+        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.compressed_query_attention * dim // self.n_head))  # B, S/r, H, r
+
+        qw = qw.permute(0, 1, 3, 2) # B, S/r, r, H
+        q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim) # B, S/r, H, Dh -> B, S/r, D
+        q = torch.cat([cls, q], dim=1)
+        q = self.q_head(q)
+        q = q[:, :2 * (q.size(1) // 2)]
+        return q
+
+
 class SequenceDependentPositionTransform(nn.Module):
     def __init__(self, config: FunnelConfig, d_pos_in, d_model_in, d_out, qkv_transform_groups, compress):
         super().__init__()
@@ -698,11 +740,14 @@ class FunnelRelMultiheadAttention(nn.Module):
         self.attention_dropout = nn.Dropout(config.attention_dropout)
         self.d_model = d_model
         self.d_model_out = d_model_out
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
         self.untie_cls = self.config.untie_cls
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
         self.sequence_dependent_position_transform = self.config.sequence_dependent_position_transform
         self.approximate_attention = self.config.approximate_attention[block_index]
+        combine_k_v_transform = self.config.combine_k_v_transform and d_model == d_model_out == n_head * d_head
+        self.combine_k_v_transform = combine_k_v_transform
         qkv_squeeze = self.config.qkv_squeeze_fraction > 1
         sq_frac = self.config.qkv_squeeze_fraction
         if qkv_squeeze:
@@ -712,12 +757,12 @@ class FunnelRelMultiheadAttention(nn.Module):
         if qkv_transform_groups > 1:
             assert n_head % qkv_transform_groups == 0 and n_head > qkv_transform_groups
             if compress_query:
-                self.q_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=4, groups=qkv_transform_groups, bias=False, stride=4)
+                self.q_head = CompressQuery(config, block_index)
             else:
                 self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
             self.k_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
-            if self.config.combine_k_v_transform and d_model == d_model_out == n_head * d_head:
-                self.v_head = self.k_head
+            if combine_k_v_transform:
+                pass
             else:
                 self.v_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, d_model_out, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model_out, kernel_size=1, groups=qkv_transform_groups)
 
@@ -729,16 +774,16 @@ class FunnelRelMultiheadAttention(nn.Module):
 
         else:
             if compress_query:
-                self.q_head = Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=4, groups=qkv_transform_groups, bias=False, stride=4)
+                self.q_head = CompressQuery(config, block_index)
             else:
                 self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
             self.k_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
-            if self.config.combine_k_v_transform and d_model == d_model_out == n_head * d_head:
-                self.v_head = self.k_head
+            if combine_k_v_transform:
+                pass
             else:
                 self.v_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, d_model_out) if qkv_squeeze else nn.Linear(d_model, d_model_out)
             if d_model_out != d_model:
-                if self.config.combine_k_v_transform:
+                if combine_k_v_transform:
                     self.q_exp = MatchQueryToValuedimByZeroAppend(d_model, d_model_out)
                 else:
                     self.q_exp = nn.Linear(d_model, d_model_out)
@@ -775,12 +820,15 @@ class FunnelRelMultiheadAttention(nn.Module):
         context_len = key.shape[1]
         n_head, d_head = self.config.n_head[self.block_index], self.config.d_head[self.block_index]
 
-        seq_len = seq_len // 4 if self.compress else seq_len
+        seq_len = (2*(((seq_len - self.cls_tokens) // self.config.compressed_query_attention)//2) + self.cls_tokens) if self.compress else seq_len
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
         k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
-        v_head = self.v_head(value).view(batch_size, context_len, n_head, self.d_model_out // n_head)
+        if not self.combine_k_v_transform:
+            v_head = self.v_head(value).view(batch_size, context_len, n_head, self.d_model_out // n_head)
+        else:
+            v_head = k_head
 
         q_head = q_head * self.scale
         # Shape n_head x d_head
@@ -856,7 +904,7 @@ class FunnelRelMultiheadAttention(nn.Module):
         if self.d_model != self.d_model_out:
             query = self.q_exp(query)
         if self.compress:
-            attn_out = upsample(attn_out, 4, query.shape[1])
+            attn_out = upsample(attn_out, self.config.compressed_query_attention, query.shape[1], self.cls_tokens)
         output = self.layer_norm(query + attn_out)
         return (output, attn_prob) if output_attentions else (output,)
 
@@ -1128,19 +1176,19 @@ class FunnelEncoder(nn.Module):
         return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
 
 
-def upsample(x, stride, target_len):
+def upsample(x, stride, target_len, cls_tokens):
     """
     Upsample tensor `x` to match `target_len` by repeating the tokens `stride` time on the sequence length dimension.
     """
     if stride == 1:
         return x
 
-    cls = x[:, :1]
-    x = x[:, 1:]
+    cls = x[:, :cls_tokens]
+    x = x[:, cls_tokens:]
     output = torch.repeat_interleave(x, repeats=stride, dim=1)
 
-    output = nn.functional.pad(output, (0, 0, 0, (target_len - 1) - output.shape[1], 0, 0))
-    output = output[:, : target_len - 1]
+    output = nn.functional.pad(output, (0, 0, 0, (target_len - cls_tokens) - output.shape[1], 0, 0))
+    output = output[:, : target_len - cls_tokens]
     output = torch.cat([cls, output], dim=1)
 
     return output
@@ -1151,6 +1199,7 @@ class FunnelDecoder(nn.Module):
         super().__init__()
         self.config = config
         self.attention_structure = FunnelAttentionStructure(config)
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.layers = nn.ModuleList()
         if config.num_decoder_layers > 0:
             if config.block_repeats:
@@ -1209,6 +1258,7 @@ class FunnelDecoder(nn.Module):
             final_hidden,
             stride=self.config.stride ** (len(self.config.block_sizes) - 1),
             target_len=first_block_hidden.shape[1],
+            cls_tokens=self.cls_tokens,
         )
 
         hidden = upsampled_hidden + first_block_hidden
@@ -1755,15 +1805,15 @@ if __name__ == "__main__":
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
     config = FunnelConfig(separate_content_and_position_attention=False,
-                          sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+                          sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[60, 64, 80], separate_compressiion_layer=True,
                           combine_k_v_transform=True, qkv_squeeze_fraction=1, last_layer_as_conv=True, first_layer_as_conv=True,
-                          compressed_query_attention=True, compressed_query_attention_layers=[(0, 1), (1, 1), (2,1)]) # (0, 1), (1, 0), (1, 1), (2, 0), (2,1)
+                          compressed_query_attention=8, compressed_query_attention_layers=[(0, 1), (1, 1), (2, 1)]) # (0, 1), (1, 0), (1, 1), (2, 0), (2,1)
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
-    # model = AutoModel.from_pretrained("funnel-transformer/intermediate-base")
-    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
+    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
     #
     # model = AutoModel.from_pretrained("bert-base-uncased")
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -1778,7 +1828,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    print(model.funnel.encoder.repeats)
+    # print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
@@ -1828,7 +1878,7 @@ Self-attention is a useful mechanism to build generative models for language and
     large_max_length = 512 - config.num_highway_cls_tokens
     very_large_max_length = 1024 - config.num_highway_cls_tokens
 
-    pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=large_max_length)
+    pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=512)
     print("Input Sizes", pt_batch["input_ids"].size())
 
     def run():
