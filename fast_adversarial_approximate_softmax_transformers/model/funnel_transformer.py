@@ -161,9 +161,9 @@ class FunnelConfig(PretrainedConfig):
         d_model=768,
         n_head=[8, 12, 12], # 8
         d_head=[48, 64, 80], # 32
-        hidden_act="gelu_new",
-        hidden_dropout=0.1,
-        attention_dropout=0.1,
+        hidden_act="gelu",
+        hidden_dropout=0.0,
+        attention_dropout=0.0,
         activation_dropout=0.0,
         max_position_embeddings=512,
         type_vocab_size=0,
@@ -217,6 +217,7 @@ class FunnelConfig(PretrainedConfig):
         assert pooling_type in [
             "mean",
             "max",
+            "learn",
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
         self.pooling_type = pooling_type
         assert attention_type in [
@@ -641,28 +642,33 @@ class Conv1d(nn.Module):
 
 
 class CompressQuery(nn.Module):
-    def __init__(self, config: FunnelConfig, block_index):
+    def __init__(self, config: FunnelConfig, block_index, use_in_funnel=False):
         super().__init__()
         self.config = config
-        self.compressed_query_attention = config.compressed_query_attention
+        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention
         d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
         self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         qkv_squeeze = self.config.qkv_squeeze_fraction > 1
         sq_frac = self.config.qkv_squeeze_fraction
         qkv_transform_groups = self.config.qkv_transform_groups
-        if qkv_transform_groups > 1:
-            self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+        if use_in_funnel:
+            self.q_head = nn.Identity()
         else:
-            self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model // sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
-                                                                                                                                  bias=False)
+            if qkv_transform_groups > 1:
+                self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+            else:
+                self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model // sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+                                                                                                                                      bias=False)
         self.ffn = BertFFN(config, self.compressed_query_attention * d_model // n_head,
                            2 * self.compressed_query_attention * d_model // n_head, 0, self.compressed_query_attention)
 
     def forward(self, query):
 
         cls = query[:, :self.cls_tokens]
-        query = query[:, self.cls_tokens: self.compressed_query_attention * (query.size(1)//self.compressed_query_attention)]
+        query = query[:, self.cls_tokens:]
+        target_len = self.compressed_query_attention * int(np.ceil(query.size(1) / self.compressed_query_attention))
+        query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
         batch_size, seq_len, dim = query.shape
         assert seq_len % self.compressed_query_attention == 0
         seq_groups = seq_len // self.compressed_query_attention
@@ -820,7 +826,7 @@ class FunnelRelMultiheadAttention(nn.Module):
         context_len = key.shape[1]
         n_head, d_head = self.config.n_head[self.block_index], self.config.d_head[self.block_index]
 
-        seq_len = (2*(((seq_len - self.cls_tokens) // self.config.compressed_query_attention)//2) + self.cls_tokens) if self.compress else seq_len
+        seq_len = (2*int(np.ceil((seq_len - self.cls_tokens) / self.config.compressed_query_attention)//2) + self.cls_tokens) if self.compress else seq_len
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
@@ -996,7 +1002,7 @@ class ConvFFN_qkv_squeeze(nn.Module):
 
 
 class BertFFN_qkv_squeeze(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner, d_out):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, d_out, groups=1):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
@@ -1038,7 +1044,7 @@ class FunnelPositionwiseFFN(nn.Module):
 
 
 class Conv1DLayer(nn.Module):
-    def __init__(self, config, block_index, is_encoder_layer):
+    def __init__(self, config: FunnelConfig, block_index, is_encoder_layer):
         cin = cout = config.block_channel_size[block_index]
         self.is_encoder_layer = is_encoder_layer
         super().__init__()
@@ -1047,17 +1053,22 @@ class Conv1DLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(cout, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
         self.dropout = nn.Dropout(config.attention_dropout)
+        self.cls_tokens = config.num_highway_cls_tokens + 1
         # padding
 
     def forward(self, query, key, value, attention_inputs, output_attentions=False):
-        q = query.permute(0, 2, 1)
+        q = query
+        cls = q[:, :self.cls_tokens]
+        q = q[:, self.cls_tokens:]
         if not self.is_encoder_layer:
-            q = q + q[:, :, 0:1]
+            q = q + cls.mean(1).unsqueeze(1)  # TODO: this might just promote all CLS tokens to become constant
+        q = q.permute(0, 2, 1)
         q = self.c1(q)
         q = self.activation_function(q)
         q = self.dropout(q)
         q = self.c2(q)
         q = q.permute(0, 2, 1)
+        q = torch.cat([cls, q], 1)
         return (self.layer_norm(query + q),)
 
 
@@ -1122,6 +1133,13 @@ class FunnelEncoder(nn.Module):
                     repeats[block_index][i] = 1
                     i += 1
         self.repeats = repeats
+        self.pool = None
+        if config.pooling_type == "learn" and config.stride > 1:
+            pool = nn.ModuleDict()
+            for block_index, _ in enumerate(config.block_sizes[1:]):
+                pool[str(block_index+1)] = CompressQuery(config, block_index+1, use_in_funnel=True)
+            self.pool = pool
+
 
     def forward(
         self,
@@ -1148,9 +1166,12 @@ class FunnelEncoder(nn.Module):
             pooling_flag = hidden.size(1) > 2
             pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
             if pooling_flag:
-                pooled_hidden, attention_inputs = self.attention_structure.pre_attention_pooling(
-                    hidden, attention_inputs
-                )
+                if self.pool:
+                    pooled_hidden = self.pool[str(block_index)](hidden)
+                else:
+                    pooled_hidden, attention_inputs = self.attention_structure.pre_attention_pooling(
+                        hidden, attention_inputs
+                    )
             for (layer_index, layer) in enumerate(block):
                 repeats = self.repeats[block_index][layer_index]
                 for repeat_index in range(repeats):
@@ -1798,17 +1819,19 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
 
 
 if __name__ == "__main__":
+    import time
+    import numpy as np
 
     from transformers import AutoTokenizer, AutoModel
 
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
-    config = FunnelConfig(separate_content_and_position_attention=False,
-                          sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
-                          approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[60, 64, 80], separate_compressiion_layer=True,
-                          combine_k_v_transform=True, qkv_squeeze_fraction=1, last_layer_as_conv=True, first_layer_as_conv=True,
-                          compressed_query_attention=8, compressed_query_attention_layers=[(0, 1), (1, 1), (2, 1)]) # (0, 1), (1, 0), (1, 1), (2, 0), (2,1)
+    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="learn",
+                          sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=4, ffn_groups=4,
+                          approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[60, 64, 80], separate_compressiion_layer=True,
+                          combine_k_v_transform=True, qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
+                          compressed_query_attention=8, compressed_query_attention_layers=[(0, 1), (1, 1), (2, 1)])  # (0, 1), (1, 0), (1, 1), (2, 0), (2,1)
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
@@ -1823,6 +1846,8 @@ if __name__ == "__main__":
     #
     # model = AutoModel.from_pretrained("distilbert-base-uncased")
     # tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+
+    # TODO: Test Longformer for long sequences as well.
 
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -1871,14 +1896,15 @@ Self-attention is a useful mechanism to build generative models for language and
     very_large_texts = [
         t1+t2+t3,
         t2+t3,
-        t3+t1,
+        t3+t1+t2+t1+t2+t3,
         t1+t2+t3+t1
     ]
-    max_length = 128 - config.num_highway_cls_tokens
-    large_max_length = 512 - config.num_highway_cls_tokens
-    very_large_max_length = 1024 - config.num_highway_cls_tokens
+    small_max_length = 128 - config.num_highway_cls_tokens
+    medium_max_length = 512 - config.num_highway_cls_tokens
+    large_max_length = 1024 - config.num_highway_cls_tokens
+    very_large_max_length = 1536 - config.num_highway_cls_tokens
 
-    pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=512)
+    pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=medium_max_length)
     print("Input Sizes", pt_batch["input_ids"].size())
 
     def run():
@@ -1886,18 +1912,23 @@ Self-attention is a useful mechanism to build generative models for language and
             pt_outputs = model(**pt_batch)
         return [o.cpu() for o in pt_outputs]
 
-    _ = run()
-    _ = run()
-    _ = run()
-    import time
-    times = []
-    for _ in range(10):
-        st = time.time()
-        _ = run()
-        et = time.time() - st
-        times.append(et)
-    import numpy as np
-    print("Time Taken = %.4f, variance = %.4f" % (np.mean(times), np.std(times)))
+    profile = False
+    if profile:
+        import torch.autograd.profiler as profiler
+        _ = [run() for _ in range(2)]
+        with profiler.profile(record_shapes=True) as prof:
+            _ = [run() for _ in range(5)]
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+        print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=100))
+    else:
+        _ = [run() for _ in range(2)]
+        times = []
+        for _ in range(10):
+            st = time.time()
+            _ = run()
+            et = time.time() - st
+            times.append(et)
+        print("Time Taken = %.4f, variance = %.4f" % (np.mean(times), np.std(times)))
 
 # Time Taken = 2.6298, variance = 0.0371
 # Time Taken = 1.1078, variance = 0.0187
