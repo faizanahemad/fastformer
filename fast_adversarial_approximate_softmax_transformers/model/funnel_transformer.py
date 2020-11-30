@@ -158,9 +158,11 @@ class FunnelConfig(PretrainedConfig):
         block_repeats=True,
         separate_compressiion_layer=False,
         num_decoder_layers=2,
-        d_model=768,
         n_head=[8, 12, 12], # 8
-        d_head=[48, 64, 80], # 32
+        sdconv=False,
+        conv_head=[8, 12, 12],  #  Total heads = Conv + n_head
+        use_cuda_conv=False,
+        d_head=[48, 64, 80],  # 32
         hidden_act="gelu",
         hidden_dropout=0.0,
         attention_dropout=0.0,
@@ -170,7 +172,9 @@ class FunnelConfig(PretrainedConfig):
         initializer_range=0.1,
         initializer_std=None,
         layer_norm_eps=1e-9,
-        pooling_type="mean",
+        pooling_type="mean", # learn, #learn_sdconv
+        pooling_kernel_size=9,
+        stride=2,
         attention_type="relative_shift",
         ffn_groups=4,
         ffn_layers=0,
@@ -179,7 +183,6 @@ class FunnelConfig(PretrainedConfig):
         embedding_size=128,
         num_highway_cls_tokens=7,
         position_biased_input=True,
-        stride=2,
         untie_cls=False,
         separate_content_and_position_attention=False,
         approximate_attention=[False, False, False],
@@ -188,8 +191,14 @@ class FunnelConfig(PretrainedConfig):
         qkv_squeeze_fraction=1,
         first_layer_as_conv=False,
         last_layer_as_conv=False,
-        compressed_query_attention: Union[bool, int]=False,
+        compress_query_method="mean",
+        compressed_query_attention_kernel_size = 9,
+        compressed_query_attention_stride=4,
         compressed_query_attention_layers=[(0, 1), (1, 1), (2,1)],
+        compress_key_method="mean",
+        compressed_key_attention_kernel_size=9,
+        compressed_key_attention_stride=4,
+        compressed_key_attention_layers=[(0, 1), (1, 1), (2, 1)],
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -199,7 +208,6 @@ class FunnelConfig(PretrainedConfig):
         self.block_repeats = block_repeats
         self.separate_compressiion_layer = separate_compressiion_layer
         self.num_decoder_layers = num_decoder_layers
-        self.d_model = d_model
         self.n_head = [n_head] * len(block_sizes) if isinstance(n_head, int) else n_head
         assert len(self.n_head) == len(block_sizes)
         self.d_head = [d_head] * len(block_sizes) if isinstance(d_head, int) else d_head
@@ -215,11 +223,20 @@ class FunnelConfig(PretrainedConfig):
         self.layer_norm_eps = layer_norm_eps
         self.ffn_width = ffn_width
         assert pooling_type in [
+
             "mean",
             "max",
             "learn",
+            "learn_sdconv",
+        ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
+        assert compress_query_method in [
+            None,
+            "mean",
+            "learn",
+            "learn_sdconv",
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
         self.pooling_type = pooling_type
+        self.compress_query_method = compress_query_method
         assert attention_type in [
             "relative_shift",
             "factorized",
@@ -237,8 +254,10 @@ class FunnelConfig(PretrainedConfig):
         self.last_layer_as_conv = last_layer_as_conv
         if first_layer_as_conv:
             assert position_biased_input
-        assert not compressed_query_attention or compressed_query_attention in [2, 4, 8]
-        self.compressed_query_attention = compressed_query_attention
+        assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
+        self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
+        assert compressed_query_attention_stride in [2, 4]
+        self.compressed_query_attention_stride = compressed_query_attention_stride
         self.compressed_query_attention_layers = compressed_query_attention_layers
         self.untie_cls = untie_cls
         self.separate_content_and_position_attention = separate_content_and_position_attention
@@ -246,27 +265,21 @@ class FunnelConfig(PretrainedConfig):
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform and not separate_content_and_position_attention)
         assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
-        if block_channel_size is None:
-            block_channel_size = [d_model] * len(block_sizes)
         assert len(block_channel_size) == len(block_sizes)
         self.block_channel_size = block_channel_size
         self.combine_k_v_transform = combine_k_v_transform
+        self.sdconv = sdconv
+        self.use_cuda_conv = use_cuda_conv
+        if sdconv:
+            if conv_head is None:
+                conv_head = n_head
+            self.conv_head = [conv_head] * len(block_sizes) if isinstance(conv_head, int) else conv_head
+            assert all([bcsz % (ch + nh) == 0 for ch, nh, bcsz in zip(self.conv_head, self.n_head, self.block_channel_size)])
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
         assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
-        assert len(approximate_attention) == len(block_sizes) # + 1 for decoder
-
-
-
-
-    @property
-    def hidden_size(self):
-        return self.d_model
-
-    @property
-    def num_attention_heads(self):
-        return self.n_head
+        assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
 
     @property
     def num_hidden_layers(self):
@@ -521,7 +534,6 @@ class FunnelAttentionStructure(nn.Module):
 
         Paper link: https://arxiv.org/abs/2006.03236
         """
-        d_model = self.config.d_model
         stride = self.stride
         # Notations from the paper, appending A.2.1, final formula.
         # We need to create and return all the possible vectors R for all blocks and shifts.
@@ -721,9 +733,19 @@ class MatchQueryToValuedimByZeroAppend(nn.Module):
         return torch.cat([q, z], dim=-1)
 
 
-class FunnelRelMultiheadAttention(nn.Module):
-    def __init__(self, config: FunnelConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index):
+class SDConv(nn.Module):
+    def __init__(self, config: FunnelConfig, block_index, heads, is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
+
+    def forward(self, query, key, value=None):
+        pass
+
+
+class FunnelRelMultiheadAttention(nn.Module):
+    def __init__(self, config: FunnelConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
+        super().__init__()
+        if last_layer_index is None:
+            last_layer_index = layer_index
         self.config = config
         self.block_index = block_index
         d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
@@ -864,6 +886,7 @@ class FunnelRelMultiheadAttention(nn.Module):
                                                     (self.cls_tokens_total, 0, 0, 0, 0, 0))
 
         if self.approximate_attention:
+            # TODO: how to handle attention masks
             v_head = v_head.permute(0, 2, 1, 3)
             attn_vec = self.attn(q_head.permute(0, 2, 1, 3), k_head.permute(0, 2, 1, 3), v_head).permute(0, 2, 1, 3)
             if self.separate_content_and_position_attention:
@@ -1027,7 +1050,7 @@ class FunnelPositionwiseFFN(nn.Module):
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if groups > 1:
-            assert config.d_model % groups == 0
+            assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
             self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
@@ -1073,9 +1096,9 @@ class Conv1DLayer(nn.Module):
 
 
 class FunnelLayer(nn.Module):
-    def __init__(self, config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index):
+    def __init__(self, config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
-        self.attention = FunnelRelMultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index)
+        self.attention = FunnelRelMultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index)
         self.ffn = FunnelPositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
 
     def forward(self, query, key, value, attention_inputs, output_attentions=False):
@@ -1091,55 +1114,52 @@ class FunnelEncoder(nn.Module):
         self.attention_structure = FunnelAttentionStructure(config)
 
         block_channel_size = config.block_channel_size
-        repeats = defaultdict(dict) if config.block_repeats else defaultdict(lambda: defaultdict(lambda: 1))
         self.blocks = nn.ModuleList()
+        self.repeats = []
         for block_index, block_size in enumerate(config.block_sizes):
             cur_channels = block_channel_size[block_index]
             next_channels = block_channel_size[min(block_index+1, len(block_channel_size) - 1)]
             self.blocks.append(nn.ModuleList())
+            self.repeats.append([])
             i = 0
-            j = 0
             while i < block_size:
                 if config.block_repeats:
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i))
-                        repeats[block_index][j] = 1
-                        j += 1
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i))
+                        self.repeats[block_index].append(1)
                         i += 1
                     elif i < block_size - 1:
                         if config.first_layer_as_conv and block_index == 0 and i == 0:
                             self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
-                            repeats[block_index][j] = 1
+                            self.repeats[block_index].append(1)
                             i += 1
-                            j += 1
                         else:
-                            self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i))
-                            repeats[block_index][j] = (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
-                            j += 1
-                            i += (block_size - (i+1)) if cur_channels != next_channels else (block_size - i)
+                            reps = (block_size - (i + 1)) if cur_channels != next_channels else (block_size - i)
+                            self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i + reps))
+                            self.repeats[block_index].append(reps)
+                            i += reps
                     elif cur_channels != next_channels and i == block_size - 1:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i))
-                        repeats[block_index][j] = 1
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i))
+                        self.repeats[block_index].append(1)
                         i += 1
-                        j += 1
                     else:
                         ValueError()
                 else:
                     if config.first_layer_as_conv:
                         self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
                     else:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i))
-                    repeats[block_index][i] = 1
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i))
+                    self.repeats[block_index].append(1)
                     i += 1
-        self.repeats = repeats
         self.pool = None
         if config.pooling_type == "learn" and config.stride > 1:
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 pool[str(block_index+1)] = CompressQuery(config, block_index+1, use_in_funnel=True)
             self.pool = pool
-
+        elif config.pooling_type == "learn_sdconv" and config.stride > 1:
+            pass
 
     def forward(
         self,
@@ -1162,7 +1182,7 @@ class FunnelEncoder(nn.Module):
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
 
-        for block_index, block in enumerate(self.blocks):
+        for block_index, (block, repeat_block) in enumerate(zip(self.blocks, self.repeats)):
             pooling_flag = hidden.size(1) > 2
             pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
             if pooling_flag:
@@ -1172,8 +1192,7 @@ class FunnelEncoder(nn.Module):
                     pooled_hidden, attention_inputs = self.attention_structure.pre_attention_pooling(
                         hidden, attention_inputs
                     )
-            for (layer_index, layer) in enumerate(block):
-                repeats = self.repeats[block_index][layer_index]
+            for (layer_index, (layer, repeats)) in enumerate(zip(block, repeat_block)):
                 for repeat_index in range(repeats):
                     do_pooling = (repeat_index == 0) and (layer_index == 0) and pooling_flag
                     if do_pooling:
@@ -1853,7 +1872,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    # print(model.funnel.encoder.repeats)
+    print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
