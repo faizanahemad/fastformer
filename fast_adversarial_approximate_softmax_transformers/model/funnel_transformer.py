@@ -46,6 +46,11 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
+try:
+    from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
+except:
+    pass
+
 
 logger = logging.get_logger(__name__)
 
@@ -161,7 +166,7 @@ class FunnelConfig(PretrainedConfig):
         n_head=[8, 12, 12], # 8
         sdconv=False,
         conv_head=[8, 12, 12],  #  Total heads = Conv + n_head
-        use_cuda_conv=False,
+        use_cuda_conv=True,
         d_head=[48, 64, 80],  # 32
         hidden_act="gelu",
         hidden_dropout=0.0,
@@ -192,7 +197,7 @@ class FunnelConfig(PretrainedConfig):
         first_layer_as_conv=False,
         last_layer_as_conv=False,
         compress_query_method="mean",
-        compressed_query_attention_kernel_size = 9,
+        compressed_query_attention_kernel_size=9,
         compressed_query_attention_stride=4,
         compressed_query_attention_layers=[(0, 1), (1, 1), (2,1)],
         compress_key_method="mean",
@@ -202,7 +207,10 @@ class FunnelConfig(PretrainedConfig):
         **kwargs
     ):
         super().__init__(**kwargs)
-
+        try:
+            from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
+        except:
+            use_cuda_conv = False
         self.vocab_size = vocab_size
         self.block_sizes = block_sizes
         self.block_repeats = block_repeats
@@ -668,9 +676,9 @@ class CompressQuery(nn.Module):
             self.q_head = nn.Identity()
         else:
             if qkv_transform_groups > 1:
-                self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+                self.q_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
             else:
-                self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model // sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+                self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
                                                                                                                                       bias=False)
         self.ffn = BertFFN(config, self.compressed_query_attention * d_model // n_head,
                            2 * self.compressed_query_attention * d_model // n_head, 0, self.compressed_query_attention)
@@ -690,7 +698,7 @@ class CompressQuery(nn.Module):
                        self.n_head, dim // self.n_head) # B, S/r, r, H, Dh
         qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.compressed_query_attention * dim // self.n_head))  # B, S/r, H, r
 
-        qw = qw.permute(0, 1, 3, 2) # B, S/r, r, H
+        qw = qw.permute(0, 1, 3, 2)  # B, S/r, r, H
         q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim) # B, S/r, H, Dh -> B, S/r, D
         q = torch.cat([cls, q], dim=1)
         q = self.q_head(q)
@@ -733,12 +741,113 @@ class MatchQueryToValuedimByZeroAppend(nn.Module):
         return torch.cat([q, z], dim=-1)
 
 
-class SDConv(nn.Module):
-    def __init__(self, config: FunnelConfig, block_index, heads, is_encoder_layer, layer_index, last_layer_index=None):
+class SeparableConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
+                 bias=True, stride=1, padding=None, channels_last=True):
         super().__init__()
+        self.channels_last = channels_last
+        if padding is None:
+            padding = (kernel_size - 1) // 2
+        if groups is None:
+            groups = in_channels
+        if pointwise_groups is None:
+            pointwise_groups = 1
+        self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
+                                   kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
+        self.pointwise_groups = pointwise_groups
+        if pointwise_groups == 1:
+            self.pointwise = nn.Linear(in_channels, out_channels)
+        else:
+            self.pointwise = nn.Conv1d(in_channels=in_channels, out_channels=out_channels,
+                                       kernel_size=1, groups=pointwise_groups, bias=bias, stride=1, padding=0)
 
-    def forward(self, query, key, value=None):
-        pass
+    def channel_move(self, x):
+        if self.channels_last:
+            return x.permute(0, 2, 1)
+        return x
+
+    def forward(self, inputs):
+        in_shape = inputs.shape
+        inputs = inputs.view(-1, in_shape[-2], in_shape[-1])
+        inputs = self.channel_move(inputs)
+        inputs = self.depthwise(inputs)
+        if self.pointwise_groups == 1:
+            inputs = self.pointwise(inputs.permute(0, 2, 1))
+            if not self.channels_last:
+                inputs = inputs.permute(0, 2, 1)
+            inputs = inputs.view(*in_shape)
+        else:
+            inputs = self.pointwise(inputs)
+            inputs = self.channel_move(inputs).view(*in_shape)
+        return inputs
+
+
+class SDConv(nn.Module):
+    def __init__(self, config: FunnelConfig, block_index, hidden_size, heads, head_size,
+                 kernel_size,
+                 is_encoder_layer, layer_index, last_layer_index=None):
+        super().__init__()
+        self.heads = heads
+        self.kernel_size = kernel_size
+        self.all_head_size = heads * head_size
+        assert hidden_size % heads == 0
+        self.head_size = head_size
+        self.separable_conv1d = SeparableConv1d(hidden_size, self.all_head_size, kernel_size, pointwise_groups=heads, channels_last=True)
+        self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)
+        self.conv_attn_point = nn.Linear(hidden_size, self.all_head_size)
+        self.use_cuda_conv = config.use_cuda_conv
+        if not self.use_cuda_conv:
+            self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0])
+        else:
+            self.padding_l = (self.conv_kernel_size - 1) // 2
+
+    def forward(self, query, key=None, value=None):
+        if key is None:
+            key = query
+        if value is None:
+            value = key
+
+        bs, seqlen = query.shape[:2]
+
+        key_conv_attn_layer = self.separable_conv1d(key)
+        conv_attn_layer = key_conv_attn_layer * query
+        conv_kernel_layer = self.conv_attn_kernel(conv_attn_layer)  # Softmax only in kernel dim
+
+        if not self.use_cuda_conv:
+
+            conv_kernel_layer = conv_kernel_layer.reshape(
+                -1, self.conv_kernel_size, 1)  # BxSxH, k, 1
+            conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
+
+            # conv_out_layer
+            conv_out_layer = self.conv_attn_point(value).transpose(1, 2).contiguous().unsqueeze(-1)  # B,D,Seq, 1
+            unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
+            unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2).reshape(bs, seqlen, -1, self.conv_kernel_size)  # B, seq, D, kernel_size
+            conv_out_layer = torch.reshape(
+                unfold_conv_out_layer,
+                [-1, self.head_size, self.conv_kernel_size])  # BxSxH, H_dim, kernel
+            conv_out_layer = torch.matmul(conv_out_layer, conv_kernel_layer)
+            conv_out = torch.reshape(
+                conv_out_layer, [bs, seqlen, -1, self.head_size])  # B, S, H, H_dim
+        else:
+            conv_kernel_layer = conv_kernel_layer.reshape(
+                bs, seqlen, -1, self.conv_kernel_size)
+            conv_kernel_layer = conv_kernel_layer.permute(0, 2, 3,
+                                                          1).contiguous()
+            # B H K T
+            weights = torch.softmax(conv_kernel_layer, dim=-2)
+
+            # B,C,T
+            conv_out_layer = self.conv_attn_point(value).transpose(
+                1, 2).contiguous()
+
+            conv_out_layer = dynamicconvFunction.apply(
+                conv_out_layer, weights,
+                self.padding_l).transpose(1, 2).contiguous()
+            conv_out = torch.reshape(
+                conv_out_layer, [bs, seqlen, -1, self.head_size])
+
+        return conv_out
 
 
 class FunnelRelMultiheadAttention(nn.Module):
@@ -787,12 +896,12 @@ class FunnelRelMultiheadAttention(nn.Module):
             if compress_query:
                 self.q_head = CompressQuery(config, block_index)
             else:
-                self.q_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
-            self.k_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+                self.q_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+            self.k_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
             if combine_k_v_transform:
                 pass
             else:
-                self.v_head = ConvFFN_qkv_squeeze(config, d_model, d_model//sq_frac, d_model_out, qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model_out, kernel_size=1, groups=qkv_transform_groups)
+                self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=d_model_out, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model_out, kernel_size=1, groups=qkv_transform_groups)
 
             if d_model_out != d_model:
                 if self.config.combine_k_v_transform:
@@ -804,12 +913,12 @@ class FunnelRelMultiheadAttention(nn.Module):
             if compress_query:
                 self.q_head = CompressQuery(config, block_index)
             else:
-                self.q_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
-            self.k_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
+                self.q_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
+            self.k_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
             if combine_k_v_transform:
                 pass
             else:
-                self.v_head = BertFFN_qkv_squeeze(config, d_model, d_model//sq_frac, d_model_out) if qkv_squeeze else nn.Linear(d_model, d_model_out)
+                self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=d_model_out) if qkv_squeeze else nn.Linear(d_model, d_model_out)
             if d_model_out != d_model:
                 if combine_k_v_transform:
                     self.q_exp = MatchQueryToValuedimByZeroAppend(d_model, d_model_out)
@@ -943,9 +1052,10 @@ class ConvFFN(nn.Module):
     ConvActivation: Conv, Activation
     """
 
-    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers=0, d_out=None):
         super().__init__()
-        cin, cout = d_model, d_model
+        d_out = d_model if d_out is None else d_out
+        cin, cout = d_model, d_out
         act = config.hidden_act
         self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
         self.activation_dropout = nn.Dropout(config.activation_dropout)
@@ -974,7 +1084,7 @@ class ConvFFN(nn.Module):
 
 
 class BertFFN(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner, layers, d_out=None):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
@@ -998,45 +1108,6 @@ class BertFFN(nn.Module):
                 h = self.activation_dropout(h)
         h = self.linear_2(h)
         h = self.dropout(h)
-        return h
-
-
-class ConvFFN_qkv_squeeze(nn.Module):
-    """
-    ConvActivation: Conv, Activation
-    """
-
-    def __init__(self, config: FunnelConfig, d_model, d_inner, d_out, groups):
-        super().__init__()
-        cin, cout = d_model, d_out
-        act = config.hidden_act
-        self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
-        self.activation_dropout = nn.Dropout(config.activation_dropout)
-        self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
-        self.act = ACT2FN[act]
-
-    def forward(self, x):
-        h = x.permute(0, 2, 1)
-        output = self.conv1d_in(h)
-        output = self.act(output)
-        output = self.conv1d_out(output)
-        output = output.permute(0, 2, 1)
-        return output
-
-
-class BertFFN_qkv_squeeze(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner, d_out, groups=1):
-        super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_inner)
-        self.activation_function = ACT2FN[config.hidden_act]
-        self.linear_2 = nn.Linear(d_inner, d_out)
-        self.dropout = nn.Dropout(config.hidden_dropout)
-
-    def forward(self, hidden):
-        # TODO: support multiple ffn layers like conv ffn?
-        h = self.linear_1(hidden)
-        h = self.activation_function(h)
-        h = self.linear_2(h)
         return h
 
 
