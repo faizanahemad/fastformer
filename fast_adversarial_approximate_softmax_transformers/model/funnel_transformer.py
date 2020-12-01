@@ -198,8 +198,8 @@ class FunnelConfig(PretrainedConfig):
         compress_query_method="learn",
         compressed_query_attention_kernel_size=3,
         compressed_query_attention_stride=2,
-        compressed_query_attention_layers=[(0, 1), (1, 1), (2,1)],
-        compressed_key_attention_layers=[(0, 1), (1, 1), (2, 1)],
+        compressed_query_attention_layers=[],
+        compressed_key_attention_layers=[],
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -226,6 +226,7 @@ class FunnelConfig(PretrainedConfig):
         self.initializer_std = initializer_std
         self.layer_norm_eps = layer_norm_eps
         self.ffn_width = ffn_width
+        self.pooling_kernel_size = pooling_kernel_size
         assert pooling_type in [
 
             "mean",
@@ -664,32 +665,32 @@ class CompressSeqWeighted(nn.Module):
     def __init__(self, config: FunnelConfig, block_index, use_in_funnel=False):
         super().__init__()
         self.config = config
-        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
+        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
         d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
         self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.ffn = BertFFN(config, self.compressed_query_attention * d_model // n_head,
-                           2 * self.compressed_query_attention * d_model // n_head, 0, self.compressed_query_attention)
+        self.ffn = BertFFN(config, self.stride * d_model // n_head,
+                           2 * self.stride * d_model // n_head, 0, self.stride)
 
     def forward(self, query):
 
         cls = query[:, :self.cls_tokens]
         query = query[:, self.cls_tokens:]
-        target_len = self.compressed_query_attention * int(np.ceil(query.size(1) / self.compressed_query_attention))
-        query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
+        target_len = int(np.ceil(query.size(1) / self.stride))
         batch_size, seq_len, dim = query.shape
-        assert seq_len % self.compressed_query_attention == 0
+        assert seq_len % self.stride == 0
         assert dim % self.n_head == 0
-        seq_groups = seq_len // self.compressed_query_attention
+        seq_groups = seq_len // self.stride
 
         q = query.view(batch_size,
-                       seq_groups, self.compressed_query_attention,
+                       seq_groups, self.stride,
                        self.n_head, dim // self.n_head)  # B, seq_groups, stride, H, h_dim
-        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.compressed_query_attention * dim // self.n_head))
+        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.stride * dim // self.n_head))
 
         qw = qw.permute(0, 1, 3, 2)  # (B, seq_groups, H, stridexh_dim) -> (B, Seq_groups, H, stride) -> (B, Seq_groups, stride, H)
         # qw -> (B, Seq_groups, stride, H) q -> (B, Seq_groups, stride, H, h_dim)
         q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim)  # B, S/r, H, Dh -> B, S/r, D
+        q = nn.functional.pad(q, (0, 0, 0, target_len - q.shape[1], 0, 0))
         q = torch.cat([cls, q], dim=1)
         q = q[:, :2 * (q.size(1) // 2)]
         return q
@@ -756,7 +757,11 @@ class SeparableConv1d(nn.Module):
         return x
 
     def forward(self, inputs):
+        # Support both B, H, C, S and B, C, S
         in_shape = inputs.shape
+        bs = in_shape[0]
+        dims = in_shape[-1] if self.channels_last else in_shape[-2]
+        seqlen = in_shape[-2] if self.channels_last else in_shape[-1]
         inputs = inputs.view(-1, in_shape[-2], in_shape[-1])
         inputs = self.channel_move(inputs)
         inputs = self.depthwise(inputs)
@@ -764,10 +769,10 @@ class SeparableConv1d(nn.Module):
             inputs = self.pointwise(inputs.permute(0, 2, 1))
             if not self.channels_last:
                 inputs = inputs.permute(0, 2, 1)
-            inputs = inputs.view(*in_shape)
+            inputs = inputs.view(bs, -1 if self.channels_last else dims, dims if self.channels_last else -1)
         else:
             inputs = self.pointwise(inputs)
-            inputs = self.channel_move(inputs).view(*in_shape)
+            inputs = self.channel_move(inputs).view(bs, -1 if self.channels_last else dims, dims if self.channels_last else -1)
         return inputs
 
 
@@ -791,7 +796,7 @@ class SDConv(nn.Module):
         if not self.use_cuda_conv:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
         else:
-            self.padding_l = (self.conv_kernel_size - 1) // 2
+            self.padding_l = (self.kernel_size - 1) // 2
 
     def forward(self, query, key=None, value=None):
         assert key is None or self.stride == 1
@@ -812,21 +817,23 @@ class SDConv(nn.Module):
         conv_kernel_layer = self.conv_attn_kernel(conv_attn_layer.permute(0, 2, 1)).permute(0, 2, 1)  # Softmax only in kernel dim
 
         if not self.use_cuda_conv or self.stride != 1:
-            conv_kernel_layer = conv_kernel_layer.reshape(-1, self.conv_kernel_size, 1)  # BxSxH, k, 1
+            conv_kernel_layer = conv_kernel_layer.reshape(-1, self.kernel_size, 1)  # BxSxH, k, 1
             conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
             # conv_out_layer
             conv_out_layer = self.conv_attn_point(value).transpose(1, 2).contiguous().unsqueeze(-1)  # B,D,Seq, 1
             unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
-            unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2).reshape(bs, seqlen, -1, self.conv_kernel_size)  # B, seq, D, kernel_size
+            # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
+            unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2).reshape(bs, unfold_conv_out_layer.shape[2], -1, self.kernel_size)  # B, seq, D, kernel_size
             conv_out_layer = torch.reshape(
                 unfold_conv_out_layer,
-                [-1, self.head_size, self.conv_kernel_size])  # BxSxH, H_dim, kernel
+                [-1, self.head_size, self.kernel_size])  # BxSxH, H_dim, kernel
             conv_out_layer = torch.matmul(conv_out_layer, conv_kernel_layer)
-            conv_out = torch.reshape(conv_out_layer, [bs, seqlen, -1])  # B, S, H, H_dim
+            conv_out = torch.reshape(conv_out_layer, [bs, unfold_conv_out_layer.shape[2], -1])  # B, S, H, H_dim
         else:
+            # TODO: implement strides here
             conv_kernel_layer = conv_kernel_layer.reshape(
-                bs, seqlen, -1, self.conv_kernel_size)
+                bs, seqlen, -1, self.kernel_size)
             conv_kernel_layer = conv_kernel_layer.permute(0, 2, 3,
                                                           1).contiguous()
             # B H K T
@@ -848,19 +855,19 @@ class CompressSeqSDConv(nn.Module):
     def __init__(self, config: FunnelConfig, block_index, use_in_funnel=False):
         super().__init__()
         self.config = config
-        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
+        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
         kernel_size = config.pooling_kernel_size if use_in_funnel else config.compressed_query_attention_kernel_size
         d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
         self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.sd_conv = SDConv(config, d_model, n_head, d_head, kernel_size, self.compressed_query_attention)
+        self.sd_conv = SDConv(config, d_model, n_head, d_head, kernel_size, self.stride)
 
     def forward(self, query):
 
         cls = query[:, :self.cls_tokens]
         query = query[:, self.cls_tokens:]
-        target_len = self.compressed_query_attention * int(np.ceil(query.size(1) / self.compressed_query_attention))
-        query = self.sd_conv(query)
+        target_len = int(np.ceil(query.size(1) / self.stride))
+        query = self.sd_conv(query).permute(0, 2, 1)
         query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
         q = torch.cat([cls, query], dim=1)
         q = q[:, :2 * (q.size(1) // 2)]
@@ -1205,7 +1212,7 @@ class Conv1DLayer(nn.Module):
         self.cls_tokens = config.num_highway_cls_tokens + 1
         # padding
 
-    def forward(self, query, key, value, attention_inputs, output_attentions=False):
+    def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         q = query
         cls = q[:, :self.cls_tokens]
         q = q[:, self.cls_tokens:]
@@ -1979,17 +1986,19 @@ if __name__ == "__main__":
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
-    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="mean",
-                          sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
+    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="learn",
+                          sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[60, 64, 80], separate_compressiion_layer=True,
-                          qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
-                          compress_query_method="mean", compressed_query_attention_stride=4, compressed_query_attention_kernel_size=5,
+                          qkv_squeeze_fraction=4, last_layer_as_conv=False, first_layer_as_conv=False,
+                          compress_query_method="learn", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=5,
                           compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                              (1, 1), (1, 2), (1, 3), (1, 4),
-                                                             (2, 1), (2, 2), (2, 3), (2, 4)],
-                          compressed_key_attention_layers=[(0, 3), (0, 4),
-                                                           (1, 3), (1, 4),
-                                                           (2, 3), (2, 4)]
+                                                             (2, 1), (2, 2), (2, 3), (2, 4)
+                                                             ],
+                          compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
+                                                           (1, 1), (1, 2), (1, 3), (1, 4),
+                                                           (2, 1), (2, 2), (2, 3), (2, 4)
+                                                           ]
                           )
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
