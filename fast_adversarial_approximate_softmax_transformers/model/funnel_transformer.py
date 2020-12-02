@@ -201,6 +201,7 @@ class FunnelConfig(PretrainedConfig):
         sdconv=[False, False, False],
         sdconv_kernel_size=[5, 7, 9],
         full_channel_separation_of_attention_sdconv=[False, False, False],
+        sdconv_head_fraction=[1, 1, 1],
         conv_layer_use_dynamic_conv=False,
         **kwargs
     ):
@@ -275,6 +276,7 @@ class FunnelConfig(PretrainedConfig):
         assert len(block_channel_size) == len(block_sizes)
         self.block_channel_size = block_channel_size
         self.sdconv = [sdconv] * len(block_sizes) if isinstance(sdconv, bool) else sdconv
+        self.sdconv_head_fraction = [sdconv_head_fraction] * len(block_sizes) if isinstance(sdconv_head_fraction, bool) else sdconv_head_fraction
         self.full_channel_separation_of_attention_sdconv = [full_channel_separation_of_attention_sdconv] * len(block_sizes) if isinstance(full_channel_separation_of_attention_sdconv, bool) else full_channel_separation_of_attention_sdconv
         self.use_cuda_conv = use_cuda_conv
         self.conv_layer_use_dynamic_conv = conv_layer_use_dynamic_conv
@@ -742,6 +744,68 @@ class MatchChannels(nn.Module):
         return self.e2(q2 + q)
 
 
+class ShortSeqLSTM(nn.Module):
+    def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap, stride=1):
+        super().__init__()
+        self.config = config
+        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.heads = heads
+        self.kernel_size = kernel_size
+        self.all_head_size = heads * head_size
+        self.hidden_size = hidden_size
+        self.stride = stride
+        act = config.hidden_act
+        self.act = ACT2FN[act]
+        assert hidden_size % heads == 0
+        self.head_size = head_size
+        self.overlap = overlap
+
+        self.gru = nn.RNN(hidden_size, self.all_head_size // 2, 1,
+                          nonlinearity="tanh",
+                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+
+    def forward(self, query, key=None, value=None):
+        assert key is None or self.stride == 1
+        assert value is None or self.stride == 1
+        if key is None:
+            key = query
+        if value is None:
+            value = key
+
+        bs, seqlen, dim = query.shape
+        context_len = key.shape[1]
+        assert self.hidden_size == dim
+
+        upsampled = False
+        if seqlen < context_len:
+            upsampled = True
+            query = value + upsample(query, self.config.stride, context_len, self.cls_tokens)
+            seqlen = context_len
+
+        num_segments = int(np.ceil(seqlen / self.kernel_size))
+        target_len = num_segments * self.kernel_size
+        query = nn.functional.pad(query, (0, 0, self.overlap, target_len + self.overlap - seqlen, 0, 0))
+        segs = []
+        segments = []
+        for i in range(num_segments):
+            seg_start = i * self.kernel_size
+            seg_end = (i+1)*self.kernel_size + 2*self.overlap
+            seg = query[:, seg_start:seg_end]
+            segs.append(seg)
+            segments.append((seg_start, seg_end, seg_end - 2*self.overlap, seg_end-seg_start, ))
+
+        query = torch.cat(segs, 0)
+        query = self.gru(query)[0]
+        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen]
+
+        if upsampled:
+            query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
+
+        if self.stride > 1:
+            query = pool_tensor(query, 0, "mean", self.stride)
+        return query
+
+
 class SeparableConv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
                  bias=True, stride=1, padding=None, channels_last=True):
@@ -812,6 +876,7 @@ class SDConv(nn.Module):
             self.padding_l = (self.kernel_size - 1) // 2
 
     def forward(self, query, key=None, value=None):
+        # return query[:, :, :self.all_head_size]
         assert key is None or self.stride == 1
         assert value is None or self.stride == 1
         if key is None:
@@ -921,14 +986,17 @@ class FunnelRelMultiheadAttention(nn.Module):
         self.sdconv = config.sdconv[block_index]
         self.full_channel_separation = config.full_channel_separation_of_attention_sdconv[block_index]
         if self.sdconv:
-            n_conv_head = n_head // 2
-            n_head = n_head // 2
+            self.sdconv_head_fraction = config.sdconv_head_fraction[block_index]
+            n_conv_head = int(n_head * (self.sdconv_head_fraction/(self.sdconv_head_fraction + 1)))
+            n_head = n_head - n_conv_head
+
 
             self.n_conv_head = n_conv_head
             if self.full_channel_separation:
-                d_model = d_model // 2
+                self.conv_dims = (n_conv_head * d_model) // (n_conv_head + n_head)
+                d_model = d_model - self.conv_dims
 
-            self.sdconv = SDConv(config, d_model, n_conv_head, d_head, config.sdconv_kernel_size[block_index])
+            self.sdconv = SDConv(config, self.conv_dims, n_conv_head, d_head, config.sdconv_kernel_size[block_index])
 
         self.n_head = n_head
 
@@ -1030,10 +1098,10 @@ class FunnelRelMultiheadAttention(nn.Module):
         query_temp = query
         if self.sdconv:
             if self.full_channel_separation:
-                sdconv_out = self.sdconv(query[:, :, :self.d_model], key[:, :, :self.d_model], value[:, :, :self.d_model])
-                query = query[:, :, self.d_model:]
-                key = key[:, :, self.d_model:]
-                value = value[:, :, self.d_model:]
+                sdconv_out = self.sdconv(query[:, :, :self.conv_dims], key[:, :, :self.conv_dims], value[:, :, :self.conv_dims])
+                query = query[:, :, self.conv_dims:]
+                key = key[:, :, self.conv_dims:]
+                value = value[:, :, self.conv_dims:]
             else:
                 sdconv_out = self.sdconv(query, key, value)
 
@@ -2027,19 +2095,20 @@ if __name__ == "__main__":
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
-    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5,
+    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3,
                           sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[60, 64, 80], separate_compressiion_layer=True,
                           qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
-                          sdconv=True, full_channel_separation_of_attention_sdconv=True,
-                          compress_query_method="learn_sdconv", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=5,
+                          sdconv=[True, True, True], full_channel_separation_of_attention_sdconv=True,
+                          sdconv_kernel_size=[5, 7, 9], sdconv_head_fraction=[3, 3, 3],
+                          compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                           compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                              (1, 1), (1, 2), (1, 3), (1, 4),
                                                              (2, 1), (2, 2), (2, 3), (2, 4)
                                                              ],
-                          compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                           (1, 1), (1, 2), (1, 3), (1, 4),
-                                                           (2, 1), (2, 2), (2, 3), (2, 4)
+                          compressed_key_attention_layers=[(0, 3), (0, 4),
+                                                           (1, 3), (1, 4),
+                                                           (2, 3), (2, 4)
                                                            ]
                           )
     model = FunnelForMaskedLM(config)
@@ -2150,7 +2219,7 @@ Self-attention is a useful mechanism to build generative models for language and
             _ = run()
             et = time.time() - st
             times.append(et)
-        print("Time Taken = %.4f, variance = %.4f" % (np.mean(times), np.std(times)))
+        print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
 
 # Time Taken = 2.6298, variance = 0.0371
 # Time Taken = 1.1078, variance = 0.0187
