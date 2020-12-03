@@ -163,7 +163,7 @@ class FunnelConfig(PretrainedConfig):
         block_repeats=True,
         separate_compressiion_layer=False,
         num_decoder_layers=2,
-        n_head=[8, 12, 12], # 8
+        n_head=[(8,), (12,), (12,)], # 8
         use_cuda_conv=True,
         d_head=[48, 64, 80],  # 32
         hidden_act="gelu",
@@ -200,8 +200,10 @@ class FunnelConfig(PretrainedConfig):
         compressed_key_attention_layers=[],
         sdconv=[False, False, False],
         sdconv_kernel_size=[5, 7, 9],
-        full_channel_separation_of_attention_sdconv=[False, False, False],
-        sdconv_head_fraction=[1, 1, 1],
+        full_channel_separation=[False, False, False],
+        short_rnn=[False, False, False],
+        short_rnn_kernel=[128, 128, 128],
+        short_rnn_overlap=[16, 16, 16],
         conv_layer_use_dynamic_conv=False,
         **kwargs
     ):
@@ -215,7 +217,9 @@ class FunnelConfig(PretrainedConfig):
         self.block_repeats = block_repeats
         self.separate_compressiion_layer = separate_compressiion_layer
         self.num_decoder_layers = num_decoder_layers
-        self.n_head = [n_head] * len(block_sizes) if isinstance(n_head, int) else n_head
+        self.n_head = [(n_head,)] * len(block_sizes) if isinstance(n_head, int) else n_head
+        self.n_head = [h if isinstance(h, (list, tuple)) else (h,) for h in self.n_head]
+        assert all([d % sum(h) == 0 for h, d in zip(self.n_head, block_channel_size)])
         assert len(self.n_head) == len(block_sizes)
         self.d_head = [d_head] * len(block_sizes) if isinstance(d_head, int) else d_head
         assert len(self.d_head) == len(block_sizes)
@@ -275,9 +279,12 @@ class FunnelConfig(PretrainedConfig):
         self.stride = stride
         assert len(block_channel_size) == len(block_sizes)
         self.block_channel_size = block_channel_size
+        self.short_rnn = [short_rnn] * len(block_sizes) if isinstance(short_rnn, bool) else short_rnn
+        self.short_rnn_kernel = [short_rnn_kernel] * len(block_sizes) if isinstance(short_rnn_kernel, int) else short_rnn_kernel
+        self.short_rnn_overlap = [short_rnn_overlap] * len(block_sizes) if isinstance(short_rnn_overlap, int) else short_rnn_overlap
+
         self.sdconv = [sdconv] * len(block_sizes) if isinstance(sdconv, bool) else sdconv
-        self.sdconv_head_fraction = [sdconv_head_fraction] * len(block_sizes) if isinstance(sdconv_head_fraction, bool) else sdconv_head_fraction
-        self.full_channel_separation_of_attention_sdconv = [full_channel_separation_of_attention_sdconv] * len(block_sizes) if isinstance(full_channel_separation_of_attention_sdconv, bool) else full_channel_separation_of_attention_sdconv
+        self.full_channel_separation = [full_channel_separation] * len(block_sizes) if isinstance(full_channel_separation, bool) else full_channel_separation
         self.use_cuda_conv = use_cuda_conv
         self.conv_layer_use_dynamic_conv = conv_layer_use_dynamic_conv
         self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
@@ -796,7 +803,7 @@ class ShortSeqLSTM(nn.Module):
 
         query = torch.cat(segs, 0)
         query = self.gru(query)[0]
-        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen]
+        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen+self.overlap]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
@@ -980,26 +987,34 @@ class FunnelRelMultiheadAttention(nn.Module):
             last_layer_index = layer_index
         self.config = config
         self.block_index = block_index
-        d_model, n_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
+        d_model, all_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
+        n_head = all_head[0]
+        total_heads = sum(all_head)
         assert d_model % 16 == 0
-
+        remaining_d_model = d_model
         self.sdconv = config.sdconv[block_index]
-        self.full_channel_separation = config.full_channel_separation_of_attention_sdconv[block_index]
+        self.full_channel_separation = config.full_channel_separation[block_index]
         if self.sdconv:
-            self.sdconv_head_fraction = config.sdconv_head_fraction[block_index]
-            n_conv_head = int(n_head * (self.sdconv_head_fraction/(self.sdconv_head_fraction + 1)))
-            n_head = n_head - n_conv_head
-
-
-            self.n_conv_head = n_conv_head
+            self.n_conv_head = all_head[1]
             if self.full_channel_separation:
-                self.conv_dims = (n_conv_head * d_model) // (n_conv_head + n_head)
-                d_model = d_model - self.conv_dims
+                self.conv_dims = (self.n_conv_head * d_model) // total_heads
+                remaining_d_model -= self.conv_dims
+            else:
+                self.conv_dims = d_model
+            self.sdconv = SDConv(config, self.conv_dims, self.n_conv_head, d_head, config.sdconv_kernel_size[block_index])
 
-            self.sdconv = SDConv(config, self.conv_dims, n_conv_head, d_head, config.sdconv_kernel_size[block_index])
+        self.short_rnn = config.short_rnn[block_index]
+        if self.short_rnn:
+            self.n_rnn_head = all_head[2]
+            if self.full_channel_separation:
+                self.rnn_dims = (self.n_rnn_head * d_model) // total_heads
+                remaining_d_model -= self.rnn_dims
+            else:
+                self.rnn_dims = d_model
+            self.rnn = ShortSeqLSTM(config, self.rnn_dims, self.n_rnn_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
         self.n_head = n_head
-
+        d_model = remaining_d_model
         self.block_index = block_index
         self.layer_index = layer_index
         self.is_encoder_layer = is_encoder_layer
@@ -1105,6 +1120,15 @@ class FunnelRelMultiheadAttention(nn.Module):
             else:
                 sdconv_out = self.sdconv(query, key, value)
 
+        if self.short_rnn:
+            if self.full_channel_separation:
+                rnn_out = self.rnn(query[:, :, :self.rnn_dims], key[:, :, :self.rnn_dims], value[:, :, :self.rnn_dims])
+                query = query[:, :, self.rnn_dims:]
+                key = key[:, :, self.rnn_dims:]
+                value = value[:, :, self.rnn_dims:]
+            else:
+                rnn_out = self.rnn(query, key, value)
+
         need_query_compress = (self.block_index, layer_index) in self.query_compression_layers
         need_key_compress = (self.block_index, layer_index) in self.key_compression_layers
         if need_query_compress:
@@ -1208,6 +1232,8 @@ class FunnelRelMultiheadAttention(nn.Module):
 
         if self.sdconv:
             attn_out = torch.cat([sdconv_out, attn_out], dim=-1)
+        if self.short_rnn:
+            attn_out = torch.cat([rnn_out, attn_out], dim=-1)
         output = self.layer_norm(query_temp + attn_out)
         return (output, attn_prob) if output_attentions else (output,)
 
@@ -2089,6 +2115,7 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
 if __name__ == "__main__":
     import time
     import numpy as np
+    from tqdm.auto import tqdm, trange
 
     from transformers import AutoTokenizer, AutoModel
 
@@ -2098,9 +2125,9 @@ if __name__ == "__main__":
     config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3,
                           sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[60, 64, 80], separate_compressiion_layer=True,
-                          qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
-                          sdconv=[True, True, True], full_channel_separation_of_attention_sdconv=True,
-                          sdconv_kernel_size=[5, 7, 9], sdconv_head_fraction=[3, 3, 3],
+                          qkv_squeeze_fraction=2, last_layer_as_conv=False, first_layer_as_conv=False,
+                          sdconv=True, full_channel_separation=True, short_rnn=True,
+                          sdconv_kernel_size=[5, 7, 9],
                           compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                           compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                              (1, 1), (1, 2), (1, 3), (1, 4),
@@ -2109,7 +2136,11 @@ if __name__ == "__main__":
                           compressed_key_attention_layers=[(0, 3), (0, 4),
                                                            (1, 3), (1, 4),
                                                            (2, 3), (2, 4)
-                                                           ]
+                                                           ],
+                          #n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
+                          #n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
+                          #n_head=[(8,), (12,), (12,)],
+                          n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)]
                           )
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
@@ -2214,7 +2245,7 @@ Self-attention is a useful mechanism to build generative models for language and
     else:
         _ = [run() for _ in range(2)]
         times = []
-        for _ in range(10):
+        for _ in trange(10):
             st = time.time()
             _ = run()
             et = time.time() - st

@@ -145,7 +145,7 @@ class ShortSeqLSTMv2(nn.Module):
         self.overlap = overlap
 
         self.gru = nn.RNN(hidden_size, self.all_head_size // 2, 1,
-                          nonlinearity="tanh",
+                          nonlinearity="relu",
                           bias=False, batch_first=True, dropout=0.0, bidirectional=True)
 
     def forward(self, query, key=None, value=None):
@@ -180,7 +180,7 @@ class ShortSeqLSTMv2(nn.Module):
 
         query = torch.cat(segs, 0)
         query = self.gru(query)[0]
-        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen]
+        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen+self.overlap]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
@@ -340,7 +340,7 @@ print("Trainable Params = %s" % (params/1_000))
 model = model.eval()
 
 _ = [model(t) for _ in trange(1)]
-print(t.size(), model(t)[0].size()) # model(t)[0].size()
+print(t.size(), model(t).size()) # model(t)[0].size()
 with profiler.profile(record_shapes=True) as prof:
     _ = [model(t) for _ in trange(5)]
 
