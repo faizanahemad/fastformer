@@ -324,6 +324,72 @@ class SDConv(nn.Module):
         return conv_out
 
 
+class ShortSeqRNN(nn.Module):
+    def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap, stride=1):
+        super().__init__()
+        self.config = config
+        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.heads = heads
+        self.kernel_size = kernel_size
+        self.all_head_size = heads * head_size
+        self.hidden_size = hidden_size
+        self.stride = stride
+        act = config.hidden_act
+        self.act = ACT2FN[act]
+        assert hidden_size % heads == 0
+        self.head_size = head_size
+        self.overlap = overlap
+
+        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), 1,
+                          nonlinearity="tanh",
+                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+
+    def forward(self, query, key=None, value=None):
+        assert key is None or self.stride == 1
+        assert value is None or self.stride == 1
+        if key is None:
+            key = query
+        if value is None:
+            value = key
+
+        bs, seqlen, dim = query.shape
+        context_len = key.shape[1]
+        assert self.hidden_size == dim
+
+        upsampled = False
+        if seqlen < context_len:
+            upsampled = True
+            query = value + upsample(query, self.config.stride, context_len, self.cls_tokens)
+            seqlen = context_len
+
+        num_segments = int(np.ceil(seqlen / self.kernel_size))
+        target_len = num_segments * self.kernel_size
+        query = nn.functional.pad(query, (0, 0, self.overlap, target_len + self.overlap - seqlen, 0, 0))
+        segs = []
+        segments = []
+        for i in range(num_segments):
+            seg_start = i * self.kernel_size
+            seg_end = (i+1)*self.kernel_size + 2*self.overlap
+            seg = query[:, seg_start:seg_end]
+            segs.append(seg)
+            segments.append((seg_start, seg_end, seg_end - 2*self.overlap, seg_end-seg_start, ))
+
+        query = torch.cat(segs, 0)
+        query = query.view(query.shape[0], query.shape[1], self.heads, -1)
+        query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
+
+        query = self.gru(query)[0]
+        query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
+        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen+self.overlap]
+
+        if upsampled:
+            query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
+
+        if self.stride > 1:
+            query = pool_tensor(query, 0, "mean", self.stride)
+        return query
+
+
 import time
 import numpy as np
 from tqdm.auto import tqdm, trange
@@ -331,9 +397,10 @@ t = torch.randn(8, 512, 768)
 sdconv = SDConv(FunnelConfig(), 768, 12, 64, 9, 1)
 lstm = nn.GRU(768, 768 // 2, 1, False, True, bidirectional=True)
 rnn = nn.RNN(768, 768 // 2, 1, nonlinearity="relu", bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+sh_rnn = ShortSeqRNN(FunnelConfig(), 768, 12, 64, 128, 8, 1)
 short_lstm = ShortSeqLSTMv2(FunnelConfig(), 768, 12, 64, 128, 8, 1)
 
-model = short_lstm
+model = sh_rnn
 model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
 params = sum([np.prod(p.size()) for p in model_parameters])
 print("Trainable Params = %s" % (params/1_000))

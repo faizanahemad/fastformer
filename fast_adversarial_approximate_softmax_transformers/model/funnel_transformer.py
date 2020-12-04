@@ -159,13 +159,13 @@ class FunnelConfig(PretrainedConfig):
         self,
         vocab_size=30522,
         block_sizes=[6, 6, 6],
-        block_channel_size=[480, 768, 960], # [512, 768, 1024]
+        block_channel_size=[576, 768, 960], # [512, 768, 1024]
         block_repeats=True,
         separate_compressiion_layer=False,
         num_decoder_layers=2,
         n_head=[(8,), (12,), (12,)], # 8
         use_cuda_conv=True,
-        d_head=[48, 64, 80],  # 32
+        d_head=[72, 64, 80],  # 32
         hidden_act="gelu",
         hidden_dropout=0.0,
         attention_dropout=0.0,
@@ -752,7 +752,7 @@ class MatchChannels(nn.Module):
         return self.e2(q2 + q)
 
 
-class ShortSeqLSTM(nn.Module):
+class ShortSeqRNN(nn.Module):
     def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap, stride=1):
         super().__init__()
         self.config = config
@@ -764,11 +764,11 @@ class ShortSeqLSTM(nn.Module):
         self.stride = stride
         act = config.hidden_act
         self.act = ACT2FN[act]
-        assert hidden_size % heads == 0
+        assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
 
-        self.gru = nn.RNN(hidden_size, self.all_head_size // 2, 1,
+        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), 1,
                           nonlinearity="tanh",
                           bias=False, batch_first=True, dropout=0.0, bidirectional=True)
 
@@ -803,7 +803,11 @@ class ShortSeqLSTM(nn.Module):
             segments.append((seg_start, seg_end, seg_end - 2*self.overlap, seg_end-seg_start, ))
 
         query = torch.cat(segs, 0)
+        query = query.view(query.shape[0], query.shape[1], self.heads, -1)
+        query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
+
         query = self.gru(query)[0]
+        query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
         query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen+self.overlap]
 
         if upsampled:
@@ -834,6 +838,8 @@ class SeparableConv1d(nn.Module):
             self.pointwise = nn.Conv1d(in_channels=in_channels, out_channels=out_channels,
                                        kernel_size=1, groups=pointwise_groups, bias=bias, stride=1, padding=0)
 
+        self.out_channels = out_channels
+
     def channel_move(self, x):
         if self.channels_last:
             return x.permute(0, 2, 1)
@@ -852,10 +858,10 @@ class SeparableConv1d(nn.Module):
             inputs = self.pointwise(inputs.permute(0, 2, 1))
             if not self.channels_last:
                 inputs = inputs.permute(0, 2, 1)
-            inputs = inputs.view(bs, -1 if self.channels_last else dims, dims if self.channels_last else -1)
+            inputs = inputs.view(bs, -1 if self.channels_last else self.out_channels, self.out_channels if self.channels_last else -1)
         else:
             inputs = self.pointwise(inputs)
-            inputs = self.channel_move(inputs).view(bs, -1 if self.channels_last else dims, dims if self.channels_last else -1)
+            inputs = self.channel_move(inputs).view(bs, -1 if self.channels_last else self.out_channels, self.out_channels if self.channels_last else -1)
         return inputs
 
 
@@ -873,10 +879,10 @@ class SDConv(nn.Module):
         self.act = ACT2FN[act]
         assert hidden_size % heads == 0
         self.head_size = head_size
-        self.separable_conv1d = SeparableConv1d(hidden_size, self.all_head_size, kernel_size, pointwise_groups=heads, stride=stride, channels_last=True)
+        self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride, channels_last=True)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
-        self.conv_attn_kernel = nn.Conv1d(self.all_head_size, self.heads * self.kernel_size, 1, groups=heads)
-        self.conv_attn_point = nn.Linear(hidden_size, self.all_head_size)
+        self.conv_attn_kernel = nn.Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
+        self.conv_attn_point = nn.Linear(hidden_size, hidden_size)  # TODO: Grouped Conv?
         self.use_cuda_conv = config.use_cuda_conv
         if not self.use_cuda_conv:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
@@ -920,7 +926,7 @@ class SDConv(nn.Module):
             unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2).reshape(bs, unfold_conv_out_layer.shape[2], -1, self.kernel_size)  # B, seq, D, kernel_size
             conv_out_layer = torch.reshape(
                 unfold_conv_out_layer,
-                [-1, self.head_size, self.kernel_size])  # BxSxH, H_dim, kernel
+                [-1, self.hidden_size // self.heads, self.kernel_size])  # BxSxH, H_dim, kernel
             conv_out_layer = torch.matmul(conv_out_layer, conv_kernel_layer)
             # seqlen = unfold_conv_out_layer.shape[1]
             conv_out = torch.reshape(conv_out_layer, [bs, unfold_conv_out_layer.shape[1], -1])  # B, S, H, H_dim
@@ -1012,7 +1018,8 @@ class FunnelRelMultiheadAttention(nn.Module):
                 remaining_d_model -= self.rnn_dims
             else:
                 self.rnn_dims = d_model
-            self.rnn = ShortSeqLSTM(config, self.rnn_dims, self.n_rnn_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+            assert self.rnn_dims % self.n_rnn_head == 0
+            self.rnn = ShortSeqRNN(config, self.rnn_dims, self.n_rnn_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
         self.n_head = n_head
         d_model = remaining_d_model
@@ -1066,7 +1073,7 @@ class FunnelRelMultiheadAttention(nn.Module):
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
             self.k_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
-            self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+            self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
             if compress_query:
@@ -1077,7 +1084,7 @@ class FunnelRelMultiheadAttention(nn.Module):
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
             self.k_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
-            self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
+            self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
@@ -1101,39 +1108,14 @@ class FunnelRelMultiheadAttention(nn.Module):
         self.layer_norm = nn.LayerNorm(config.block_channel_size[block_index], eps=config.layer_norm_eps)
         self.scale = 1.0 / (d_head ** 0.5)
 
-    def self_attention(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        pass
-
-
-    def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        # query has shape batch_size x seq_len x d_model
-        # key and value have shapes batch_size x context_len x d_model
+    def self_attention(self, query, key, value, attention_inputs, layer_index):
+        batch_size, seq_len, _ = query.shape
+        initial_seq_len = seq_len
         position_embeds, attention_mask = attention_inputs
         position_embeds = position_embeds[self.block_index]
         position_embed_of_key, position_embed_of_query = position_embeds
-        batch_size, seq_len, _ = query.shape
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
-
-        query_temp = query
-        if self.sdconv:
-            if self.full_channel_separation:
-                sdconv_out = self.sdconv(query[:, :, :self.conv_dims], key[:, :, :self.conv_dims], value[:, :, :self.conv_dims])
-                query = query[:, :, self.conv_dims:]
-                key = key[:, :, self.conv_dims:]
-                value = value[:, :, self.conv_dims:]
-            else:
-                sdconv_out = self.sdconv(query, key, value)
-
-        if self.short_rnn:
-            if self.full_channel_separation:
-                rnn_out = self.rnn(query[:, :, :self.rnn_dims], key[:, :, :self.rnn_dims], value[:, :, :self.rnn_dims])
-                query = query[:, :, self.rnn_dims:]
-                key = key[:, :, self.rnn_dims:]
-                value = value[:, :, self.rnn_dims:]
-            else:
-                rnn_out = self.rnn(query, key, value)
-
         need_query_compress = (self.block_index, layer_index) in self.query_compression_layers
         need_key_compress = (self.block_index, layer_index) in self.key_compression_layers
         if need_query_compress:
@@ -1142,14 +1124,16 @@ class FunnelRelMultiheadAttention(nn.Module):
             key = self.k_head_compress(key)
             value = pool_tensor(value, self.cls_tokens, mode='mean', stride=self.config.compressed_query_attention_stride)
 
-        seq_len = (2*int(np.ceil((seq_len - self.cls_tokens) / self.config.compressed_query_attention_stride)//2) + self.cls_tokens) if need_query_compress else seq_len
+        seq_len = (2 * int(
+            np.ceil((seq_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_query_compress else seq_len
         context_len = (2 * int(
-            np.ceil((context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
+            np.ceil(
+                (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
         k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
-        v_head = self.v_head(value).view(batch_size, context_len, n_head, d_head)
+        v_head = self.v_head(value).view(batch_size, context_len, n_head, self.d_model // n_head)
 
         q_head = q_head * self.scale
         # Shape n_head x d_head
@@ -1168,19 +1152,21 @@ class FunnelRelMultiheadAttention(nn.Module):
                 pos_k_head = self.pos_kln(self.pos_k_head(key, position_embed_of_key, 1)).view(batch_size, -1, n_head, d_head)
                 pos_q_head = self.pos_qln(self.pos_q_head(query, position_embed_of_query, 1)).view(batch_size, -1, n_head, d_head)
                 if self.untie_cls:
-                    pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0), pos_k_head.size(1) - self.cls_tokens, pos_k_head.size(2), pos_k_head.size(3)]),
-                                                  (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
-                    pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0), pos_q_head.size(1) - self.cls_tokens, pos_q_head.size(2), pos_q_head.size(3)]),
-                                                    (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
+                    pos_k_head = pos_k_head * F.pad(
+                        pos_k_head.new_ones([pos_k_head.size(0), pos_k_head.size(1) - self.cls_tokens, pos_k_head.size(2), pos_k_head.size(3)]),
+                        (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
+                    pos_q_head = pos_q_head * F.pad(
+                        pos_q_head.new_ones([pos_q_head.size(0), pos_q_head.size(1) - self.cls_tokens, pos_q_head.size(2), pos_q_head.size(3)]),
+                        (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
             else:
 
                 pos_k_head = self.pos_kln(self.pos_k_head(position_embed_of_key)).view(context_len, n_head, d_head)
                 pos_q_head = self.pos_qln(self.pos_q_head(position_embed_of_query)).view(seq_len, n_head, d_head)
-            # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
+                # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
 
                 if self.untie_cls:
-                    pos_k_head = pos_k_head*F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens, pos_k_head.size(1), pos_k_head.size(2)]),
-                                                  (self.cls_tokens, 0, 0, 0, 0, 0))
+                    pos_k_head = pos_k_head * F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens, pos_k_head.size(1), pos_k_head.size(2)]),
+                                                    (self.cls_tokens, 0, 0, 0, 0, 0))
                     pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0) - self.cls_tokens, pos_q_head.size(1), pos_q_head.size(2)]),
                                                     (self.cls_tokens, 0, 0, 0, 0, 0))
 
@@ -1193,8 +1179,9 @@ class FunnelRelMultiheadAttention(nn.Module):
                                                                                                                                                        3)
                 p2c_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), (k_head + w).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
                                                                                                                                                        3)
-                p2p_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
-                                                                                                                                                       3)
+                p2p_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3),
+                                      pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                                                                                                                     3)
                 attn_vec = attn_vec + c2p_score + p2c_score + p2p_score
                 # TODO: try adaptive weighting
 
@@ -1233,7 +1220,31 @@ class FunnelRelMultiheadAttention(nn.Module):
         # Shape shape batch_size x seq_len x d_model
 
         if need_query_compress:
-            attn_out = upsample(attn_out, self.config.compressed_query_attention_kernel_size, query_temp.shape[1], self.cls_tokens)
+            attn_out = upsample(attn_out, self.config.compressed_query_attention_kernel_size, initial_seq_len, self.cls_tokens)
+        return attn_out, attn_prob
+
+    def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
+        batch_size, seq_len, _ = query.shape
+        query_temp = query
+        if self.sdconv:
+            if self.full_channel_separation:
+                sdconv_out = self.sdconv(query[:, :, :self.conv_dims], key[:, :, :self.conv_dims], value[:, :, :self.conv_dims])
+                query = query[:, :, self.conv_dims:]
+                key = key[:, :, self.conv_dims:]
+                value = value[:, :, self.conv_dims:]
+            else:
+                sdconv_out = self.sdconv(query, key, value)
+
+        if self.short_rnn:
+            if self.full_channel_separation:
+                rnn_out = self.rnn(query[:, :, :self.rnn_dims], key[:, :, :self.rnn_dims], value[:, :, :self.rnn_dims])
+                query = query[:, :, self.rnn_dims:]
+                key = key[:, :, self.rnn_dims:]
+                value = value[:, :, self.rnn_dims:]
+            else:
+                rnn_out = self.rnn(query, key, value)
+
+        attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
 
         if self.sdconv:
             attn_out = torch.cat([sdconv_out, attn_out], dim=-1)
@@ -2121,7 +2132,7 @@ if __name__ == "__main__":
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
     config = FunnelConfig(separate_content_and_position_attention=True, pooling_type="mean", pooling_kernel_size=3,
                           sequence_dependent_position_transform=True, stride=2, qkv_transform_groups=4, ffn_groups=4,
-                          approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[60, 64, 80], separate_compressiion_layer=True,
+                          approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
                           qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
                           sdconv=True, full_channel_separation=True, short_rnn=True,
                           sdconv_kernel_size=[5, 7, 9],
@@ -2137,7 +2148,8 @@ if __name__ == "__main__":
                           #n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
                           #n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                           #n_head=[(8,), (12,), (12,)],
-                          n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)]
+                          n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
+                          block_channel_size=[384, 768, 960]
                           )
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
@@ -2168,7 +2180,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    # print(model.funnel.encoder.repeats)
+    print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
