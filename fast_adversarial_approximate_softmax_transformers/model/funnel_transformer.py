@@ -92,6 +92,7 @@ from transformers import PretrainedConfig
 # TODO: check if all heads are aligned
 # TODO: check if repeats are happening properly for layers
 # TODO: check if upsampling (interleaving) is happening properly
+# TODO: Fix parameter initialization
 
 class FunnelConfig(PretrainedConfig):
     r"""
@@ -1722,138 +1723,6 @@ class FunnelForPreTrainingOutput(ModelOutput):
     attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
-FUNNEL_START_DOCSTRING = r"""
-
-    The Funnel Transformer model was proposed in `Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
-    Language Processing <https://arxiv.org/abs/2006.03236>`__ by Zihang Dai, Guokun Lai, Yiming Yang, Quoc V. Le.
-
-    This model inherits from :class:`~transformers.PreTrainedModel`. Check the superclass documentation for the generic
-    methods the library implements for all its model (such as downloading or saving, resizing the input embeddings,
-    pruning heads etc.)
-
-    This model is also a PyTorch `torch.nn.Module <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`__
-    subclass. Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to
-    general usage and behavior.
-
-    Parameters:
-        config (:class:`~transformers.FunnelConfig`): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the :meth:`~transformers.PreTrainedModel.from_pretrained` method to load the model
-            weights.
-"""
-
-FUNNEL_INPUTS_DOCSTRING = r"""
-    Args:
-        input_ids (:obj:`torch.LongTensor` of shape :obj:`({0})`):
-            Indices of input sequence tokens in the vocabulary.
-
-            Indices can be obtained using :class:`~transformers.BertTokenizer`. See
-            :meth:`transformers.PreTrainedTokenizer.encode` and :meth:`transformers.PreTrainedTokenizer.__call__` for
-            details.
-
-            `What are input IDs? <../glossary.html#input-ids>`__
-        attention_mask (:obj:`torch.FloatTensor` of shape :obj:`({0})`, `optional`):
-            Mask to avoid performing attention on padding token indices. Mask values selected in ``[0, 1]``:
-
-            - 1 for tokens that are **not masked**,
-            - 0 for tokens that are **masked**.
-
-            `What are attention masks? <../glossary.html#attention-mask>`__
-        inputs_embeds (:obj:`torch.FloatTensor` of shape :obj:`({0}, hidden_size)`, `optional`):
-            Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
-            This is useful if you want more control over how to convert :obj:`input_ids` indices into associated
-            vectors than the model's internal embedding lookup matrix.
-        output_attentions (:obj:`bool`, `optional`):
-            Whether or not to return the attentions tensors of all attention layers. See ``attentions`` under returned
-            tensors for more detail.
-        output_hidden_states (:obj:`bool`, `optional`):
-            Whether or not to return the hidden states of all layers. See ``hidden_states`` under returned tensors for
-            more detail.
-        return_dict (:obj:`bool`, `optional`):
-            Whether or not to return a :class:`~transformers.file_utils.ModelOutput` instead of a plain tuple.
-"""
-
-
-@add_start_docstrings(
-    """
-    The base Funnel Transformer Model transformer outputting raw hidden-states without upsampling head (also called
-    decoder) or any task-specific head on top.
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-class FunnelBaseModel(FunnelPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-
-        self.embeddings = FunnelEmbeddings(config)
-        self.encoder = FunnelEncoder(config)
-
-        self.init_weights()
-
-    def get_input_embeddings(self):
-        return self.embeddings.word_embeddings
-
-    def set_input_embeddings(self, new_embeddings):
-        self.embeddings.word_embeddings = new_embeddings
-
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small-base",
-        output_type=BaseModelOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
-        elif input_ids is not None:
-            input_shape = input_ids.size()
-        elif inputs_embeds is not None:
-            input_shape = inputs_embeds.size()[:-1]
-        else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
-
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
-
-        if attention_mask is None:
-            attention_mask = torch.ones(input_shape, device=device)
-
-        # TODO: deal with head_mask
-        if inputs_embeds is None:
-            inputs_embeds = self.embeddings(input_ids)
-
-        encoder_outputs = self.encoder(
-            inputs_embeds,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        return encoder_outputs
-
-
-@add_start_docstrings(
-    "The bare Funnel Transformer Model transformer outputting raw hidden-states without any specific head on top.",
-    FUNNEL_START_DOCSTRING,
-)
 class FunnelModel(FunnelPreTrainedModel):
     def __init__(self, config: FunnelConfig):
         super().__init__(config)
@@ -1861,6 +1730,7 @@ class FunnelModel(FunnelPreTrainedModel):
         self.embeddings = FunnelEmbeddings(config)
         self.encoder = FunnelEncoder(config)
         self.decoder = FunnelDecoder(config)
+        self.cls_tokens = config.num_highway_cls_tokens + 1
 
         self.init_weights()
 
@@ -1870,13 +1740,6 @@ class FunnelModel(FunnelPreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.embeddings.word_embeddings = new_embeddings
 
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small",
-        output_type=BaseModelOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
     def forward(
         self,
         input_ids=None,
@@ -1935,6 +1798,8 @@ class FunnelModel(FunnelPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
+        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens-1:], decoder_outputs[1:])
 
         if not return_dict:
             idx = 0
@@ -1945,6 +1810,7 @@ class FunnelModel(FunnelPreTrainedModel):
             if output_attentions:
                 idx += 1
                 outputs = outputs + (encoder_outputs[2] + decoder_outputs[idx],)
+            outputs += (cls_tokens, )
             return outputs
 
         return BaseModelOutput(
@@ -1956,15 +1822,6 @@ class FunnelModel(FunnelPreTrainedModel):
         )
 
 
-add_start_docstrings(
-    """
-    Funnel Transformer model with a binary classification head on top as used during pretraining for identifying
-    generated tokens.
-    """,
-    FUNNEL_START_DOCSTRING,
-)
-
-
 class FunnelForPreTraining(FunnelPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
@@ -1973,7 +1830,6 @@ class FunnelForPreTraining(FunnelPreTrainedModel):
         self.discriminator_predictions = FunnelDiscriminatorPredictions(config)
         self.init_weights()
 
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @replace_return_docstrings(output_type=FunnelForPreTrainingOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
@@ -2045,7 +1901,6 @@ class FunnelForPreTraining(FunnelPreTrainedModel):
         )
 
 
-@add_start_docstrings("""Funnel Transformer Model with a `language modeling` head on top. """, FUNNEL_START_DOCSTRING)
 class FunnelForMaskedLM(FunnelPreTrainedModel):
     def __init__(self, config: FunnelConfig):
         super().__init__(config)
@@ -2053,6 +1908,7 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
         self.funnel = FunnelModel(config)
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.lm_dim_match = None
+        self.cls_tokens = config.num_highway_cls_tokens + 1
         if config.embedding_size != config.block_channel_size[0]:
             self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
 
@@ -2061,7 +1917,6 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
     def get_output_embeddings(self):
         return self.lm_head
 
-    @add_start_docstrings_to_model_forward(FUNNEL_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
         tokenizer_class=_TOKENIZER_FOR_DOC,
         checkpoint="funnel-transformer/small",
@@ -2106,7 +1961,7 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
         masked_lm_loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
-            masked_lm_loss = loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
+            masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
 
         if not return_dict:
             output = (prediction_logits,) + outputs[1:]
@@ -2124,8 +1979,8 @@ if __name__ == "__main__":
     import time
     import numpy as np
     from tqdm.auto import tqdm, trange
-
-    from transformers import AutoTokenizer, AutoModel
+    from torch.optim import AdamW
+    from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining
 
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
@@ -2159,6 +2014,13 @@ if __name__ == "__main__":
     #
     # model = AutoModel.from_pretrained("bert-base-uncased")
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    # model = AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    # model = ElectraForPreTraining.from_pretrained("google/electra-base-discriminator")
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
     #
     # model = AutoModel.from_pretrained("albert-base-v2")
     # tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
@@ -2180,7 +2042,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    print(model.funnel.encoder.repeats)
+    # print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
@@ -2238,12 +2100,60 @@ Self-attention is a useful mechanism to build generative models for language and
     pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=512)
     print("Input Sizes", pt_batch["input_ids"].size())
 
-    def run():
-        with torch.no_grad():
-            pt_outputs = model(**pt_batch)
-        return [o.cpu() for o in pt_outputs]
-
     profile = False
+    forward_only = False
+    fp16 = False
+    device = torch.device("cpu")
+
+    model = model.to(device)
+    pt_batch = {k: v.to(device) for k, v in pt_batch.items()}
+
+    try:
+        from torch.cuda.amp import GradScaler, autocast
+        scaler = GradScaler()
+    except:
+        pass
+    if forward_only:
+        _ = model.eval()
+    else:
+        _ = model.train()
+
+    all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
+    optimizer = AdamW(all_params)
+
+    def run():
+        if not forward_only:
+            if fp16:
+                with autocast():
+                    output = model(**pt_batch, labels=pt_batch["input_ids"])
+                    loss = output[0]
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+            else:
+                output = model(**pt_batch, labels=pt_batch["input_ids"])
+                loss = output[0]
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+        else:
+            if fp16:
+                with autocast():
+                    with torch.no_grad():
+                        pt_outputs = model(**pt_batch, labels=pt_batch["input_ids"])
+            else:
+                with torch.no_grad():
+                    pt_outputs = model(**pt_batch, labels=pt_batch["input_ids"])
+                return [o.cpu() for o in pt_outputs]
+
     if profile:
         import torch.autograd.profiler as profiler
         _ = [run() for _ in range(2)]
@@ -2261,12 +2171,3 @@ Self-attention is a useful mechanism to build generative models for language and
             times.append(et)
         print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
 
-# Time Taken = 2.6298, variance = 0.0371
-# Time Taken = 1.1078, variance = 0.0187
-
-# Time Taken = 9.8372, variance = 0.6968
-# Time Taken = 5.2917, variance = 0.2338
-
-# Time Taken = 10.9500, variance = 1.6771
-# Time Taken = 13.1243, variance = 0.7339 (PA)
-# Time Taken = 12.1854, variance = 0.5044
