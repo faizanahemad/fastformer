@@ -860,7 +860,10 @@ class SDConv(nn.Module):
         self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride, channels_last=True)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
         self.conv_attn_kernel = nn.Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
-        self.conv_attn_point = nn.Linear(hidden_size, hidden_size)  # TODO: Grouped Conv?
+        if config.no_v_head:
+            self.conv_attn_point = nn.Identity()
+        else:
+            self.conv_attn_point = Conv1d(hidden_size, hidden_size, 1, heads)
         self.use_cuda_conv = config.use_cuda_conv
         if not self.use_cuda_conv:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
@@ -1068,7 +1071,10 @@ class FunnelRelMultiheadAttention(nn.Module):
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
             self.k_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
-            self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
+            if config.no_v_head:
+                self.v_head = nn.Identity()
+            else:
+                self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
             if compress_query:
@@ -1079,7 +1085,10 @@ class FunnelRelMultiheadAttention(nn.Module):
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
             self.k_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
-            self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
+            if config.no_v_head:
+                self.v_head = nn.Identity()
+            else:
+                self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
@@ -2008,7 +2017,7 @@ if __name__ == "__main__":
                           #n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                           #n_head=[(8,), (12,), (12,)],
                           n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                          block_channel_size=[384, 768, 960]
+                          block_channel_size=[384, 768, 960], no_v_head=True,
                           )
     model = FunnelForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
