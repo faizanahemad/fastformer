@@ -734,27 +734,6 @@ class SequenceDependentPositionTransform(nn.Module):
         return embeds
 
 
-class MatchChannels(nn.Module):
-    def __init__(self, config: FunnelConfig, d_in, d_out):
-        super().__init__()
-        self.diff = d_out - d_in
-        ffn_groups = config.ffn_groups
-        assert d_in % ffn_groups == 0 and d_out % ffn_groups == 0
-        if ffn_groups > 1:
-            self.e1 = Conv1d(in_channels=d_in, out_channels=d_out, kernel_size=1, groups=ffn_groups)
-        else:
-            self.e1 = nn.Linear(d_in, d_out)
-        self.e2 = nn.LayerNorm(d_out, config.layer_norm_eps)
-
-    def forward(self, q):
-        q2 = self.e1(q)
-        if self.diff > 0:
-            q = nn.functional.pad(q, (0, self.diff, 0, 0, 0, 0))
-        elif self.diff < 0:
-            q = q[:, :, :self.diff]
-        return self.e2(q2 + q)
-
-
 class ShortSeqRNN(nn.Module):
     def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap):
         super().__init__()
@@ -1275,10 +1254,10 @@ class ConvFFN(nn.Module):
     ConvActivation: Conv, Activation
     """
 
-    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers=0, d_out=None):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers=0, d_out=None, separate_d_out_node=False):
         super().__init__()
         d_out = d_model if d_out is None else d_out
-        cin, cout = d_model, d_out
+        cin, cout = d_model, d_model
         act = config.hidden_act
         self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
         self.activation_dropout = nn.Dropout(config.activation_dropout)
@@ -1286,11 +1265,14 @@ class ConvFFN(nn.Module):
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
+        if separate_d_out_node and d_out != d_model:
+            self.dconv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=d_out, kernel_size=1, groups=groups)
         self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
+
         self.dropout = nn.Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
-    def forward(self, x):
+    def forward(self, x, separate_d=False):
         h = x.permute(0, 2, 1)
         output = self.conv1d_in(h)
         output = self.act(output)
@@ -1300,26 +1282,31 @@ class ConvFFN(nn.Module):
                 output = ll(output)
                 output = self.act(output)
                 output = self.activation_dropout(output)
-        output = self.conv1d_out(output)
+        if separate_d:
+            output = self.dconv1d_out(output)
+        else:
+            output = self.conv1d_out(output)
         output = self.dropout(output)
         output = output.permute(0, 2, 1)
         return output
 
 
 class BertFFN(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner, layers=0, d_out=None):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, layers=0, d_out=None, separate_d_out_node=False):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         d_out = d_model if d_out is None else d_out
-        self.linear_2 = nn.Linear(d_inner, d_out)
+        if separate_d_out_node and d_out != d_model:
+            self.dlinear_2 =  nn.Linear(d_inner, d_out)
+        self.linear_2 = nn.Linear(d_inner, d_model)
         self.dropout = nn.Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Linear(d_inner, d_inner))
 
-    def forward(self, hidden):
+    def forward(self, hidden, separate_d=False):
         h = self.linear_1(hidden)
         h = self.activation_function(h)
         h = self.activation_dropout(h)
@@ -1328,7 +1315,10 @@ class BertFFN(nn.Module):
                 h = ll(h)
                 h = self.act(h)
                 h = self.activation_dropout(h)
-        h = self.linear_2(h)
+        if separate_d:
+            h = self.dlinear_2(h)
+        else:
+            h = self.linear_2(h)
         h = self.dropout(h)
         return h
 
@@ -1338,24 +1328,38 @@ class FunnelPositionwiseFFN(nn.Module):
         super().__init__()
         groups, layers = config.ffn_groups, config.ffn_layers
         d_model, d_inner = config.block_channel_size[block_index], config.block_channel_size[block_index] * config.ffn_width
+        d_next = config.block_channel_size[block_index + 1] if (block_index + 1) < len(config.block_channel_size) else d_model
+        self.n_blocks = config.block_sizes[block_index] - 1
+        self.need_dim_match = d_model != d_next
+        self.diff = d_next - d_model
         self.activation_function = ACT2FN[config.hidden_act]
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
+        if self.need_dim_match:
+            self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
-            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
+            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers, d_out=d_next, separate_d_out_node=self.need_dim_match)
         else:
             self.lin = None
-            self.ffn = BertFFN(config, d_model, d_inner, layers)
+            self.ffn = BertFFN(config, d_model, d_inner, layers, d_out=d_next, separate_d_out_node=self.need_dim_match)
 
-    def forward(self, hidden):
+    def forward(self, hidden, layer_index=None):
+        dim_match = self.need_dim_match and layer_index == self.n_blocks
+        pre_ffn = hidden
         if self.lin:
             h = self.activation_dropout(self.activation_function(self.lin(hidden)))
-            h = self.ffn(h)
+            pre_ffn = h
+            h = self.ffn(h, dim_match)
         else:
-            h = self.ffn(hidden)
-        return self.layer_norm(hidden + h)
+            h = self.ffn(hidden, dim_match)
+        if dim_match:
+            hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
+            return pre_ffn, self.dlayer_norm(hidden + h)
+        else:
+            return pre_ffn, self.layer_norm(hidden + h)
+
 
 
 class Conv1DLayer(nn.Module):
@@ -1395,8 +1399,8 @@ class FunnelLayer(nn.Module):
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
-        output = self.ffn(attn[0])
-        return (output, attn[1]) if output_attentions else (output,)
+        pre_ffn, output = self.ffn(attn[0], layer_index)
+        return (output, pre_ffn, attn[1]) if output_attentions else (output, pre_ffn)
 
 
 class FunnelEncoder(nn.Module):
@@ -1408,13 +1412,6 @@ class FunnelEncoder(nn.Module):
         block_channel_size = config.block_channel_size
         self.blocks = nn.ModuleList()
         self.channel_match = nn.ModuleDict()
-        for block_index, _ in enumerate(config.block_sizes[1:]):
-            cur_channels = block_channel_size[block_index]
-            next_channels = block_channel_size[min(block_index + 1, len(block_channel_size) - 1)]
-            if cur_channels != next_channels:
-                self.channel_match[str(block_index + 1)] = MatchChannels(config, cur_channels, next_channels)
-            else:
-                self.channel_match[str(block_index + 1)] = nn.Identity()
         self.repeats = []
         for block_index, block_size in enumerate(config.block_sizes):
             cur_channels = block_channel_size[block_index]
@@ -1483,13 +1480,12 @@ class FunnelEncoder(nn.Module):
         hidden = inputs_embeds
 
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
+        pre_ffn_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
 
         for block_index, (block, repeat_block) in enumerate(zip(self.blocks, self.repeats)):
             pooling_flag = hidden.size(1) > 2
             pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
-            if block_index > 0:
-                hidden = self.channel_match[str(block_index)](hidden)
             if pooling_flag:
                 if self.pool:
                     pooled_hidden = self.pool[str(block_index)](hidden)
@@ -1505,6 +1501,7 @@ class FunnelEncoder(nn.Module):
                     layer_output = layer(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
                     layer_index += 1
                     hidden = layer_output[0]
+                    pre_ffn = layer_output[1]
                     if do_pooling:
                         attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index)
 
@@ -1512,9 +1509,10 @@ class FunnelEncoder(nn.Module):
                         all_attentions = all_attentions + layer_output[1:]
                     if output_hidden_states:
                         all_hidden_states = all_hidden_states + (hidden,)
+                        pre_ffn_states = pre_ffn_states + (pre_ffn,)
 
         if not return_dict:
-            return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
+            return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions] if v is not None)
         return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
 
 
@@ -1794,8 +1792,6 @@ class FunnelModel(FunnelPreTrainedModel):
 
         inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids)
 
-
-
         encoder_outputs = self.encoder(
             inputs_embeds,
             position_embeds,
@@ -1807,7 +1803,7 @@ class FunnelModel(FunnelPreTrainedModel):
 
         decoder_outputs = self.decoder(
             final_hidden=encoder_outputs[0],
-            first_block_hidden=encoder_outputs[1][self.config.block_sizes[0]],
+            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
             position_embeds=position_embeds,
             attention_mask=attention_mask,
             output_attentions=output_attentions,
