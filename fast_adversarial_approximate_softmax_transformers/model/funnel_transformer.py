@@ -1254,10 +1254,10 @@ class ConvFFN(nn.Module):
     ConvActivation: Conv, Activation
     """
 
-    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers=0, d_out=None, separate_d_out_node=False):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, groups, layers=0, d_out=None):
         super().__init__()
         d_out = d_model if d_out is None else d_out
-        cin, cout = d_model, d_model
+        cin, cout = d_model, d_out
         act = config.hidden_act
         self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
         self.activation_dropout = nn.Dropout(config.activation_dropout)
@@ -1265,14 +1265,12 @@ class ConvFFN(nn.Module):
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
-        if separate_d_out_node and d_out != d_model:
-            self.dconv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=d_out, kernel_size=1, groups=groups)
         self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
 
         self.dropout = nn.Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
-    def forward(self, x, separate_d=False):
+    def forward(self, x):
         h = x.permute(0, 2, 1)
         output = self.conv1d_in(h)
         output = self.act(output)
@@ -1282,31 +1280,26 @@ class ConvFFN(nn.Module):
                 output = ll(output)
                 output = self.act(output)
                 output = self.activation_dropout(output)
-        if separate_d:
-            output = self.dconv1d_out(output)
-        else:
-            output = self.conv1d_out(output)
+        output = self.conv1d_out(output)
         output = self.dropout(output)
         output = output.permute(0, 2, 1)
         return output
 
 
 class BertFFN(nn.Module):
-    def __init__(self, config: FunnelConfig, d_model, d_inner, layers=0, d_out=None, separate_d_out_node=False):
+    def __init__(self, config: FunnelConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         d_out = d_model if d_out is None else d_out
-        if separate_d_out_node and d_out != d_model:
-            self.dlinear_2 =  nn.Linear(d_inner, d_out)
-        self.linear_2 = nn.Linear(d_inner, d_model)
+        self.linear_2 = nn.Linear(d_inner, d_out)
         self.dropout = nn.Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Linear(d_inner, d_inner))
 
-    def forward(self, hidden, separate_d=False):
+    def forward(self, hidden):
         h = self.linear_1(hidden)
         h = self.activation_function(h)
         h = self.activation_dropout(h)
@@ -1315,10 +1308,7 @@ class BertFFN(nn.Module):
                 h = ll(h)
                 h = self.act(h)
                 h = self.activation_dropout(h)
-        if separate_d:
-            h = self.dlinear_2(h)
-        else:
-            h = self.linear_2(h)
+        h = self.linear_2(h)
         h = self.dropout(h)
         return h
 
@@ -1330,32 +1320,33 @@ class FunnelPositionwiseFFN(nn.Module):
         d_model, d_inner = config.block_channel_size[block_index], config.block_channel_size[block_index] * config.ffn_width
         d_next = config.block_channel_size[block_index + 1] if (block_index + 1) < len(config.block_channel_size) else d_model
         self.n_blocks = config.block_sizes[block_index] - 1
-        self.need_dim_match = d_model != d_next
+        self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.activation_function = ACT2FN[config.hidden_act]
         self.activation_dropout = nn.Dropout(config.activation_dropout)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
+            self.dlin = nn.Linear(d_model, self.diff)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
-            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers, d_out=d_next, separate_d_out_node=self.need_dim_match)
+            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
             self.lin = None
-            self.ffn = BertFFN(config, d_model, d_inner, layers, d_out=d_next, separate_d_out_node=self.need_dim_match)
+            self.ffn = BertFFN(config, d_model, d_inner, layers)
 
     def forward(self, hidden, layer_index=None):
         dim_match = self.need_dim_match and layer_index == self.n_blocks
-        pre_ffn = hidden
         if self.lin:
             h = self.activation_dropout(self.activation_function(self.lin(hidden)))
-            pre_ffn = h
-            h = self.ffn(h, dim_match)
+            h = self.ffn(h)
         else:
-            h = self.ffn(hidden, dim_match)
+            h = self.ffn(hidden)
+        pre_ffn = h
         if dim_match:
             hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
+            h = torch.cat((h, self.dlin(h)), 2)
             return pre_ffn, self.dlayer_norm(hidden + h)
         else:
             return pre_ffn, self.layer_norm(hidden + h)
@@ -1423,9 +1414,10 @@ class FunnelEncoder(nn.Module):
                 if config.block_repeats:
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i))
+                        inext = i + 1
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                         self.repeats[block_index].append(1)
-                        i += 1
+                        i = inext
                     elif i < block_size:
                         if config.first_layer_as_conv and block_index == 0 and i == 0:
                             self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
@@ -1433,18 +1425,20 @@ class FunnelEncoder(nn.Module):
                             i += 1
                         else:
                             reps = (block_size - (i)) if cur_channels != next_channels else (block_size - i)
-                            self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i + reps))
+                            inext = i + reps
+                            self.blocks[block_index].append(FunnelLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
                             self.repeats[block_index].append(reps)
-                            i += reps
+                            i = inext
                     else:
                         ValueError()
                 else:
+                    inext = i + 1
                     if config.first_layer_as_conv:
                         self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
                     else:
-                        self.blocks[block_index].append(FunnelLayer(config, block_index, i == block_size - 1, i == 0, True, i, i))
+                        self.blocks[block_index].append(FunnelLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
-                    i += 1
+                    i = inext
         self.pool = None
         if config.pooling_type == 'learn':
             CompressionClass = CompressSeqWeighted
