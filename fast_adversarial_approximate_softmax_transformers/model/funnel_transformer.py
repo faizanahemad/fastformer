@@ -747,11 +747,9 @@ class MatchChannels(nn.Module):
         self.e2 = nn.LayerNorm(d_out, config.layer_norm_eps)
 
     def forward(self, q):
-        batch_size, seq_len, _ = q.shape
         q2 = self.e1(q)
         if self.diff > 0:
-            z = torch.zeros(batch_size, seq_len, self.diff, dtype=q.dtype, device=q.device)
-            q = torch.cat([q, z], dim=-1)
+            q = nn.functional.pad(q, (0, self.diff, 0, 0, 0, 0))
         elif self.diff < 0:
             q = q[:, :, :self.diff]
         return self.e2(q2 + q)
@@ -1698,7 +1696,6 @@ class FunnelPreTrainedModel(PreTrainedModel):
                 module.register_buffer('projection_matrix', projection_matrix)
 
 
-
 class FunnelClassificationHead(nn.Module):
     def __init__(self, config, n_labels):
         super().__init__()
@@ -2061,7 +2058,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    # print(model.funnel.encoder.repeats)
+    print(model.funnel.encoder.repeats)
 
     model = model.eval()
 
