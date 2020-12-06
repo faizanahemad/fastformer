@@ -192,8 +192,8 @@ class FunnelConfig(PretrainedConfig):
         approximate_attention=[False, False, False],
         sequence_dependent_position_transform=False,
         qkv_squeeze_fraction=1,
-        first_layer_as_conv=False,
-        last_layer_as_conv=False,
+        light_first_layer=False,
+        light_last_layer=False,
         compress_query_method="learn",
         compressed_query_attention_kernel_size=3,
         compressed_query_attention_stride=2,
@@ -265,8 +265,8 @@ class FunnelConfig(PretrainedConfig):
         self.num_highway_cls_tokens = num_highway_cls_tokens
         self.qkv_squeeze_fraction = qkv_squeeze_fraction
         self.approximate_attention = approximate_attention
-        self.first_layer_as_conv = first_layer_as_conv
-        self.last_layer_as_conv = last_layer_as_conv
+        self.light_first_layer = light_first_layer
+        self.light_last_layer = light_last_layer
         assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
         self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
         assert compressed_query_attention_stride in [2, 4]
@@ -296,7 +296,7 @@ class FunnelConfig(PretrainedConfig):
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
         assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
         assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
-        if first_layer_as_conv or any(self.short_rnn) or any(self.sdconv) or last_layer_as_conv:
+        if light_first_layer or any(self.short_rnn) or any(self.sdconv) or light_last_layer:
             assert position_biased_input
 
     @property
@@ -1352,34 +1352,32 @@ class FunnelPositionwiseFFN(nn.Module):
             return pre_ffn, self.layer_norm(hidden + h)
 
 
-
-class Conv1DLayer(nn.Module):
+class LightLayer(nn.Module):
     def __init__(self, config: FunnelConfig, block_index, is_encoder_layer):
-        cin = cout = config.block_channel_size[block_index]
+        cin = config.block_channel_size[block_index]
+        cout = cin // 2
         self.is_encoder_layer = is_encoder_layer
         super().__init__()
-        self.c1 = nn.Conv1d(in_channels=cin, out_channels=cout, kernel_size=3, groups=sum(config.n_head[block_index]), padding=1, padding_mode='zeros')
-        self.c2 = nn.Conv1d(in_channels=cin, out_channels=cout, kernel_size=3, groups=sum(config.n_head[block_index]), padding=1, padding_mode='zeros')
-        self.layer_norm = nn.LayerNorm(cout, config.layer_norm_eps)
+        self.c1 = nn.Conv1d(in_channels=cout, out_channels=cout, kernel_size=5, groups=sum(config.n_head[block_index]) // 2, padding=2, padding_mode='zeros')
+        self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
         self.dropout = nn.Dropout(config.attention_dropout)
         self.cls_tokens = config.num_highway_cls_tokens + 1
+        d_head = config.d_head[block_index]
+        self.rnn = ShortSeqRNN(config, cout, sum(config.n_head[block_index]) // 2, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+        self.lin = nn.Linear(cin, cin)
+        self.cout = cout
         # padding
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        q = query
-        cls = q[:, :self.cls_tokens]
-        q = q[:, self.cls_tokens:]
-        if not self.is_encoder_layer:
-            q = q + cls.mean(1).unsqueeze(1)  # TODO: this might just promote all CLS tokens to become constant
-        q = q.permute(0, 2, 1)
-        q = self.c1(q)
+        qcnn = self.c1(query[:, :, :self.cout].permute(0, 2, 1)).permute(0, 2, 1)
+        qrnn = self.rnn(query[:, :, self.cout:])
+        q = torch.cat((qcnn, qrnn), 2)
         q = self.activation_function(q)
         q = self.dropout(q)
-        q = self.c2(q)
-        q = q.permute(0, 2, 1)
-        q = torch.cat([cls, q], 1)
-        return (self.layer_norm(query + q),)
+        q = self.lin(q)
+        res = self.layer_norm(query + q)
+        return (res, res)
 
 
 class FunnelLayer(nn.Module):
@@ -1419,8 +1417,8 @@ class FunnelEncoder(nn.Module):
                         self.repeats[block_index].append(1)
                         i = inext
                     elif i < block_size:
-                        if config.first_layer_as_conv and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
+                        if config.light_first_layer and block_index == 0 and i == 0:
+                            self.blocks[block_index].append(LightLayer(config, block_index, True))
                             self.repeats[block_index].append(1)
                             i += 1
                         else:
@@ -1433,8 +1431,8 @@ class FunnelEncoder(nn.Module):
                         ValueError()
                 else:
                     inext = i + 1
-                    if config.first_layer_as_conv:
-                        self.blocks[block_index].append(Conv1DLayer(config, block_index, True))
+                    if config.light_first_layer:
+                        self.blocks[block_index].append(LightLayer(config, block_index, True))
                     else:
                         self.blocks[block_index].append(FunnelLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
@@ -1538,16 +1536,16 @@ class FunnelDecoder(nn.Module):
         if config.num_decoder_layers > 0:
             if config.block_repeats:
                 self.layers.extend([FunnelLayer(config, 0, True, True, False, 0)])
-                if config.last_layer_as_conv:
-                    self.layers.extend([Conv1DLayer(config, 0, False)])
+                if config.light_last_layer:
+                    self.layers.extend([LightLayer(config, 0, False)])
                     self.repeats = [config.num_decoder_layers - 1] + [1]
                 else:
                     self.repeats = [config.num_decoder_layers]
             else:
-                if config.last_layer_as_conv:
+                if config.light_last_layer:
                     self.layers.extend([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers - 1)])
                     self.repeats = [1] * config.num_decoder_layers
-                    self.layers = nn.ModuleList([Conv1DLayer(config, 0, False)])
+                    self.layers = nn.ModuleList([LightLayer(config, 0, False)])
                 else:
                     self.layers.extend([FunnelLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers)])
                     self.repeats = [1] * config.num_decoder_layers
@@ -1994,7 +1992,7 @@ if __name__ == "__main__":
     config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3,
                           sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
-                          qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
+                          qkv_squeeze_fraction=1, light_last_layer=True, light_first_layer=True,
                           sdconv=True, full_channel_separation=True, short_rnn=True,
                           sdconv_kernel_size=[5, 7, 9],
                           compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
