@@ -206,6 +206,7 @@ class FunnelConfig(PretrainedConfig):
         short_rnn_kernel=[128, 128, 128],
         short_rnn_overlap=[16, 16, 16],
         conv_layer_use_dynamic_conv=False,
+        no_v_head=False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -241,11 +242,13 @@ class FunnelConfig(PretrainedConfig):
             "max",
             "learn",
             "learn_sdconv",
+                        'learn_rnn',
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
         assert compress_query_method in [
             "mean",
             "learn",
             "learn_sdconv",
+            'learn_rnn',
         ], f"Got {pooling_type} for `compress_query_method`"
         self.pooling_type = pooling_type
         self.compress_query_method = compress_query_method
@@ -264,8 +267,6 @@ class FunnelConfig(PretrainedConfig):
         self.approximate_attention = approximate_attention
         self.first_layer_as_conv = first_layer_as_conv
         self.last_layer_as_conv = last_layer_as_conv
-        if first_layer_as_conv:
-            assert position_biased_input
         assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
         self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
         assert compressed_query_attention_stride in [2, 4]
@@ -289,11 +290,14 @@ class FunnelConfig(PretrainedConfig):
         self.use_cuda_conv = use_cuda_conv
         self.conv_layer_use_dynamic_conv = conv_layer_use_dynamic_conv
         self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
+        self.no_v_head = no_v_head
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
         assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
         assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
+        if first_layer_as_conv or any(self.short_rnn) or any(self.sdconv) or last_layer_as_conv:
+            assert position_biased_input
 
     @property
     def num_hidden_layers(self):
@@ -754,7 +758,7 @@ class MatchChannels(nn.Module):
 
 
 class ShortSeqRNN(nn.Module):
-    def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap, stride=1):
+    def __init__(self, config: FunnelConfig, hidden_size, heads, head_size, kernel_size, overlap):
         super().__init__()
         self.config = config
         self.cls_tokens = config.num_highway_cls_tokens + 1
@@ -762,20 +766,18 @@ class ShortSeqRNN(nn.Module):
         self.kernel_size = kernel_size
         self.all_head_size = heads * head_size
         self.hidden_size = hidden_size
-        self.stride = stride
         act = config.hidden_act
         self.act = ACT2FN[act]
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
 
-        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), 1,
+        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), 2,
                           nonlinearity="tanh",
                           bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+        # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
-        assert key is None or self.stride == 1
-        assert value is None or self.stride == 1
         if key is None:
             key = query
         if value is None:
@@ -814,8 +816,6 @@ class ShortSeqRNN(nn.Module):
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
 
-        if self.stride > 1:
-            query = pool_tensor(query, 0, "mean", self.stride)
         return query
 
 
@@ -988,6 +988,21 @@ class CompressSeqMeanPooling(nn.Module):
         return pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
 
 
+class CompressSeqShortSeqRNN(nn.Module):
+    def __init__(self, config: FunnelConfig, block_index, d_model, n_head, use_in_funnel=False):
+        super().__init__()
+        self.config = config
+        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
+        d_head = config.d_head[block_index]
+        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        self.rnn = ShortSeqRNN(config, d_model, n_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+
+    def forward(self, query):
+        query = self.rnn(query)
+        return pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+
+
 class FunnelRelMultiheadAttention(nn.Module):
     def __init__(self, config: FunnelConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
@@ -1040,6 +1055,8 @@ class FunnelRelMultiheadAttention(nn.Module):
             CompressionClass = CompressSeqWeighted
         elif config.compress_query_method == 'learn_sdconv':
             CompressionClass = CompressSeqSDConv
+        elif config.compress_query_method == 'learn_rnn':
+            CompressionClass = CompressSeqShortSeqRNN
         elif config.compress_query_method == 'mean':
             CompressionClass = CompressSeqMeanPooling
         else:
@@ -1438,13 +1455,15 @@ class FunnelEncoder(nn.Module):
             CompressionClass = CompressSeqWeighted
         elif config.pooling_type == 'learn_sdconv':
             CompressionClass = CompressSeqSDConv
+        elif config.pooling_type == 'learn_rnn':
+            CompressionClass = CompressSeqShortSeqRNN
         elif config.pooling_type == 'mean':
             CompressionClass = CompressSeqMeanPooling
-        if config.pooling_type in ["learn", 'mean', 'learn_sdconv'] and config.stride > 1:
+        if config.pooling_type in ["learn", 'mean', 'learn_sdconv', 'learn_rnn'] and config.stride > 1:
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 bi = block_index + 1
-                pool[str(block_index+1)] = CompressionClass(config, bi, config.block_channel_size[bi], config.n_head[bi], use_in_funnel=True)
+                pool[str(block_index+1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
             self.pool = pool
 
     def forward(
@@ -1985,8 +2004,8 @@ if __name__ == "__main__":
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
     # FunnelConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
-    config = FunnelConfig(separate_content_and_position_attention=True, pooling_type="mean", pooling_kernel_size=3,
-                          sequence_dependent_position_transform=True, stride=2, qkv_transform_groups=4, ffn_groups=4,
+    config = FunnelConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3,
+                          sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                           approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
                           qkv_squeeze_fraction=1, last_layer_as_conv=False, first_layer_as_conv=False,
                           sdconv=True, full_channel_separation=True, short_rnn=True,
@@ -2101,7 +2120,7 @@ Self-attention is a useful mechanism to build generative models for language and
     print("Input Sizes", pt_batch["input_ids"].size())
 
     profile = False
-    forward_only = False
+    forward_only = True
     fp16 = False
     device = torch.device("cpu")
 
@@ -2148,10 +2167,10 @@ Self-attention is a useful mechanism to build generative models for language and
             if fp16:
                 with autocast():
                     with torch.no_grad():
-                        pt_outputs = model(**pt_batch, labels=pt_batch["input_ids"])
+                        pt_outputs = model(**pt_batch)
             else:
                 with torch.no_grad():
-                    pt_outputs = model(**pt_batch, labels=pt_batch["input_ids"])
+                    pt_outputs = model(**pt_batch)
                 return [o.cpu() for o in pt_outputs]
 
     if profile:
