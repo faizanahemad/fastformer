@@ -641,12 +641,6 @@ class FunnelAttentionStructure(nn.Module):
     def pool_tensor(self, tensor, mode="mean", stride=2):
         return pool_tensor(tensor, self.cls_tokens_total, mode, stride)
 
-    def pre_attention_pooling(self, output, attention_inputs):
-        """ Pool `output` and the proper parts of `attention_inputs` before the attention layer. """
-        position_embeds, attention_mask = attention_inputs
-        output = self.pool_tensor(output, mode=self.config.pooling_type, stride=self.stride)
-        attention_inputs = (position_embeds, attention_mask)
-        return output, attention_inputs
 
     def post_attention_pooling(self, attention_inputs, block_index):
         """ Pool the proper parts of `attention_inputs` after the attention layer. """
@@ -798,9 +792,8 @@ class ShortSeqRNN(nn.Module):
 
 class SeparableConv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
-                 bias=True, stride=1, padding=None, channels_last=True):
+                 bias=True, stride=1, padding=None):
         super().__init__()
-        self.channels_last = channels_last
         if padding is None:
             padding = (kernel_size - 1) // 2
         if groups is None:
@@ -824,22 +817,19 @@ class SeparableConv1d(nn.Module):
         return x
 
     def forward(self, inputs):
-        # Support both B, H, C, S and B, C, S
+        """
+        Expect inputs in channels last format
+        :param inputs:
+        :return:
+        """
         in_shape = inputs.shape
         bs = in_shape[0]
-        dims = in_shape[-1] if self.channels_last else in_shape[-2]
-        seqlen = in_shape[-2] if self.channels_last else in_shape[-1]
-        inputs = inputs.view(-1, in_shape[-2], in_shape[-1])
-        inputs = self.channel_move(inputs)
+        inputs = inputs.permute(0, 2, 1)
         inputs = self.depthwise(inputs)
         if self.pointwise_groups == 1:
             inputs = self.pointwise(inputs.permute(0, 2, 1))
-            if not self.channels_last:
-                inputs = inputs.permute(0, 2, 1)
-            inputs = inputs.view(bs, -1 if self.channels_last else self.out_channels, self.out_channels if self.channels_last else -1)
         else:
-            inputs = self.pointwise(inputs)
-            inputs = self.channel_move(inputs).view(bs, -1 if self.channels_last else self.out_channels, self.out_channels if self.channels_last else -1)
+            inputs = self.pointwise(inputs).permute(0, 2, 1)
         return inputs
 
 
@@ -857,7 +847,7 @@ class SDConv(nn.Module):
         self.act = ACT2FN[act]
         assert hidden_size % heads == 0
         self.head_size = head_size
-        self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride, channels_last=True)
+        self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
         self.conv_attn_kernel = nn.Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
         if config.no_v_head:
