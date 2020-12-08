@@ -34,15 +34,13 @@ try:
 except:
     pass
 
-
 logger = logging.get_logger(__name__)
-
 
 INF = 1e6
 EPS = 1e-6
 
-
 from transformers import PretrainedConfig
+
 
 # TODO: check if all heads are aligned
 # TODO: check if repeats are happening properly for layers
@@ -53,57 +51,57 @@ class FastFormerConfig(PretrainedConfig):
     model_type = "funnel"
 
     def __init__(
-        self,
-        vocab_size=30522,
-        block_sizes=[6, 6, 6],
-        block_channel_size=[576, 768, 960], # [512, 768, 1024]
-        block_repeats=True,
-        separate_compressiion_layer=False,
-        num_decoder_layers=2,
-        n_head=[(8,), (12,), (12,)], # 8
-        use_cuda_conv=True,
-        d_head=[72, 64, 80],  # 32
-        hidden_act="gelu",
-        hidden_dropout=0.0,
-        attention_dropout=0.0,
-        activation_dropout=0.0,
-        max_position_embeddings=512,
-        type_vocab_size=0,
-        initializer_range=0.1,
-        initializer_std=None,
-        layer_norm_eps=1e-9,
-        pooling_type="mean",  # learn, #learn_sdconv
-        pooling_kernel_size=5,
-        stride=2,
-        attention_type="relative_shift",
-        ffn_groups=4,
-        ffn_layers=0,
-        ffn_width=4,
-        qkv_transform_groups=4,
-        embedding_size=128,
-        num_highway_cls_tokens=7,
-        position_biased_input=True,
-        untie_cls=False,
-        separate_content_and_position_attention=False,
-        approximate_attention=[False, False, False],
-        sequence_dependent_position_transform=False,
-        qkv_squeeze_fraction=1,
-        light_first_layer=False,
-        light_last_layer=False,
-        compress_query_method="learn",
-        compressed_query_attention_kernel_size=3,
-        compressed_query_attention_stride=2,
-        compressed_query_attention_layers=[],
-        compressed_key_attention_layers=[],
-        sdconv=[False, False, False],
-        sdconv_kernel_size=[5, 7, 9],
-        full_channel_separation=[False, False, False],
-        short_rnn=[False, False, False],
-        short_rnn_kernel=[128, 128, 128],
-        short_rnn_overlap=[16, 16, 16],
-        conv_layer_use_dynamic_conv=False,
-        no_v_head=False,
-        **kwargs
+            self,
+            vocab_size=30522,
+            block_sizes=[6, 6, 6],
+            block_channel_size=[576, 768, 960],  # [512, 768, 1024]
+            block_repeats=True,
+            separate_compressiion_layer=False,
+            num_decoder_layers=2,
+            n_head=[(8,), (12,), (12,)],  # 8
+            use_cuda_conv=True,
+            d_head=[72, 64, 80],  # 32
+            hidden_act="gelu",
+            hidden_dropout=0.0,
+            attention_dropout=0.0,
+            activation_dropout=0.0,
+            max_position_embeddings=512,
+            type_vocab_size=0,
+            initializer_range=0.1,
+            initializer_std=None,
+            layer_norm_eps=1e-9,
+            pooling_type="mean",  # learn, #learn_sdconv
+            pooling_kernel_size=5,
+            stride=2,
+            attention_type="relative_shift",
+            ffn_groups=4,
+            ffn_layers=0,
+            ffn_width=4,
+            qkv_transform_groups=4,
+            embedding_size=128,
+            num_highway_cls_tokens=7,
+            position_biased_input=True,
+            untie_cls=False,
+            separate_content_and_position_attention=False,
+            approximate_attention=[False, False, False],
+            sequence_dependent_position_transform=False,
+            qkv_squeeze_fraction=1,
+            light_first_layer=False,
+            light_last_layer=False,
+            compress_query_method="learn",
+            compressed_query_attention_kernel_size=3,
+            compressed_query_attention_stride=2,
+            compressed_query_attention_layers=[],
+            compressed_key_attention_layers=[],
+            sdconv=[False, False, False],
+            sdconv_kernel_size=[5, 7, 9],
+            full_channel_separation=[False, False, False],
+            short_rnn=[False, False, False],
+            short_rnn_kernel=[128, 128, 128],
+            short_rnn_overlap=[16, 16, 16],
+            conv_layer_use_dynamic_conv=False,
+            no_v_head=False,
+            **kwargs
     ):
         super().__init__(**kwargs)
         try:
@@ -138,7 +136,7 @@ class FastFormerConfig(PretrainedConfig):
             "max",
             "learn",
             "learn_sdconv",
-                        'learn_rnn',
+            'learn_rnn',
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
         assert compress_query_method in [
             "mean",
@@ -172,7 +170,8 @@ class FastFormerConfig(PretrainedConfig):
         self.untie_cls = untie_cls
         self.separate_content_and_position_attention = separate_content_and_position_attention
         self.sequence_dependent_position_transform = sequence_dependent_position_transform
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform and not separate_content_and_position_attention)
+        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (
+                    not sequence_dependent_position_transform and not separate_content_and_position_attention)
         assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
         assert len(block_channel_size) == len(block_sizes)
@@ -206,22 +205,22 @@ class FastFormerConfig(PretrainedConfig):
 
 vanilla_bert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
                                      ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                     untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*1, block_repeats=False)
+                                     untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1, block_repeats=False)
 vanilla_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
                                        ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*3, )
+                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3, )
 repeated_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
                                         ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                        untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*3,
+                                        untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
                                         block_repeats=True, separate_compressiion_layer=True, )
 repeated_funnel_channel_expanded_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[480, 768, 960],
                                                          num_decoder_layers=2, n_head=[8, 12, 12], d_head=[48, 64, 80],
                                                          ffn_groups=4, qkv_transform_groups=4, embedding_size=128, num_highway_cls_tokens=0,
-                                                         untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*3,
+                                                         untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
                                                          block_repeats=True, separate_compressiion_layer=False, )
 vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
                                        ffn_groups=1, qkv_transform_groups=1, embedding_size=128, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*1,
+                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1,
                                        block_repeats=True)
 
 
@@ -243,7 +242,6 @@ def get_mask(input, local_context):
         mask = local_context.mask if local_context.reuse_mask else None
 
     if dropout > 0 and mask is None:
-
         mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).bool()
 
     if isinstance(local_context, DropoutContext):
@@ -390,7 +388,9 @@ class Embeddings(nn.Module):
             if token_type_ids is None:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
             else:
-                token_type_ids = torch.cat((torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids), dim=1)
+                token_type_ids = torch.cat(
+                    (torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids),
+                    dim=1)
             token_type_embeddings = self.token_type_embeddings(token_type_ids)
             embeddings += token_type_embeddings
 
@@ -403,7 +403,7 @@ class Embeddings(nn.Module):
             if mask.dim() != embeddings.dim():
                 if mask.dim() == 4:
                     mask = mask.squeeze(1).squeeze(1)
-                mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device),mask), dim=1)
+                mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device), mask), dim=1)
                 mask = mask.unsqueeze(2)
             mask = mask.to(embeddings.dtype)
 
@@ -421,7 +421,6 @@ def pool_tensor(tensor, cls_size, mode="mean", stride=2):
     # Do the pool recursively if tensor is a list or tuple of tensors.
     if isinstance(tensor, (tuple, list)):
         return type(tensor)(pool_tensor(x, mode=mode, stride=stride) for x in tensor)
-
 
     # TODO: check if even length in dim=1 (seq dim)
     cls_tokens = tensor[:, :cls_size]
@@ -507,7 +506,7 @@ class AttentionStructure(nn.Module):
                 position_embeds_no_pooling = pos_embed
             else:
                 pooled_pos = self.stride_pool_pos(pos, block_index, stride)
-                pooled_pos = pooled_pos[:2 * (pooled_pos.size(0)//2)]
+                pooled_pos = pooled_pos[:2 * (pooled_pos.size(0) // 2)]
                 ppos = pooled_pos[:, None].expand(pooled_pos.size(0), pos_embed.size(1)).type(torch.long)
                 position_embeds_pooling = torch.gather(pos_embed, 0, ppos)
                 if block_index == 1:
@@ -535,7 +534,6 @@ class AttentionStructure(nn.Module):
 
     def pool_tensor(self, tensor, mode="mean", stride=2):
         return pool_tensor(tensor, self.cls_tokens_total, mode, stride)
-
 
     def post_attention_pooling(self, attention_inputs, block_index):
         """ Pool the proper parts of `attention_inputs` after the attention layer. """
@@ -576,7 +574,6 @@ class CompressSeqWeighted(nn.Module):
                            2 * self.stride * d_model // n_head, 0, self.stride)
 
     def forward(self, query):
-
         cls = query[:, :self.cls_tokens]
         query = query[:, self.cls_tokens:]
         target_len = int(np.ceil(query.size(1) / self.stride))
@@ -604,7 +601,8 @@ class SequenceDependentPositionTransform(nn.Module):
         super().__init__()
         act = config.hidden_act
         self.act = ACT2FN[act]
-        self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1, groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
+        self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1,
+                                    groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
         self.d_pos_in = d_pos_in
         self.ffn = BertFFN(config, 2 * d_pos_in, 4 * d_pos_in, 0, d_out)
         self.compress = nn.AvgPool1d(4) if compress else None
@@ -666,10 +664,10 @@ class ShortSeqRNN(nn.Module):
         segments = []
         for i in range(num_segments):
             seg_start = i * self.kernel_size
-            seg_end = (i+1)*self.kernel_size + 2*self.overlap
+            seg_end = (i + 1) * self.kernel_size + 2 * self.overlap
             seg = query[:, seg_start:seg_end]
             segs.append(seg)
-            segments.append((seg_start, seg_end, seg_end - 2*self.overlap, seg_end-seg_start, ))
+            segments.append((seg_start, seg_end, seg_end - 2 * self.overlap, seg_end - seg_start,))
 
         query = torch.cat(segs, 0)
         query = query.view(query.shape[0], query.shape[1], self.heads, -1)
@@ -677,7 +675,7 @@ class ShortSeqRNN(nn.Module):
 
         query = self.gru(query)[0]
         query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen+self.overlap]
+        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen + self.overlap]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
@@ -813,7 +811,6 @@ class CompressSeqSDConv(nn.Module):
         self.sd_conv = SDConv(config, d_model, n_head, d_head, kernel_size, self.stride)
 
     def forward(self, query):
-
         cls = query[:, :self.cls_tokens]
         query = query[:, self.cls_tokens:]
         target_len = int(np.ceil(query.size(1) / self.stride))
@@ -851,7 +848,8 @@ class CompressSeqShortSeqRNN(nn.Module):
 
 
 class MultiheadAttention(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
+    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
+                 last_layer_index=None):
         super().__init__()
         if last_layer_index is None:
             last_layer_index = layer_index
@@ -889,7 +887,8 @@ class MultiheadAttention(nn.Module):
         self.block_index = block_index
         self.layer_index = layer_index
         self.is_encoder_layer = is_encoder_layer
-        query_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index+1)]).intersection(set(config.compressed_query_attention_layers))
+        query_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index + 1)]).intersection(
+            set(config.compressed_query_attention_layers))
         self.query_compression_layers = query_compression_layers
         compress_query = is_encoder_layer and len(query_compression_layers) > 0
 
@@ -932,43 +931,50 @@ class MultiheadAttention(nn.Module):
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.q_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+            self.q_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.k_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+            self.k_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
-                self.v_head = ConvFFN(config, d_model, d_model//sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
+                self.v_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                    in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.q_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
+            self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+                                                                                                                            bias=False)
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.k_head = BertFFN(config, d_model, d_model//sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
+            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
-                self.v_head = BertFFN(config, d_model, d_model//sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
+                self.v_head = BertFFN(config, d_model, d_model // sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
             assert not compress_key
         if self.separate_content_and_position_attention:
             if self.sequence_dependent_position_transform:
-                self.pos_q_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups, compress_query)
+                self.pos_q_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups,
+                                                                     compress_query)
                 self.pos_k_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups, False)
             elif qkv_transform_groups > 1:
-                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4 if compress_query else 1, groups=qkv_transform_groups, stride=4 if compress_query else 1)
+                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4 if compress_query else 1,
+                                         groups=qkv_transform_groups, stride=4 if compress_query else 1)
                 self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
             else:
-                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4, groups=qkv_transform_groups, stride=4) if compress_query else nn.Linear(config.embedding_size, n_head * d_head)
+                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4, groups=qkv_transform_groups,
+                                         stride=4) if compress_query else nn.Linear(config.embedding_size, n_head * d_head)
                 self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head)
             self.c2p_bias = nn.Parameter(torch.zeros([n_head, d_head]))
             self.p2c_bias = nn.Parameter(torch.zeros([n_head, d_head]))
@@ -1240,7 +1246,8 @@ class LightLayer(nn.Module):
         self.dropout = Dropout(config.attention_dropout)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         d_head = config.d_head[block_index]
-        self.rnn = ShortSeqRNN(config, cout, sum(config.n_head[block_index]) // 2, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+        self.rnn = ShortSeqRNN(config, cout, sum(config.n_head[block_index]) // 2, d_head, config.short_rnn_kernel[block_index],
+                               config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin)
         self.cout = cout
         # padding
@@ -1259,7 +1266,8 @@ class LightLayer(nn.Module):
 class TransformerLayer(nn.Module):
     def __init__(self, config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
-        self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index)
+        self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
+                                            last_layer_index)
         self.ffn = PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
@@ -1280,7 +1288,7 @@ class TransformerEncoder(nn.Module):
         self.repeats = []
         for block_index, block_size in enumerate(config.block_sizes):
             cur_channels = block_channel_size[block_index]
-            next_channels = block_channel_size[min(block_index+1, len(block_channel_size) - 1)]
+            next_channels = block_channel_size[min(block_index + 1, len(block_channel_size) - 1)]
             self.blocks.append(nn.ModuleList())
             self.repeats.append([])
             i = 0
@@ -1326,16 +1334,19 @@ class TransformerEncoder(nn.Module):
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 bi = block_index + 1
-                pool[str(block_index+1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
+                pool[str(block_index + 1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
             self.pool = pool
 
+    def aitm(self, hidden_states, attention_mask=None):
+        pass
+
     def forward(
-        self,
-        inputs_embeds,
-        position_embeds,
-        attention_mask=None,
-        output_attentions=False,
-        output_hidden_states=False,
+            self,
+            inputs_embeds,
+            position_embeds,
+            attention_mask=None,
+            output_attentions=False,
+            output_hidden_states=False,
     ):
         # The pooling is not implemented on long tensors, so we convert this mask.
         attention_mask = attention_mask.type_as(inputs_embeds)
@@ -1381,7 +1392,6 @@ class TransformerEncoder(nn.Module):
         return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions] if v is not None)
 
 
-
 def upsample(x, stride, target_len, cls_tokens):
     """
     Upsample tensor `x` to match `target_len` by repeating the tokens `stride` time on the sequence length dimension.
@@ -1417,11 +1427,13 @@ class TransformerDecoder(nn.Module):
                     self.repeats = [config.num_decoder_layers]
             else:
                 if config.light_last_layer:
-                    self.layers.extend([TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers - 1)])
+                    self.layers.extend(
+                        [TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers - 1)])
                     self.repeats = [1] * config.num_decoder_layers
                     self.layers = nn.ModuleList([LightLayer(config, 0, False)])
                 else:
-                    self.layers.extend([TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers)])
+                    self.layers.extend(
+                        [TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers)])
                     self.repeats = [1] * config.num_decoder_layers
 
         else:
@@ -1438,13 +1450,13 @@ class TransformerDecoder(nn.Module):
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0])
 
     def forward(
-        self,
-        final_hidden,
-        first_block_hidden,
-        position_embeds,
-        attention_mask=None,
-        output_attentions=False,
-        output_hidden_states=False,
+            self,
+            final_hidden,
+            first_block_hidden,
+            position_embeds,
+            attention_mask=None,
+            output_attentions=False,
+            output_hidden_states=False,
     ):
         if self.final_hidden_fc:
             final_hidden = self.final_hidden_fc(final_hidden)
@@ -1492,8 +1504,8 @@ class DiscriminatorPredictions(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.dense = nn.Linear(config.d_model, config.d_model)
-        self.dense_prediction = nn.Linear(config.d_model, 1)
+        self.dense = nn.Linear(config.block_channel_size[0], config.block_channel_size[0])
+        self.dense_prediction = nn.Linear(config.block_channel_size[0], 1)
 
     def forward(self, discriminator_hidden_states):
         hidden_states = self.dense(discriminator_hidden_states)
@@ -1503,7 +1515,6 @@ class DiscriminatorPredictions(nn.Module):
 
 
 class FastFormerPreTrainedModel(PreTrainedModel):
-
     config_class = FastFormerConfig
     base_model_prefix = "funnel"
 
@@ -1546,8 +1557,8 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             if hasattr(module, "token_type_embeddings"):
                 nn.init.normal_(module.token_type_embeddings.weight, std=std)
         elif classname == "FastAttention":
-            if not hasattr(module,  'projection_matrix'):
-                projection_matrix = module.create_projection(device = next(self.parameters()).device)
+            if not hasattr(module, 'projection_matrix'):
+                projection_matrix = module.create_projection(device=next(self.parameters()).device)
                 module.register_buffer('projection_matrix', projection_matrix)
 
 
@@ -1567,7 +1578,6 @@ class ClassificationHead(nn.Module):
 
 @dataclass
 class PreTrainingOutput(ModelOutput):
-
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
@@ -1592,14 +1602,14 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            inputs_embeds=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1646,7 +1656,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             output_hidden_states=output_hidden_states,
         )
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
-        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens-1:], decoder_outputs[1:])
+        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
 
         if not return_dict:
             idx = 0
@@ -1657,7 +1667,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             if output_attentions:
                 idx += 1
                 outputs = outputs + (encoder_outputs[2] + decoder_outputs[idx],)
-            outputs += (cls_tokens, )
+            outputs += (cls_tokens,)
             return outputs
 
         return BaseModelOutput(
@@ -1678,15 +1688,15 @@ class FastFormerForPreTraining(FastFormerPreTrainedModel):
         self.init_weights()
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
     ):
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -1744,15 +1754,15 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         return self.lm_head
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -1767,12 +1777,13 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         )
 
         last_hidden_state = outputs[0]
-        if self.lm_dim_match:
-            last_hidden_state = self.lm_dim_match(last_hidden_state)
-        prediction_logits = self.lm_head(last_hidden_state)
+        prediction_logits = None
 
         masked_lm_loss = None
         if labels is not None:
+            if self.lm_dim_match:
+                last_hidden_state = self.lm_dim_match(last_hidden_state)
+            prediction_logits = self.lm_head(last_hidden_state)
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
 
@@ -1788,16 +1799,113 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         )
 
 
-
 from abc import ABC, abstractmethod
 
 
 class ELECTRAPretraining(ABC):
-    pass
+    def __init__(self, generator, discriminator, mlm_weight=1.0):
+        pass
 
 
-class FusedELECTRAPretraining(ABC):
-    pass
+class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
+    def __init__(self, config: FastFormerConfig):
+        super().__init__(config)
+
+        self.config = config
+        self.funnel = FastFormerModel(config)
+        self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
+        self.lm_dim_match = None
+        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.discriminator_predictions = DiscriminatorPredictions(config)
+        if config.embedding_size != config.block_channel_size[0]:
+            self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
+
+        self.init_weights()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+    ):
+
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        assert attention_mask is not None
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+
+        # TODO: deal with head_mask
+        tokenizer_attn_mask = attention_mask
+        if self.config.num_highway_cls_tokens > 0:
+            attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
+
+        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids)
+        encoder_outputs = self.funnel.encoder(
+            inputs_embeds,
+            position_embeds,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=True,
+        )
+        first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
+        prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
+
+        active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
+        assert labels is not None
+        # labels[labels == 0] = -100 # -100 index = padding token
+        loss_fct = CrossEntropyLoss()  # -100 index = padding token
+        masked_lm_loss = loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
+        predictions = prediction_logits.argmax(dim=-1)
+        labels = (labels == predictions).float()
+
+        decoder_outputs = self.funnel.decoder(
+            final_hidden=encoder_outputs[0],
+            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
+            position_embeds=position_embeds,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+        )
+
+        cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
+        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
+        discriminator_sequence_output = decoder_outputs[0]
+        logits = self.discriminator_predictions(discriminator_sequence_output)
+
+        loss_fct = nn.BCEWithLogitsLoss()
+        active_logits = logits.view(-1, input_shape[1])[active_loss]
+        active_labels = labels[active_loss]
+        loss = loss_fct(active_logits, active_labels)
+
+        idx = 0
+        outputs = (loss, masked_lm_loss, decoder_outputs[0],)
+        if output_hidden_states:
+            idx += 1
+            outputs = outputs + (encoder_outputs[1] + decoder_outputs[idx],)
+        outputs += (cls_tokens,)
+        return outputs
 
 
 class AITM(ABC):
@@ -1826,21 +1934,21 @@ if __name__ == "__main__":
                               sdconv_kernel_size=[5, 7, 9],
                               compress_query_method="mean", compressed_query_attention_stride=4, compressed_query_attention_kernel_size=3,
                               compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                             (1, 1), (1, 2), (1, 3), (1, 4),
-                                                             (2, 1), (2, 2), (2, 3), (2, 4)
-                                                             ],
+                                                                 (1, 1), (1, 2), (1, 3), (1, 4),
+                                                                 (2, 1), (2, 2), (2, 3), (2, 4)
+                                                                 ],
                               compressed_key_attention_layers=[(0, 3), (0, 4),
-                                                           (1, 3), (1, 4),
-                                                           (2, 3), (2, 4)
-                                                           ],
-                              #n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
-                              #n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
-                              #n_head=[(8,), (12,), (12,)],
+                                                               (1, 3), (1, 4),
+                                                               (2, 3), (2, 4)
+                                                               ],
+                              # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
+                              # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
+                              # n_head=[(8,), (12,), (12,)],
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
                               block_channel_size=[384, 768, 960], no_v_head=True,
                               )
-    model = FastFormerForMaskedLM(config)
-    tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    model = FastFormerForFusedELECTRAPretraining(config)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
     # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
@@ -1898,13 +2006,13 @@ if __name__ == "__main__":
     # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-4_H-768_A-12")
     # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-4_H-768_A-12")
 
-
     # TODO: Test Longformer for long sequences as well.
     # TODO: test mobilebert
 
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print("Trainable Params = %s" % (params/1_000_000))
+    print(tokenizer.pad_token_id)
+    print("Trainable Params = %s" % (params / 1_000_000))
     print(model)
     # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
 
@@ -1943,14 +2051,14 @@ Self-attention is a useful mechanism to build generative models for language and
         t1,
         t2,
         t3,
-        t2+t3
-        ]
+        t2 + t3
+    ]
 
     very_large_texts = [
-        t1+t2+t3,
-        t2+t3 + t1,
-        t3+t1+t2+t1+t2+t3,
-        t1+t2+t3+t1,
+        t1 + t2 + t3,
+        t2 + t3 + t1,
+        t3 + t1 + t2 + t1 + t2 + t3,
+        t1 + t2 + t3 + t1,
         t1,
         t2,
         t3,
@@ -1965,15 +2073,17 @@ Self-attention is a useful mechanism to build generative models for language and
     print("Input Sizes", pt_batch["input_ids"].size())
 
     profile = False
-    forward_only = True
+    forward_only = False
     fp16 = False
     device = torch.device("cpu")
+    torch.autograd.set_detect_anomaly(True)
 
     model = model.to(device)
     pt_batch = {k: v.to(device) for k, v in pt_batch.items()}
 
     try:
         from torch.cuda.amp import GradScaler, autocast
+
         scaler = GradScaler()
     except:
         pass
@@ -1984,6 +2094,7 @@ Self-attention is a useful mechanism to build generative models for language and
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = AdamW(all_params)
+
 
     def run():
         if not forward_only:
@@ -2013,13 +2124,16 @@ Self-attention is a useful mechanism to build generative models for language and
                 with autocast():
                     with torch.no_grad():
                         pt_outputs = model(**pt_batch)
+
             else:
                 with torch.no_grad():
                     pt_outputs = model(**pt_batch)
-                return [o.cpu() for o in pt_outputs]
+            return pt_outputs
+
 
     if profile:
         import torch.autograd.profiler as profiler
+
         _ = [run() for _ in range(2)]
         with profiler.profile(record_shapes=True) as prof:
             _ = [run() for _ in range(5)]
@@ -2034,4 +2148,3 @@ Self-attention is a useful mechanism to build generative models for language and
             et = time.time() - st
             times.append(et)
         print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
-
