@@ -843,8 +843,9 @@ class CompressSeqShortSeqRNN(nn.Module):
         self.rnn = ShortSeqRNN(config, d_model, n_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
     def forward(self, query):
+        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
         query = self.rnn(query)
-        return pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+        return qskip + pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
 
 
 class MultiheadAttention(nn.Module):
@@ -1926,13 +1927,13 @@ if __name__ == "__main__":
     # repeated_funnel_channel_expanded_base
     # FastFormerConfig(separate_content_and_position_attention=True, stride=4)
     # FastFormerConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
-    config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3,
-                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=4, ffn_groups=4,
+    config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5,
+                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                               approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
                               qkv_squeeze_fraction=2, light_last_layer=True, light_first_layer=True,
                               sdconv=True, full_channel_separation=True, short_rnn=True,
                               sdconv_kernel_size=[5, 7, 9],
-                              compress_query_method="mean", compressed_query_attention_stride=4, compressed_query_attention_kernel_size=3,
+                              compress_query_method="learn_rnn", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                               compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                                  (1, 1), (1, 2), (1, 3), (1, 4),
                                                                  (2, 1), (2, 2), (2, 3), (2, 4)
@@ -1947,7 +1948,7 @@ if __name__ == "__main__":
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
                               block_channel_size=[384, 768, 960], no_v_head=True,
                               )
-    model = FastFormerForFusedELECTRAPretraining(config)
+    model = FastFormerForMaskedLM(config)
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
@@ -2073,7 +2074,7 @@ Self-attention is a useful mechanism to build generative models for language and
     print("Input Sizes", pt_batch["input_ids"].size())
 
     profile = False
-    forward_only = False
+    forward_only = True
     fp16 = False
     device = torch.device("cpu")
     torch.autograd.set_detect_anomaly(True)
