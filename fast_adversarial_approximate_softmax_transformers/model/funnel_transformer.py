@@ -380,7 +380,7 @@ class XDropout(torch.autograd.Function):
             return grad_output, None
 
 
-class StableDropout(torch.nn.Module):
+class Dropout(torch.nn.Module):
     """
     Optimized dropout module for stabilizing the training
 
@@ -454,7 +454,7 @@ class FunnelEmbeddings(nn.Module):
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
         self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
-        self.dropout = StableDropout(config.hidden_dropout)
+        self.dropout = Dropout(config.hidden_dropout)
         self.output_to_half = False
         self.config = config
 
@@ -807,11 +807,6 @@ class SeparableConv1d(nn.Module):
 
         self.out_channels = out_channels
 
-    def channel_move(self, x):
-        if self.channels_last:
-            return x.permute(0, 2, 1)
-        return x
-
     def forward(self, inputs):
         """
         Expect inputs in channels first format
@@ -1023,7 +1018,7 @@ class FunnelRelMultiheadAttention(nn.Module):
 
         assert d_model % d_head == 0
         assert d_model % n_head == 0
-        self.attention_dropout = nn.Dropout(config.attention_dropout)
+        self.attention_dropout = Dropout(config.attention_dropout)
         self.d_model = d_model
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
@@ -1246,14 +1241,14 @@ class ConvFFN(nn.Module):
         cin, cout = d_model, d_out
         act = config.hidden_act
         self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
-        self.activation_dropout = nn.Dropout(config.activation_dropout)
-        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.activation_dropout = Dropout(config.activation_dropout)
+        self.dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
         self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
 
-        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.dropout = Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
     def forward(self, x):
@@ -1277,10 +1272,10 @@ class BertFFN(nn.Module):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
-        self.activation_dropout = nn.Dropout(config.activation_dropout)
+        self.activation_dropout = Dropout(config.activation_dropout)
         d_out = d_model if d_out is None else d_out
         self.linear_2 = nn.Linear(d_inner, d_out)
-        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Linear(d_inner, d_inner))
@@ -1309,7 +1304,7 @@ class FunnelPositionwiseFFN(nn.Module):
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.activation_function = ACT2FN[config.hidden_act]
-        self.activation_dropout = nn.Dropout(config.activation_dropout)
+        self.activation_dropout = Dropout(config.activation_dropout)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
@@ -1347,7 +1342,7 @@ class LightLayer(nn.Module):
         self.c1 = nn.Conv1d(in_channels=cout, out_channels=cout, kernel_size=5, groups=sum(config.n_head[block_index]) // 2, padding=2, padding_mode='zeros')
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
-        self.dropout = nn.Dropout(config.attention_dropout)
+        self.dropout = Dropout(config.attention_dropout)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         d_head = config.d_head[block_index]
         self.rnn = ShortSeqRNN(config, cout, sum(config.n_head[block_index]) // 2, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
@@ -1446,7 +1441,6 @@ class FunnelEncoder(nn.Module):
         attention_mask=None,
         output_attentions=False,
         output_hidden_states=False,
-        return_dict=False,
     ):
         # The pooling is not implemented on long tensors, so we convert this mask.
         attention_mask = attention_mask.type_as(inputs_embeds)
@@ -1489,9 +1483,8 @@ class FunnelEncoder(nn.Module):
                         all_hidden_states = all_hidden_states + (hidden,)
                         pre_ffn_states = pre_ffn_states + (pre_ffn,)
 
-        if not return_dict:
-            return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions] if v is not None)
-        return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
+        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions] if v is not None)
+
 
 
 def upsample(x, stride, target_len, cls_tokens):
@@ -1557,7 +1550,6 @@ class FunnelDecoder(nn.Module):
         attention_mask=None,
         output_attentions=False,
         output_hidden_states=False,
-        return_dict=False,
     ):
         if self.final_hidden_fc:
             final_hidden = self.final_hidden_fc(final_hidden)
@@ -1565,9 +1557,7 @@ class FunnelDecoder(nn.Module):
             hidden = final_hidden
             all_hidden_states = (hidden,) if output_hidden_states else None
             all_attentions = () if output_attentions else None
-            if not return_dict:
-                return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
-            return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
+            return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
 
         upsampled_hidden = upsample(
             final_hidden,
@@ -1598,9 +1588,7 @@ class FunnelDecoder(nn.Module):
                 if output_hidden_states:
                     all_hidden_states = all_hidden_states + (hidden,)
 
-        if not return_dict:
-            return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
-        return BaseModelOutput(last_hidden_state=hidden, hidden_states=all_hidden_states, attentions=all_attentions)
+        return tuple(v for v in [hidden, all_hidden_states, all_attentions] if v is not None)
 
 
 class FunnelDiscriminatorPredictions(nn.Module):
@@ -1676,7 +1664,7 @@ class FunnelClassificationHead(nn.Module):
     def __init__(self, config, n_labels):
         super().__init__()
         self.linear_hidden = nn.Linear(config.d_model, config.d_model)
-        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.dropout = Dropout(config.hidden_dropout)
         self.linear_out = nn.Linear(config.d_model, n_labels)
 
     def forward(self, hidden):
@@ -1776,7 +1764,6 @@ class FunnelModel(FunnelPreTrainedModel):
             attention_mask=attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=True,
-            return_dict=return_dict,
         )
 
         decoder_outputs = self.decoder(
@@ -1786,7 +1773,6 @@ class FunnelModel(FunnelPreTrainedModel):
             attention_mask=attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
         )
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
         decoder_outputs = (decoder_outputs[0][:, self.cls_tokens-1:], decoder_outputs[1:])
@@ -1970,7 +1956,7 @@ if __name__ == "__main__":
     import numpy as np
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
-    from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining
+    from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
 
     # repeated_funnel_channel_expanded_base
     # FunnelConfig(separate_content_and_position_attention=True, stride=4)
@@ -1996,8 +1982,8 @@ if __name__ == "__main__":
                           n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
                           block_channel_size=[384, 768, 960], no_v_head=True,
                           )
-    model = FunnelForMaskedLM(config)
-    tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    # model = FunnelForMaskedLM(config)
+    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
     # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
@@ -2025,6 +2011,37 @@ if __name__ == "__main__":
     # model = AutoModel.from_pretrained("squeezebert/squeezebert-uncased")
     # tokenizer = AutoTokenizer.from_pretrained("squeezebert/squeezebert-uncased")
 
+    # model = AutoModelForMaskedLM.from_pretrained("prajjwal1/bert-tiny")
+    # tokenizer = AutoTokenizer.from_pretrained("prajjwal1/bert-tiny")
+
+    # model = AutoModelForMaskedLM.from_pretrained("funnel-transformer/small-base")
+    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/small-base")
+
+    # model = AutoModelForMaskedLM.from_pretrained("google/electra-small-discriminator")
+    # tokenizer = AutoTokenizer.from_pretrained("google/electra-small-discriminator")
+
+    # model = AutoModelForMaskedLM.from_pretrained("nlpaueb/legal-bert-small-uncased")
+    # tokenizer = AutoTokenizer.from_pretrained("nlpaueb/legal-bert-small-uncased")
+
+    # model = AutoModelForMaskedLM.from_pretrained("nreimers/BERT-Small-L-4_H-512_A-8")
+    # tokenizer = AutoTokenizer.from_pretrained("nreimers/BERT-Small-L-4_H-512_A-8")
+
+    model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
+    tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
+
+    # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-6_H-768_A-12")
+    # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-6_H-768_A-12")
+
+    # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-6_H-512_A-8")
+    # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-6_H-512_A-8")
+
+    # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-6_H-256_A-4")
+    # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-6_H-256_A-4")
+
+    # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-4_H-768_A-12")
+    # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-4_H-768_A-12")
+
+
     # TODO: Test Longformer for long sequences as well.
     # TODO: test mobilebert
 
@@ -2032,7 +2049,7 @@ if __name__ == "__main__":
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params/1_000_000))
     print(model)
-    print(model.funnel.encoder.repeats)
+    # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
 
     model = model.eval()
 
