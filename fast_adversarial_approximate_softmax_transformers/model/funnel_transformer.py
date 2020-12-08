@@ -1,19 +1,3 @@
-# coding=utf-8
-# Copyright 2020-present Google Brain and Carnegie Mellon University Authors and the HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-""" PyTorch Funnel Transformer model. """
-
 import os
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
@@ -27,7 +11,6 @@ from performer_pytorch import SelfAttention, FastAttention
 from collections import defaultdict
 
 from transformers.activations import ACT2FN
-# from transformers.configuration_funnel import FunnelConfig
 from transformers.file_utils import (
     ModelOutput,
     add_code_sample_docstrings,
@@ -54,37 +37,9 @@ except:
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "FunnelConfig"
-_TOKENIZER_FOR_DOC = "FunnelTokenizer"
-
-FUNNEL_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "funnel-transformer/small",  # B4-4-4H768
-    "funnel-transformer/small-base",  # B4-4-4H768, no decoder
-    "funnel-transformer/medium",  # B6-3x2-3x2H768
-    "funnel-transformer/medium-base",  # B6-3x2-3x2H768, no decoder
-    "funnel-transformer/intermediate",  # B6-6-6H768
-    "funnel-transformer/intermediate-base",  # B6-6-6H768, no decoder
-    "funnel-transformer/large",  # B8-8-8H1024
-    "funnel-transformer/large-base",  # B8-8-8H1024, no decoder
-    "funnel-transformer/xlarge-base",  # B10-10-10H1024
-    "funnel-transformer/xlarge",  # B10-10-10H1024, no decoder
-]
 
 INF = 1e6
 EPS = 1e-6
-
-FUNNEL_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "funnel-transformer/small": "https://huggingface.co/funnel-transformer/small/resolve/main/config.json",
-    "funnel-transformer/small-base": "https://huggingface.co/funnel-transformer/small-base/resolve/main/config.json",
-    "funnel-transformer/medium": "https://huggingface.co/funnel-transformer/medium/resolve/main/config.json",
-    "funnel-transformer/medium-base": "https://huggingface.co/funnel-transformer/medium-base/resolve/main/config.json",
-    "funnel-transformer/intermediate": "https://huggingface.co/funnel-transformer/intermediate/resolve/main/config.json",
-    "funnel-transformer/intermediate-base": "https://huggingface.co/funnel-transformer/intermediate-base/resolve/main/config.json",
-    "funnel-transformer/large": "https://huggingface.co/funnel-transformer/large/resolve/main/config.json",
-    "funnel-transformer/large-base": "https://huggingface.co/funnel-transformer/large-base/resolve/main/config.json",
-    "funnel-transformer/xlarge": "https://huggingface.co/funnel-transformer/xlarge/resolve/main/config.json",
-    "funnel-transformer/xlarge-base": "https://huggingface.co/funnel-transformer/xlarge-base/resolve/main/config.json",
-}
 
 
 from transformers import PretrainedConfig
@@ -95,65 +50,6 @@ from transformers import PretrainedConfig
 # TODO: Fix parameter initialization
 
 class FunnelConfig(PretrainedConfig):
-    r"""
-    This is the configuration class to store the configuration of a :class:`~transformers.FunnelModel` or a
-    :class:`~transformers.TFBertModel`. It is used to instantiate a Funnel Transformer model according to the specified
-    arguments, defining the model architecture. Instantiating a configuration with the defaults will yield a similar
-    configuration to that of the Funnel Transformer `funnel-transformer/small
-    <https://huggingface.co/funnel-transformer/small>`__ architecture.
-
-    Configuration objects inherit from :class:`~transformers.PretrainedConfig` and can be used to control the model
-    outputs. Read the documentation from :class:`~transformers.PretrainedConfig` for more information.
-
-    Args:
-        vocab_size (:obj:`int`, `optional`, defaults to 30522):
-            Vocabulary size of the Funnel transformer. Defines the number of different tokens that can be represented
-            by the :obj:`inputs_ids` passed when calling :class:`~transformers.FunnelModel` or
-            :class:`~transformers.TFFunnelModel`.
-        block_sizes (:obj:`List[int]`, `optional`, defaults to :obj:`[4, 4, 4]`):
-            The sizes of the blocks used in the model.
-        block_repeats (:obj:`List[int]`, `optional`):
-            If passed along, each layer of each block is repeated the number of times indicated.
-        num_decoder_layers (:obj:`int`, `optional`, defaults to 2):
-            The number of layers in the decoder (when not using the base model).
-        d_model (:obj:`int`, `optional`, defaults to 768):
-            Dimensionality of the model's hidden states.
-        n_head (:obj:`int`, `optional`, defaults to 12):
-            Number of attention heads for each attention layer in the Transformer encoder.
-        d_head (:obj:`int`, `optional`, defaults to 64):
-            Dimensionality of the model's heads.
-        d_inner (:obj:`int`, `optional`, defaults to 3072):
-            Inner dimension in the feed-forward blocks.
-        hidden_act (:obj:`str` or :obj:`callable`, `optional`, defaults to :obj:`"gelu_new"`):
-            The non-linear activation function (function or string) in the encoder and pooler. If string,
-            :obj:`"gelu"`, :obj:`"relu"`, :obj:`"silu"` and :obj:`"gelu_new"` are supported.
-        hidden_dropout (:obj:`float`, `optional`, defaults to 0.1):
-            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
-        attention_dropout (:obj:`float`, `optional`, defaults to 0.1):
-            The dropout probability for the attention probabilities.
-        activation_dropout (:obj:`float`, `optional`, defaults to 0.0):
-            The dropout probability used between the two layers of the feed-forward blocks.
-        max_position_embeddings (:obj:`int`, `optional`, defaults to 512):
-            The maximum sequence length that this model might ever be used with. Typically set this to something large
-            just in case (e.g., 512 or 1024 or 2048).
-        type_vocab_size (:obj:`int`, `optional`, defaults to 3):
-            The vocabulary size of the :obj:`token_type_ids` passed when calling :class:`~transformers.FunnelModel` or
-            :class:`~transformers.TFFunnelModel`.
-        initializer_range (:obj:`float`, `optional`, defaults to 0.1):
-            The standard deviation of the `uniform initializer` for initializing all weight matrices in attention
-            layers.
-        initializer_std (:obj:`float`, `optional`):
-            The standard deviation of the `normal initializer` for initializing the embedding matrix and the weight of
-            linear layers. Will default to 1 for the embedding matrix and the value given by Xavier initialization for
-            linear layers.
-        layer_norm_eps (:obj:`float`, `optional`, defaults to 1e-9):
-            The epsilon used by the layer normalization layers.
-        pooling_type (:obj:`str`, `optional`, defaults to :obj:`"mean"`):
-            Possible values are ``"mean"`` or ``"max"``. The way pooling is performed at the beginning of each block.
-        attention_type (:obj:`str`, `optional`, defaults to :obj:`"relative_shift"`):
-            Possible values are ``"relative_shift"`` or ``"factorized"``. The former is faster on CPU/GPU while the
-            latter is faster on TPU.
-    """
     model_type = "funnel"
 
     def __init__(
@@ -327,7 +223,6 @@ vanilla_albert_base = FunnelConfig(vocab_size=30522, block_sizes=[12], block_cha
                                    ffn_groups=1, qkv_transform_groups=1, embedding_size=128, num_highway_cls_tokens=0,
                                    untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False]*1,
                                    block_repeats=True)
-
 
 
 class DropoutContext(object):
@@ -1608,10 +1503,6 @@ class FunnelDiscriminatorPredictions(nn.Module):
 
 
 class FunnelPreTrainedModel(PreTrainedModel):
-    """
-    An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
-    models.
-    """
 
     config_class = FunnelConfig
     base_model_prefix = "funnel"
@@ -1676,26 +1567,6 @@ class FunnelClassificationHead(nn.Module):
 
 @dataclass
 class FunnelForPreTrainingOutput(ModelOutput):
-    """
-    Output type of :class:`~transformers.FunnelForPreTraining`.
-
-    Args:
-        loss (`optional`, returned when ``labels`` is provided, ``torch.FloatTensor`` of shape :obj:`(1,)`):
-            Total loss of the ELECTRA-style objective.
-        logits (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`):
-            Prediction scores of the head (scores for each token before SoftMax).
-        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
-            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
 
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
@@ -1806,7 +1677,6 @@ class FunnelForPreTraining(FunnelPreTrainedModel):
         self.discriminator_predictions = FunnelDiscriminatorPredictions(config)
         self.init_weights()
 
-    @replace_return_docstrings(output_type=FunnelForPreTrainingOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
         input_ids=None,
@@ -1818,27 +1688,7 @@ class FunnelForPreTraining(FunnelPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
     ):
-        r"""
-        labels (``torch.LongTensor`` of shape ``(batch_size, sequence_length)``, `optional`):
-            Labels for computing the ELECTRA-style loss. Input should be a sequence of tokens (see :obj:`input_ids`
-            docstring) Indices should be in ``[0, 1]``:
 
-            - 0 indicates the token is an original token,
-            - 1 indicates the token was replaced.
-
-        Returns:
-
-        Examples::
-
-            >>> from transformers import FunnelTokenizer, FunnelForPreTraining
-            >>> import torch
-
-            >>> tokenizer = FunnelTokenizer.from_pretrained('funnel-transformer/small')
-            >>> model = FunnelForPreTraining.from_pretrained('funnel-transformer/small', return_dict=True)
-
-            >>> inputs = tokenizer("Hello, my dog is cute", return_tensors= "pt")
-            >>> logits = model(**inputs).logits
-        """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         discriminator_hidden_states = self.funnel(
@@ -1893,13 +1743,6 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
     def get_output_embeddings(self):
         return self.lm_head
 
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="funnel-transformer/small",
-        output_type=MaskedLMOutput,
-        config_class=_CONFIG_FOR_DOC,
-        mask="<mask>",
-    )
     def forward(
         self,
         input_ids=None,
@@ -1911,12 +1754,6 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
     ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
-            Labels for computing the masked language modeling loss. Indices should be in ``[-100, 0, ...,
-            config.vocab_size]`` (see ``input_ids`` docstring) Tokens with indices set to ``-100`` are ignored
-            (masked), the loss is only computed for the tokens with labels in ``[0, ..., config.vocab_size]``
-        """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.funnel(
@@ -1951,6 +1788,26 @@ class FunnelForMaskedLM(FunnelPreTrainedModel):
         )
 
 
+
+from abc import ABC, abstractmethod
+
+
+class ELECTRAPretraining(ABC):
+    pass
+
+
+class FusedELECTRAPretraining(ABC):
+    pass
+
+
+class AITM(ABC):
+    pass
+
+
+class BertAITM(nn.Module, AITM):
+    pass
+
+
 if __name__ == "__main__":
     import time
     import numpy as np
@@ -1982,8 +1839,8 @@ if __name__ == "__main__":
                           n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
                           block_channel_size=[384, 768, 960], no_v_head=True,
                           )
-    # model = FunnelForMaskedLM(config)
-    # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
+    model = FunnelForMaskedLM(config)
+    tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate-base")
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
     # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
@@ -2026,8 +1883,8 @@ if __name__ == "__main__":
     # model = AutoModelForMaskedLM.from_pretrained("nreimers/BERT-Small-L-4_H-512_A-8")
     # tokenizer = AutoTokenizer.from_pretrained("nreimers/BERT-Small-L-4_H-512_A-8")
 
-    model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
-    tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
+    # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
+    # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-8_H-256_A-4")
 
     # model = AutoModelForMaskedLM.from_pretrained("chiragjn/small_bert_uncased_L-6_H-768_A-12")
     # tokenizer = AutoTokenizer.from_pretrained("chiragjn/small_bert_uncased_L-6_H-768_A-12")
