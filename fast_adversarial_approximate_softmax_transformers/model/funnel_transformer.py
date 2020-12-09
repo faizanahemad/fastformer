@@ -1610,13 +1610,11 @@ class FastFormerModel(FastFormerPreTrainedModel):
             inputs_embeds=None,
             output_attentions=None,
             output_hidden_states=None,
-            return_dict=None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
@@ -1658,26 +1656,18 @@ class FastFormerModel(FastFormerPreTrainedModel):
         )
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
         decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
-
-        if not return_dict:
-            idx = 0
-            outputs = (decoder_outputs[0],)
-            if output_hidden_states:
-                idx += 1
-                outputs = outputs + (encoder_outputs[1] + decoder_outputs[idx],)
-            if output_attentions:
-                idx += 1
-                outputs = outputs + (encoder_outputs[2] + decoder_outputs[idx],)
-            outputs += (cls_tokens,)
-            return outputs
-
-        return BaseModelOutput(
-            last_hidden_state=decoder_outputs[0],
-            hidden_states=(encoder_outputs.hidden_states + decoder_outputs.hidden_states)
-            if output_hidden_states
-            else None,
-            attentions=(encoder_outputs.attentions + decoder_outputs.attentions) if output_attentions else None,
-        )
+        encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
+        encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
+        idx = 0
+        outputs = (decoder_outputs[0],)
+        if output_hidden_states:
+            idx += 1
+            outputs = outputs + (encoder_outputs[0], encoder_outputs[1] + decoder_outputs[idx],)
+        if output_attentions:
+            idx += 1
+            outputs = outputs + (encoder_outputs[3] + decoder_outputs[idx],)
+        outputs += (encoder_cls_tokens, cls_tokens,)
+        return outputs
 
 
 class FastFormerForPreTraining(FastFormerPreTrainedModel):
@@ -1746,6 +1736,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.lm_dim_match = None
         self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
         if config.embedding_size != config.block_channel_size[0]:
             self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
 
@@ -1785,7 +1776,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             if self.lm_dim_match:
                 last_hidden_state = self.lm_dim_match(last_hidden_state)
             prediction_logits = self.lm_head(last_hidden_state)
-            loss_fct = CrossEntropyLoss()  # -100 index = padding token
+            loss_fct = self.loss_ce  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
 
         if not return_dict:
@@ -1803,24 +1794,83 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 from abc import ABC, abstractmethod
 
 
-class ELECTRAPretraining(ABC):
-    def __init__(self, generator, discriminator, mlm_weight=1.0):
-        pass
+class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
+    def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig, generator: FastFormerModel = None, discriminator: FastFormerModel=None):
+        super().__init__(config)
+        assert config_discriminator.embedding_size == config_generator.embedding_size
+        assert config_discriminator.vocab_size == config_generator.vocab_size
+        assert config_discriminator.block_channel_size[0] == config_generator.block_channel_size[0]
+        self.config = config_discriminator
+        self.funnel: FastFormerModel = FastFormerModel(config_discriminator) if discriminator is None else discriminator
+        self.lm_head = nn.Linear(config_generator.embedding_size, config.vocab_size)
+        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.discriminator_predictions = DiscriminatorPredictions(config)
+        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
+        self.generator = FastFormerModel(config_generator) if generator is None else generator
+        assert self.generator.config.embedding_size == self.funnel.config.embedding_size
+        if self.generator.config.embedding_size != self.generator.config.block_channel_size[0]:
+            self.lm_dim_match = nn.Linear(self.generator.config.block_channel_size[0], self.generator.config.embedding_size)
+        self.funnel.embeddings = self.generator.embeddings
+        self.init_weights()
+
+    def get_input_embeddings(self):
+        return self.generator.get_input_embeddings()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def forward(self, input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            labels=None,):
+
+        outputs = self.generator(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            output_attentions=False,
+            output_hidden_states=False,
+        )
+        input_shape = input_ids.size()
+
+        last_hidden_state = outputs[0]
+        if self.lm_dim_match:
+            last_hidden_state = self.lm_dim_match(last_hidden_state)
+        prediction_logits = self.lm_head(last_hidden_state)
+        loss_fct = self.loss_ce
+        masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
+        predictions = prediction_logits.argmax(dim=-1)
+        labels = (labels == predictions).float()
+
+        outputs = self.funnel(input_ids=predictions, attention_mask=attention_mask, token_type_ids=token_type_ids, output_attentions=False, output_hidden_states=True,)
+        discriminator_sequence_output = outputs[0]
+        logits = self.discriminator_predictions(discriminator_sequence_output)
+
+        active_loss = attention_mask.view(-1, input_shape[1]) == 1
+        loss_fct = nn.BCEWithLogitsLoss()
+        active_logits = logits.view(-1, input_shape[1])[active_loss]
+        active_labels = labels[active_loss]
+        loss = loss_fct(active_logits, active_labels)
+
+        results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
+                       decoder_output=outputs[0], decoder_cls=outputs[-1],
+                       encoder_output=outputs[1], encoder_cls=outputs[-2],
+                       encoder_hidden_states=outputs[2])
+        return results
+
 
 
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig):
+    def __init__(self, config: FastFormerConfig, model: FastFormerModel = None):
         super().__init__(config)
 
         self.config = config
-        self.funnel = FastFormerModel(config)
+        self.funnel: FastFormerModel = FastFormerModel(config) if model is None else model
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
-        self.lm_dim_match = None
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        if config.embedding_size != config.block_channel_size[0]:
-            self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
-
+        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
+        self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
         self.init_weights()
 
     def get_output_embeddings(self):
@@ -1866,7 +1916,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             inputs_embeds,
             position_embeds,
             attention_mask=attention_mask,
-            output_attentions=output_attentions,
+            output_attentions=False,
             output_hidden_states=True,
         )
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
@@ -1875,8 +1925,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
         assert labels is not None
-        # labels[labels == 0] = -100 # -100 index = padding token
-        loss_fct = CrossEntropyLoss()  # -100 index = padding token
+        loss_fct = self.loss_ce  # -100 index = padding token
         masked_lm_loss = loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
@@ -1886,12 +1935,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
             position_embeds=position_embeds,
             attention_mask=attention_mask,
-            output_attentions=output_attentions,
+            output_attentions=False,
             output_hidden_states=output_hidden_states,
         )
 
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
-        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
+        decoder_outputs = (decoder_outputs[0][:, (self.cls_tokens - 1):], decoder_outputs[1:])
         discriminator_sequence_output = decoder_outputs[0]
         logits = self.discriminator_predictions(discriminator_sequence_output)
 
@@ -1900,13 +1949,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss]
         loss = loss_fct(active_logits, active_labels)
 
-        idx = 0
-        outputs = (loss, masked_lm_loss, decoder_outputs[0],)
-        if output_hidden_states:
-            idx += 1
-            outputs = outputs + (encoder_outputs[1] + decoder_outputs[idx],)
-        outputs += (cls_tokens,)
-        return outputs
+
+        results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
+                       decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
+                       encoder_output=encoder_outputs[0][:, (self.cls_tokens - 1):], encoder_cls=encoder_outputs[0][:, :self.cls_tokens], encoder_hidden_states=encoder_outputs[1])
+        return results
 
 
 class AITM(ABC):
@@ -1924,9 +1971,24 @@ if __name__ == "__main__":
     from torch.optim import AdamW
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
 
-    # repeated_funnel_channel_expanded_base
-    # FastFormerConfig(separate_content_and_position_attention=True, stride=4)
-    # FastFormerConfig(separate_content_and_position_attention=False, stride=4, approximate_attention=False)
+    sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
+                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
+                              approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 32, 64], separate_compressiion_layer=True,
+                              qkv_squeeze_fraction=2, light_last_layer=True, light_first_layer=True,
+                              sdconv=True, full_channel_separation=True, short_rnn=True,
+                              sdconv_kernel_size=[5, 7, 9], block_sizes=[3, 3, 3],
+                              compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                              compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
+                                                                 (1, 1), (1, 2), (1, 3), (1, 4),
+                                                                 (2, 1), (2, 2), (2, 3), (2, 4)
+                                                                 ],
+                              compressed_key_attention_layers=[(0, 3), (0, 4),
+                                                               (1, 3), (1, 4),
+                                                               (2, 3), (2, 4)
+                                                               ],
+                              n_head=[(2, 2, 4), (4, 2, 2), (4, 4, 4)],
+                              block_channel_size=[384, 512, 768], no_v_head=True,
+                              )
     config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                               approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
@@ -1948,8 +2010,17 @@ if __name__ == "__main__":
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
                               block_channel_size=[384, 768, 960], no_v_head=True,
                               )
-    model = FastFormerForMaskedLM(config)
+
+    model = FastFormerForELECTRAPretraining(sm_config, config)
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    # model = FastFormerForFusedELECTRAPretraining(config)
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    # model = FastFormerForMaskedLM(config)
+    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
     # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
@@ -2074,7 +2145,7 @@ Self-attention is a useful mechanism to build generative models for language and
     print("Input Sizes", pt_batch["input_ids"].size())
 
     profile = False
-    forward_only = True
+    forward_only = False
     fp16 = False
     device = torch.device("cpu")
     torch.autograd.set_detect_anomaly(True)
@@ -2102,7 +2173,7 @@ Self-attention is a useful mechanism to build generative models for language and
             if fp16:
                 with autocast():
                     output = model(**pt_batch, labels=pt_batch["input_ids"])
-                    loss = output[0]
+                    loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                     optimizer.step()
@@ -2115,7 +2186,7 @@ Self-attention is a useful mechanism to build generative models for language and
                     optimizer.zero_grad()
             else:
                 output = model(**pt_batch, labels=pt_batch["input_ids"])
-                loss = output[0]
+                loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                 optimizer.step()
