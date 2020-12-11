@@ -1779,16 +1779,10 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             loss_fct = self.loss_ce  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
 
-        if not return_dict:
-            output = (prediction_logits,) + outputs[1:]
-            return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
 
-        return MaskedLMOutput(
-            loss=masked_lm_loss,
-            logits=prediction_logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
+        output = (prediction_logits,) + outputs[1:]
+        return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
+
 
 
 from abc import ABC, abstractmethod
@@ -1823,6 +1817,9 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             labels=None,):
+
+        # TODO: can do forward pass of embedding layer once instead of twice?
+        # TODO: can share the full 1st block instead of just embedding? Is this similar to fused ELECTRA
 
         outputs = self.generator(
             input_ids,
@@ -1859,7 +1856,6 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         return results
 
 
-
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None):
         super().__init__(config)
@@ -1886,6 +1882,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_attentions=None,
             output_hidden_states=None,
     ):
+
+        # TODO: should 1st block in fused setting have one more self-attention layer in a separate pipeline before MLM layer, this extra SA layers output will not go to 2nd block.
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -2008,14 +2006,14 @@ if __name__ == "__main__":
                               # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                               # n_head=[(8,), (12,), (12,)],
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                              block_channel_size=[384, 768, 960], no_v_head=True,
+                              block_channel_size=[384, 768, 960], no_v_head=False,
                               )
 
-    model = FastFormerForELECTRAPretraining(sm_config, config)
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
-    # model = FastFormerForFusedELECTRAPretraining(config)
+    # model = FastFormerForELECTRAPretraining(sm_config, config)
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    model = FastFormerForFusedELECTRAPretraining(config)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # model = FastFormerForMaskedLM(config)
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -2145,7 +2143,7 @@ Self-attention is a useful mechanism to build generative models for language and
     print("Input Sizes", pt_batch["input_ids"].size())
 
     profile = False
-    forward_only = False
+    forward_only = True
     fp16 = False
     device = torch.device("cpu")
     torch.autograd.set_detect_anomaly(True)
