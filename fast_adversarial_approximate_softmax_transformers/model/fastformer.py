@@ -101,6 +101,7 @@ class FastFormerConfig(PretrainedConfig):
             short_rnn_overlap=[16, 16, 16],
             conv_layer_use_dynamic_conv=False,
             no_v_head=False,
+            expand_dim_before_pooling=False,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -151,6 +152,7 @@ class FastFormerConfig(PretrainedConfig):
             "factorized",
         ], f"Got {attention_type} for `attention_type` but only 'relative_shift' and 'factorized' are supported."
         self.attention_type = attention_type
+        self.expand_dim_before_pooling=expand_dim_before_pooling
         self.ffn_groups = ffn_groups
         self.ffn_layers = ffn_layers
         self.qkv_transform_groups = qkv_transform_groups
@@ -163,7 +165,7 @@ class FastFormerConfig(PretrainedConfig):
         self.light_last_layer = light_last_layer
         assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
         self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
-        assert compressed_query_attention_stride in [2, 4]
+        assert compressed_query_attention_stride in [1, 2, 4]
         self.compressed_query_attention_stride = compressed_query_attention_stride
         self.compressed_query_attention_layers = compressed_query_attention_layers
         self.compressed_key_attention_layers = compressed_key_attention_layers
@@ -417,6 +419,9 @@ def pool_tensor(tensor, cls_size, mode="mean", stride=2):
     """Apply 1D pooling to a tensor of size [B x T (x H)]."""
     if tensor is None:
         return None
+
+    if stride == 1:
+        return tensor
 
     # Do the pool recursively if tensor is a list or tuple of tensors.
     if isinstance(tensor, (tuple, list)):
@@ -803,22 +808,32 @@ class CompressSeqSDConv(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
         super().__init__()
         self.config = config
+        expand_dims = config.expand_dim_before_pooling
+        if expand_dims:
+            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.expansion_factor = 2
+        else:
+            self.expand = nn.Identity()
+            self.contract = nn.Identity()
+            self.expansion_factor = 1
         self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
         kernel_size = config.pooling_kernel_size if use_in_funnel else config.compressed_query_attention_kernel_size
-        d_head = config.d_head[block_index]
-        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
+        d_head = config.d_head[block_index] * self.expansion_factor
+        self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.sd_conv = SDConv(config, d_model, n_head, d_head, kernel_size, self.stride)
+        self.sd_conv = SDConv(config, d_model * self.expansion_factor, n_head, d_head, kernel_size, self.stride)
 
     def forward(self, query):
+        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.stride)
+        query = self.expand(query)
         cls = query[:, :self.cls_tokens]
         query = query[:, self.cls_tokens:]
-        target_len = int(np.ceil(query.size(1) / self.stride))
+        target_len = qskip.shape[1] - self.cls_tokens
         query = self.sd_conv(query)
         query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
         q = torch.cat([cls, query], dim=1)
-        q = q[:, :2 * (q.size(1) // 2)]
-        return q
+        return qskip + self.contract(q)
 
 
 class CompressSeqMeanPooling(nn.Module):
@@ -827,9 +842,21 @@ class CompressSeqMeanPooling(nn.Module):
         self.config = config
         self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        expand_dims = config.expand_dim_before_pooling
+        if expand_dims:
+            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.expansion_factor = 2
+        else:
+            self.expand = nn.Identity()
+            self.contract = nn.Identity()
+            self.expansion_factor = 1
 
     def forward(self, query):
-        return pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+        query = self.expand(query)
+        query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
+        return qskip + query
 
 
 class CompressSeqShortSeqRNN(nn.Module):
@@ -837,15 +864,27 @@ class CompressSeqShortSeqRNN(nn.Module):
         super().__init__()
         self.config = config
         self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        d_head = config.d_head[block_index]
-        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
+        expand_dims = config.expand_dim_before_pooling
+        if expand_dims:
+            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.expansion_factor = 2
+        else:
+            self.expand = nn.Identity()
+            self.contract = nn.Identity()
+            self.expansion_factor = 1
+        d_head = config.d_head[block_index] * self.expansion_factor
+        self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.rnn = ShortSeqRNN(config, d_model, n_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+        self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, n_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
     def forward(self, query):
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+        query = self.expand(query)
         query = self.rnn(query)
-        return qskip + pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
+        query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
+        return query + qskip
+
 
 
 class MultiheadAttention(nn.Module):
@@ -891,11 +930,11 @@ class MultiheadAttention(nn.Module):
         query_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index + 1)]).intersection(
             set(config.compressed_query_attention_layers))
         self.query_compression_layers = query_compression_layers
-        compress_query = is_encoder_layer and len(query_compression_layers) > 0
+        compress_query = is_encoder_layer and len(query_compression_layers) > 0 and config.compressed_query_attention_stride != 1
 
         key_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index + 1)]).intersection(
             set(config.compressed_key_attention_layers))
-        compress_key = is_encoder_layer and len(key_compression_layers) > 0
+        compress_key = is_encoder_layer and len(key_compression_layers) > 0 and config.compressed_query_attention_stride != 1
         self.key_compression_layers = key_compression_layers
 
         if config.compress_query_method == 'learn':
@@ -994,19 +1033,19 @@ class MultiheadAttention(nn.Module):
         position_embed_of_key, position_embed_of_query = position_embeds
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
-        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers
-        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers
+        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1
+        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1
         if need_query_compress:
             query = self.q_head_compress(query)
+            seq_len = (2 * int(
+                np.ceil(
+                    (seq_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_query_compress else seq_len
         if need_key_compress:
             key = self.k_head_compress(key)
             value = pool_tensor(value, self.cls_tokens, mode='mean', stride=self.config.compressed_query_attention_stride)
-
-        seq_len = (2 * int(
-            np.ceil((seq_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_query_compress else seq_len
-        context_len = (2 * int(
-            np.ceil(
-                (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
+            context_len = (2 * int(
+                np.ceil(
+                    (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
@@ -1285,7 +1324,6 @@ class TransformerEncoder(nn.Module):
 
         block_channel_size = config.block_channel_size
         self.blocks = nn.ModuleList()
-        self.channel_match = nn.ModuleDict()
         self.repeats = []
         for block_index, block_size in enumerate(config.block_sizes):
             cur_channels = block_channel_size[block_index]
@@ -1698,8 +1736,7 @@ class FastFormerForPreTraining(FastFormerPreTrainedModel):
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            output_hidden_states=output_hidden_states
         )
         discriminator_sequence_output = discriminator_hidden_states[0]
 
@@ -1756,7 +1793,6 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             output_hidden_states=None,
             return_dict=None,
     ):
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.funnel(
             input_ids,
@@ -1764,8 +1800,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            output_hidden_states=output_hidden_states
         )
 
         last_hidden_state = outputs[0]
@@ -1947,7 +1982,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss]
         loss = loss_fct(active_logits, active_labels)
 
-
         results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
                        decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
                        encoder_output=encoder_outputs[0][:, (self.cls_tokens - 1):], encoder_cls=encoder_outputs[0][:, :self.cls_tokens], encoder_hidden_states=encoder_outputs[1])
@@ -1962,12 +1996,31 @@ class BertAITM(nn.Module, AITM):
     pass
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 if __name__ == "__main__":
     import time
+    import argparse
     import numpy as np
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--device", type=str, default='cpu',
+                    help="Device")
+    ap.add_argument("--profile", type=str2bool, default=False)
+    ap.add_argument("--forward_only", type=str2bool, default=True)
+    ap.add_argument("--fp16", type=str2bool, default=False)
 
     sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
@@ -1987,13 +2040,13 @@ if __name__ == "__main__":
                               n_head=[(2, 2, 4), (4, 2, 2), (4, 4, 4)],
                               block_channel_size=[384, 512, 768], no_v_head=True,
                               )
-    config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5,
+    config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                               approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
                               qkv_squeeze_fraction=2, light_last_layer=True, light_first_layer=True,
                               sdconv=True, full_channel_separation=True, short_rnn=True,
                               sdconv_kernel_size=[5, 7, 9],
-                              compress_query_method="learn_rnn", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                              compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                               compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                                  (1, 1), (1, 2), (1, 3), (1, 4),
                                                                  (2, 1), (2, 2), (2, 3), (2, 4)
@@ -2006,18 +2059,17 @@ if __name__ == "__main__":
                               # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                               # n_head=[(8,), (12,), (12,)],
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                              block_channel_size=[384, 768, 960], no_v_head=False,
+                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True,
                               )
 
     # model = FastFormerForELECTRAPretraining(sm_config, config)
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-    model = FastFormerForFusedELECTRAPretraining(config)
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
-    # model = FastFormerForMaskedLM(config)
+    # model = FastFormerForFusedELECTRAPretraining(config)
     # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
+    model = FastFormerForMaskedLM(config)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
@@ -2146,7 +2198,7 @@ Self-attention is a useful mechanism to build generative models for language and
     forward_only = True
     fp16 = False
     device = torch.device("cpu")
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
 
     model = model.to(device)
     pt_batch = {k: v.to(device) for k, v in pt_batch.items()}
