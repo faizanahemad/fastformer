@@ -159,6 +159,7 @@ class FastFormerConfig(PretrainedConfig):
         self.embedding_size = embedding_size
         self.position_biased_input = position_biased_input
         self.num_highway_cls_tokens = num_highway_cls_tokens
+        assert qkv_squeeze_fraction == 1 or qkv_squeeze_fraction > 2
         self.qkv_squeeze_fraction = qkv_squeeze_fraction
         self.approximate_attention = approximate_attention
         self.light_first_layer = light_first_layer
@@ -415,21 +416,12 @@ class Embeddings(nn.Module):
         return embeddings, position_embeddings.squeeze(0)
 
 
-def pool_tensor(tensor, cls_size, mode="mean", stride=2):
-    """Apply 1D pooling to a tensor of size [B x T (x H)]."""
+def pool_tensor_basic(tensor, mode="mean", stride=2):
     if tensor is None:
         return None
 
     if stride == 1:
         return tensor
-
-    # Do the pool recursively if tensor is a list or tuple of tensors.
-    if isinstance(tensor, (tuple, list)):
-        return type(tensor)(pool_tensor(x, mode=mode, stride=stride) for x in tensor)
-
-    # TODO: check if even length in dim=1 (seq dim)
-    cls_tokens = tensor[:, :cls_size]
-    tensor = tensor[:, cls_size:]
 
     ndim = tensor.ndim
     if ndim == 2:
@@ -452,6 +444,26 @@ def pool_tensor(tensor, cls_size, mode="mean", stride=2):
         tensor = tensor[:, 0, :, 0]
     elif ndim == 3:
         tensor = tensor[:, 0]
+
+    return tensor
+
+
+def pool_tensor(tensor, cls_size, mode="mean", stride=2):
+    """Apply 1D pooling to a tensor of size [B x T (x H)]."""
+    if tensor is None:
+        return None
+
+    if stride == 1:
+        return tensor
+
+    # Do the pool recursively if tensor is a list or tuple of tensors.
+    if isinstance(tensor, (tuple, list)):
+        return type(tensor)(pool_tensor(x, mode=mode, stride=stride) for x in tensor)
+
+    # TODO: check if even length in dim=1 (seq dim)
+    cls_tokens = tensor[:, :cls_size]
+    tensor = tensor[:, cls_size:]
+    tensor = pool_tensor_basic(tensor, mode, stride)
 
     tensor = torch.cat([cls_tokens, tensor.squeeze(1)], dim=1)
     tensor = tensor[:, :2 * (tensor.size(1) // 2)]
@@ -808,7 +820,7 @@ class CompressSeqSDConv(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
         super().__init__()
         self.config = config
-        expand_dims = config.expand_dim_before_pooling
+        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
             self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
@@ -842,7 +854,7 @@ class CompressSeqMeanPooling(nn.Module):
         self.config = config
         self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        expand_dims = config.expand_dim_before_pooling
+        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
             self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
@@ -864,7 +876,7 @@ class CompressSeqShortSeqRNN(nn.Module):
         super().__init__()
         self.config = config
         self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        expand_dims = config.expand_dim_before_pooling
+        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
             self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
@@ -885,6 +897,15 @@ class CompressSeqShortSeqRNN(nn.Module):
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
         return query + qskip
 
+
+class ChannelCompress(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.stride = in_dim // out_dim
+        assert in_dim % out_dim == 0
+
+    def forward(self, x):
+        return pool_tensor_basic(x.transpose(1, 2), "mean", self.stride).transpose(1, 2)
 
 
 class MultiheadAttention(nn.Module):
@@ -936,6 +957,7 @@ class MultiheadAttention(nn.Module):
             set(config.compressed_key_attention_layers))
         compress_key = is_encoder_layer and len(key_compression_layers) > 0 and config.compressed_query_attention_stride != 1
         self.key_compression_layers = key_compression_layers
+        self.learned_compress = config.compress_query_method in ['learn_sdconv', 'learn_rnn', 'learn']
 
         if config.compress_query_method == 'learn':
             CompressionClass = CompressSeqWeighted
@@ -952,6 +974,7 @@ class MultiheadAttention(nn.Module):
 
         assert d_model % d_head == 0
         assert d_model % n_head == 0
+        assert d_model % (n_head * d_head) == 0
         self.attention_dropout = Dropout(config.attention_dropout)
         self.d_model = d_model
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
@@ -968,17 +991,18 @@ class MultiheadAttention(nn.Module):
         qkv_transform_groups = self.config.qkv_transform_groups
         if qkv_transform_groups > 1:
             # assert n_head % qkv_transform_groups == 0 and n_head >= qkv_transform_groups
+            self.q_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+            self.k_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.q_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
-                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.k_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
-                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
@@ -986,15 +1010,16 @@ class MultiheadAttention(nn.Module):
                     in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
+            self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+                                                                                                                            bias=False)
+            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
+
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
-                                                                                                                            bias=False)
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
@@ -1026,7 +1051,7 @@ class MultiheadAttention(nn.Module):
         self.scale = 1.0 / (d_head ** 0.5)
 
     def self_attention(self, query, key, value, attention_inputs, layer_index):
-        batch_size, seq_len, _ = query.shape
+        batch_size, seq_len, dim = query.shape
         initial_seq_len = seq_len
         position_embeds, attention_mask = attention_inputs
         position_embeds = position_embeds[self.block_index]
@@ -1035,6 +1060,7 @@ class MultiheadAttention(nn.Module):
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
         need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1
         need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1
+        stride = dim // (n_head * d_head)
         if need_query_compress:
             query = self.q_head_compress(query)
             seq_len = (2 * int(
@@ -1047,9 +1073,15 @@ class MultiheadAttention(nn.Module):
                 np.ceil(
                     (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
         # Shape batch_size x seq_len x n_head x d_head
-        q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
+        if self.learned_compress and need_query_compress:
+            q_head = pool_tensor_basic(query.transpose(1, 2), "mean", stride).transpose(1, 2).view(batch_size, seq_len, n_head, d_head)
+        else:
+            q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
-        k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
+        if self.learned_compress and need_key_compress:
+            k_head = pool_tensor_basic(key.transpose(1, 2), "mean", stride).transpose(1, 2).view(batch_size, context_len, n_head, d_head)
+        else:
+            k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
         v_head = self.v_head(value).view(batch_size, context_len, n_head, self.d_model // n_head)
 
         q_head = q_head * self.scale
@@ -2025,7 +2057,7 @@ if __name__ == "__main__":
     sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                               approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 32, 64], separate_compressiion_layer=True,
-                              qkv_squeeze_fraction=2, light_last_layer=True, light_first_layer=True,
+                              qkv_squeeze_fraction=4, light_last_layer=True, light_first_layer=True,
                               sdconv=True, full_channel_separation=True, short_rnn=True,
                               sdconv_kernel_size=[5, 7, 9], block_sizes=[3, 3, 3],
                               compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
@@ -2043,10 +2075,10 @@ if __name__ == "__main__":
     config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
                               approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
-                              qkv_squeeze_fraction=2, light_last_layer=True, light_first_layer=True,
+                              qkv_squeeze_fraction=1, light_last_layer=True, light_first_layer=True,
                               sdconv=True, full_channel_separation=True, short_rnn=True,
                               sdconv_kernel_size=[5, 7, 9],
-                              compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                              compress_query_method="learn_sdconv", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                               compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
                                                                  (1, 1), (1, 2), (1, 3), (1, 4),
                                                                  (2, 1), (2, 2), (2, 3), (2, 4)
