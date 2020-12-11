@@ -1290,6 +1290,20 @@ class PositionwiseFFN(nn.Module):
             self.lin = None
             self.ffn = BertFFN(config, d_model, d_inner, layers)
 
+        if config.pooling_type == 'learn':
+            CompressionClass = CompressSeqWeighted
+        elif config.pooling_type == 'learn_sdconv':
+            CompressionClass = CompressSeqSDConv
+        elif config.pooling_type == 'learn_rnn':
+            CompressionClass = CompressSeqShortSeqRNN
+        elif config.pooling_type == 'mean':
+            CompressionClass = CompressSeqMeanPooling
+
+        if config.pooling_type in ["learn", 'mean', 'learn_sdconv', 'learn_rnn'] and config.stride > 1 and block_index < len(config.block_sizes) - 1:
+            pass
+
+
+
     def forward(self, hidden, layer_index=None):
         dim_match = self.need_dim_match and layer_index == self.n_blocks
         if self.lin:
