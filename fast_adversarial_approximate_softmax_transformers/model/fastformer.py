@@ -2068,6 +2068,16 @@ if __name__ == "__main__":
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=True)
     ap.add_argument("--fp16", type=str2bool, default=False)
+    ap.add_argument("--model", type=str, default='fastformer_mlm') # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+
+    args = vars(ap.parse_args())
+    forward_only = args["forward_only"]
+    device = args["device"]
+    profile = args["profile"]
+    fp16 = args["fp16"]
+    model_name = args["model"]
+    HuggingFaceModelClass = AutoModel if forward_only else AutoModelForMaskedLM
+
 
     sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
                               sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
@@ -2109,15 +2119,22 @@ if __name__ == "__main__":
                               block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False,
                               )
 
-    # model = FastFormerForELECTRAPretraining(sm_config, config)
-    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    if "fastformer" in model_name:
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        if model_name == "fastformer_electra":
+            model = FastFormerForELECTRAPretraining(sm_config, config)
+            assert not forward_only
+        if model_name == "fastformer_fused_electra":
+            model = FastFormerForFusedELECTRAPretraining(config)
+            assert not forward_only
+        if model_name == "fastformer_mlm":
+            model = FastFormerForMaskedLM(config)
 
-    # model = FastFormerForFusedELECTRAPretraining(config)
-    # tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
-    model = FastFormerForMaskedLM(config)
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
+    else:
+        if "electra" in model_name:
+            HuggingFaceModelClass = ElectraForPreTraining
+        model = HuggingFaceModelClass.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     # model = AutoModel.from_pretrained("funnel-transformer/intermediate")
     # tokenizer = AutoTokenizer.from_pretrained("funnel-transformer/intermediate")
@@ -2239,12 +2256,13 @@ Self-attention is a useful mechanism to build generative models for language and
     very_large_max_length = 1536 - config.num_highway_cls_tokens
 
     pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=512)
+    if "electra" in model_name:
+        labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
+    else:
+        labels = pt_batch["input_ids"]
     print("Input Sizes", pt_batch["input_ids"].size())
 
-    profile = False
-    forward_only = True
-    fp16 = False
-    device = torch.device("cpu")
+    device = torch.device(device)
     # torch.autograd.set_detect_anomaly(True)
 
     model = model.to(device)
@@ -2269,7 +2287,7 @@ Self-attention is a useful mechanism to build generative models for language and
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(**pt_batch, labels=pt_batch["input_ids"])
+                    output = model(**pt_batch, labels=labels)
                     loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
@@ -2282,7 +2300,7 @@ Self-attention is a useful mechanism to build generative models for language and
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(**pt_batch, labels=pt_batch["input_ids"])
+                output = model(**pt_batch, labels=labels)
                 loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(all_params, 1.0)
