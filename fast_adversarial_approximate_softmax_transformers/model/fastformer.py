@@ -103,6 +103,11 @@ class FastFormerConfig(PretrainedConfig):
             no_v_head=False,
             expand_dim_before_pooling=False,
             identity_preserving_norm=True,
+            char_rnn=False,
+            char_rnn_layers=1,
+            char_rnn_vocab_size=1024,
+            char_rnn_window_size=512,
+            char_rnn_window_overlap=64,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -121,6 +126,11 @@ class FastFormerConfig(PretrainedConfig):
         assert len(self.n_head) == len(block_sizes)
         self.d_head = [d_head] * len(block_sizes) if isinstance(d_head, int) else d_head
         assert len(self.d_head) == len(block_sizes)
+        self.char_rnn = char_rnn
+        self.char_rnn_layers = char_rnn_layers
+        self.char_rnn_vocab_size = char_rnn_vocab_size
+        self.char_rnn_window_overlap = char_rnn_window_overlap
+        self.char_rnn_window_size = char_rnn_window_size
         self.hidden_act = hidden_act
         self.hidden_dropout = hidden_dropout
         self.attention_dropout = attention_dropout
@@ -347,6 +357,13 @@ class Embeddings(nn.Module):
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
 
+        if config.char_rnn:
+            char_rnn_layers = config.char_rnn_layers
+            char_rnn_vocab_size = config.char_rnn_vocab_size
+            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size, padding_idx=pad_token_id)
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 1, self.embedding_size,
+                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
+
         self.embed_proj = None
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
@@ -362,15 +379,22 @@ class Embeddings(nn.Module):
         if config.num_highway_cls_tokens > 0:
             self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
 
-    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None):
+    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None):
         if input_embeds is None:
             input_shape = input_ids.size()
             input_shape = list(input_shape)
+            initial_seq_len = input_shape[1]
             input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
             input_shape = tuple(input_shape)
 
             seq_length = input_shape[1]
             inputs_embeds = self.word_embeddings(input_ids)
+
+            if self.config.char_rnn:
+                char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
+                char_embeds = self.char_rnn(self.char_embeddings(char_ids))
+                char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
+                inputs_embeds = inputs_embeds + char_embeds
 
             if self.config.num_highway_cls_tokens > 0:
                 highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
@@ -607,7 +631,7 @@ class SequenceDependentPositionTransform(nn.Module):
 
 
 class ShortSeqRNN(nn.Module):
-    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap):
+    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1):
         super().__init__()
         self.config = config
         self.cls_tokens = config.num_highway_cls_tokens + 1
@@ -621,7 +645,7 @@ class ShortSeqRNN(nn.Module):
         self.head_size = head_size
         self.overlap = overlap
 
-        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), 2,
+        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
                           nonlinearity="tanh",
                           bias=False, batch_first=True, dropout=0.0, bidirectional=True)
         # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
@@ -1695,6 +1719,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             inputs_embeds=None,
             output_attentions=None,
             output_hidden_states=None,
+            char_ids=None, char_offsets=None
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1721,7 +1746,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
 
-        inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids)
+        inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
 
         encoder_outputs = self.encoder(
             inputs_embeds,
@@ -1755,63 +1780,6 @@ class FastFormerModel(FastFormerPreTrainedModel):
         return outputs
 
 
-class FastFormerForPreTraining(FastFormerPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-
-        self.funnel = FastFormerModel(config)
-        self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.init_weights()
-
-    def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            token_type_ids=None,
-            inputs_embeds=None,
-            labels=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-    ):
-
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        discriminator_hidden_states = self.funnel(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
-        )
-        discriminator_sequence_output = discriminator_hidden_states[0]
-
-        logits = self.discriminator_predictions(discriminator_sequence_output)
-
-        loss = None
-        if labels is not None:
-            loss_fct = nn.BCEWithLogitsLoss()
-            if attention_mask is not None:
-                active_loss = attention_mask.view(-1, discriminator_sequence_output.shape[1]) == 1
-                active_logits = logits.view(-1, discriminator_sequence_output.shape[1])[active_loss]
-                active_labels = labels[active_loss]
-                loss = loss_fct(active_logits, active_labels.float())
-            else:
-                loss = loss_fct(logits.view(-1, discriminator_sequence_output.shape[1]), labels.float())
-
-        if not return_dict:
-            output = (logits,) + discriminator_hidden_states[1:]
-            return ((loss,) + output) if loss is not None else output
-
-        return PreTrainingOutput(
-            loss=loss,
-            logits=logits,
-            hidden_states=discriminator_hidden_states.hidden_states,
-            attentions=discriminator_hidden_states.attentions,
-        )
-
-
 class FastFormerForMaskedLM(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig):
         super().__init__(config)
@@ -1838,7 +1806,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             labels=None,
             output_attentions=None,
             output_hidden_states=None,
-            return_dict=None,
+            char_ids=None, char_offsets=None,
     ):
 
         outputs = self.funnel(
@@ -1847,7 +1815,8 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states
+            output_hidden_states=output_hidden_states,
+            char_ids=char_ids, char_offsets=char_offsets,
         )
 
         last_hidden_state = outputs[0]
@@ -1896,9 +1865,9 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         return self.lm_head
 
     def forward(self, input_ids=None,
-            attention_mask=None,
-            token_type_ids=None,
-            labels=None,):
+                attention_mask=None,
+                token_type_ids=None,
+                labels=None, char_ids=None, char_offsets=None,):
 
         # TODO: can do forward pass of embedding layer once instead of twice?
         # TODO: can share the full 1st block instead of just embedding? Is this similar to fused ELECTRA
@@ -1907,6 +1876,7 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
+            char_ids=char_ids, char_offsets=char_offsets,
             output_attentions=False,
             output_hidden_states=False,
         )
@@ -1963,6 +1933,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             labels=None,
             output_attentions=None,
             output_hidden_states=None,
+            char_ids=None, char_offsets=None,
     ):
 
         # TODO: should 1st block in fused setting have one more self-attention layer in a separate pipeline before MLM layer, this extra SA layers output will not go to 2nd block.
@@ -1991,7 +1962,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
 
-        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids)
+        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
         encoder_outputs = self.funnel.encoder(
             inputs_embeds,
             position_embeds,
@@ -2054,12 +2025,47 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+from transformers import AutoTokenizer
+char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
+char_to_id = dict(zip(char_to_id, range(1, len(char_to_id) + 1)))
+
+
+class CharRNNTokenize:
+    def __init__(self, tokenizer, char_to_id):
+        self.tokenizer = tokenizer
+        self.char_to_id = char_to_id
+
+    def char_rnn_tokenize(self, texts, tokenizer, char_to_id, padding_index=None, padding=True, truncation=True, return_tensors="pt", max_length=512):
+        tokenizer_outputs = tokenizer(texts, return_offsets_mapping=True, padding=padding,
+                                      truncation=truncation, return_tensors=return_tensors, max_length=max_length)
+        offset_mapping = tokenizer_outputs["offset_mapping"]
+        offset_mapping[:, :, -1] -= 1
+        offset_mapping = F.relu(offset_mapping)
+        padding_index = tokenizer.pad_token_id if padding_index is None else padding_index
+
+        char_lists = list(map(list, texts))
+        max_chars = max(list(map(len, char_lists)))
+        max_chars = int(256 * np.ceil(max_chars / 256))
+        char_lists = [torch.tensor(list(map(lambda x: char_to_id.__getitem__(x.lower()), cl))) for cl in char_lists]
+        char_lists = torch.nn.utils.rnn.pad_sequence(char_lists, batch_first=True, padding_value=0)
+        padding = max_chars - char_lists.shape[1]
+        char_lists = torch.cat([char_lists, char_lists.new(char_lists.shape[0], padding).fill_(padding_index)], 1)
+        tokenizer_outputs["char_ids"] = char_lists
+        tokenizer_outputs["char_offsets"] = offset_mapping
+        del tokenizer_outputs["offset_mapping"]
+        return tokenizer_outputs
+
+    def __call__(self, texts, **kwargs):
+        return self.char_rnn_tokenize(texts, self.tokenizer, self.char_to_id, **kwargs)
+
+
 if __name__ == "__main__":
     import time
     import argparse
     import numpy as np
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
+    from transformers import PreTrainedTokenizerFast, BertTokenizerFast
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
 
     ap = argparse.ArgumentParser()
@@ -2116,11 +2122,15 @@ if __name__ == "__main__":
                               # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                               # n_head=[(8,), (12,), (12,)],
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False,
+                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
                               )
 
     if "fastformer" in model_name:
-        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        if config.char_rnn:
+            char_tokenizer = CharRNNTokenize(tokenizer, char_to_id)
+            tokenizer = char_tokenizer
+
         if model_name == "fastformer_electra":
             model = FastFormerForELECTRAPretraining(sm_config, config)
             assert not forward_only
@@ -2197,7 +2207,6 @@ if __name__ == "__main__":
 
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print(tokenizer.pad_token_id)
     print("Trainable Params = %s" % (params / 1_000_000))
     print(model)
     # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
