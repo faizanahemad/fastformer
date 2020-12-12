@@ -102,6 +102,7 @@ class FastFormerConfig(PretrainedConfig):
             conv_layer_use_dynamic_conv=False,
             no_v_head=False,
             expand_dim_before_pooling=False,
+            identity_preserving_norm=True,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -173,8 +174,7 @@ class FastFormerConfig(PretrainedConfig):
         self.untie_cls = untie_cls
         self.separate_content_and_position_attention = separate_content_and_position_attention
         self.sequence_dependent_position_transform = sequence_dependent_position_transform
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (
-                    not sequence_dependent_position_transform and not separate_content_and_position_attention)
+        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform)
         assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
         assert len(block_channel_size) == len(block_sizes)
@@ -189,6 +189,7 @@ class FastFormerConfig(PretrainedConfig):
         self.conv_layer_use_dynamic_conv = conv_layer_use_dynamic_conv
         self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
         self.no_v_head = no_v_head
+        self.identity_preserving_norm = identity_preserving_norm
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
@@ -350,6 +351,7 @@ class Embeddings(nn.Module):
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
         self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
+        self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
         self.dropout = Dropout(config.hidden_dropout)
         self.output_to_half = False
         self.config = config
@@ -413,7 +415,7 @@ class Embeddings(nn.Module):
             embeddings = embeddings * mask
 
         embeddings = self.dropout(embeddings)
-        return embeddings, position_embeddings.squeeze(0)
+        return embeddings, self.LayerNormPosEmb(position_embeddings.squeeze(0))
 
 
 def pool_tensor_basic(tensor, mode="mean", stride=2):
@@ -577,40 +579,6 @@ class Conv1d(nn.Module):
         if unsqueeze:
             x = x.squeeze(0)
         return x
-
-
-class CompressSeqWeighted(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
-        super().__init__()
-        self.config = config
-        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        d_head = config.d_head[block_index]
-        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.ffn = BertFFN(config, self.stride * d_model // n_head,
-                           2 * self.stride * d_model // n_head, 0, self.stride)
-
-    def forward(self, query):
-        cls = query[:, :self.cls_tokens]
-        query = query[:, self.cls_tokens:]
-        target_len = int(np.ceil(query.size(1) / self.stride))
-        batch_size, seq_len, dim = query.shape
-        assert seq_len % self.stride == 0
-        assert dim % self.n_head == 0
-        seq_groups = seq_len // self.stride
-
-        q = query.view(batch_size,
-                       seq_groups, self.stride,
-                       self.n_head, dim // self.n_head)  # B, seq_groups, stride, H, h_dim
-        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.stride * dim // self.n_head))
-
-        qw = qw.permute(0, 1, 3, 2)  # (B, seq_groups, H, stridexh_dim) -> (B, Seq_groups, H, stride) -> (B, Seq_groups, stride, H)
-        # qw -> (B, Seq_groups, stride, H) q -> (B, Seq_groups, stride, H, h_dim)
-        q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim)  # B, S/r, H, Dh -> B, S/r, D
-        q = nn.functional.pad(q, (0, 0, 0, target_len - q.shape[1], 0, 0))
-        q = torch.cat([cls, q], dim=1)
-        q = q[:, :2 * (q.size(1) // 2)]
-        return q
 
 
 class SequenceDependentPositionTransform(nn.Module):
@@ -823,11 +791,11 @@ class CompressSeqSDConv(nn.Module):
         expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
             self.expansion_factor = 2
         else:
             self.expand = nn.Identity()
-            self.contract = nn.Identity()
+            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
             self.expansion_factor = 1
         self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
         kernel_size = config.pooling_kernel_size if use_in_funnel else config.compressed_query_attention_kernel_size
@@ -857,11 +825,11 @@ class CompressSeqMeanPooling(nn.Module):
         expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
             self.expansion_factor = 2
         else:
             self.expand = nn.Identity()
-            self.contract = nn.Identity()
+            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
             self.expansion_factor = 1
 
     def forward(self, query):
@@ -879,11 +847,11 @@ class CompressSeqShortSeqRNN(nn.Module):
         expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
             self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), )
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
             self.expansion_factor = 2
         else:
             self.expand = nn.Identity()
-            self.contract = nn.Identity()
+            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
             self.expansion_factor = 1
         d_head = config.d_head[block_index] * self.expansion_factor
         self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
@@ -896,6 +864,41 @@ class CompressSeqShortSeqRNN(nn.Module):
         query = self.rnn(query)
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
         return query + qskip
+
+
+class CompressSeqWeighted(nn.Module):
+    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
+        super().__init__()
+        self.config = config
+        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
+        d_head = config.d_head[block_index]
+        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
+        self.ffn = BertFFN(config, self.stride * d_model // n_head,
+                           2 * self.stride * d_model // n_head, 0, self.stride)
+
+    def forward(self, query):
+        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.stride)
+        cls = query[:, :self.cls_tokens]
+        query = query[:, self.cls_tokens:]
+        target_len = qskip.shape[1] - self.cls_tokens
+        batch_size, seq_len, dim = query.shape
+        assert seq_len % self.stride == 0
+        assert dim % self.n_head == 0
+        seq_groups = seq_len // self.stride
+
+        q = query.view(batch_size,
+                       seq_groups, self.stride,
+                       self.n_head, dim // self.n_head)  # B, seq_groups, stride, H, h_dim
+        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.stride * dim // self.n_head))
+
+        qw = qw.permute(0, 1, 3, 2)  # (B, seq_groups, H, stridexh_dim) -> (B, Seq_groups, H, stride) -> (B, Seq_groups, stride, H)
+        # qw -> (B, Seq_groups, stride, H) q -> (B, Seq_groups, stride, H, h_dim)
+        q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim)  # B, S/r, H, Dh -> B, S/r, D
+        q = nn.functional.pad(q, (0, 0, 0, target_len - q.shape[1], 0, 0))
+        q = torch.cat([cls, q], dim=1)
+        return qskip + self.contract(q)
 
 
 class ChannelCompress(nn.Module):
@@ -1199,7 +1202,10 @@ class MultiheadAttention(nn.Module):
             attn_out = torch.cat([sdconv_out, attn_out], dim=-1)
         if self.short_rnn:
             attn_out = torch.cat([rnn_out, attn_out], dim=-1)
-        output = self.layer_norm(query_temp + attn_out)
+        if self.config.identity_preserving_norm:
+            output = query_temp + self.layer_norm(attn_out)
+        else:
+            output = self.layer_norm(query_temp + attn_out)
         return (output, attn_prob) if output_attentions else (output,)
 
 
@@ -1270,6 +1276,7 @@ class BertFFN(nn.Module):
 class PositionwiseFFN(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_encoder_layer):
         super().__init__()
+        self.config = config
         groups, layers = config.ffn_groups, config.ffn_layers
         d_model, d_inner = config.block_channel_size[block_index], config.block_channel_size[block_index] * config.ffn_width
         d_next = config.block_channel_size[block_index + 1] if (block_index + 1) < len(config.block_channel_size) else d_model
@@ -1281,47 +1288,38 @@ class PositionwiseFFN(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
-            self.dlin = nn.Linear(d_model, self.diff)
+            self.dlin = Conv1d(d_model, self.diff, 1, 4) if d_model % 4 == 0 and self.diff % 4 == 0 else nn.Linear(d_model, self.diff)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
             self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
-            self.lin = None
+            self.lin = nn.Identity()
             self.ffn = BertFFN(config, d_model, d_inner, layers)
-
-        if config.pooling_type == 'learn':
-            CompressionClass = CompressSeqWeighted
-        elif config.pooling_type == 'learn_sdconv':
-            CompressionClass = CompressSeqSDConv
-        elif config.pooling_type == 'learn_rnn':
-            CompressionClass = CompressSeqShortSeqRNN
-        elif config.pooling_type == 'mean':
-            CompressionClass = CompressSeqMeanPooling
-
-        if config.pooling_type in ["learn", 'mean', 'learn_sdconv', 'learn_rnn'] and config.stride > 1 and block_index < len(config.block_sizes) - 1:
-            pass
-
-
 
     def forward(self, hidden, layer_index=None):
         dim_match = self.need_dim_match and layer_index == self.n_blocks
-        if self.lin:
-            h = self.activation_dropout(self.activation_function(self.lin(hidden)))
-            h = self.ffn(h)
-        else:
-            h = self.ffn(hidden)
+        h = self.lin(hidden)
+        h = self.ffn(h)
         pre_ffn = h
         if dim_match:
             hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
             h = torch.cat((h, self.dlin(h)), 2)
-            return pre_ffn, self.dlayer_norm(hidden + h)
+            if self.config.identity_preserving_norm:
+                h = hidden + self.dlayer_norm(h)
+            else:
+                h = self.dlayer_norm(hidden + h)
         else:
-            return pre_ffn, self.layer_norm(hidden + h)
+            if self.config.identity_preserving_norm:
+                h = hidden + self.layer_norm(h)
+            else:
+                h = self.layer_norm(hidden + h)
+        return pre_ffn, h
 
 
 class LightLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_encoder_layer):
+        self.config = config
         cin = config.block_channel_size[block_index]
         cout = cin // 2
         self.is_encoder_layer = is_encoder_layer
@@ -1345,7 +1343,10 @@ class LightLayer(nn.Module):
         q = self.activation_function(q)
         q = self.dropout(q)
         q = self.lin(q)
-        res = self.layer_norm(query + q)
+        if self.config.identity_preserving_norm:
+            res = query + self.layer_norm(q)
+        else:
+            res = self.layer_norm(query + q)
         return (res, res)
 
 
@@ -2105,7 +2106,7 @@ if __name__ == "__main__":
                               # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                               # n_head=[(8,), (12,), (12,)],
                               n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True,
+                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False,
                               )
 
     # model = FastFormerForELECTRAPretraining(sm_config, config)
