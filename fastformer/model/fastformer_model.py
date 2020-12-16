@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from performer_pytorch import SelfAttention, FastAttention
 from collections import defaultdict
 
+from torch.utils.data import DataLoader
 from transformers.activations import ACT2FN
 from transformers.file_utils import (
     ModelOutput,
@@ -18,6 +19,7 @@ from transformers.file_utils import (
     add_start_docstrings_to_model_forward,
     replace_return_docstrings,
 )
+
 from transformers.modeling_outputs import (
     BaseModelOutput,
     MaskedLMOutput,
@@ -29,213 +31,20 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
+from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
+from fastformer.data.sample_data import SmallTextDataset
+
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
 except:
     pass
 
+from fastformer.config import FastFormerConfig, md_config, sm_config
+
 logger = logging.get_logger(__name__)
 
 INF = 1e6
 EPS = 1e-6
-
-from transformers import PretrainedConfig
-
-
-# TODO: check if all heads are aligned
-# TODO: check if repeats are happening properly for layers
-# TODO: check if upsampling (interleaving) is happening properly
-# TODO: Fix parameter initialization
-
-class FastFormerConfig(PretrainedConfig):
-    model_type = "funnel"
-
-    def __init__(
-            self,
-            vocab_size=30522,
-            block_sizes=[6, 6, 6],
-            block_channel_size=[576, 768, 960],  # [512, 768, 1024]
-            block_repeats=True,
-            separate_compressiion_layer=False,
-            num_decoder_layers=2,
-            n_head=[(8,), (12,), (12,)],  # 8
-            use_cuda_conv=True,
-            d_head=[72, 64, 80],  # 32
-            hidden_act="gelu",
-            hidden_dropout=0.0,
-            attention_dropout=0.0,
-            activation_dropout=0.0,
-            max_position_embeddings=512,
-            type_vocab_size=0,
-            initializer_range=0.1,
-            initializer_std=None,
-            layer_norm_eps=1e-9,
-            pooling_type="mean",  # learn, #learn_sdconv
-            pooling_kernel_size=5,
-            stride=2,
-            attention_type="relative_shift",
-            ffn_groups=4,
-            ffn_layers=0,
-            ffn_width=4,
-            qkv_transform_groups=4,
-            embedding_size=128,
-            num_highway_cls_tokens=7,
-            position_biased_input=True,
-            untie_cls=False,
-            separate_content_and_position_attention=False,
-            approximate_attention=[False, False, False],
-            sequence_dependent_position_transform=False,
-            qkv_squeeze_fraction=1,
-            light_first_layer=False,
-            light_last_layer=False,
-            compress_query_method="learn",
-            compressed_query_attention_kernel_size=3,
-            compressed_query_attention_stride=2,
-            compressed_query_attention_layers=[],
-            compressed_key_attention_layers=[],
-            sdconv=[False, False, False],
-            sdconv_kernel_size=[5, 7, 9],
-            full_channel_separation=[False, False, False],
-            short_rnn=[False, False, False],
-            short_rnn_kernel=[128, 128, 128],
-            short_rnn_overlap=[16, 16, 16],
-            conv_layer_use_dynamic_conv=False,
-            no_v_head=False,
-            expand_dim_before_pooling=False,
-            identity_preserving_norm=True,
-            char_rnn=False,
-            char_rnn_layers=1,
-            char_rnn_vocab_size=1024,
-            char_rnn_window_size=512,
-            char_rnn_window_overlap=64,
-            **kwargs
-    ):
-        super().__init__(**kwargs)
-        try:
-            from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
-        except:
-            use_cuda_conv = False
-        self.vocab_size = vocab_size
-        self.block_sizes = block_sizes
-        self.block_repeats = block_repeats
-        self.separate_compressiion_layer = separate_compressiion_layer
-        self.num_decoder_layers = num_decoder_layers
-        self.n_head = [(n_head,)] * len(block_sizes) if isinstance(n_head, int) else n_head
-        self.n_head = [h if isinstance(h, (list, tuple)) else (h,) for h in self.n_head]
-        assert all([d % sum(h) == 0 for h, d in zip(self.n_head, block_channel_size)])
-        assert len(self.n_head) == len(block_sizes)
-        self.d_head = [d_head] * len(block_sizes) if isinstance(d_head, int) else d_head
-        assert len(self.d_head) == len(block_sizes)
-        self.char_rnn = char_rnn
-        self.char_rnn_layers = char_rnn_layers
-        self.char_rnn_vocab_size = char_rnn_vocab_size
-        self.char_rnn_window_overlap = char_rnn_window_overlap
-        self.char_rnn_window_size = char_rnn_window_size
-        self.hidden_act = hidden_act
-        self.hidden_dropout = hidden_dropout
-        self.attention_dropout = attention_dropout
-        self.activation_dropout = activation_dropout
-        self.max_position_embeddings = max_position_embeddings
-        self.type_vocab_size = type_vocab_size
-        self.initializer_range = initializer_range
-        self.initializer_std = initializer_std
-        self.layer_norm_eps = layer_norm_eps
-        self.ffn_width = ffn_width
-        self.pooling_kernel_size = pooling_kernel_size
-        assert pooling_type in [
-
-            "mean",
-            "max",
-            "learn",
-            "learn_sdconv",
-            'learn_rnn',
-        ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
-        assert compress_query_method in [
-            "mean",
-            "learn",
-            "learn_sdconv",
-            'learn_rnn',
-        ], f"Got {pooling_type} for `compress_query_method`"
-        self.pooling_type = pooling_type
-        self.compress_query_method = compress_query_method
-        assert attention_type in [
-            "relative_shift",
-            "factorized",
-        ], f"Got {attention_type} for `attention_type` but only 'relative_shift' and 'factorized' are supported."
-        self.attention_type = attention_type
-        self.expand_dim_before_pooling=expand_dim_before_pooling
-        self.ffn_groups = ffn_groups
-        self.ffn_layers = ffn_layers
-        self.qkv_transform_groups = qkv_transform_groups
-        self.embedding_size = embedding_size
-        self.position_biased_input = position_biased_input
-        self.num_highway_cls_tokens = num_highway_cls_tokens
-        assert qkv_squeeze_fraction == 1 or qkv_squeeze_fraction > 2
-        self.qkv_squeeze_fraction = qkv_squeeze_fraction
-        self.approximate_attention = approximate_attention
-        self.light_first_layer = light_first_layer
-        self.light_last_layer = light_last_layer
-        assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
-        self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
-        assert compressed_query_attention_stride in [1, 2, 4]
-        self.compressed_query_attention_stride = compressed_query_attention_stride
-        self.compressed_query_attention_layers = compressed_query_attention_layers
-        self.compressed_key_attention_layers = compressed_key_attention_layers
-        self.untie_cls = untie_cls
-        self.separate_content_and_position_attention = separate_content_and_position_attention
-        self.sequence_dependent_position_transform = sequence_dependent_position_transform
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform)
-        assert separate_content_and_position_attention or position_biased_input
-        self.stride = stride
-        assert len(block_channel_size) == len(block_sizes)
-        self.block_channel_size = block_channel_size
-        self.short_rnn = [short_rnn] * len(block_sizes) if isinstance(short_rnn, bool) else short_rnn
-        self.short_rnn_kernel = [short_rnn_kernel] * len(block_sizes) if isinstance(short_rnn_kernel, int) else short_rnn_kernel
-        self.short_rnn_overlap = [short_rnn_overlap] * len(block_sizes) if isinstance(short_rnn_overlap, int) else short_rnn_overlap
-
-        self.sdconv = [sdconv] * len(block_sizes) if isinstance(sdconv, bool) else sdconv
-        self.full_channel_separation = [full_channel_separation] * len(block_sizes) if isinstance(full_channel_separation, bool) else full_channel_separation
-        self.use_cuda_conv = use_cuda_conv
-        self.conv_layer_use_dynamic_conv = conv_layer_use_dynamic_conv
-        self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
-        self.no_v_head = no_v_head
-        self.identity_preserving_norm = identity_preserving_norm
-        assert position_biased_input or separate_content_and_position_attention
-        assert not (separate_content_and_position_attention and any(approximate_attention))
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
-        assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
-        assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
-        if light_first_layer or any(self.short_rnn) or any(self.sdconv) or light_last_layer:
-            assert position_biased_input
-
-    @property
-    def num_hidden_layers(self):
-        return sum(self.block_sizes)
-
-    @property
-    def num_blocks(self):
-        return len(self.block_sizes)
-
-
-vanilla_bert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
-                                     ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                     untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1, block_repeats=False)
-vanilla_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
-                                       ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3, )
-repeated_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
-                                        ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                        untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
-                                        block_repeats=True, separate_compressiion_layer=True, )
-repeated_funnel_channel_expanded_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[480, 768, 960],
-                                                         num_decoder_layers=2, n_head=[8, 12, 12], d_head=[48, 64, 80],
-                                                         ffn_groups=4, qkv_transform_groups=4, embedding_size=128, num_highway_cls_tokens=0,
-                                                         untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
-                                                         block_repeats=True, separate_compressiion_layer=False, )
-vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
-                                       ffn_groups=1, qkv_transform_groups=1, embedding_size=128, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1,
-                                       block_repeats=True)
 
 
 class DropoutContext(object):
@@ -1840,7 +1649,8 @@ from abc import ABC, abstractmethod
 
 
 class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
-    def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig, generator: FastFormerModel = None, discriminator: FastFormerModel=None):
+    def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig,
+                 generator: FastFormerModel = None, discriminator: FastFormerModel=None, alum=False):
         super().__init__(config)
         assert config_discriminator.embedding_size == config_generator.embedding_size
         assert config_discriminator.vocab_size == config_generator.vocab_size
@@ -1909,7 +1719,8 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
 
 
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig, model: FastFormerModel = None):
+    def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, aitm=False, alum=False,
+                 sentence_order_prediction=1.0, word_order_prediction=1.0, gap_sentence_prediction=1.0):
         super().__init__(config)
 
         self.config = config
@@ -2025,40 +1836,6 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-from transformers import AutoTokenizer
-char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
-char_to_id = dict(zip(char_to_id, range(1, len(char_to_id) + 1)))
-
-
-class CharRNNTokenize:
-    def __init__(self, tokenizer, char_to_id):
-        self.tokenizer = tokenizer
-        self.char_to_id = char_to_id
-
-    def char_rnn_tokenize(self, texts, tokenizer, char_to_id, padding_index=None, padding=True, truncation=True, return_tensors="pt", max_length=512):
-        tokenizer_outputs = tokenizer(texts, return_offsets_mapping=True, padding=padding,
-                                      truncation=truncation, return_tensors=return_tensors, max_length=max_length)
-        offset_mapping = tokenizer_outputs["offset_mapping"]
-        offset_mapping[:, :, -1] -= 1
-        offset_mapping = F.relu(offset_mapping)
-        padding_index = tokenizer.pad_token_id if padding_index is None else padding_index
-
-        char_lists = list(map(list, texts))
-        max_chars = max(list(map(len, char_lists)))
-        max_chars = int(256 * np.ceil(max_chars / 256))
-        char_lists = [torch.tensor(list(map(lambda x: char_to_id.__getitem__(x.lower()), cl))) for cl in char_lists]
-        char_lists = torch.nn.utils.rnn.pad_sequence(char_lists, batch_first=True, padding_value=0)
-        padding = max_chars - char_lists.shape[1]
-        char_lists = torch.cat([char_lists, char_lists.new(char_lists.shape[0], padding).fill_(padding_index)], 1)
-        tokenizer_outputs["char_ids"] = char_lists
-        tokenizer_outputs["char_offsets"] = offset_mapping
-        del tokenizer_outputs["offset_mapping"]
-        return tokenizer_outputs
-
-    def __call__(self, texts, **kwargs):
-        return self.char_rnn_tokenize(texts, self.tokenizer, self.char_to_id, **kwargs)
-
-
 if __name__ == "__main__":
     import time
     import argparse
@@ -2083,54 +1860,26 @@ if __name__ == "__main__":
     fp16 = args["fp16"]
     model_name = args["model"]
     HuggingFaceModelClass = AutoModel if forward_only else AutoModelForMaskedLM
+    config = md_config
 
+    small_max_length = 128 - config.num_highway_cls_tokens
+    medium_max_length = 512 - config.num_highway_cls_tokens
+    large_max_length = 1024 - config.num_highway_cls_tokens
+    very_large_max_length = 1536 - config.num_highway_cls_tokens
 
-    sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
-                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
-                              approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 32, 64], separate_compressiion_layer=True,
-                              qkv_squeeze_fraction=4, light_last_layer=True, light_first_layer=True,
-                              sdconv=True, full_channel_separation=True, short_rnn=True,
-                              sdconv_kernel_size=[5, 7, 9], block_sizes=[3, 3, 3],
-                              compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                              compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                                 (1, 1), (1, 2), (1, 3), (1, 4),
-                                                                 (2, 1), (2, 2), (2, 3), (2, 4)
-                                                                 ],
-                              compressed_key_attention_layers=[(0, 3), (0, 4),
-                                                               (1, 3), (1, 4),
-                                                               (2, 3), (2, 4)
-                                                               ],
-                              n_head=[(2, 2, 4), (4, 2, 2), (4, 4, 4)],
-                              block_channel_size=[384, 512, 768], no_v_head=True,
-                              )
-    config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
-                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
-                              approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80], separate_compressiion_layer=True,
-                              qkv_squeeze_fraction=1, light_last_layer=True, light_first_layer=True,
-                              sdconv=True, full_channel_separation=True, short_rnn=True,
-                              sdconv_kernel_size=[5, 7, 9],
-                              compress_query_method="learn_sdconv", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                              compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                                 (1, 1), (1, 2), (1, 3), (1, 4),
-                                                                 (2, 1), (2, 2), (2, 3), (2, 4)
-                                                                 ],
-                              compressed_key_attention_layers=[(0, 3), (0, 4),
-                                                               (1, 3), (1, 4),
-                                                               (2, 3), (2, 4)
-                                                               ],
-                              # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
-                              # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
-                              # n_head=[(8,), (12,), (12,)],
-                              n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
-                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
-                              )
+    char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
+    char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
+    dataset = SmallTextDataset(very_large_texts)
+    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+    setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
+    tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
+    dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512), dataset)
+    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+    pt_batch = next(iter(dataloader))
 
     if "fastformer" in model_name:
-        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        if config.char_rnn:
-            char_tokenizer = CharRNNTokenize(tokenizer, char_to_id)
-            tokenizer = char_tokenizer
-
+        pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"], char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
         if model_name == "fastformer_electra":
             model = FastFormerForELECTRAPretraining(sm_config, config)
             assert not forward_only
@@ -2141,6 +1890,7 @@ if __name__ == "__main__":
             model = FastFormerForMaskedLM(config)
 
     else:
+        pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"])
         if "electra" in model_name:
             HuggingFaceModelClass = ElectraForPreTraining
         model = HuggingFaceModelClass.from_pretrained(model_name)
@@ -2212,59 +1962,9 @@ if __name__ == "__main__":
     # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
 
     model = model.eval()
+    config = md_config
 
-    t1 = """
-With the success of language pretraining, it is highly desirable to develop more
-efficient architectures of good scalability that can exploit the abundant unlabeled
-data at a lower cost. To improve the efficiency, we examine the much-overlooked
-redundancy in maintaining a full-length token-level presentation, especially for
-tasks that only require a single-vector presentation of the sequence. With this intuition, we propose Funnel-Transformer which gradually compresses the sequence of hidden states to a shorter one and hence reduces the computation cost. More
-importantly, by re-investing the saved FLOPs from length reduction in constructing
-a deeper or wider model, we further improve the model capacity. In addition, to
-perform token-level predictions as required by common pretraining objectives,
-Funnel-Transformer is able to recover a deep representation for each token from
-the reduced hidden sequence via a decoder. Empirically, with comparable or fewer
-FLOPs, Funnel-Transformer outperforms the standard Transformer on a wide
-variety of sequence-level prediction tasks, including text classification, language
-understanding, and reading comprehension. Increasing model size when pretraining natural language representations often results in improved performance on downstream tasks. However, at some point further model increases become harder due to GPU/TPU memory limitations and
-longer training times. To address these problems, we present two parameterreduction techniques to lower memory consumption and increase the training
-speed of BERT (Devlin et al., 2019). Comprehensive empirical evidence shows
-that our proposed methods lead to models that scale much better compared to
-the original BERT. We also use a self-supervised loss that focuses on modeling
-inter-sentence coherence, and show it consistently helps downstream tasks with
-multi-sentence inputs. As a result, our best model establishes new state-of-the-art
-results on the GLUE, RACE, and SQuAD benchmarks while having fewer parameters compared to BERT-large.
-Self-attention is a useful mechanism to build generative models for language and images. It determines the importance of context elements by comparing each element to the current time step. In this paper, we show that a very lightweight convolution can perform competitively to the best reported self-attention results. Next, we introduce dynamic convolutions which are simpler and more efficient than self-attention. We predict separate convolution kernels based solely on the current time-step in order to determine the importance of context elements. The number of operations required by this approach scales linearly in the input length, whereas self-attention is quadratic. Experiments on large-scale machine translation, language modeling and abstractive summarization show that dynamic convolutions improve over strong self-attention models. On the WMT'14 English-German test set dynamic convolutions achieve a new state of the art of 29.7 BLEU.
-"""
-    t2 = """
-    Most popular optimizers for deep learning can be broadly categorized as adaptive methods (e.g. Adam) and accelerated schemes (e.g. stochastic gradient descent (SGD) with momentum). For many models such as convolutional neural networks (CNNs), adaptive methods typically converge faster but generalize worse compared to SGD; for complex settings such as generative adversarial networks (GANs), adaptive methods are typically the default because of their stability.We propose AdaBelief to simultaneously achieve three goals: fast convergence as in adaptive methods, good generalization as in SGD, and training stability. The intuition for AdaBelief is to adapt the stepsize according to the "belief" in the current gradient direction. Viewing the exponential moving average (EMA) of the noisy gradient as the prediction of the gradient at the next time step, if the observed gradient greatly deviates from the prediction, we distrust the current observation and take a small step; if the observed gradient is close to the prediction, we trust it and take a large step. We validate AdaBelief in extensive experiments, showing that it outperforms other methods with fast convergence and high accuracy on image classification and language modeling. Specifically, on ImageNet, AdaBelief achieves comparable accuracy to SGD. Furthermore, in the training of a GAN on Cifar10, AdaBelief demonstrates high stability and improves the quality of generated samples compared to a well-tuned Adam optimizer.
-    """
-    t3 = """
-    We present the Open Graph Benchmark (OGB), a diverse set of challenging and realistic benchmark datasets to facilitate scalable, robust, and reproducible graph machine learning (ML) research. OGB datasets are large-scale, encompass multiple important graph ML tasks, and cover a diverse range of domains, ranging from social and information networks to biological networks, molecular graphs, source code ASTs, and knowledge graphs. For each dataset, we provide a unified evaluation protocol using meaningful application-specific data splits and evaluation metrics. In addition to building the datasets, we also perform extensive benchmark experiments for each dataset. Our experiments suggest that OGB datasets present significant challenges of scalability to large-scale graphs and out-of-distribution generalization under realistic data splits, indicating fruitful opportunities for future research. Finally, OGB provides an automated end-to-end graph ML pipeline that simplifies and standardizes the process of graph data loading, experimental setup, and model evaluation. OGB will be regularly updated and welcomes inputs from the community. OGB datasets as well as data loaders, evaluation scripts, baseline code, and leaderboards are publicly available.
-    """
-    large_texts = [
-        t1,
-        t2,
-        t3,
-        t2 + t3
-    ]
 
-    very_large_texts = [
-        t1 + t2 + t3,
-        t2 + t3 + t1,
-        t3 + t1 + t2 + t1 + t2 + t3,
-        t1 + t2 + t3 + t1,
-        t1,
-        t2,
-        t3,
-        t1 + t3
-    ]
-    small_max_length = 128 - config.num_highway_cls_tokens
-    medium_max_length = 512 - config.num_highway_cls_tokens
-    large_max_length = 1024 - config.num_highway_cls_tokens
-    very_large_max_length = 1536 - config.num_highway_cls_tokens
-
-    pt_batch = tokenizer(very_large_texts, padding=True, truncation=True, return_tensors="pt", max_length=512)
     if "electra" in model_name:
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
     else:

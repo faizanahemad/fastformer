@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-  name = 'performer-pytorch',
+  name = 'fastformer',
   packages = find_packages(exclude=['examples']),
   version = '0.0.1',
   license='MIT',
