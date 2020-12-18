@@ -38,6 +38,7 @@ large_texts = [
     t2 + t3
 ]
 
+small_texts = [" ".join(t.split()[:128]) for t in large_texts]
 very_large_texts = [
     t1 + t2 + t3,
     t2 + t3 + t1,
@@ -68,14 +69,14 @@ if __name__ == "__main__":
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
 
     for i in range(10):
-        dataset = SmallTextDataset(large_texts)
+        dataset = SmallTextDataset(small_texts)
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
         tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
         tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
 
         dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512), dataset)
-        dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+        dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
         next_batch = next(iter(dataloader))
         print(next_batch)
 

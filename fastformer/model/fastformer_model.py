@@ -1,3 +1,4 @@
+import copy
 import os
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
@@ -9,6 +10,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 from performer_pytorch import SelfAttention, FastAttention
 from collections import defaultdict
+from torch.nn import TransformerDecoder
 
 from torch.utils.data import DataLoader
 from transformers.activations import ACT2FN
@@ -199,7 +201,7 @@ class Embeddings(nn.Module):
             seq_length = input_shape[1]
             inputs_embeds = self.word_embeddings(input_ids)
 
-            if self.config.char_rnn:
+            if self.config.char_rnn and char_ids is not None:
                 char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
                 char_embeds = self.char_rnn(self.char_embeddings(char_ids))
                 char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
@@ -397,9 +399,10 @@ class AttentionStructure(nn.Module):
 
 
 class Conv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1):
+    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1):
         super().__init__()
-        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, groups=groups, bias=bias, stride=stride)
+        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                              groups=groups, bias=bias, stride=stride, dilation=dilation)
 
     def forward(self, x):
         unsqueeze = False
@@ -890,12 +893,10 @@ class MultiheadAttention(nn.Module):
         batch_size, seq_len, dim = query.shape
         initial_seq_len = seq_len
         position_embeds, attention_mask = attention_inputs
-        position_embeds = position_embeds[self.block_index]
-        position_embed_of_key, position_embed_of_query = position_embeds
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
-        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1
-        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1
+        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer
+        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer
         stride = dim // (n_head * d_head)
         if need_query_compress:
             query = self.q_head_compress(query)
@@ -925,6 +926,8 @@ class MultiheadAttention(nn.Module):
         r_w_bias = self.r_w_bias * self.scale
         # Shapes batch_size x n_head x seq_len x context_len
         if self.separate_content_and_position_attention:
+            position_embeds = position_embeds[self.block_index]
+            position_embed_of_key, position_embed_of_query = position_embeds
             if need_query_compress:
                 position_embed_of_query = pool_tensor(position_embed_of_query.unsqueeze(0), self.cls_tokens, mode='mean',
                                                       stride=self.config.compressed_query_attention_stride).squeeze()
@@ -994,7 +997,9 @@ class MultiheadAttention(nn.Module):
                 # TODO: handle attention mask's pooling for qk pooling
                 if need_key_compress:
                     attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=self.config.compressed_query_attention_stride)
-                attn_score = attn_score - INF * (1 - attention_mask[:, None, None].float())
+                if len(attention_mask.size()) == 2:
+                    attention_mask = attention_mask[:, None, None].float()
+                attn_score = attn_score - INF * (1 - attention_mask)
             # attention probability
             attn_prob = torch.softmax(attn_score, dim=-1, dtype=dtype)
             attn_prob = self.attention_dropout(attn_prob)
@@ -1308,7 +1313,73 @@ class TransformerEncoder(nn.Module):
                         all_hidden_states = all_hidden_states + (hidden,)
                         pre_ffn_states = pre_ffn_states + (pre_ffn,)
 
-        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions] if v is not None)
+        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs[1]] if v is not None)
+
+
+def shift_right(input_ids, decoder_start_token_id, pad_token_id):
+
+    assert (
+        decoder_start_token_id is not None
+    ), "self.model.config.decoder_start_token_id has to be defined. In T5 it is usually set to the pad_token_id. See T5 docs for more information"
+
+    # shift inputs to the right
+    shifted_input_ids = input_ids.new_zeros(input_ids.shape)
+    shifted_input_ids[..., 1:] = input_ids[..., :-1].clone()
+    shifted_input_ids[..., 0] = decoder_start_token_id
+
+    assert pad_token_id is not None, "self.model.config.pad_token_id has to be defined."
+    # replace possible -100 values in labels by `pad_token_id`
+    shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
+
+    assert torch.all(shifted_input_ids >= 0).item(), "Verify that `shifted_input_ids` has only positive values"
+
+    return shifted_input_ids
+
+
+def subsequent_mask(size):
+    "Mask out subsequent positions."
+    attn_shape = (1, size, size)
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+    return torch.from_numpy(subsequent_mask) == 0
+
+
+class TransformerCrossAttentionDecoder(nn.Module):
+    def __init__(self, config: FastFormerConfig):
+        super().__init__()
+        config = copy.deepcopy(config)
+        config.short_rnn = [False]
+        config.sdconv = [False]
+        config.compressed_query_attention_layers = {}
+        config.compressed_key_attention_layers = {}
+        config.separate_content_and_position_attention = False
+        config.sequence_dependent_position_transform = False
+
+        self.config = config
+        block_index = 0
+        self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0)
+        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index])
+        self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
+        self.cross_attn = MultiheadAttention(config, block_index, False, True, False, 0)
+        self.ffn = PositionwiseFFN(config, block_index, False, False)
+
+    def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
+        bs, seq_len, dim = query.shape
+        query_temp = query
+        if query_mask is None:
+            query_mask = subsequent_mask(seq_len).to(query.device).unsqueeze(0)
+
+        query_padding_mask = query_padding_mask[:, None, None].expand(bs, 1, seq_len, seq_len)
+
+        if key_mask is None:
+            key_mask = key_padding_mask
+
+        (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
+        query = self.self_attn_ln(self.self_attn_lin(query))
+        query = query_temp + query
+        (query,) = self.cross_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
+        _, query = self.ffn(query)
+        return query
 
 
 def upsample(x, stride, target_len, cls_tokens):
@@ -1327,6 +1398,8 @@ def upsample(x, stride, target_len, cls_tokens):
     output = torch.cat([cls, output], dim=1)
 
     return output
+
+# TODO: Decoder layer keep 1 layer with Q=1st block hidden, K,V= 3rd block hidden. This does better upsampling than current method
 
 
 class TransformerDecoder(nn.Module):
@@ -1359,6 +1432,7 @@ class TransformerDecoder(nn.Module):
             self.layers = None
 
         block_channel_size = self.config.block_channel_size
+        self.decoder_ln = nn.LayerNorm(block_channel_size[0], config.layer_norm_eps)
         self.final_hidden_fc = None
         ffn_groups = self.config.ffn_groups
         if block_channel_size[0] != block_channel_size[-1]:
@@ -1393,6 +1467,8 @@ class TransformerDecoder(nn.Module):
         )
 
         hidden = upsampled_hidden + first_block_hidden
+        hidden = self.decoder_ln(hidden)
+
         all_hidden_states = (hidden,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
 
@@ -1597,7 +1673,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.lm_dim_match = None
         self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
+        self.loss_ce = CrossEntropyLoss(ignore_index=config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0)
         if config.embedding_size != config.block_channel_size[0]:
             self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
 
@@ -1660,7 +1736,7 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config_generator.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
+        self.loss_ce = CrossEntropyLoss(ignore_index=config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0)
         self.generator = FastFormerModel(config_generator) if generator is None else generator
         assert self.generator.config.embedding_size == self.funnel.config.embedding_size
         if self.generator.config.embedding_size != self.generator.config.block_channel_size[0]:
@@ -1720,7 +1796,7 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
 
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, aitm=False, alum=False,
-                 sentence_order_prediction=1.0, word_order_prediction=1.0, gap_sentence_prediction=1.0):
+                 sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
         super().__init__(config)
 
         self.config = config
@@ -1728,8 +1804,28 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.loss_ce = CrossEntropyLoss(config.pad_token_id if hasattr(config, "pad_token_id") else 0)
+        self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
+        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
+        if sentence_order_prediction_w > 0:
+            self.sentence_order_prediction_w = sentence_order_prediction_w
+            self.order_prediction_fc = BertFFN(config, self.config.block_channel_size[1], self.config.block_channel_size[1])
+            self.sent_predict_fc = nn.Linear(config.block_channel_size[1], self.cls_tokens)
+            self.two_sent_order_fc = Conv1d(config.block_channel_size[1], 1, 2, 1)
+            self.three_sent_order_fc = Conv1d(config.block_channel_size[1], 1, 3, 1, dilation=2)
+
+        if word_order_prediction_w > 0 or gap_sentence_prediction_w > 0:
+            assert config.position_biased_input
+            self.word_gap_prediction_fc = nn.Sequential(BertFFN(config, self.config.block_channel_size[-1], self.config.block_channel_size[0],
+                                                                d_out=self.config.block_channel_size[0]),
+                                                        nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
+            self.initiator_emb = nn.Embedding(2, self.config.block_channel_size[0])
+            self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
+            self.word_order_prediction_w = word_order_prediction_w
+            self.gap_sentence_prediction_w = gap_sentence_prediction_w
+
+        self.loss_ce = CrossEntropyLoss()
+        self.loss_bce = nn.BCEWithLogitsLoss()
         self.init_weights()
 
     def get_output_embeddings(self):
@@ -1742,9 +1838,16 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             token_type_ids=None,
             inputs_embeds=None,
             labels=None,
+            labels_two_sentence_order=None,
+            labels_three_sentence_dilated_order=None,
+            labels_segment_index=None,
             output_attentions=None,
             output_hidden_states=None,
             char_ids=None, char_offsets=None,
+            gap_sentence_input_ids=None, gap_sentence_attention_mask=None,
+            jumble_sentence_input_ids=None, jumble_sentence_attention_mask=None,
+            **kwargs
+
     ):
 
         # TODO: should 1st block in fused setting have one more self-attention layer in a separate pipeline before MLM layer, this extra SA layers output will not go to 2nd block.
@@ -1785,6 +1888,57 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
 
+        second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
+        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
+
+        sentence_order_loss = None
+        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
+            second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
+            two_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:1]), 1)
+            three_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:4]), 1)
+
+            sent_order_preds = self.sent_predict_fc(second_block_hidden_cls)
+            sent_order_loss = self.loss_ce(sent_order_preds.view(-1, self.cls_tokens), labels_segment_index.view(-1))
+
+            two_sent_order_preds = self.two_sent_order_fc(two_sent_order_hidden)
+            three_sent_order_preds = self.three_sent_order_fc(three_sent_order_hidden)
+            two_sent_loss = self.loss_bce(two_sent_order_preds.view(-1, self.cls_tokens), labels_two_sentence_order.float())
+            three_sent_loss = self.loss_bce(three_sent_order_preds.view(-1, self.cls_tokens), labels_three_sentence_dilated_order.float())
+
+            sentence_order_loss = self.sentence_order_prediction_w * (sent_order_loss + two_sent_loss + three_sent_loss)
+
+        if (self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None) or (self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None):
+            third_block_hidden = self.word_gap_prediction_fc(third_block_hidden)
+
+        if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None:
+            word_order_inputs_embeds, _ = self.funnel.embeddings(shift_right(jumble_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
+            initiator_emb = self.initiator_emb(torch.tensor(0))[None, None, :]
+            word_order_inputs_embeds = word_order_inputs_embeds + initiator_emb
+            if self.config.num_highway_cls_tokens > 0:
+                jumble_sentence_attention_mask = torch.cat(
+                    [torch.ones(jumble_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=jumble_sentence_attention_mask.device),
+                     jumble_sentence_attention_mask], dim=1)
+
+
+            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, third_block_hidden, third_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1])
+            word_order_out = self.lm_dim_match(word_order_out[:, (self.funnel.cls_tokens - 1):])
+            word_order_out = self.lm_head(word_order_out)[:, :, :self.config.vocab_size]
+            word_order_loss = self.word_order_prediction_w * self.loss_ce(word_order_out.view(-1, self.config.vocab_size), jumble_sentence_input_ids.view(-1))
+
+        if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None:
+            gap_inputs_embeds, _ = self.funnel.embeddings(shift_right(gap_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
+            initiator_emb = self.initiator_emb(torch.tensor(1))[None, None, :]
+            gap_inputs_embeds = gap_inputs_embeds + initiator_emb
+            if self.config.num_highway_cls_tokens > 0:
+                gap_sentence_attention_mask = torch.cat(
+                    [torch.ones(gap_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=gap_sentence_attention_mask.device),
+                     gap_sentence_attention_mask], dim=1)
+
+            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, third_block_hidden, third_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1])
+            gap_sentence_out = self.lm_dim_match(gap_sentence_out[:, (self.funnel.cls_tokens - 1):])
+            gap_sentence_out = self.lm_head(gap_sentence_out)[:, :, :self.config.vocab_size]
+            gap_sentence_loss = self.gap_sentence_prediction_w * self.loss_ce(gap_sentence_out.view(-1, self.config.vocab_size), gap_sentence_input_ids.view(-1))
+
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
         assert labels is not None
         loss_fct = self.loss_ce  # -100 index = padding token
@@ -1812,6 +1966,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss = loss_fct(active_logits, active_labels)
 
         results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
+                       sentence_order_loss=sentence_order_loss, word_order_loss=word_order_loss, gap_sentence_loss=gap_sentence_loss,
                        decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
                        encoder_output=encoder_outputs[0][:, (self.cls_tokens - 1):], encoder_cls=encoder_outputs[0][:, :self.cls_tokens], encoder_hidden_states=encoder_outputs[1])
         return results
@@ -1849,9 +2004,9 @@ if __name__ == "__main__":
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
     ap.add_argument("--profile", type=str2bool, default=False)
-    ap.add_argument("--forward_only", type=str2bool, default=True)
+    ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
-    ap.add_argument("--model", type=str, default='fastformer_mlm') # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+    ap.add_argument("--model", type=str, default='fastformer_fused_electra') # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -1879,15 +2034,22 @@ if __name__ == "__main__":
     pt_batch = next(iter(dataloader))
 
     if "fastformer" in model_name:
-        pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"], char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
+        sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
+                        char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
         if model_name == "fastformer_electra":
             model = FastFormerForELECTRAPretraining(sm_config, config)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
             model = FastFormerForFusedELECTRAPretraining(config)
+            sm_pt_batch = dict(**sm_pt_batch, **dict(gap_sentence_input_ids=pt_batch["gap_sentence_input_ids"], gap_sentence_attention_mask=pt_batch["gap_sentence_attention_mask"],
+                                                     jumble_sentence_attention_mask=pt_batch["jumble_sentence_attention_mask"], jumble_sentence_input_ids=pt_batch["jumble_sentence_input_ids"],
+                                                     labels_segment_index=pt_batch["labels_segment_index"], labels_three_sentence_dilated_order=pt_batch["labels_three_sentence_dilated_order"],
+                                                     labels_two_sentence_order=pt_batch["labels_two_sentence_order"], label_mlm_input_ids=pt_batch["label_mlm_input_ids"]))
             assert not forward_only
         if model_name == "fastformer_mlm":
             model = FastFormerForMaskedLM(config)
+
+        pt_batch = sm_pt_batch
 
     else:
         pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"])
@@ -1968,7 +2130,7 @@ if __name__ == "__main__":
     if "electra" in model_name:
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
     else:
-        labels = pt_batch["input_ids"]
+        labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
     print("Input Sizes", pt_batch["input_ids"].size())
 
     device = torch.device(device)

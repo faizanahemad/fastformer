@@ -42,14 +42,14 @@ def isnumber(text):
     return False
 
 
-def segment(text, n_segments, sent_detector):
+def segment(text, n_segments, sent_detector, pad_token):
     text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ',text)
     sents = sent_detector.tokenize(text)
     sent_wc = list(map(lambda x: len(x.split()), sents))
     twc = len(text.split())
     segments = defaultdict(str)
     tol = 0.1
-    while len(segments) < n_segments:
+    while len(segments) < n_segments and tol < 0.9:
         segments = defaultdict(str)
         expected_wc = twc // (n_segments + tol)
         tol += 0.2
@@ -62,7 +62,7 @@ def segment(text, n_segments, sent_detector):
                 cwc = 0
                 sidx += 1
 
-    return list(segments.values())
+    return list(segments.values()) + [pad_token] * (n_segments - len(segments))
 
 
 punctuation_list = ".,\"'?!;()"
@@ -143,6 +143,7 @@ augs = list(dict(**word_augs, **punct_augs).items())
 def word_level_noising(text, tokenizer, probability=0.15):
     # Avoid [MASK] tokens
     mask_token = tokenizer.mask_token
+    pad_token = tokenizer.pad_token
     text = str(text)
     if probability == 0 or len(text) == 0 or len(text.split()) <= 2:
         return text
@@ -152,7 +153,7 @@ def word_level_noising(text, tokenizer, probability=0.15):
     for idx, token in enumerate(tokens):
         if skip_next_word:
             continue
-        if token != mask_token:
+        if token != mask_token and token != pad_token:
             prob = random.random()
             if prob < probability:
                 aug_possibilities = random.sample(augs, k=2)
@@ -220,7 +221,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
-                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset,
+                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=0.75,
                  word_mask_proba: float = 0.15, word_noise_proba: float = 0.15, max_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens + 1
@@ -236,6 +237,7 @@ class TokenizerDataset(Dataset):
         self.word_jumble_segment_count = 1
         self.word_noise_proba = word_noise_proba
         self.training = True
+        self.sentence_jumble_proba = sentence_jumble_proba
 
     def train(self):
         self.training = True
@@ -259,14 +261,18 @@ class TokenizerDataset(Dataset):
         results = dict(labels=label)
 
         if self.training:
-            segments = np.array(segment(text, self.cls_tokens, self.sent_detector))
+            segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
             assert len(segments) == self.cls_tokens
-            seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
+            if random.random() < self.sentence_jumble_proba:
+                seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
+            else:
+                seg_idxs = list(range(self.cls_tokens))
             seg_slides = seg_idxs + seg_idxs[0:1]
             two_ordered = torch.tensor([int(s1 < s2) for s1, s2 in zip(seg_slides[:-1], seg_slides[1:])])
             seg_slides = seg_idxs + seg_idxs[0:4]
             three_ordered_dilated = torch.tensor([int(s1 < s2 < s3) for s1, s2, s3 in zip(seg_slides[0:-4:1], seg_slides[2:-2:1], seg_slides[4::1])])
-            results = dict(labels=label, label_two_sentence_order=two_ordered, label_three_sentence_dilated_order=three_ordered_dilated)
+            results = dict(labels=label, labels_two_sentence_order=two_ordered, labels_three_sentence_dilated_order=three_ordered_dilated,
+                           labels_segment_index=torch.tensor(seg_idxs))
 
             segments = segments[seg_idxs]
             noised_seg_idxs = random.sample(range(self.cls_tokens), self.mask_segment_count + self.word_jumble_segment_count)
@@ -289,8 +295,8 @@ class TokenizerDataset(Dataset):
                 random.shuffle(seq)
                 segments[idx] = " ".join(seq).strip()
 
-            segments[masked_seg_idxs] = self.tokenizer.sentence_mask_token
-            mlm_text = " ".join(segments) # Training Labels for MLM
+            segments[masked_seg_idxs] = [" ".join(seq.split()[:len(seq.split()) // 2]) + " " + self.tokenizer.sentence_mask_token for seq in segments[masked_seg_idxs]]
+            mlm_text = " ".join(segments)  # Training Labels for MLM
             if pet_query is not None:
                 mlm_text = mlm_text + " " + tokenizer.sep_token + " " + pet_query
                 assert pet_answer is not None
@@ -323,8 +329,8 @@ class TokenizerDataset(Dataset):
 
 def collate_fn(samples):
     char_ids = None
+    padding_index = 0
     if isinstance(samples, list) and isinstance(samples[0], dict) and "char_ids" in samples[0]:
-        padding_index = 0
         char_ids = [s["char_ids"] for s in samples]
         for s in samples:
             del s["char_ids"]
@@ -341,64 +347,23 @@ def collate_fn(samples):
     if char_ids is not None:
         samples["char_ids"] = char_ids
     # TODO: reduce the batch seq length to minimum required and a multiple of 16.
+    for k, v in samples.items():
+        if len(v.size()) < 2 or k == "char_offsets" or "label" in k or k == "token_type_ids":
+            continue
+        step_size = 64 if k == "char_ids" else 16
+        while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
+            v = v[:, :-step_size]
+        required_len = int(step_size * np.ceil(v.shape[1]/step_size))
+        padding = required_len - v.shape[-1]
+        v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+        samples[k] = v
+    if "label_mlm_input_ids" in samples:
+        samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
+    if "token_type_ids" in samples:
+        samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
+    if "char_offsets" in samples:
+        samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
     return samples
 
-
-class CharRNNTokenize:
-    def __init__(self, config: FastFormerConfig, tokenizer, char_to_id,
-                 word_masking_proba=0.15, max_span_size=3, sentence_ordering_frac=0.75, ):
-        self.tokenizer = tokenizer
-        self.char_to_id = char_to_id
-        # Noise -> consecutive vowel inversion, vowel-replace,
-        # Noise -> char inversion within word (not 1st or last), Keyboard, word-break, [punctuation_continue, punctuation_strip, word-join]
-        # Noise -> separate all characters of a word with spaces
-        # Whole Word masking
-        # Span based masking
-        # Char masking for RNN
-        # sentence masking for GSP (some proportion of sentences is masked)
-        # Two sentence or at least 64 words (whichever is higher) SOP order prediction (some proportion is ordered incorrectly)
-        # ELECTRA and MLM labels are based on actual input, GSP masked senteces are not part of those labels
-
-        # Truncate length to multiple of 8
-        # If pet query exists for a sentence dont do sentence reordering, don't omit sentences either (gsp).
-        # If less than 8 sentences dont do sop.
-        # For GSP just do AR on whole thing, No, AR only on gap sentences, do 2 gap sentences and AR them in one-shot decoder by joining in batch dim. Dont take error for 1st 2 words.
-        # GSP with only GAP AR doesn't work for denoising, we can either use MLM part for denoising or AR the whole thing
-        # AR the whole thing means the ordering has to be figured out by model if sop is done. Also huge compute for longer sequences.
-
-        # For MLM the gap sentence isn't considered.
-        # Denoising in MLM, SOP 2 types, AR only gaps in 3rd block -> MLM target will be normal while input is noised.
-
-        # Order of operations
-        # get 8 segments. each segment must be made of 1 or more full sentences
-        # Jumble the 8 segments for SOP and keep the jumbling indexing as labels
-        # select 2 segments for AR masking. put sentence_mask_token in their place
-        # For rest 6 segments, create a noised version as well.
-        # Create ground truth for MLM using non-noise 8 segments [MASK1] stays as is. MLM isn't responsible for un-jumbling
-        # Create input by using 6 noised segment and 2 [MASK1]
-        # Put a <sep> token before PET query and dont jumble PET query/answer
-
-    def char_rnn_tokenize(self, texts, tokenizer, char_to_id, pet_queries=None, pet_answers=None, padding_index=None, padding=True, truncation=True, return_tensors="pt", max_length=512):
-        tokenizer_outputs = tokenizer(texts, return_offsets_mapping=True, padding=padding,
-                                      truncation=truncation, return_tensors=return_tensors, max_length=max_length)
-        offset_mapping = tokenizer_outputs["offset_mapping"]
-        offset_mapping[:, :, -1] -= 1
-        offset_mapping = F.relu(offset_mapping)
-        padding_index = tokenizer.pad_token_id if padding_index is None else padding_index
-
-        char_lists = list(map(list, texts))
-        max_chars = max(list(map(len, char_lists)))
-        max_chars = int(64 * np.ceil(max_chars / 64))
-        char_lists = [torch.tensor(list(map(lambda x: char_to_id.__getitem__(x.lower()), cl))) for cl in char_lists]
-        char_lists = torch.nn.utils.rnn.pad_sequence(char_lists, batch_first=True, padding_value=0)
-        padding = max_chars - char_lists.shape[1]
-        char_lists = torch.cat([char_lists, char_lists.new(char_lists.shape[0], padding).fill_(padding_index)], 1)
-        tokenizer_outputs["char_ids"] = char_lists
-        tokenizer_outputs["char_offsets"] = offset_mapping
-        del tokenizer_outputs["offset_mapping"]
-        return tokenizer_outputs
-
-    def __call__(self, texts, **kwargs):
-        return self.char_rnn_tokenize(texts, self.tokenizer, self.char_to_id, **kwargs)
 
 
