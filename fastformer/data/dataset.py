@@ -230,11 +230,9 @@ class TokenizerDataset(Dataset):
         self.tokenizer_args = tokenizer_args
         self.dataset = dataset
         self.char_to_id = copy.deepcopy(char_to_id)
-        self.mask_segment_count = 1
         self.word_mask_proba = word_mask_proba
         self.vocab = list(tokenizer.get_vocab())
         self.max_span_length = max_span_length
-        self.word_jumble_segment_count = 1
         self.word_noise_proba = word_noise_proba
         self.training = True
         self.sentence_jumble_proba = sentence_jumble_proba
@@ -275,11 +273,18 @@ class TokenizerDataset(Dataset):
                            labels_segment_index=torch.tensor(seg_idxs))
 
             segments = segments[seg_idxs]
-            noised_seg_idxs = random.sample(range(self.cls_tokens), self.mask_segment_count + self.word_jumble_segment_count)
-            masked_seg_idxs = noised_seg_idxs[:self.mask_segment_count]
-            word_jumble_seg_idxs = noised_seg_idxs[self.mask_segment_count:]
-            masked_segments = segments[masked_seg_idxs][0]
-            word_jumble_segments = segments[word_jumble_seg_idxs][0]
+            masked_segments = word_jumble_segments = tokenizer.pad_token
+            iters = 0
+            word_jumble_seg_idxs = -1
+            masked_seg_idxs = -1
+            while (masked_segments == tokenizer.pad_token or word_jumble_segments == tokenizer.pad_token) and iters <= 16:
+                iters += 1
+                if word_jumble_segments == tokenizer.pad_token:
+                    word_jumble_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {masked_seg_idxs}), 1)[0]
+                    word_jumble_segments = segments[word_jumble_seg_idxs]
+                if masked_segments == tokenizer.pad_token:
+                    masked_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {word_jumble_seg_idxs}), 1)[0]
+                    masked_segments = segments[masked_seg_idxs]
 
             small_segment_tokenizer_args = dict(**self.tokenizer_args)
             small_segment_tokenizer_args["max_length"] = self.tokenizer_args["max_length"] // (self.cls_tokens - 1)
@@ -290,12 +295,11 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
 
-            for idx in word_jumble_seg_idxs:
-                seq = segments[idx].split()
-                random.shuffle(seq)
-                segments[idx] = " ".join(seq).strip()
+            seq = segments[word_jumble_seg_idxs].split()
+            random.shuffle(seq)
+            segments[word_jumble_seg_idxs] = " ".join(seq).strip()
 
-            segments[masked_seg_idxs] = [" ".join(seq.split()[:len(seq.split()) // 2]) + " " + self.tokenizer.sentence_mask_token for seq in segments[masked_seg_idxs]]
+            segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 2]) + " " + self.tokenizer.sentence_mask_token
             mlm_text = " ".join(segments)  # Training Labels for MLM
             if pet_query is not None:
                 mlm_text = mlm_text + " " + tokenizer.sep_token + " " + pet_query
@@ -305,6 +309,7 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
+            noised_seg_idxs = [word_jumble_seg_idxs, masked_seg_idxs]
             for idx, seq in enumerate(segments):
                 if idx in noised_seg_idxs:
                     continue

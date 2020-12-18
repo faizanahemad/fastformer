@@ -34,7 +34,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
 from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
-from fastformer.data.sample_data import SmallTextDataset
+from fastformer.data.sample_data import SmallTextDataset, small_texts
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -1726,7 +1726,9 @@ from abc import ABC, abstractmethod
 
 class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig,
-                 generator: FastFormerModel = None, discriminator: FastFormerModel=None, alum=False):
+                 generator: FastFormerModel = None, discriminator: FastFormerModel=None,
+                 electra_loss_w=1.0, lm_loss_w=1.0,
+                 alum=False):
         super().__init__(config)
         assert config_discriminator.embedding_size == config_generator.embedding_size
         assert config_discriminator.vocab_size == config_generator.vocab_size
@@ -1742,6 +1744,10 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         if self.generator.config.embedding_size != self.generator.config.block_channel_size[0]:
             self.lm_dim_match = nn.Linear(self.generator.config.block_channel_size[0], self.generator.config.embedding_size)
         self.funnel.embeddings = self.generator.embeddings
+        self.lm_loss_w = lm_loss_w
+        self.electra_loss_w = electra_loss_w
+        self.loss_hist = defaultdict(list)
+        self.accuracy_hist = defaultdict(list)
         self.init_weights()
 
     def get_input_embeddings(self):
@@ -1773,9 +1779,10 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
             last_hidden_state = self.lm_dim_match(last_hidden_state)
         prediction_logits = self.lm_head(last_hidden_state)
         loss_fct = self.loss_ce
-        masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
+        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
+        self.accuracy_hist["masked_lm"].append(labels.sum() / len(labels.view(-1)))
 
         outputs = self.funnel(input_ids=predictions, attention_mask=attention_mask, token_type_ids=token_type_ids, output_attentions=False, output_hidden_states=True,)
         discriminator_sequence_output = outputs[0]
@@ -1785,9 +1792,11 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         loss_fct = nn.BCEWithLogitsLoss()
         active_logits = logits.view(-1, input_shape[1])[active_loss]
         active_labels = labels[active_loss]
-        loss = loss_fct(active_logits, active_labels)
+        loss = self.electra_loss_w * loss_fct(active_logits, active_labels)
+        self.loss_hist["electra_loss"].append(float(loss))
+        self.loss_hist["masked_lm_loss"].append(float(masked_lm_loss))
 
-        results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
+        results = dict(loss=loss + masked_lm_loss,
                        decoder_output=outputs[0], decoder_cls=outputs[-1],
                        encoder_output=outputs[1], encoder_cls=outputs[-2],
                        encoder_hidden_states=outputs[2])
@@ -1796,7 +1805,7 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
 
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, aitm=False, alum=False,
-                 sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
+                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
         super().__init__(config)
 
         self.config = config
@@ -1826,6 +1835,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         self.loss_ce = CrossEntropyLoss()
         self.loss_bce = nn.BCEWithLogitsLoss()
+        self.lm_loss_w = lm_loss_w
+        self.electra_loss_w = electra_loss_w
+        self.loss_hist = defaultdict(list)
+        self.accuracy_hist = defaultdict(list)
         self.init_weights()
 
     def get_output_embeddings(self):
@@ -1891,7 +1904,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
 
-        sentence_order_loss = None
+        sentence_order_loss = 0.0
+        word_order_loss = 0.0
+        gap_sentence_loss = 0.0
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
             second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
             two_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:1]), 1)
@@ -1900,10 +1915,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_preds = self.sent_predict_fc(second_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_preds.view(-1, self.cls_tokens), labels_segment_index.view(-1))
 
-            two_sent_order_preds = self.two_sent_order_fc(two_sent_order_hidden)
-            three_sent_order_preds = self.three_sent_order_fc(three_sent_order_hidden)
-            two_sent_loss = self.loss_bce(two_sent_order_preds.view(-1, self.cls_tokens), labels_two_sentence_order.float())
-            three_sent_loss = self.loss_bce(three_sent_order_preds.view(-1, self.cls_tokens), labels_three_sentence_dilated_order.float())
+            two_sent_order_preds = self.two_sent_order_fc(two_sent_order_hidden).view(-1, self.cls_tokens)
+            three_sent_order_preds = self.three_sent_order_fc(three_sent_order_hidden).view(-1, self.cls_tokens)
+            two_sent_loss = self.loss_bce(two_sent_order_preds, labels_two_sentence_order.float())
+            three_sent_loss = self.loss_bce(three_sent_order_preds, labels_three_sentence_dilated_order.float())
+            self.accuracy_hist["two_sent_order"].append(float(((two_sent_order_preds > 0.) == labels_two_sentence_order).sum() / len(labels_two_sentence_order.view(-1))))
+            self.accuracy_hist["three_sent_order"].append(
+                float(((three_sent_order_preds > 0.) == labels_three_sentence_dilated_order).sum() / len(labels_three_sentence_dilated_order.view(-1))))
 
             sentence_order_loss = self.sentence_order_prediction_w * (sent_order_loss + two_sent_loss + three_sent_loss)
 
@@ -1942,9 +1960,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
         assert labels is not None
         loss_fct = self.loss_ce  # -100 index = padding token
-        masked_lm_loss = loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
+        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
+        self.accuracy_hist["masked_lm"].append(float(labels.sum() / len(labels.view(-1))))
 
         decoder_outputs = self.funnel.decoder(
             final_hidden=encoder_outputs[0],
@@ -1963,10 +1982,24 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss_fct = nn.BCEWithLogitsLoss()
         active_logits = logits.view(-1, input_shape[1])[active_loss]
         active_labels = labels[active_loss]
-        loss = loss_fct(active_logits, active_labels)
+        loss = self.electra_loss_w * loss_fct(active_logits, active_labels)
 
-        results = dict(electra_loss=loss, masked_lm_loss=masked_lm_loss,
-                       sentence_order_loss=sentence_order_loss, word_order_loss=word_order_loss, gap_sentence_loss=gap_sentence_loss,
+        # TODO: Store losses here
+
+        self.loss_hist["electra_loss"].append(float(loss))
+        self.loss_hist["masked_lm_loss"].append(float(masked_lm_loss))
+        self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
+        self.loss_hist["word_order_loss"].append(float(word_order_loss))
+        self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
+
+        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss
+
+
+        # TODO: return one loss
+        # TODO: check various loss history and accuracies over time
+        # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
+
+        results = dict(loss=loss,
                        decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
                        encoder_output=encoder_outputs[0][:, (self.cls_tokens - 1):], encoder_cls=encoder_outputs[0][:, :self.cls_tokens], encoder_hidden_states=encoder_outputs[1])
         return results
@@ -2024,13 +2057,13 @@ if __name__ == "__main__":
 
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
-    dataset = SmallTextDataset(very_large_texts)
+    dataset = SmallTextDataset(small_texts)
     tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
     setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
     tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
     dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512), dataset)
-    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
     pt_batch = next(iter(dataloader))
 
     if "fastformer" in model_name:
@@ -2151,7 +2184,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params)
+    optimizer = AdamW(all_params, lr=1e-4)
 
 
     def run():
@@ -2159,7 +2192,7 @@ if __name__ == "__main__":
             if fp16:
                 with autocast():
                     output = model(**pt_batch, labels=labels)
-                    loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
+                    loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                     optimizer.step()
@@ -2172,7 +2205,7 @@ if __name__ == "__main__":
                     optimizer.zero_grad()
             else:
                 output = model(**pt_batch, labels=labels)
-                loss = output[0] if isinstance(output, (list, tuple)) else (output["electra_loss"] + output["masked_lm_loss"])
+                loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                 optimizer.step()
@@ -2200,9 +2233,13 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(2)]
         times = []
-        for _ in trange(10):
+        for _ in trange(20):
             st = time.time()
             _ = run()
             et = time.time() - st
             times.append(et)
         print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
+
+    if not forward_only and isinstance(model, FastFormerForFusedELECTRAPretraining):
+        print(model.accuracy_hist)
+        print(model.loss_hist)
