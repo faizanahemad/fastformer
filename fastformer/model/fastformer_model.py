@@ -1726,13 +1726,14 @@ from abc import ABC, abstractmethod
 
 class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig,
-                 generator: FastFormerModel = None, discriminator: FastFormerModel=None,
+                 generator: FastFormerModel = None, discriminator: FastFormerModel=None, tokenizer = None,
                  electra_loss_w=1.0, lm_loss_w=1.0,
                  alum=False):
         super().__init__(config)
         assert config_discriminator.embedding_size == config_generator.embedding_size
         assert config_discriminator.vocab_size == config_generator.vocab_size
         assert config_discriminator.block_channel_size[0] == config_generator.block_channel_size[0]
+        self.tokenizer = tokenizer
         self.config = config_discriminator
         self.funnel: FastFormerModel = FastFormerModel(config_discriminator) if discriminator is None else discriminator
         self.lm_head = nn.Linear(config_generator.embedding_size, config.vocab_size)
@@ -1782,7 +1783,9 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
-        self.accuracy_hist["masked_lm"].append(labels.sum() / len(labels.view(-1)))
+        mlm_positions = input_ids == self.tokenizer.mask_token_id
+        self.accuracy_hist["lm"].append(float(labels[active_loss].sum() / len(labels[active_loss].view(-1))))
+        self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].sum() / len(labels[mlm_positions].view(-1))))
 
         outputs = self.funnel(input_ids=predictions, attention_mask=attention_mask, token_type_ids=token_type_ids, output_attentions=False, output_hidden_states=True,)
         discriminator_sequence_output = outputs[0]
@@ -1804,18 +1807,19 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
 
 
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, aitm=False, alum=False,
+    def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
         super().__init__(config)
 
         self.config = config
+        self.tokenizer = tokenizer
         self.funnel: FastFormerModel = FastFormerModel(config) if model is None else model
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-        self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
+        self.lm_dim_match = BertFFN(config, config.block_channel_size[0], config.block_channel_size[0]*2, d_out=config.embedding_size)
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
             self.order_prediction_fc = BertFFN(config, self.config.block_channel_size[1], self.config.block_channel_size[1])
@@ -1865,7 +1869,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         # TODO: should 1st block in fused setting have one more self-attention layer in a separate pipeline before MLM layer, this extra SA layers output will not go to 2nd block.
 
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
@@ -1937,11 +1940,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(jumble_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=jumble_sentence_attention_mask.device),
                      jumble_sentence_attention_mask], dim=1)
 
-
             word_order_out = self.sentence_task_attn(word_order_inputs_embeds, third_block_hidden, third_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1])
             word_order_out = self.lm_dim_match(word_order_out[:, (self.funnel.cls_tokens - 1):])
             word_order_out = self.lm_head(word_order_out)[:, :, :self.config.vocab_size]
             word_order_loss = self.word_order_prediction_w * self.loss_ce(word_order_out.view(-1, self.config.vocab_size), jumble_sentence_input_ids.view(-1))
+            word_order_out = word_order_out.argmax(dim=-1) == jumble_sentence_input_ids
+            self.accuracy_hist["word_order"].append(float(word_order_out.sum() / len(word_order_out.view(-1))))
+            self.loss_hist["word_order_loss"].append(float(word_order_loss))
 
         if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None:
             gap_inputs_embeds, _ = self.funnel.embeddings(shift_right(gap_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
@@ -1956,6 +1961,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             gap_sentence_out = self.lm_dim_match(gap_sentence_out[:, (self.funnel.cls_tokens - 1):])
             gap_sentence_out = self.lm_head(gap_sentence_out)[:, :, :self.config.vocab_size]
             gap_sentence_loss = self.gap_sentence_prediction_w * self.loss_ce(gap_sentence_out.view(-1, self.config.vocab_size), gap_sentence_input_ids.view(-1))
+            gap_sentence_out = gap_sentence_out.argmax(dim=-1) == gap_sentence_input_ids
+            self.accuracy_hist["gap_sentence"].append(float(gap_sentence_out.sum() / len(gap_sentence_out.view(-1))))
+            self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
         assert labels is not None
@@ -1963,7 +1971,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
-        self.accuracy_hist["masked_lm"].append(float(labels.sum() / len(labels.view(-1))))
+        mlm_positions = input_ids == self.tokenizer.mask_token_id
+        self.accuracy_hist["lm"].append(float(labels[active_loss].sum() / len(labels[active_loss].view(-1))))
+        self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].sum() / len(labels[mlm_positions].view(-1))))
 
         decoder_outputs = self.funnel.decoder(
             final_hidden=encoder_outputs[0],
@@ -1987,7 +1997,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Store losses here
 
         self.loss_hist["electra_loss"].append(float(loss))
-        self.loss_hist["masked_lm_loss"].append(float(masked_lm_loss))
+        self.loss_hist["lm_loss"].append(float(masked_lm_loss))
         self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
         self.loss_hist["word_order_loss"].append(float(word_order_loss))
         self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
@@ -2070,10 +2080,10 @@ if __name__ == "__main__":
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
                         char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
         if model_name == "fastformer_electra":
-            model = FastFormerForELECTRAPretraining(sm_config, config)
+            model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config)
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer)
             sm_pt_batch = dict(**sm_pt_batch, **dict(gap_sentence_input_ids=pt_batch["gap_sentence_input_ids"], gap_sentence_attention_mask=pt_batch["gap_sentence_attention_mask"],
                                                      jumble_sentence_attention_mask=pt_batch["jumble_sentence_attention_mask"], jumble_sentence_input_ids=pt_batch["jumble_sentence_input_ids"],
                                                      labels_segment_index=pt_batch["labels_segment_index"], labels_three_sentence_dilated_order=pt_batch["labels_three_sentence_dilated_order"],
@@ -2241,5 +2251,6 @@ if __name__ == "__main__":
         print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
 
     if not forward_only and isinstance(model, FastFormerForFusedELECTRAPretraining):
-        print(model.accuracy_hist)
-        print(model.loss_hist)
+        from pprint import pprint
+        pprint(model.accuracy_hist)
+        pprint(model.loss_hist)
