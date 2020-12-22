@@ -1,3 +1,5 @@
+from typing import List
+
 from transformers import PretrainedConfig
 
 
@@ -5,6 +7,30 @@ from transformers import PretrainedConfig
 # TODO: check if repeats are happening properly for layers
 # TODO: check if upsampling (interleaving) is happening properly
 # TODO: Fix parameter initialization
+# TODO: separate static model structure config from dynamic training config
+
+from dataclasses import dataclass
+from dataclasses_json import dataclass_json
+
+@dataclass_json
+@dataclass
+class TrainingConfig:
+    lr: float
+    batch_size: int
+    num_batches_to_train: int  # Like epochs
+    num_batches_to_validate: int
+    validate_every_steps: int
+    gradient_clipping: float
+    fp16: bool
+    datasets: List[str]
+    alum: bool
+    model_class: str
+    model_name: str
+    experiment_name: str
+    optimizer_class: str
+    scheduler_class: str
+
+
 
 class FastFormerConfig(PretrainedConfig):
     model_type = "funnel"

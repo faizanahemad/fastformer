@@ -1264,11 +1264,44 @@ class TransformerEncoder(nn.Module):
     def aitm(self, hidden_states, attention_mask=None):
         pass
 
+    def forward_one_block(self, block_index, hidden, attention_inputs,
+                          all_hidden_states, pre_ffn_states, all_attentions,
+                          output_attentions=False, output_hidden_states=False):
+        (block, repeat_block) = self.blocks[block_index], self.repeats[block_index]
+        pooling_flag = hidden.size(1) > 2
+        pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
+        if pooling_flag:
+            if self.pool:
+                pooled_hidden = self.pool[str(block_index)](hidden)
+        layer_index = 0
+        for (_, (layer, repeats)) in enumerate(zip(block, repeat_block)):
+            for repeat_index in range(repeats):
+                do_pooling = (repeat_index == 0) and (layer_index == 0) and pooling_flag
+                if do_pooling:
+                    query = pooled_hidden
+                    key = value = hidden
+                else:
+                    query = key = value = hidden
+                layer_output = layer(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
+                layer_index += 1
+                hidden = layer_output[0]
+                pre_ffn = layer_output[1]
+                if do_pooling:
+                    attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index)
+
+                if output_attentions:
+                    all_attentions = all_attentions + layer_output[1:]
+                if output_hidden_states:
+                    all_hidden_states = all_hidden_states + (hidden,)
+                    pre_ffn_states = pre_ffn_states + (pre_ffn,)
+
+        return hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs
+
     def forward(
             self,
             inputs_embeds,
             position_embeds,
-            attention_mask=None,
+            attention_mask,
             output_attentions=False,
             output_hidden_states=False,
     ):
@@ -1284,34 +1317,9 @@ class TransformerEncoder(nn.Module):
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
         pre_ffn_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
-
-        for block_index, (block, repeat_block) in enumerate(zip(self.blocks, self.repeats)):
-            pooling_flag = hidden.size(1) > 2
-            pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
-            if pooling_flag:
-                if self.pool:
-                    pooled_hidden = self.pool[str(block_index)](hidden)
-            layer_index = 0
-            for (_, (layer, repeats)) in enumerate(zip(block, repeat_block)):
-                for repeat_index in range(repeats):
-                    do_pooling = (repeat_index == 0) and (layer_index == 0) and pooling_flag
-                    if do_pooling:
-                        query = pooled_hidden
-                        key = value = hidden
-                    else:
-                        query = key = value = hidden
-                    layer_output = layer(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
-                    layer_index += 1
-                    hidden = layer_output[0]
-                    pre_ffn = layer_output[1]
-                    if do_pooling:
-                        attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index)
-
-                    if output_attentions:
-                        all_attentions = all_attentions + layer_output[1:]
-                    if output_hidden_states:
-                        all_hidden_states = all_hidden_states + (hidden,)
-                        pre_ffn_states = pre_ffn_states + (pre_ffn,)
+        for block_index, (_, _) in enumerate(zip(self.blocks, self.repeats)):
+            one_block_res = self.forward_one_block(block_index, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, output_attentions, output_hidden_states)
+            hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
 
         return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs[1]] if v is not None)
 
@@ -1453,6 +1461,7 @@ class TransformerDecoder(nn.Module):
     ):
         if self.final_hidden_fc:
             final_hidden = self.final_hidden_fc(final_hidden)
+        final_hidden = final_hidden[:, :, :first_block_hidden.shape[-1]]
         if not self.layers:
             hidden = final_hidden
             all_hidden_states = (hidden,) if output_hidden_states else None
@@ -1806,8 +1815,16 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         return results
 
 
+def KL(input, target, reduction="sum"):
+    input = input.float()
+    target = target.float()
+    loss = F.kl_div(F.log_softmax(input, dim=-1, dtype=torch.float32), F.softmax(target, dim=-1, dtype=torch.float32), reduction=reduction)
+    return loss
+
+
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
+                 adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3, adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
         super().__init__(config)
 
@@ -1843,10 +1860,129 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = defaultdict(list)
+        self.aitm = aitm
+        self.alum = alum
+        self.aitm_noise_var = aitm_noise_var
+        self.aitm_clip_min = aitm_clip_min
+        self.aitm_clip_max = aitm_clip_max
+        self.adv_lm_w = adv_lm_w
+        self.adv_step_size = adv_step_size
+        self.adv_epsilon = adv_epsilon
+        self.adv_ascent_steps = adv_ascent_steps
+        self.adv_w = adv_w
+        if aitm:
+            self.adv_lm_w = -1 * abs(self.adv_lm_w)
+            assert not alum
+        if alum:
+            assert not aitm
+            self.adv_lm_w = abs(self.adv_lm_w)
+            self.aitm_clip_min = self.aitm_clip_max = 1.0
+        self.funnel.decoder.final_hidden_fc = None
         self.init_weights()
 
     def get_output_embeddings(self):
         return self.lm_head
+
+    def adv_project(self, grad, norm_type='inf', eps=1e-6):
+        if norm_type == 'l2':
+            direction = grad / (torch.norm(grad, dim=-1, keepdim=True) + eps)
+        elif norm_type == 'l1':
+            direction = grad.sign()
+        else:
+            direction = grad / (grad.abs().max(-1, keepdim=True)[0] + eps)
+        return direction
+
+    def aitm_loss(self, embed, position_embeds, attention_mask, mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions, reverse_loss=False):
+        encoder_outputs = self.funnel.encoder(
+            embed,
+            position_embeds,
+            attention_mask=attention_mask,
+            output_attentions=False,
+            output_hidden_states=True,
+        )
+        first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
+        second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
+
+        lm_pre_kl = self.adv_lm_w * (
+                    mlm_correct.float().clamp(self.aitm_clip_min, self.aitm_clip_max) * KL(first_block_hidden, mlm_predictions.detach(), reduction="none").sum(
+                -1)).mean(0).sum()
+        sent_order_pre_kl = 0
+        if self.sentence_order_prediction_w > 0 and sent_order_predictions is not None:
+            second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
+            sent_order_logits = self.sent_predict_fc(second_block_hidden_cls)
+            sent_order_pre_kl = KL(sent_order_logits, sent_order_predictions.detach(), reduction="batchmean")
+            if reverse_loss:
+                sent_order_pre_kl = (sent_order_pre_kl + KL(sent_order_logits.detach(), sent_order_predictions, reduction="batchmean")) / 2.0
+
+        decoder_outputs = self.funnel.decoder(
+            final_hidden=encoder_outputs[0],
+            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
+            position_embeds=position_embeds,
+            attention_mask=attention_mask,
+            output_attentions=False,
+            output_hidden_states=True,
+        )
+        discriminator_sequence_output = decoder_outputs[0][:, (self.cls_tokens - 1):]
+        electra_logits = self.discriminator_predictions(discriminator_sequence_output)
+        electra_pre_kl = KL(electra_logits, electra_predictions.detach(), reduction="batchmean")
+        if reverse_loss:
+            electra_pre_kl = (electra_pre_kl + KL(electra_logits.detach(), electra_predictions, reduction="batchmean")) / 2.0
+        return lm_pre_kl, sent_order_pre_kl, electra_pre_kl
+
+    def forward_for_aitm(self, embed, position_embeds, attention_mask,
+                         mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions):
+        noise = embed.new(embed.size()).normal_(0, 1) * self.aitm_noise_var
+        noise.requires_grad_()
+        for _ in range(self.adv_ascent_steps):
+            newembed = embed.detach() + noise
+            lm_pre_kl, sent_order_pre_kl, electra_pre_kl = self.aitm_loss(newembed, position_embeds, attention_mask, mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions)
+
+            adv_loss = electra_pre_kl + sent_order_pre_kl + lm_pre_kl
+            self.loss_hist["electra_pre_kl"].append(float(electra_pre_kl))
+            self.loss_hist["lm_pre_kl"].append(float(lm_pre_kl))
+            self.loss_hist["sent_order_pre_kl"].append(float(sent_order_pre_kl))
+            self.loss_hist["adv_loss_pre_kl"].append(float(adv_loss))
+            delta_grad, = torch.autograd.grad(adv_loss, noise, only_inputs=True)
+            norm = delta_grad.norm()
+            if (torch.isnan(norm) or torch.isinf(norm)):
+                return 0.0
+
+            noise = noise + delta_grad * self.adv_step_size
+
+        noise = self.adv_project(noise, eps=self.adv_epsilon)
+
+        #
+        newembed = embed + noise.detach()
+        lm_post_kl, sent_order_post_kl, electra_post_kl = self.aitm_loss(newembed, position_embeds, attention_mask, mlm_predictions, mlm_correct,
+                                                                         sent_order_predictions, electra_predictions, reverse_loss=True)
+        self.loss_hist["electra_post_kl"].append(float(electra_post_kl))
+        self.loss_hist["lm_post_kl"].append(float(lm_post_kl))
+        self.loss_hist["sent_order_post_kl"].append(float(sent_order_post_kl))
+        adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2)
+        self.loss_hist["adv_loss_post_kl"].append(float(adv_loss))
+        return self.adv_w * adv_loss
+
+    def get_emb(self, embedding_generation_params):
+        input_ids, token_type_ids, inputs_embeds, char_ids, char_offsets = embedding_generation_params
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+
+        # TODO: deal with head_mask
+
+        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
+        return inputs_embeds, position_embeds, input_shape
 
     def forward(
             self,
@@ -1872,27 +2008,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-
-        if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
-        elif input_ids is not None:
-            input_shape = input_ids.size()
-        elif inputs_embeds is not None:
-            input_shape = inputs_embeds.size()[:-1]
-        else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
-
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
-        assert attention_mask is not None
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
-
+        embedding_generation_params = input_ids, token_type_ids, inputs_embeds, char_ids, char_offsets
+        inputs_embeds, position_embeds, input_shape = self.get_emb(embedding_generation_params)
         # TODO: deal with head_mask
+        assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
 
-        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
         encoder_outputs = self.funnel.encoder(
             inputs_embeds,
             position_embeds,
@@ -1910,18 +2033,24 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         word_order_loss = 0.0
         gap_sentence_loss = 0.0
+        sent_order_logits = None
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
             second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
             two_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:1]), 1)
             three_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:4]), 1)
 
-            sent_order_preds = self.sent_predict_fc(second_block_hidden_cls)
-            sent_order_loss = self.loss_ce(sent_order_preds.view(-1, self.cls_tokens), labels_segment_index.view(-1))
+            sent_order_logits = self.sent_predict_fc(second_block_hidden_cls)
+            sent_order_loss = self.loss_ce(sent_order_logits.view(-1, self.cls_tokens), labels_segment_index.view(-1))
+            self.loss_hist["sent_order_loss"].append(float(sent_order_loss))
+            sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
+            self.accuracy_hist["sent_order"].append(float(sent_order_out.sum() / len(sent_order_out.view(-1))))
 
             two_sent_order_preds = self.two_sent_order_fc(two_sent_order_hidden).view(-1, self.cls_tokens)
             three_sent_order_preds = self.three_sent_order_fc(three_sent_order_hidden).view(-1, self.cls_tokens)
             two_sent_loss = self.loss_bce(two_sent_order_preds, labels_two_sentence_order.float())
             three_sent_loss = self.loss_bce(three_sent_order_preds, labels_three_sentence_dilated_order.float())
+            self.loss_hist["two_sent_loss"].append(float(two_sent_loss))
+            self.loss_hist["three_sent_loss"].append(float(three_sent_loss))
             self.accuracy_hist["two_sent_order"].append(float(((two_sent_order_preds > 0.) == labels_two_sentence_order).sum() / len(labels_two_sentence_order.view(-1))))
             self.accuracy_hist["three_sent_order"].append(
                 float(((three_sent_order_preds > 0.) == labels_three_sentence_dilated_order).sum() / len(labels_three_sentence_dilated_order.view(-1))))
@@ -2002,6 +2131,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.loss_hist["word_order_loss"].append(float(word_order_loss))
         self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
+        if self.aitm or self.alum:
+            adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits)
+            loss = loss + adv_loss
+
         loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss
 
 
@@ -2049,6 +2182,7 @@ if __name__ == "__main__":
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
+    ap.add_argument("--aitm", type=str2bool, default=True)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra') # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
@@ -2057,6 +2191,9 @@ if __name__ == "__main__":
     profile = args["profile"]
     fp16 = args["fp16"]
     model_name = args["model"]
+    aitm = args["aitm"]
+    if aitm:
+        assert not forward_only and model_name == "fastformer_fused_electra"
     HuggingFaceModelClass = AutoModel if forward_only else AutoModelForMaskedLM
     config = md_config
 
@@ -2083,7 +2220,7 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer)
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3)
             sm_pt_batch = dict(**sm_pt_batch, **dict(gap_sentence_input_ids=pt_batch["gap_sentence_input_ids"], gap_sentence_attention_mask=pt_batch["gap_sentence_attention_mask"],
                                                      jumble_sentence_attention_mask=pt_batch["jumble_sentence_attention_mask"], jumble_sentence_input_ids=pt_batch["jumble_sentence_input_ids"],
                                                      labels_segment_index=pt_batch["labels_segment_index"], labels_three_sentence_dilated_order=pt_batch["labels_three_sentence_dilated_order"],
