@@ -1,6 +1,4 @@
-
-
-
+from seaborn import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
 import torch
@@ -246,8 +244,19 @@ class TokenizerDataset(Dataset):
     def __getitem__(self, item):
         tokenizer = self.tokenizer
         item = self.dataset[item]
-        pet_query = item["pet_query"] if "pet_query" in item else None
-        pet_answer = item["pet_answer"] if "pet_answer" in item else None
+        pet_query = item["query"] if "query" in item else None
+        pet_answer = item["answer"] if "answer" in item else None
+
+        assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
+        if isinstance(pet_query, str):
+            n_queries = 1
+            pet_query = [pet_query]
+            pet_answer = [pet_answer]
+        elif isinstance(pet_query, list):
+            n_queries = len(pet_query)
+        else:
+            n_queries = 0
+            pet_query = pet_answer = []
         if "label" in item:
             label = item["label"]
         elif "labels" in item:
@@ -256,7 +265,7 @@ class TokenizerDataset(Dataset):
             label = 0
 
         text = item["text"]
-        results = dict(labels=label)
+        results = dict(labels=label, n_pet_queries=n_queries)
 
         if self.training:
             segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
@@ -301,10 +310,25 @@ class TokenizerDataset(Dataset):
 
             segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 2]) + " " + self.tokenizer.sentence_mask_token
             mlm_text = " ".join(segments)  # Training Labels for MLM
-            if pet_query is not None:
-                mlm_text = mlm_text + " " + tokenizer.sep_token + " " + pet_query
-                assert pet_answer is not None
-                mlm_text = mlm_text + " " + tokenizer.sep_token + " " + pet_answer
+            labels_pet_text = ""
+            for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
+                if i == 0:
+                    mlm_text = mlm_text + " " + tokenizer.sep_token
+
+                mlm_text = mlm_text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
+                mlm_text = mlm_text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + str(len(tokenizer.tokenize(a))) + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+                assert a is not None
+                labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + a + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+            if n_queries > 0:
+                labels_pet_text_tokenizer_args = dict(**self.tokenizer_args)
+                labels_pet_text_max_length = 128
+                labels_pet_text_tokenizer_args["max_length"] = labels_pet_text_max_length
+                tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=True, **labels_pet_text_tokenizer_args)
+                input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+                results.update(dict(labels_pet_input_ids=input_ids.squeeze(),
+                                    labels_pet_attention_mask=attention_mask.squeeze(), labels_pet_max_length=labels_pet_text_max_length))
+
+
             tokenizer_outputs = tokenizer(mlm_text, return_offsets_mapping=True, **self.tokenizer_args)
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
@@ -318,12 +342,14 @@ class TokenizerDataset(Dataset):
                 segments[idx] = seq
 
             text = " ".join(segments)
-        if pet_query is not None:
-            text = text + " " + tokenizer.sep_token + " " + pet_query
-            if self.training:
-                text = text + " " + tokenizer.sep_token + " " + " ".join([tokenizer.mask_token] * len(tokenizer.tokenize(pet_answer)))
-            else:
-                text = text + " " + tokenizer.sep_token + " " + tokenizer.mask_token
+
+        for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
+            if i == 0:
+                text = text + " " + tokenizer.sep_token
+
+            text = text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
+            text = text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + tokenizer.mask_token + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+
         inp = char_rnn_tokenize(text, self.tokenizer, self.char_to_id, **self.tokenizer_args)
         results.update(inp)
         return results
@@ -369,6 +395,41 @@ def collate_fn(samples):
     if "char_offsets" in samples:
         samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
     return samples
+
+
+def all_datasets():
+    from datasets import load_dataset
+    bookcorpus = load_dataset("bookcorpus")
+    bookcorpusopen = load_dataset("bookcorpusopen")
+    openwebtext = load_dataset("openwebtext")
+    wikipedia = load_dataset("wikipedia", '20200501.en')
+    
+    wmt14de_en = load_dataset("wmt14", 'de-en')  # ['cs-en', 'de-en', 'fr-en', 'hi-en', 'ru-en']
+    un_pc = load_dataset("un_pc", 'en-fr', script_version="master")  # ['ar-de', 'ar-en', 'ar-es', 'ar-fr', 'ar-ru', 'ar-zh', 'de-en', 'de-es', 'de-fr', 'de-ru', 'de-zh', 'en-es', 'en-fr', 'en-ru', 'en-zh', 'es-fr', 'es-ru', 'es-zh', 'fr-ru', 'fr-zh', 'ru-zh']
+    un_pc = load_dataset("un_pc", 'en-ru', script_version="master")
+
+    amazon_polarity = load_dataset("amazon_polarity", script_version="master")
+    imdb = load_dataset("imdb", script_version="master")
+    yelp_polarity = load_dataset("yelp_polarity")
+    yelp_review_full = load_dataset("yelp_review_full", script_version="master")
+    big_patent = load_dataset("big_patent",'all', script_version="master")
+    cc100_en = load_dataset("cc100", lang="en", script_version="master")  # http://data.statmt.org/cc-100/
+    # generics_kb = load_dataset("generics_kb")
+    open_subtitles = load_dataset("open_subtitles", 'en-hi', script_version="master")
+    yahoo_answers_topics = load_dataset("yahoo_answers_topics")
+    eli5 = load_dataset("eli5")
+    cnn_dailymail = load_dataset("cnn_dailymail", '3.0.0')
+    amazon_reviews_multi = load_dataset("amazon_reviews_multi", 'en')
+    wiki_auto = load_dataset("wiki_auto", 'auto_acl')
+
+
+    for ds in ['el-en', 'cs-en', 'en-hu', 'en-ro', 'en-sk', 'en-uk', 'en-ja', 'en-es', 'en-fr', 'de-en', 'en-ko', 'en-zh', 'en-ru', 'en-pt']:
+        ppt = load_dataset("para_pat", ds, script_version="master")
+
+    un_multi = load_dataset("un_multi", 'en-fr', script_version="master")
+
+    for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00', 'Software_v1_00', 'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00', 'PC_v1_00', 'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00', 'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00', 'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00', 'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00', 'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00', 'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
+        amazon_us_reviews = load_dataset("amazon_us_reviews", ds, script_version="master")
 
 
 

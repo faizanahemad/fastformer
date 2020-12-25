@@ -1261,9 +1261,6 @@ class TransformerEncoder(nn.Module):
                 pool[str(block_index + 1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
             self.pool = pool
 
-    def aitm(self, hidden_states, attention_mask=None):
-        pass
-
     def forward_one_block(self, block_index, hidden, attention_inputs,
                           all_hidden_states, pre_ffn_states, all_attentions,
                           output_attentions=False, output_hidden_states=False):
@@ -1596,7 +1593,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
         self.cls_tokens = config.num_highway_cls_tokens + 1
-
+        self.answering_ffn = BertFFN(config, config.block_channel_size[-1], config.block_channel_size[-1], d_out=config.embedding_size)
+        self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.init_weights()
 
     def get_input_embeddings(self):
@@ -1604,6 +1602,9 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
     def set_input_embeddings(self, new_embeddings):
         self.embeddings.word_embeddings = new_embeddings
+
+    def get_output_embeddings(self):
+        return self.lm_head
 
     def forward(
             self,
@@ -1613,7 +1614,9 @@ class FastFormerModel(FastFormerPreTrainedModel):
             inputs_embeds=None,
             output_attentions=None,
             output_hidden_states=None,
-            char_ids=None, char_offsets=None
+            char_ids=None, char_offsets=None,
+            run_decoder=True,
+            run_answering=True,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1649,28 +1652,44 @@ class FastFormerModel(FastFormerPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=True,
         )
+        answering = ()
+        if run_answering:
+            answering_hidden = self.answering_ffn(encoder_outputs[0][:, self.cls_tokens - 1:])
+            answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            answering_predictions = answering_logits.argmax(dim=-1)
+            answering += (answering_logits, answering_predictions,)
 
-        decoder_outputs = self.decoder(
-            final_hidden=encoder_outputs[0],
-            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
-            position_embeds=position_embeds,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-        )
-        cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
-        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
-        encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
-        encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
-        idx = 0
-        outputs = (decoder_outputs[0],)
-        if output_hidden_states:
-            idx += 1
-            outputs = outputs + (encoder_outputs[0], encoder_outputs[1] + decoder_outputs[idx],)
-        if output_attentions:
-            idx += 1
-            outputs = outputs + (encoder_outputs[3] + decoder_outputs[idx],)
+        if hasattr(self, "decoder") and run_decoder:
+
+            decoder_outputs = self.decoder(
+                final_hidden=encoder_outputs[0],
+                first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
+                position_embeds=position_embeds,
+                attention_mask=attention_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+            )
+            encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
+            encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
+            cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
+            decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
+            outputs = (decoder_outputs[0],)
+            if output_hidden_states:
+                outputs = outputs + (encoder_outputs[0], encoder_outputs[1] + decoder_outputs[1],)
+            if output_attentions:
+                outputs = outputs + (encoder_outputs[3] + decoder_outputs[2],)
+        else:
+            encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
+            encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
+            outputs = (encoder_outputs[0],)
+            cls_tokens = encoder_cls_tokens
+            if output_hidden_states:
+                outputs = outputs + (encoder_outputs[0], encoder_outputs[1],)
+            if output_attentions:
+                outputs = outputs + (encoder_outputs[3],)
+
         outputs += (encoder_cls_tokens, cls_tokens,)
+        outputs += answering
         return outputs
 
 
@@ -1825,7 +1844,7 @@ def KL(input, target, reduction="sum"):
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3, adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0,
-                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0):
+                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0, answering_lm_w=1.0):
         super().__init__(config)
 
         self.config = config
@@ -1870,6 +1889,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.adv_epsilon = adv_epsilon
         self.adv_ascent_steps = adv_ascent_steps
         self.adv_w = adv_w
+        self.answering_lm_w = answering_lm_w
         if aitm:
             self.adv_lm_w = -1 * abs(self.adv_lm_w)
             assert not alum
@@ -1999,11 +2019,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             char_ids=None, char_offsets=None,
             gap_sentence_input_ids=None, gap_sentence_attention_mask=None,
             jumble_sentence_input_ids=None, jumble_sentence_attention_mask=None,
+            labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
             **kwargs
 
     ):
-
-        # TODO: should 1st block in fused setting have one more self-attention layer in a separate pipeline before MLM layer, this extra SA layers output will not go to 2nd block.
 
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -2023,6 +2042,18 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
+        answering_lm_loss = 0.0
+        if labels_pet_input_ids is not None:
+            answering_hidden = self.funnel.answering_ffn(encoder_outputs[0][:, self.cls_tokens - 1:])
+            answering_logits = self.funnel.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            answering_predictions = answering_logits.argmax(dim=-1)
+            loss_fct = self.loss_ce  # -100 index = padding token
+            answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids.view(-1))
+            self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
+            answering_lm_correct = answering_predictions == labels_pet_input_ids
+            self.accuracy_hist["answering_lm"].append(float(answering_lm_correct[labels_pet_attention_mask].sum() / len(answering_lm_correct[labels_pet_attention_mask].view(-1))))
+
+
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
@@ -2135,7 +2166,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits)
             loss = loss + adv_loss
 
-        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss
+        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss
 
 
         # TODO: return one loss
@@ -2146,14 +2177,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                        decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
                        encoder_output=encoder_outputs[0][:, (self.cls_tokens - 1):], encoder_cls=encoder_outputs[0][:, :self.cls_tokens], encoder_hidden_states=encoder_outputs[1])
         return results
-
-
-class AITM(ABC):
-    pass
-
-
-class BertAITM(nn.Module, AITM):
-    pass
 
 
 def str2bool(v):
@@ -2167,13 +2190,38 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+def get_tokenizer(name):
+    from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+    if "roberta" in name:
+        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+    elif "bert" in name:
+        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+    else:
+        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+    setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
+    tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
+
+    n_question_tokens = 8
+    for i in range(n_question_tokens):
+        setattr(tokenizer, "_question_token_%s" % i, "[QUESTION_%s]" % i)
+        setattr(tokenizer, "_answer_token_%s" % i, "[ANSWER_%s]" % i)
+        setattr(tokenizer, "_answer_end_token_%s" % i, "[ANSWER_END_%s]" % i)
+        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["question_token_%s" % i]
+        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_token_%s" % i]
+        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token_%s" % i]
+        tokenizer.add_special_tokens({"question_token_%s" % i: "[QUESTION_%s]", "answer_token_%s" % i: "[ANSWER_%s]", "answer_end_token_%s" % i: "[ANSWER_END_%s]" % i})
+
+    return tokenizer
+
+
 if __name__ == "__main__":
     import time
     import argparse
     import numpy as np
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
-    from transformers import PreTrainedTokenizerFast, BertTokenizerFast
+
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
 
     ap = argparse.ArgumentParser()
@@ -2183,7 +2231,7 @@ if __name__ == "__main__":
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=True)
-    ap.add_argument("--model", type=str, default='fastformer_fused_electra') # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2202,14 +2250,11 @@ if __name__ == "__main__":
     large_max_length = 1024 - config.num_highway_cls_tokens
     very_large_max_length = 1536 - config.num_highway_cls_tokens
 
+    tokenizer = get_tokenizer("bert")
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     dataset = SmallTextDataset(small_texts)
-    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-    setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
-    tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
-    dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512), dataset)
+    dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length), dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
     pt_batch = next(iter(dataloader))
 
@@ -2221,10 +2266,7 @@ if __name__ == "__main__":
             assert not forward_only
         if model_name == "fastformer_fused_electra":
             model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3)
-            sm_pt_batch = dict(**sm_pt_batch, **dict(gap_sentence_input_ids=pt_batch["gap_sentence_input_ids"], gap_sentence_attention_mask=pt_batch["gap_sentence_attention_mask"],
-                                                     jumble_sentence_attention_mask=pt_batch["jumble_sentence_attention_mask"], jumble_sentence_input_ids=pt_batch["jumble_sentence_input_ids"],
-                                                     labels_segment_index=pt_batch["labels_segment_index"], labels_three_sentence_dilated_order=pt_batch["labels_three_sentence_dilated_order"],
-                                                     labels_two_sentence_order=pt_batch["labels_two_sentence_order"], label_mlm_input_ids=pt_batch["label_mlm_input_ids"]))
+            sm_pt_batch = pt_batch
             assert not forward_only
         if model_name == "fastformer_mlm":
             model = FastFormerForMaskedLM(config)
@@ -2311,6 +2353,8 @@ if __name__ == "__main__":
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
     else:
         labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
+    if "labels" in pt_batch:
+        del pt_batch["labels"]
     print("Input Sizes", pt_batch["input_ids"].size())
 
     device = torch.device(device)

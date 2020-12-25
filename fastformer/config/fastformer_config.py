@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 from transformers import PretrainedConfig
 
@@ -14,26 +14,74 @@ from dataclasses_json import dataclass_json
 
 @dataclass_json
 @dataclass
-class TrainingConfig:
-    lr: float
-    batch_size: int
-    num_batches_to_train: int  # Like epochs
+class AdversarialConfig:
+    aitm: bool
+    alum: bool
+    adv_lm_w: float = 1.0
+    adv_ascent_steps: int = 1
+    aitm_clip_min: float = 0.1
+    aitm_clip_max: float = 0.9
+    adv_step_size: float = 1e-3
+    adv_epsilon: float = 1e-2
+    aitm_noise_var: float = 0.1
+    adv_w: float = 1.0
+
+
+@dataclass_json
+@dataclass
+class DatasetConfig:
+    num_batches_to_train: int
     num_batches_to_validate: int
+    datasets: Dict[str, float]  # Dataset name and probability of choice
+
+
+
+@dataclass_json
+@dataclass
+class OptimizerConfig:
+    lr: float
+    epsilon: float
+    beta_1: float
+    beta_2: float
+    batch_size: int
+    test_batch_size: int
+    optimizer_class: str
+    scheduler_class: str
+    do_eval: bool
     validate_every_steps: int
     gradient_clipping: float
     fp16: bool
-    datasets: List[str]
-    alum: bool
+    early_stopping: bool
+    early_stopping_steps: int
+    reduce_lr_on_plateau: bool
+    reduce_lr_on_plateau_steps: int
+
+
+@dataclass_json
+@dataclass
+class ModelConfig:
+    tokenizer_name: str
+    tokenizer_class: str
     model_class: str
     model_name: str
+
+
+
+@dataclass_json
+@dataclass
+class TrainingConfig:
     experiment_name: str
-    optimizer_class: str
-    scheduler_class: str
+    experiment_desc: str
+    seed: int
+    optimizer: OptimizerConfig
+    dataset: DatasetConfig
+    model: ModelConfig
+    adversary: AdversarialConfig
 
 
-
+@dataclass_json
+@dataclass
 class FastFormerConfig(PretrainedConfig):
-    model_type = "funnel"
 
     def __init__(
             self,
@@ -58,7 +106,6 @@ class FastFormerConfig(PretrainedConfig):
             pooling_type="mean",  # learn, #learn_sdconv
             pooling_kernel_size=5,
             stride=2,
-            attention_type="relative_shift",
             ffn_groups=4,
             ffn_layers=0,
             ffn_width=4,
@@ -101,6 +148,7 @@ class FastFormerConfig(PretrainedConfig):
         except:
             use_cuda_conv = False
         self.vocab_size = vocab_size
+        self.tokenizer_length = max_position_embeddings - num_highway_cls_tokens
         self.block_sizes = block_sizes
         self.block_repeats = block_repeats
         self.separate_compressiion_layer = separate_compressiion_layer
@@ -143,11 +191,6 @@ class FastFormerConfig(PretrainedConfig):
         ], f"Got {pooling_type} for `compress_query_method`"
         self.pooling_type = pooling_type
         self.compress_query_method = compress_query_method
-        assert attention_type in [
-            "relative_shift",
-            "factorized",
-        ], f"Got {attention_type} for `attention_type` but only 'relative_shift' and 'factorized' are supported."
-        self.attention_type = attention_type
         self.expand_dim_before_pooling = expand_dim_before_pooling
         self.ffn_groups = ffn_groups
         self.ffn_layers = ffn_layers
