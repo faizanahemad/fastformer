@@ -246,7 +246,8 @@ class TokenizerDataset(Dataset):
         item = self.dataset[item]
         pet_query = item["query"] if "query" in item else None
         pet_answer = item["answer"] if "answer" in item else None
-
+        pet_query = ["how many queens?"] * 8
+        pet_answer = ["eight"] * 8
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
@@ -316,9 +317,10 @@ class TokenizerDataset(Dataset):
                     mlm_text = mlm_text + " " + tokenizer.sep_token
 
                 mlm_text = mlm_text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
-                mlm_text = mlm_text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + str(len(tokenizer.tokenize(a))) + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+                mlm_text = mlm_text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + str(len(tokenizer.tokenize(a)))
                 assert a is not None
-                labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + a + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+                labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + a + " " + getattr(tokenizer, "answer_token_%s" % i)
+            labels_pet_text = (labels_pet_text + " " + getattr(tokenizer, "answer_end_token")).strip()
             if n_queries > 0:
                 labels_pet_text_tokenizer_args = dict(**self.tokenizer_args)
                 labels_pet_text_max_length = 128
@@ -326,8 +328,7 @@ class TokenizerDataset(Dataset):
                 tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=True, **labels_pet_text_tokenizer_args)
                 input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
                 results.update(dict(labels_pet_input_ids=input_ids.squeeze(),
-                                    labels_pet_attention_mask=attention_mask.squeeze(), labels_pet_max_length=labels_pet_text_max_length))
-
+                                    labels_pet_attention_mask=attention_mask.squeeze()))
 
             tokenizer_outputs = tokenizer(mlm_text, return_offsets_mapping=True, **self.tokenizer_args)
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
@@ -348,7 +349,7 @@ class TokenizerDataset(Dataset):
                 text = text + " " + tokenizer.sep_token
 
             text = text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
-            text = text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + tokenizer.mask_token + " " + getattr(tokenizer, "answer_end_token_%s" % i)
+            text = text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + tokenizer.mask_token
 
         inp = char_rnn_tokenize(text, self.tokenizer, self.char_to_id, **self.tokenizer_args)
         results.update(inp)
@@ -379,7 +380,9 @@ def collate_fn(samples):
         samples["char_ids"] = char_ids
     # TODO: reduce the batch seq length to minimum required and a multiple of 16.
     for k, v in samples.items():
-        if len(v.size()) < 2 or k == "char_offsets" or "label" in k or k == "token_type_ids":
+        if len(v.size()) < 2 or k == "char_offsets" or k == "token_type_ids":
+            continue
+        if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
             continue
         step_size = 64 if k == "char_ids" else 16
         while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:

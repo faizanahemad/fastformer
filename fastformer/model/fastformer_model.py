@@ -2044,14 +2044,18 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         )
         answering_lm_loss = 0.0
         if labels_pet_input_ids is not None:
-            answering_hidden = self.funnel.answering_ffn(encoder_outputs[0][:, self.cls_tokens - 1:])
+            encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens:]
+            alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
+            assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
+
+            answering_hidden = self.funnel.answering_ffn(encoder_last_layer_out[:, :alen])
             answering_logits = self.funnel.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
             answering_predictions = answering_logits.argmax(dim=-1)
-            loss_fct = self.loss_ce  # -100 index = padding token
-            answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids.view(-1))
+            loss_fct = self.loss_ce
+            answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
             self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
-            answering_lm_correct = answering_predictions == labels_pet_input_ids
-            self.accuracy_hist["answering_lm"].append(float(answering_lm_correct[labels_pet_attention_mask].sum() / len(answering_lm_correct[labels_pet_attention_mask].view(-1))))
+            answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
+            self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
 
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
@@ -2201,16 +2205,16 @@ def get_tokenizer(name):
     setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
     tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
-
+    setattr(tokenizer, "_answer_end_token", "[ANSWER_END]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token"]
+    tokenizer.add_special_tokens({"answer_end_token": "[ANSWER_END]"})
     n_question_tokens = 8
     for i in range(n_question_tokens):
         setattr(tokenizer, "_question_token_%s" % i, "[QUESTION_%s]" % i)
         setattr(tokenizer, "_answer_token_%s" % i, "[ANSWER_%s]" % i)
-        setattr(tokenizer, "_answer_end_token_%s" % i, "[ANSWER_END_%s]" % i)
         tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["question_token_%s" % i]
         tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_token_%s" % i]
-        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token_%s" % i]
-        tokenizer.add_special_tokens({"question_token_%s" % i: "[QUESTION_%s]", "answer_token_%s" % i: "[ANSWER_%s]", "answer_end_token_%s" % i: "[ANSWER_END_%s]" % i})
+        tokenizer.add_special_tokens({"question_token_%s" % i: "[QUESTION_%s]" % i, "answer_token_%s" % i: "[ANSWER_%s]" % i})
 
     return tokenizer
 
