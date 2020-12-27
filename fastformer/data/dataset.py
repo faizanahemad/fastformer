@@ -246,8 +246,14 @@ class TokenizerDataset(Dataset):
         item = self.dataset[item]
         pet_query = item["query"] if "query" in item else None
         pet_answer = item["answer"] if "answer" in item else None
-        pet_query = ["how many queens?"] * 8
-        pet_answer = ["eight"] * 8
+
+        labels_seq = item["labels_seq"] if "labels_seq" in item else None
+        labels_seq_prompt = item["labels_seq_prompt"] if "labels_seq_prompt" in item else None
+
+        # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
+
+        # pet_query = ["how many queens?"] * 8
+        # pet_answer = ["eight"] * 8
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
@@ -271,7 +277,7 @@ class TokenizerDataset(Dataset):
         if self.training:
             segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
             assert len(segments) == self.cls_tokens
-            if random.random() < self.sentence_jumble_proba:
+            if random.random() < self.sentence_jumble_proba and n_queries == 0:
                 seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
             else:
                 seg_idxs = list(range(self.cls_tokens))
@@ -305,11 +311,15 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
 
-            seq = segments[word_jumble_seg_idxs].split()
-            random.shuffle(seq)
-            segments[word_jumble_seg_idxs] = " ".join(seq).strip()
+            if n_queries == 0:
+                seq = segments[word_jumble_seg_idxs].split()
+                wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
+                random.shuffle(wj_seq2)
+                seq = wj_seq1 + wj_seq2
+                segments[word_jumble_seg_idxs] = " ".join(seq).strip()
 
-            segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 2]) + " " + self.tokenizer.sentence_mask_token
+            if n_queries == 0:
+                segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 2]) + " " + self.tokenizer.sentence_mask_token
             mlm_text = " ".join(segments)  # Training Labels for MLM
             labels_pet_text = ""
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
@@ -336,7 +346,7 @@ class TokenizerDataset(Dataset):
 
             noised_seg_idxs = [word_jumble_seg_idxs, masked_seg_idxs]
             for idx, seq in enumerate(segments):
-                if idx in noised_seg_idxs:
+                if idx in noised_seg_idxs or n_queries != 0:
                     continue
                 seq = span_based_whole_word_masking(seq, self.tokenizer, self.word_mask_proba, self.vocab, self.max_span_length)
                 seq = word_level_noising(seq, self.tokenizer, self.word_noise_proba)
@@ -402,6 +412,7 @@ def collate_fn(samples):
 
 def all_datasets():
     from datasets import load_dataset
+    # TODO: convert \n to spaces
     bookcorpus = load_dataset("bookcorpus")
     bookcorpusopen = load_dataset("bookcorpusopen")
     openwebtext = load_dataset("openwebtext")
@@ -417,7 +428,7 @@ def all_datasets():
     yelp_review_full = load_dataset("yelp_review_full", script_version="master")
     big_patent = load_dataset("big_patent",'all', script_version="master")
     cc100_en = load_dataset("cc100", lang="en", script_version="master")  # http://data.statmt.org/cc-100/
-    # generics_kb = load_dataset("generics_kb")
+    # generics_kb = load_dataset("generics_kb",'generics_kb_best', script_version="master")
     open_subtitles = load_dataset("open_subtitles", 'en-hi', script_version="master")
     yahoo_answers_topics = load_dataset("yahoo_answers_topics")
     eli5 = load_dataset("eli5")
@@ -433,6 +444,68 @@ def all_datasets():
 
     for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00', 'Software_v1_00', 'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00', 'PC_v1_00', 'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00', 'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00', 'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00', 'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00', 'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00', 'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
         amazon_us_reviews = load_dataset("amazon_us_reviews", ds, script_version="master")
+
+    glue = dict()
+    for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
+        glue[gl] = load_dataset("glue", gl)
+
+    super_glue = dict()
+    for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc', 'wsc.fixed', 'axb', 'axg']:
+        super_glue[gl] = load_dataset("super_glue", gl)
+
+    google_wellformed_query = load_dataset("google_wellformed_query", script_version="master")
+
+    codah = load_dataset("codah", "codah")
+    swag = load_dataset("swag", 'regular')
+    hellaswag = load_dataset("hellaswag")
+    search_qa = load_dataset("search_qa", 'train_test_val')
+    hotpot_qa = load_dataset("hotpot_qa", 'distractor')
+    hotpot_qa = load_dataset("hotpot_qa", 'fullwiki')
+    squad = load_dataset("squad")
+    squad_v2 = load_dataset("squad_v2")
+    ms_marco = load_dataset("ms_marco", 'v2.1')
+    com_qa = load_dataset("com_qa")
+    commonsense_qa = load_dataset("commonsense_qa")
+    cosmos_qa = load_dataset("cosmos_qa")
+    mrqa = load_dataset("mrqa", script_version="master")
+    natural_questions = load_dataset("natural_questions")
+    piqa = load_dataset("piqa")
+    pubmed_qa = load_dataset("pubmed_qa", 'pqa_labeled', script_version="master")
+    # pubmed = load_dataset("pubmed", script_version="master")
+    scientific_papers_pubmed = load_dataset("scientific_papers", 'pubmed')
+    scientific_papers_arxiv = load_dataset("scientific_papers", 'arxiv')
+    biomrc_large_A = load_dataset("biomrc", 'biomrc_large_A')
+    biomrc_large_B = load_dataset("biomrc", 'biomrc_large_B')
+    med_hop = load_dataset("med_hop", 'original', script_version="master")
+    covid_qa_deepset = load_dataset("covid_qa_deepset", script_version="master")
+    sciq = load_dataset("sciq")
+    peer_read_reviews = load_dataset("peer_read", 'reviews', script_version="master")
+    peer_read_pdf = load_dataset("peer_read", 'parsed_pdfs', script_version="master")
+
+    ai2_arc = load_dataset("ai2_arc", 'ARC-Challenge')
+    ai2_arc_easy = load_dataset("ai2_arc", 'ARC-Easy')
+    circa = load_dataset("circa")
+    zest = load_dataset("zest", script_version="master")
+    drop = load_dataset("drop")
+    eraser_multi_rc = load_dataset("eraser_multi_rc")
+    # conceptnet5 = load_dataset("conceptnet5", 'conceptnet5', script_version="master")
+    crawl_domain = load_dataset("crawl_domain", script_version="master")
+
+    conll2003 = load_dataset("conll2003")
+    polyglot_ner = load_dataset("polyglot_ner", 'en')
+    acronym_identification = load_dataset("acronym_identification", script_version="master")
+    limit = load_dataset("limit", script_version="master")
+    wikiann = load_dataset("wikiann", 'en', script_version="master")
+    blog_authorship_corpus = load_dataset("blog_authorship_corpus")
+    ptb_text_only = load_dataset("ptb_text_only", script_version="master")
+    rotten_tomatoes = load_dataset("rotten_tomatoes")
+
+
+
+
+    # math_qa = load_dataset("math_qa")
+    # docred = load_dataset("docred")
+
 
 
 
