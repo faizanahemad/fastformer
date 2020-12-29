@@ -34,7 +34,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
 from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
-from fastformer.data.sample_data import SmallTextDataset, small_texts
+from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -490,13 +490,24 @@ class ShortSeqRNN(nn.Module):
             segs.append(seg)
             segments.append((seg_start, seg_end, seg_end - 2 * self.overlap, seg_end - seg_start,))
 
-        query = torch.cat(segs, 0)
+        query = torch.stack(segs, 0).transpose(0, 1)
+        query = query.reshape(-1, query.shape[2], query.shape[3])
         query = query.view(query.shape[0], query.shape[1], self.heads, -1)
+        """
+        query = query.permute(2, 0, 1, 3)
+        processed_query = []
+        for i in range(query.size(0)):
+            qp = self.gru[i](query(i))
+            processed_query.append(qp)
+        query = torch.cat(processed_query, 0)
+        query = query.permute(1, 2, 0, 3).view(-1, query.shape[2], dim)
+        """
         query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
 
         query = self.gru(query)[0]
         query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        query = query.reshape(bs, -1, dim)[:, self.overlap:seqlen + self.overlap]
+        query = query[:, self.overlap:-self.overlap]
+        query = query.reshape(bs, -1, dim)[:, :seqlen]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
@@ -2258,7 +2269,7 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer("bert")
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
-    dataset = SmallTextDataset(small_texts)
+    dataset = SmallTextDataset(large_texts)
     dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length), dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
     pt_batch = next(iter(dataloader))

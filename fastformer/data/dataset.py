@@ -41,13 +41,13 @@ def isnumber(text):
 
 
 def segment(text, n_segments, sent_detector, pad_token):
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ',text)
+    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
     sents = sent_detector.tokenize(text)
     sent_wc = list(map(lambda x: len(x.split()), sents))
     twc = len(text.split())
     segments = defaultdict(str)
     tol = 0.1
-    while len(segments) < n_segments and tol < 0.9:
+    while len(segments) < n_segments and tol <= (n_segments/2):
         segments = defaultdict(str)
         expected_wc = twc // (n_segments + tol)
         tol += 0.2
@@ -292,13 +292,13 @@ class TokenizerDataset(Dataset):
             masked_segments = word_jumble_segments = tokenizer.pad_token
             iters = 0
             word_jumble_seg_idxs = -1
-            masked_seg_idxs = -1
+            masked_seg_idxs = self.cls_tokens - 1
             while (masked_segments == tokenizer.pad_token or word_jumble_segments == tokenizer.pad_token) and iters <= 16:
                 iters += 1
                 if word_jumble_segments == tokenizer.pad_token:
                     word_jumble_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {masked_seg_idxs}), 1)[0]
                     word_jumble_segments = segments[word_jumble_seg_idxs]
-                if masked_segments == tokenizer.pad_token:
+                if masked_segments == tokenizer.pad_token or seg_idxs[masked_seg_idxs] == self.cls_tokens - 1:
                     masked_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {word_jumble_seg_idxs}), 1)[0]
                     masked_segments = segments[masked_seg_idxs]
 
