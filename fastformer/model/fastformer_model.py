@@ -456,10 +456,11 @@ class ShortSeqRNN(nn.Module):
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
-
-        self.gru = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-                          nonlinearity="tanh",
-                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+        self.gru = nn.ModuleList()
+        for i in range(heads):
+            self.gru.append(nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+                                   nonlinearity="tanh",
+                                   bias=False, batch_first=True, dropout=0.0, bidirectional=True))
         # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
@@ -493,19 +494,18 @@ class ShortSeqRNN(nn.Module):
         query = torch.stack(segs, 0).transpose(0, 1)
         query = query.reshape(-1, query.shape[2], query.shape[3])
         query = query.view(query.shape[0], query.shape[1], self.heads, -1)
-        """
+
         query = query.permute(2, 0, 1, 3)
         processed_query = []
         for i in range(query.size(0)):
-            qp = self.gru[i](query(i))
+            qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
-        query = torch.cat(processed_query, 0)
-        query = query.permute(1, 2, 0, 3).view(-1, query.shape[2], dim)
-        """
-        query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
+        query = torch.stack(processed_query, 0)
+        query = query.permute(1, 2, 0, 3).reshape(-1, query.shape[2], dim)
 
-        query = self.gru(query)[0]
-        query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
+        # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
+        # query = self.gru(query)[0]
+        # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
         query = query[:, self.overlap:-self.overlap]
         query = query.reshape(bs, -1, dim)[:, :seqlen]
 
