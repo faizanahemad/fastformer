@@ -1617,6 +1617,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             char_ids=None, char_offsets=None,
             run_decoder=True,
             run_answering=True,
+            run_auto_regressive=True,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1653,7 +1654,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             output_hidden_states=True,
         )
         answering = ()
-        if run_answering:
+        if run_answering and hasattr(self, "answering_ffn"):
             answering_hidden = self.answering_ffn(encoder_outputs[0][:, self.cls_tokens - 1:])
             answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
             answering_predictions = answering_logits.argmax(dim=-1)

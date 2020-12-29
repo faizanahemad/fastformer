@@ -416,25 +416,43 @@ def all_datasets():
     bookcorpus = load_dataset("bookcorpus")
     bookcorpusopen = load_dataset("bookcorpusopen")
     openwebtext = load_dataset("openwebtext")
-    wikipedia = load_dataset("wikipedia", '20200501.en')
+    wikipedia = load_dataset("wikipedia", '20200501.en')  # select the right title for article
+    reddit = load_dataset("reddit")
     
     wmt14de_en = load_dataset("wmt14", 'de-en')  # ['cs-en', 'de-en', 'fr-en', 'hi-en', 'ru-en']
     un_pc = load_dataset("un_pc", 'en-fr', script_version="master")  # ['ar-de', 'ar-en', 'ar-es', 'ar-fr', 'ar-ru', 'ar-zh', 'de-en', 'de-es', 'de-fr', 'de-ru', 'de-zh', 'en-es', 'en-fr', 'en-ru', 'en-zh', 'es-fr', 'es-ru', 'es-zh', 'fr-ru', 'fr-zh', 'ru-zh']
     un_pc = load_dataset("un_pc", 'en-ru', script_version="master")
+    opus100_en_fr = load_dataset("opus100", 'en-fr', script_version="master")
+    opus100_en_ru = load_dataset("opus100", 'en-ru', script_version="master")
+    multi_x_science_sum = load_dataset("multi_x_science_sum")
+    app_reviews = load_dataset("app_reviews", script_version="master")
 
     amazon_polarity = load_dataset("amazon_polarity", script_version="master")
     imdb = load_dataset("imdb", script_version="master")
     yelp_polarity = load_dataset("yelp_polarity")
     yelp_review_full = load_dataset("yelp_review_full", script_version="master")
-    big_patent = load_dataset("big_patent",'all', script_version="master")
+    big_patent = load_dataset("big_patent", 'all', script_version="master")
     cc100_en = load_dataset("cc100", lang="en", script_version="master")  # http://data.statmt.org/cc-100/
     # generics_kb = load_dataset("generics_kb",'generics_kb_best', script_version="master")
     open_subtitles = load_dataset("open_subtitles", 'en-hi', script_version="master")
     yahoo_answers_topics = load_dataset("yahoo_answers_topics")
-    eli5 = load_dataset("eli5")
+    xsum = load_dataset("xsum")
+    eli5 = load_dataset("eli5")  # sentence ordering task, order answers in order of upvotes.
     cnn_dailymail = load_dataset("cnn_dailymail", '3.0.0')
+    cnn_dailymail = load_dataset("cnn_dailymail", '2.0.0')
+    cnn_dailymail = load_dataset("cnn_dailymail", '1.0.0')
+    wiki_lingua = load_dataset("wiki_lingua", 'english', script_version="master")
+    samsum = load_dataset("samsum", script_version="master")
+    wikihow = load_dataset("wikihow", 'all')
+    wikihow = load_dataset("wikihow", 'sep')
+    multi_news = load_dataset("multi_news")
     amazon_reviews_multi = load_dataset("amazon_reviews_multi", 'en')
-    wiki_auto = load_dataset("wiki_auto", 'auto_acl')
+    wiki_auto = load_dataset("wiki_auto", 'auto_acl')  # select the right summary from simple wiki
+    ag_news = load_dataset("ag_news")
+    gigaword = load_dataset("gigaword")  # select the correct summary from list of summaries
+    kelm = load_dataset("kelm", script_version="master")
+    wiki_atomic_edits_insertions = load_dataset("wiki_atomic_edits", 'english_insertions', script_version="master")
+    wiki_atomic_edits_deletions = load_dataset("wiki_atomic_edits", 'english_deletions', script_version="master")
 
 
     for ds in ['el-en', 'cs-en', 'en-hu', 'en-ro', 'en-sk', 'en-uk', 'en-ja', 'en-es', 'en-fr', 'de-en', 'en-ko', 'en-zh', 'en-ru', 'en-pt']:
@@ -454,6 +472,17 @@ def all_datasets():
         super_glue[gl] = load_dataset("super_glue", gl)
 
     google_wellformed_query = load_dataset("google_wellformed_query", script_version="master")
+    per_sent = load_dataset("per_sent", script_version="master")
+    selqa = load_dataset("selqa", 'answer_selection_experiments', script_version="master")  # Is the answer given correct / relevant
+    selqa = load_dataset("selqa", 'answer_selection_analysis', script_version="master")  # select the text that seems like the right / relevant answer
+    selqa = load_dataset("selqa", 'answer_triggering_experiments', script_version="master")
+    esnli = load_dataset("esnli")  # SNLI with explanations, explanations can be used along with the 2 statements for labelling
+    anli = load_dataset("anli")
+    hans = load_dataset("hans")
+    scitail = load_dataset("scitail", 'snli_format')
+    go_emotions = load_dataset("go_emotions", 'raw', script_version="master")
+    discovery = load_dataset("discovery", 'discovery', script_version="master")
+    paws = load_dataset("paws", 'labeled_final', script_version="master")
 
     codah = load_dataset("codah", "codah")
     swag = load_dataset("swag", 'regular')
@@ -463,7 +492,23 @@ def all_datasets():
     hotpot_qa = load_dataset("hotpot_qa", 'fullwiki')
     squad = load_dataset("squad")
     squad_v2 = load_dataset("squad_v2")
+    squad_adversarial = load_dataset("squad_adversarial", 'AddSent', script_version="master")
+    ropes = load_dataset("ropes")
+    yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
+    tweet_qa = load_dataset("tweet_qa", script_version="master")
+    wiki_qa = load_dataset("wiki_qa")  # Is answer correct / relevant or not
+    quac = load_dataset("quac", script_version="master")
+
     ms_marco = load_dataset("ms_marco", 'v2.1')
+    quarel = load_dataset("quarel")
+    quartz = load_dataset("quartz")
+    mocha = load_dataset("mocha", script_version="master")
+    quail = load_dataset("quail")
+    quoref = load_dataset("quoref")
+    race = load_dataset("race", 'all')
+    winogrande = load_dataset("winogrande", 'winogrande_xl')
+
+    kilt = load_dataset("kilt_tasks")
     com_qa = load_dataset("com_qa")
     commonsense_qa = load_dataset("commonsense_qa")
     cosmos_qa = load_dataset("cosmos_qa")
@@ -481,6 +526,9 @@ def all_datasets():
     sciq = load_dataset("sciq")
     peer_read_reviews = load_dataset("peer_read", 'reviews', script_version="master")
     peer_read_pdf = load_dataset("peer_read", 'parsed_pdfs', script_version="master")
+    conv_ai_3 = load_dataset("conv_ai_3", script_version="master")
+    daily_dialog = load_dataset("daily_dialog")
+    empathetic_dialogues = load_dataset("empathetic_dialogues")
 
     ai2_arc = load_dataset("ai2_arc", 'ARC-Challenge')
     ai2_arc_easy = load_dataset("ai2_arc", 'ARC-Easy')
@@ -488,8 +536,9 @@ def all_datasets():
     zest = load_dataset("zest", script_version="master")
     drop = load_dataset("drop")
     eraser_multi_rc = load_dataset("eraser_multi_rc")
-    # conceptnet5 = load_dataset("conceptnet5", 'conceptnet5', script_version="master")
+    conceptnet5 = load_dataset("conceptnet5", 'conceptnet5', script_version="master")  # Can make cloze task by asking what is the relation between the 2 words, only when sentence field is also present
     crawl_domain = load_dataset("crawl_domain", script_version="master")
+    numer_sense = load_dataset("numer_sense")
 
     conll2003 = load_dataset("conll2003")
     polyglot_ner = load_dataset("polyglot_ner", 'en')
@@ -499,12 +548,32 @@ def all_datasets():
     blog_authorship_corpus = load_dataset("blog_authorship_corpus")
     ptb_text_only = load_dataset("ptb_text_only", script_version="master")
     rotten_tomatoes = load_dataset("rotten_tomatoes")
+    sentiment140 = load_dataset("sentiment140")
+    emotion = load_dataset("emotion")
 
+    reuters_hayes = load_dataset("reuters21578", 'ModHayes')
+    reuters_lewis = load_dataset("reuters21578", 'ModLewis')
+    reuters_apte = load_dataset("reuters21578", 'ModApte')
 
+    wiki_asp = dict()
+    for ds in ['album', 'animal', 'artist', 'building', 'company', 'educational_institution', 'event', 'film', 'group', 'historic_place', 'infrastructure', 'mean_of_transportation', 'office_holder', 'plant', 'single', 'soccer_player', 'software', 'television_show', 'town', 'written_work']:
+        wiki_asp[ds] = load_dataset("wiki_asp", ds, script_version="master")
+
+    taskmaster2 = dict()
+    for ds in ['flights', 'food-ordering', 'hotels', 'movies', 'music', 'restaurant-search', 'sports']:
+        taskmaster2[ds] = load_dataset("taskmaster2", ds, script_version="master")
+
+    qa4mre = dict()
+    for ds in ['2011.main.EN', '2012.main.EN', '2013.main.EN', '2013.entrance_exam.EN', '2012.alzheimers.EN', '2013.alzheimers.EN']:
+        qa4mre[ds] = load_dataset("qa4mre", ds, script_version="master")
+
+    seval = load_dataset("joelito/sem_eval_2010_task_8")  # See: https://huggingface.co/datasets/joelito/sem_eval_2010_task_8
 
 
     # math_qa = load_dataset("math_qa")
     # docred = load_dataset("docred")
+    # lama = load_dataset("lama", 'trex', script_version="master") # Don't train on this, fact checking dataset
+    # openbookqa = load_dataset("openbookqa", 'additional') # fact checking dataset
 
 
 
