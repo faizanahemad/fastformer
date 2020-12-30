@@ -418,14 +418,26 @@ def all_datasets():
     openwebtext = load_dataset("openwebtext")
     wikipedia = load_dataset("wikipedia", '20200501.en')  # select the right title for article
     reddit = load_dataset("reddit")
+    medal = load_dataset("medal", script_version="master")
     
     wmt14de_en = load_dataset("wmt14", 'de-en')  # ['cs-en', 'de-en', 'fr-en', 'hi-en', 'ru-en']
     un_pc = load_dataset("un_pc", 'en-fr', script_version="master")  # ['ar-de', 'ar-en', 'ar-es', 'ar-fr', 'ar-ru', 'ar-zh', 'de-en', 'de-es', 'de-fr', 'de-ru', 'de-zh', 'en-es', 'en-fr', 'en-ru', 'en-zh', 'es-fr', 'es-ru', 'es-zh', 'fr-ru', 'fr-zh', 'ru-zh']
     un_pc = load_dataset("un_pc", 'en-ru', script_version="master")
+    emea = load_dataset("emea", lang1="en", lang2="nl", script_version="master")
+    giga_fren = load_dataset("giga_fren", 'en-fr', script_version="master")
+    un_ga_fr = load_dataset("un_ga", 'en_to_fr', script_version="master")
+    menyo20k_mt = load_dataset("menyo20k_mt", script_version="master")
+    hind_encorp = load_dataset("hind_encorp", script_version="master")
     opus100_en_fr = load_dataset("opus100", 'en-fr', script_version="master")
     opus100_en_ru = load_dataset("opus100", 'en-ru', script_version="master")
+    opus_tedtalks = load_dataset("opus_tedtalks", script_version="master")
+    capes = load_dataset("capes", script_version="master")
     multi_x_science_sum = load_dataset("multi_x_science_sum")
     app_reviews = load_dataset("app_reviews", script_version="master")
+    news_commentary = load_dataset("news_commentary", "en-fr", script_version="master")
+    scielo = load_dataset("scielo", 'en-pt', script_version="master")
+    scb_mt_enth_2020 = load_dataset("scb_mt_enth_2020", 'enth', script_version="master")
+    setimes = load_dataset("setimes", 'en-sr', script_version="master")
 
     amazon_polarity = load_dataset("amazon_polarity", script_version="master")
     imdb = load_dataset("imdb", script_version="master")
@@ -453,6 +465,9 @@ def all_datasets():
     kelm = load_dataset("kelm", script_version="master")
     wiki_atomic_edits_insertions = load_dataset("wiki_atomic_edits", 'english_insertions', script_version="master")
     wiki_atomic_edits_deletions = load_dataset("wiki_atomic_edits", 'english_deletions', script_version="master")
+    wiki_split = load_dataset("wiki_split", script_version="master")  # Matching task?
+    dbpedia_14 = load_dataset("dbpedia_14", script_version="master")
+    tuple_ie = load_dataset("tuple_ie", 'all', script_version="master")
 
 
     for ds in ['el-en', 'cs-en', 'en-hu', 'en-ro', 'en-sk', 'en-uk', 'en-ja', 'en-es', 'en-fr', 'de-en', 'en-ko', 'en-zh', 'en-ru', 'en-pt']:
@@ -470,6 +485,8 @@ def all_datasets():
     super_glue = dict()
     for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc', 'wsc.fixed', 'axb', 'axg']:
         super_glue[gl] = load_dataset("super_glue", gl)
+
+    health_fact = load_dataset("health_fact", script_version="master")
 
     google_wellformed_query = load_dataset("google_wellformed_query", script_version="master")
     per_sent = load_dataset("per_sent", script_version="master")
@@ -490,6 +507,7 @@ def all_datasets():
     search_qa = load_dataset("search_qa", 'train_test_val')
     hotpot_qa = load_dataset("hotpot_qa", 'distractor')
     hotpot_qa = load_dataset("hotpot_qa", 'fullwiki')
+    inquisitive_qg = load_dataset("inquisitive_qg", script_version="master")
     squad = load_dataset("squad")
     squad_v2 = load_dataset("squad_v2")
     squad_adversarial = load_dataset("squad_adversarial", 'AddSent', script_version="master")
@@ -497,7 +515,17 @@ def all_datasets():
     yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
     tweet_qa = load_dataset("tweet_qa", script_version="master")
     wiki_qa = load_dataset("wiki_qa")  # Is answer correct / relevant or not
+    narrativeqa = load_dataset("narrativeqa", script_version="master")
+    mc_taco = load_dataset("mc_taco", script_version="master")
+    social_i_qa = load_dataset("social_i_qa", script_version="master")
     quac = load_dataset("quac", script_version="master")
+    asset_simplification = load_dataset("asset", 'simplification', script_version="master")
+    asset_ratings = load_dataset("asset", 'ratings', script_version="master")
+    e2e_nlg_cleaned = load_dataset("e2e_nlg_cleaned", script_version="master")
+    youtube_caption_corrections = load_dataset("youtube_caption_corrections", script_version="master")
+    europa_eac_tm = load_dataset("europa_eac_tm", 'en2fr', script_version="master")
+
+    sent_comp = load_dataset("sent_comp", script_version="master")
 
     ms_marco = load_dataset("ms_marco", 'v2.1')
     quarel = load_dataset("quarel")
@@ -510,12 +538,14 @@ def all_datasets():
 
     kilt = load_dataset("kilt_tasks")
     com_qa = load_dataset("com_qa")
+    qed = load_dataset("qed", script_version="master")
     commonsense_qa = load_dataset("commonsense_qa")
     cosmos_qa = load_dataset("cosmos_qa")
     mrqa = load_dataset("mrqa", script_version="master")
     natural_questions = load_dataset("natural_questions")
     piqa = load_dataset("piqa")
     pubmed_qa = load_dataset("pubmed_qa", 'pqa_labeled', script_version="master")
+    ohsumed = load_dataset("ohsumed", script_version="master")
     # pubmed = load_dataset("pubmed", script_version="master")
     scientific_papers_pubmed = load_dataset("scientific_papers", 'pubmed')
     scientific_papers_arxiv = load_dataset("scientific_papers", 'arxiv')
@@ -528,6 +558,7 @@ def all_datasets():
     peer_read_pdf = load_dataset("peer_read", 'parsed_pdfs', script_version="master")
     conv_ai_3 = load_dataset("conv_ai_3", script_version="master")
     daily_dialog = load_dataset("daily_dialog")
+    medical_questions_pairs = load_dataset("medical_questions_pairs", script_version="master")
     empathetic_dialogues = load_dataset("empathetic_dialogues")
 
     ai2_arc = load_dataset("ai2_arc", 'ARC-Challenge')
@@ -555,6 +586,8 @@ def all_datasets():
     reuters_lewis = load_dataset("reuters21578", 'ModLewis')
     reuters_apte = load_dataset("reuters21578", 'ModApte')
 
+    scitldr = load_dataset("scitldr", 'Abstract', script_version="master")
+
     wiki_asp = dict()
     for ds in ['album', 'animal', 'artist', 'building', 'company', 'educational_institution', 'event', 'film', 'group', 'historic_place', 'infrastructure', 'mean_of_transportation', 'office_holder', 'plant', 'single', 'soccer_player', 'software', 'television_show', 'town', 'written_work']:
         wiki_asp[ds] = load_dataset("wiki_asp", ds, script_version="master")
@@ -574,6 +607,15 @@ def all_datasets():
     # docred = load_dataset("docred")
     # lama = load_dataset("lama", 'trex', script_version="master") # Don't train on this, fact checking dataset
     # openbookqa = load_dataset("openbookqa", 'additional') # fact checking dataset
+    # aqua_rat  = load_dataset("aqua_rat", 'raw', script_version="master") # numer_sense
+    # jeopardy = load_dataset("jeopardy", script_version="master") # fact checking dataset
+    # common_gen = load_dataset("common_gen", script_version="master")
+    # has_part  = load_dataset("has_part", script_version="master")
+    # mkqa  = load_dataset("mkqa", script_version="master")
+    # nq_open  = load_dataset("nq_open", script_version="master")
+    # winograd_wsc  = load_dataset("winograd_wsc",'wsc285', script_version="master")
+
+    # wiki_bio  = load_dataset("wiki_bio", script_version="master")
 
 
 
