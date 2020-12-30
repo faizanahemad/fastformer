@@ -2246,8 +2246,8 @@ if __name__ == "__main__":
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
-    ap.add_argument("--aitm", type=str2bool, default=True)
-    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+    ap.add_argument("--aitm", type=str2bool, default=False)
+    ap.add_argument("--model", type=str, default='distilroberta-base')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2267,9 +2267,12 @@ if __name__ == "__main__":
     very_large_max_length = 1536 - config.num_highway_cls_tokens
 
     tokenizer = get_tokenizer("bert")
+    if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
+        md_config.tokenizer_length=512
+        md_config.max_position_embeddings=512
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
-    dataset = SmallTextDataset(large_texts)
+    dataset = SmallTextDataset(very_large_texts)
     dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length), dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
     pt_batch = next(iter(dataloader))
@@ -2438,7 +2441,7 @@ if __name__ == "__main__":
         print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
         print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=100))
     else:
-        _ = [run() for _ in range(2)]
+        _ = [run() for _ in range(1)]
         times = []
         for _ in trange(20):
             st = time.time()
