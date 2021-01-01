@@ -1856,7 +1856,8 @@ def KL(input, target, reduction="sum"):
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3, adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0,
-                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, gap_sentence_prediction_w=1.0, answering_lm_w=1.0):
+                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
+                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0):
         super().__init__(config)
 
         self.config = config
@@ -1867,20 +1868,19 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-        self.lm_dim_match = BertFFN(config, config.block_channel_size[0], config.block_channel_size[0]*2, d_out=config.embedding_size)
+        self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.order_prediction_fc = BertFFN(config, self.config.block_channel_size[1], self.config.block_channel_size[1])
+            self.order_prediction_fc = nn.Identity()
             self.sent_predict_fc = nn.Linear(config.block_channel_size[1], self.cls_tokens)
             self.two_sent_order_fc = Conv1d(config.block_channel_size[1], 1, 2, 1)
             self.three_sent_order_fc = Conv1d(config.block_channel_size[1], 1, 3, 1, dilation=2)
 
-        if word_order_prediction_w > 0 or gap_sentence_prediction_w > 0:
+        if word_order_prediction_w > 0 or gap_sentence_prediction_w > 0 or highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.word_gap_prediction_fc = nn.Sequential(BertFFN(config, self.config.block_channel_size[-1], self.config.block_channel_size[0],
-                                                                d_out=self.config.block_channel_size[0]),
+            self.word_gap_prediction_fc = nn.Sequential(Conv1d(self.config.block_channel_size[-1], self.config.block_channel_size[0],kernel_size=1, groups=4),
                                                         nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
-            self.initiator_emb = nn.Embedding(2, self.config.block_channel_size[0])
+            self.initiator_emb = nn.Embedding(4, self.config.block_channel_size[0])
             self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
             self.word_order_prediction_w = word_order_prediction_w
             self.gap_sentence_prediction_w = gap_sentence_prediction_w
@@ -1902,6 +1902,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.adv_ascent_steps = adv_ascent_steps
         self.adv_w = adv_w
         self.answering_lm_w = answering_lm_w
+        self.highway_cls_ar_w = highway_cls_ar_w
         if aitm:
             self.adv_lm_w = -1 * abs(self.adv_lm_w)
             assert not alum
@@ -2030,6 +2031,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_hidden_states=None,
             char_ids=None, char_offsets=None,
             gap_sentence_input_ids=None, gap_sentence_attention_mask=None,
+            highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
             jumble_sentence_input_ids=None, jumble_sentence_attention_mask=None,
             labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
             **kwargs
@@ -2069,7 +2071,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
             self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
 
-
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
@@ -2080,6 +2081,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         word_order_loss = 0.0
         gap_sentence_loss = 0.0
+        highway_cls_ar_loss = 0.0
         sent_order_logits = None
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
             second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
@@ -2104,8 +2106,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             sentence_order_loss = self.sentence_order_prediction_w * (sent_order_loss + two_sent_loss + three_sent_loss)
 
-        if (self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None) or (self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None):
-            third_block_hidden = self.word_gap_prediction_fc(third_block_hidden)
+        if (self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None) or \
+                (self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None):
+            third_block_hidden = self.word_gap_prediction_fc(third_block_hidden[:, :self.cls_tokens])
 
         if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None:
             word_order_inputs_embeds, _ = self.funnel.embeddings(shift_right(jumble_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
@@ -2116,7 +2119,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(jumble_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=jumble_sentence_attention_mask.device),
                      jumble_sentence_attention_mask], dim=1)
 
-            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, third_block_hidden, third_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1])
+            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, third_block_hidden, third_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1][:, :self.cls_tokens])
             word_order_out = self.lm_dim_match(word_order_out[:, (self.funnel.cls_tokens - 1):])
             word_order_out = self.lm_head(word_order_out)[:, :, :self.config.vocab_size]
             word_order_loss = self.word_order_prediction_w * self.loss_ce(word_order_out.view(-1, self.config.vocab_size), jumble_sentence_input_ids.view(-1))
@@ -2133,13 +2136,31 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(gap_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=gap_sentence_attention_mask.device),
                      gap_sentence_attention_mask], dim=1)
 
-            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, third_block_hidden, third_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1])
+            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, third_block_hidden, third_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1][:, :self.cls_tokens])
             gap_sentence_out = self.lm_dim_match(gap_sentence_out[:, (self.funnel.cls_tokens - 1):])
             gap_sentence_out = self.lm_head(gap_sentence_out)[:, :, :self.config.vocab_size]
             gap_sentence_loss = self.gap_sentence_prediction_w * self.loss_ce(gap_sentence_out.view(-1, self.config.vocab_size), gap_sentence_input_ids.view(-1))
             gap_sentence_out = gap_sentence_out.argmax(dim=-1) == gap_sentence_input_ids
             self.accuracy_hist["gap_sentence"].append(float(gap_sentence_out.sum() / len(gap_sentence_out.view(-1))))
             self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
+
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None:
+            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
+            initiator_emb = self.initiator_emb(torch.tensor(2))[None, None, :]
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds + initiator_emb
+
+            if self.config.num_highway_cls_tokens > 0:
+                highway_cls_ar__attention_mask = torch.cat(
+                    [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
+                     highway_cls_ar__attention_mask], dim=1)
+
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, third_block_hidden, third_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][:, :self.cls_tokens])
+            highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
+            highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.view(-1, self.config.vocab_size), highway_cls_ar_input_ids.view(-1))
+            highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1) == highway_cls_ar_input_ids
+            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.sum() / len(highway_cls_ar_out.view(-1))))
+            self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
         assert labels is not None
@@ -2182,7 +2203,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits)
             loss = loss + adv_loss
 
-        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss
+        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss
 
 
         # TODO: return one loss
@@ -2246,7 +2267,7 @@ if __name__ == "__main__":
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
-    ap.add_argument("--aitm", type=str2bool, default=False)
+    ap.add_argument("--aitm", type=str2bool, default=True)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())

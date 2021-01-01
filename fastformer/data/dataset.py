@@ -49,7 +49,7 @@ def segment(text, n_segments, sent_detector, pad_token):
     tol = 0.1
     while len(segments) < n_segments and tol <= (n_segments/2):
         segments = defaultdict(str)
-        expected_wc = twc // (n_segments + tol)
+        expected_wc = max(twc // (n_segments + tol), 16)  # Each segment is atleast 16 words
         tol += 0.2
         cwc = 0
         sidx = 0
@@ -272,12 +272,17 @@ class TokenizerDataset(Dataset):
             label = 0
 
         text = item["text"]
+        tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)
+        # TODO: try one in ten words
+        highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         results = dict(labels=label, n_pet_queries=n_queries)
 
         if self.training:
             segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
+            # TODO: No jumbling for cases where more than 2 of segment is PAD
+            count_pad_tokens = sum(segments == tokenizer.pad_token)
             assert len(segments) == self.cls_tokens
-            if random.random() < self.sentence_jumble_proba and n_queries == 0:
+            if random.random() < self.sentence_jumble_proba and n_queries == 0 and count_pad_tokens <= 2:
                 seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
             else:
                 seg_idxs = list(range(self.cls_tokens))
@@ -286,7 +291,8 @@ class TokenizerDataset(Dataset):
             seg_slides = seg_idxs + seg_idxs[0:4]
             three_ordered_dilated = torch.tensor([int(s1 < s2 < s3) for s1, s2, s3 in zip(seg_slides[0:-4:1], seg_slides[2:-2:1], seg_slides[4::1])])
             results = dict(labels=label, labels_two_sentence_order=two_ordered, labels_three_sentence_dilated_order=three_ordered_dilated,
-                           labels_segment_index=torch.tensor(seg_idxs))
+                           labels_segment_index=torch.tensor(seg_idxs),
+                           highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
             segments = segments[seg_idxs]
             masked_segments = word_jumble_segments = tokenizer.pad_token
@@ -311,15 +317,15 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
 
-            if n_queries == 0:
+            if n_queries == 0 and count_pad_tokens <= 2:
                 seq = segments[word_jumble_seg_idxs].split()
                 wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
                 random.shuffle(wj_seq2)
                 seq = wj_seq1 + wj_seq2
                 segments[word_jumble_seg_idxs] = " ".join(seq).strip()
-
-            if n_queries == 0:
-                segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 2]) + " " + self.tokenizer.sentence_mask_token
+                segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 4]) + " " + self.tokenizer.sentence_mask_token
+            else:
+                word_jumble_seg_idxs = masked_seg_idxs = -1
             mlm_text = " ".join(segments)  # Training Labels for MLM
             labels_pet_text = ""
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
