@@ -35,6 +35,7 @@ from transformers.utils import logging
 
 from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
 from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts
+from fastformer.model.AdMSLoss import AdMSoftmaxLoss
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -1857,7 +1858,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3, adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
-                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0):
+                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.2):
         super().__init__(config)
 
         self.config = config
@@ -1867,7 +1868,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
-        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+        if additive_margin_softmax_w == 0:
+            self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+        else:
+            self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id)
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
@@ -1885,7 +1889,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.word_order_prediction_w = word_order_prediction_w
             self.gap_sentence_prediction_w = gap_sentence_prediction_w
 
-        self.loss_ce = CrossEntropyLoss()
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.lm_loss_w = lm_loss_w
         self.electra_loss_w = electra_loss_w
@@ -1903,6 +1906,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.adv_w = adv_w
         self.answering_lm_w = answering_lm_w
         self.highway_cls_ar_w = highway_cls_ar_w
+        self.additive_margin_softmax_w = additive_margin_softmax_w
         if aitm:
             self.adv_lm_w = -1 * abs(self.adv_lm_w)
             assert not alum
@@ -2267,7 +2271,7 @@ if __name__ == "__main__":
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
-    ap.add_argument("--aitm", type=str2bool, default=True)
+    ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
@@ -2288,11 +2292,11 @@ if __name__ == "__main__":
     very_large_max_length = 1536
 
     tokenizer = get_tokenizer("bert")
-    md_config.tokenizer_length = medium_max_length
+    md_config.tokenizer_length = small_max_length
     md_config.max_position_embeddings = md_config.tokenizer_length + md_config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
-        md_config.tokenizer_length=512
-        md_config.max_position_embeddings=512
+        md_config.tokenizer_length = min(md_config.tokenizer_length, 512)
+        md_config.max_position_embeddings = min(md_config.tokenizer_length, 512)
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     dataset = SmallTextDataset(very_large_texts)
@@ -2390,7 +2394,6 @@ if __name__ == "__main__":
 
     model = model.eval()
     config = md_config
-
 
     if "electra" in model_name:
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)

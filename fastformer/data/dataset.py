@@ -1,3 +1,5 @@
+from typing import List, Dict
+
 from seaborn import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
@@ -15,6 +17,7 @@ from torch.utils.data._utils.collate import default_collate
 import copy
 
 from dataclasses import dataclass
+from datasets import load_dataset, concatenate_datasets
 
 @dataclass
 class TextPretrainingRegularizationConfig:
@@ -418,24 +421,79 @@ def collate_fn(samples):
 
 def all_datasets():
     from datasets import load_dataset
-    # TODO: convert \n to spaces
+    # Done MLM
+    ## Large
     bookcorpus = load_dataset("bookcorpus")
     bookcorpusopen = load_dataset("bookcorpusopen")
     openwebtext = load_dataset("openwebtext")
     wikipedia = load_dataset("wikipedia", '20200501.en')  # select the right title for article
-    reddit = load_dataset("reddit")
-    medal = load_dataset("medal", script_version="master")
-    
+    reddit = load_dataset("reddit")  # Dont take texts below 64? Or combine small ones with big ones for threading structure?
+    big_patent = load_dataset("big_patent", 'all', script_version="master")
+
+    ## Medium
+    yahoo_answers_topics = load_dataset("yahoo_answers_topics")
+    amazon_polarity = load_dataset("amazon_polarity", script_version="master")
+    scientific_papers_pubmed = load_dataset("scientific_papers", 'pubmed')
+    scientific_papers_arxiv = load_dataset("scientific_papers", 'arxiv')
+
+    ## Small
+    yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
+    reuters_hayes = load_dataset("reuters21578", 'ModHayes')
+    reuters_lewis = load_dataset("reuters21578", 'ModLewis')
+    reuters_apte = load_dataset("reuters21578", 'ModApte')
+    reuters = concatenate_datasets([d[split] for d in [reuters_hayes, reuters_lewis, reuters_apte] for split in ["train", "test"]])
+    ohsumed = load_dataset("ohsumed", script_version="master")
+    xsum = load_dataset("xsum")
+    eli5 = load_dataset("eli5")  # sentence ordering task, order answers in order of upvotes.
+    cnn_dailymail = load_dataset("cnn_dailymail", '3.0.0')
+    # Below 2 are same as above
+    cnn_dailymail = load_dataset("cnn_dailymail", '2.0.0')
+    cnn_dailymail = load_dataset("cnn_dailymail", '1.0.0')
+    yelp_polarity = load_dataset("yelp_polarity")
+    # Source of both these is same
+    yelp_review_full = load_dataset("yelp_review_full", script_version="master")
+    amazon_reviews_multi = load_dataset("amazon_reviews_multi", 'en')
+
     wmt14de_en = load_dataset("wmt14", 'de-en')  # ['cs-en', 'de-en', 'fr-en', 'hi-en', 'ru-en']
+    giga_fren = load_dataset("giga_fren", 'en-fr', script_version="master")
+    wmt16ru_en = load_dataset("wmt16", 'ru-en')
+    wmt16ru_en = wmt16ru_en.filter(lambda e: len(e["translation"]['en'].split()) > 64, num_proc=16)
+    wmt17cs_en = load_dataset("wmt17", "cs-en")
+    wmt17cs_en = wmt17cs_en.filter(lambda e: len(e["translation"]['en'].split()) > 64, num_proc=16)
+
+    to_en = dict()
+    for ds in ['af-en', 'am-en', 'an-en', 'ar-en', 'as-en', 'az-en', 'be-en', 'bg-en', 'bn-en', 'br-en', 'bs-en', 'ca-en', 'cs-en', 'cy-en', 'da-en', 'de-en',
+               'dz-en', 'el-en']:
+        to_en[ds] = load_dataset("opus100", ds, script_version="master")
+    to_en = concatenate_datasets(
+        [d[split].map(lambda x: dict(text=x["translation"]["en"]), remove_columns=['translation'], num_proc=16) for d in to_en.values() for split in
+         ["train", "test", "validation"] if split in d])
+    to_en = to_en.filter(lambda e: len(e["text"].split()) > 64, num_proc=16)
+
+
+
+
+    # Not Done
+    medal = load_dataset("medal", script_version="master")
+    cc100_en = load_dataset("cc100", lang="en", script_version="master")  # http://data.statmt.org/cc-100/
+    # cc100_en = load_dataset(path="cc100.py", lang="en", script_version="master")
+
+    wmt15fr_en = load_dataset("wmt15", "fr-en")
+
+
     un_pc = load_dataset("un_pc", 'en-fr', script_version="master")  # ['ar-de', 'ar-en', 'ar-es', 'ar-fr', 'ar-ru', 'ar-zh', 'de-en', 'de-es', 'de-fr', 'de-ru', 'de-zh', 'en-es', 'en-fr', 'en-ru', 'en-zh', 'es-fr', 'es-ru', 'es-zh', 'fr-ru', 'fr-zh', 'ru-zh']
+    un_pc = un_pc.filter(lambda e: len(e["translation"]['en'].split()) > 64, num_proc=8)
     un_pc = load_dataset("un_pc", 'en-ru', script_version="master")
     emea = load_dataset("emea", lang1="en", lang2="nl", script_version="master")
-    giga_fren = load_dataset("giga_fren", 'en-fr', script_version="master")
+
     un_ga_fr = load_dataset("un_ga", 'en_to_fr', script_version="master")
     menyo20k_mt = load_dataset("menyo20k_mt", script_version="master")
     hind_encorp = load_dataset("hind_encorp", script_version="master")
     opus100_en_fr = load_dataset("opus100", 'en-fr', script_version="master")
     opus100_en_ru = load_dataset("opus100", 'en-ru', script_version="master")
+
+
+
     opus_tedtalks = load_dataset("opus_tedtalks", script_version="master")
     capes = load_dataset("capes", script_version="master")
     multi_x_science_sum = load_dataset("multi_x_science_sum")
@@ -445,26 +503,24 @@ def all_datasets():
     scb_mt_enth_2020 = load_dataset("scb_mt_enth_2020", 'enth', script_version="master")
     setimes = load_dataset("setimes", 'en-sr', script_version="master")
 
-    amazon_polarity = load_dataset("amazon_polarity", script_version="master")
+
     imdb = load_dataset("imdb", script_version="master")
-    yelp_polarity = load_dataset("yelp_polarity")
-    yelp_review_full = load_dataset("yelp_review_full", script_version="master")
-    big_patent = load_dataset("big_patent", 'all', script_version="master")
-    cc100_en = load_dataset("cc100", lang="en", script_version="master")  # http://data.statmt.org/cc-100/
+
+
+
     # generics_kb = load_dataset("generics_kb",'generics_kb_best', script_version="master")
     open_subtitles = load_dataset("open_subtitles", 'en-hi', script_version="master")
-    yahoo_answers_topics = load_dataset("yahoo_answers_topics")
-    xsum = load_dataset("xsum")
-    eli5 = load_dataset("eli5")  # sentence ordering task, order answers in order of upvotes.
-    cnn_dailymail = load_dataset("cnn_dailymail", '3.0.0')
-    cnn_dailymail = load_dataset("cnn_dailymail", '2.0.0')
-    cnn_dailymail = load_dataset("cnn_dailymail", '1.0.0')
+
+    xsum_factuality = load_dataset("xsum_factuality", "xsum_faithfulness", script_version="master")
+    xsum_factuality = load_dataset("xsum_factuality", "xsum_factuality", script_version="master")
+
+
     wiki_lingua = load_dataset("wiki_lingua", 'english', script_version="master")
     samsum = load_dataset("samsum", script_version="master")
     wikihow = load_dataset("wikihow", 'all')
     wikihow = load_dataset("wikihow", 'sep')
     multi_news = load_dataset("multi_news")
-    amazon_reviews_multi = load_dataset("amazon_reviews_multi", 'en')
+
     wiki_auto = load_dataset("wiki_auto", 'auto_acl')  # select the right summary from simple wiki
     ag_news = load_dataset("ag_news")
     gigaword = load_dataset("gigaword")  # select the correct summary from list of summaries
@@ -481,8 +537,14 @@ def all_datasets():
 
     un_multi = load_dataset("un_multi", 'en-fr', script_version="master")
 
-    for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00', 'Software_v1_00', 'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00', 'PC_v1_00', 'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00', 'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00', 'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00', 'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00', 'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00', 'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
-        amazon_us_reviews = load_dataset("amazon_us_reviews", ds, script_version="master")
+    amazon_us_reviews = dict()
+    for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00', 'Software_v1_00',
+               'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00',
+               #'PC_v1_00',
+               'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00', 'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00', 'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00', 'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00', 'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00', 'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
+        amazon_us_reviews[ds] = load_dataset("amazon_us_reviews", ds, script_version="master")
+    amazon_us_reviews = concatenate_datasets(list([t["train"] for t in amazon_us_reviews.values()]))
+    amazon_us_reviews = amazon_us_reviews.filter(lambda e: len(e["review_body"].split()) > 64)
 
     glue = dict()
     for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
@@ -518,7 +580,7 @@ def all_datasets():
     squad_v2 = load_dataset("squad_v2")
     squad_adversarial = load_dataset("squad_adversarial", 'AddSent', script_version="master")
     ropes = load_dataset("ropes")
-    yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
+
     tweet_qa = load_dataset("tweet_qa", script_version="master")
     wiki_qa = load_dataset("wiki_qa")  # Is answer correct / relevant or not
     narrativeqa = load_dataset("narrativeqa", script_version="master")
@@ -551,10 +613,9 @@ def all_datasets():
     natural_questions = load_dataset("natural_questions")
     piqa = load_dataset("piqa")
     pubmed_qa = load_dataset("pubmed_qa", 'pqa_labeled', script_version="master")
-    ohsumed = load_dataset("ohsumed", script_version="master")
+    quora = load_dataset("quora")
     # pubmed = load_dataset("pubmed", script_version="master")
-    scientific_papers_pubmed = load_dataset("scientific_papers", 'pubmed')
-    scientific_papers_arxiv = load_dataset("scientific_papers", 'arxiv')
+
     biomrc_large_A = load_dataset("biomrc", 'biomrc_large_A')
     biomrc_large_B = load_dataset("biomrc", 'biomrc_large_B')
     med_hop = load_dataset("med_hop", 'original', script_version="master")
@@ -582,15 +643,13 @@ def all_datasets():
     acronym_identification = load_dataset("acronym_identification", script_version="master")
     limit = load_dataset("limit", script_version="master")
     wikiann = load_dataset("wikiann", 'en', script_version="master")
-    blog_authorship_corpus = load_dataset("blog_authorship_corpus")
+    # blog_authorship_corpus = load_dataset("blog_authorship_corpus")
     ptb_text_only = load_dataset("ptb_text_only", script_version="master")
     rotten_tomatoes = load_dataset("rotten_tomatoes")
     sentiment140 = load_dataset("sentiment140")
     emotion = load_dataset("emotion")
 
-    reuters_hayes = load_dataset("reuters21578", 'ModHayes')
-    reuters_lewis = load_dataset("reuters21578", 'ModLewis')
-    reuters_apte = load_dataset("reuters21578", 'ModApte')
+
 
     scitldr = load_dataset("scitldr", 'Abstract', script_version="master")
 
@@ -601,10 +660,12 @@ def all_datasets():
     taskmaster2 = dict()
     for ds in ['flights', 'food-ordering', 'hotels', 'movies', 'music', 'restaurant-search', 'sports']:
         taskmaster2[ds] = load_dataset("taskmaster2", ds, script_version="master")
+    taskmaster2 = concatenate_datasets(list([t["train"] for t in taskmaster2.values()]))
 
     qa4mre = dict()
     for ds in ['2011.main.EN', '2012.main.EN', '2013.main.EN', '2013.entrance_exam.EN', '2012.alzheimers.EN', '2013.alzheimers.EN']:
         qa4mre[ds] = load_dataset("qa4mre", ds, script_version="master")
+    qa4mre = concatenate_datasets(list(qa4mre.values()))
 
     seval = load_dataset("joelito/sem_eval_2010_task_8")  # See: https://huggingface.co/datasets/joelito/sem_eval_2010_task_8
 
@@ -622,6 +683,201 @@ def all_datasets():
     # winograd_wsc  = load_dataset("winograd_wsc",'wsc285', script_version="master")
 
     # wiki_bio  = load_dataset("wiki_bio", script_version="master")
+    # t2s = train_10_20_ds.map(get_text_mapper(["title", "text"], 512, tokenizer, sent_detector), batched=True, remove_columns=["title"])
+    # train_10_20_ds = datasets.load_dataset('wikipedia', '20200501.en', split='train[10:20]')
+
+def clean_text(text):
+    if isinstance(text, (list, tuple)):
+        text = " ".join(text)
+    text = text.lower()
+    EMPTY = ' '
+
+    def replace_link(match):
+        return EMPTY if re.match('[a-z]+://', match.group(1)) else match.group(1)
+
+    text = re.sub('<a[^>]*>(.*)</a>', replace_link, text)
+    text = re.sub('<.*?>', EMPTY, text)
+    text.replace("\\'", "'")
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = re.sub('<pre><code>.*?</code></pre>', EMPTY, text)
+    text = re.sub('<code>.*?</code>', EMPTY, text)
+    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+    text = re.sub('[ ]+', ' ', text)
+
+    return text
+
+
+def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
+    def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
+        # TODO: remove duplicates after merging for main dataset of MLM
+        # TODO: add an id column after making MLM set
+        texts = []
+
+        for tcol in text_cols:
+            if isinstance(tcol, str):
+                texts.append(list(map(clean_text, examples[tcol])))
+            elif isinstance(tcol, (list, tuple)):
+                ex = examples[tcol[0]]
+                for tcol2 in tcol[1:]:
+                    ex = [e[tcol2] for e in ex]
+                texts.append(list(map(clean_text, ex)))
+            else:
+                raise NotImplementedError()
+
+        one_texts = [" ".join(one_example) for one_example in zip(*texts)]
+        final_texts = []
+
+        for text in one_texts:
+            if text is None or len(text) == 0:
+                continue
+            text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+            sents = sent_detector.tokenize(text)
+            cwc = 0
+            cur_seg = ""
+            for i, s in enumerate(sents):
+                wc = len(tokenizer.tokenize(s, add_special_tokens=True))
+                if cwc + wc <= total_tokens or cwc == 0 or i == len(sents) - 1:
+                    pass
+                else:
+                    final_texts.append(cur_seg)
+                    cwc = 0
+                    cur_seg = ""
+                cwc += wc
+                cur_seg = cur_seg + " " + s
+            # TODO: Last sent, big sentence
+            final_texts.append(cur_seg)
+        final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) for t in final_texts]
+        assert len(final_lengths) == len(final_texts)
+        return dict(text=final_texts, length=final_lengths)
+    return mapper
+
+"""
+import datasets
+import re
+from typing import List, Dict
+from datasets import load_dataset, concatenate_datasets
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+import nltk.data
+sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+import os
+os.cpu_count()
+
+bookcorpusopen512 = bookcorpusopen.map(get_text_mapper(["title", "text"], 512, tokenizer, sent_detector), batched=True, remove_columns=["title"], num_proc=24)
+
+
+openwebtext256 = openwebtext.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+openwebtext256.save_to_disk("/home/ahemf/processed_datasets/openwebtext256")
+openwebtext512 = openwebtext.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+openwebtext512.save_to_disk("/home/ahemf/processed_datasets/openwebtext512")
+openwebtext1024 = openwebtext.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+openwebtext1024.save_to_disk("/home/ahemf/processed_datasets/openwebtext1024")
+
+reddit = reddit.map(lambda x: dict(text=x["normalizedBody"]), remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=48)
+reddit128 = reddit.map(get_text_mapper(["text"], 128, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=48)
+reddit128.save_to_disk("/home/ahemf/processed_datasets/reddit128")
+reddit256 = reddit.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=48)
+reddit256.save_to_disk("/home/ahemf/processed_datasets/reddit256")
+reddit512 = reddit.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=48)
+reddit512.save_to_disk("/home/ahemf/processed_datasets/reddit512")
+reddit1024 = reddit.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=48)
+reddit1024.save_to_disk("/home/ahemf/processed_datasets/reddit1024")
+
+medal = medal.map(lambda x: dict(text=x["text"]+(" ".join(x["label"]) if isinstance(x["label"], (list, tuple)) else x["label"])), remove_columns=["abstract_id", "location"], num_proc=48)
+medal128 = medal.map(get_text_mapper(["text"], 128, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+medal128.save_to_disk("/home/ahemf/processed_datasets/medal128")
+medal256 = medal.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+medal256.save_to_disk("/home/ahemf/processed_datasets/medal256")
+medal512 = medal.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+medal512.save_to_disk("/home/ahemf/processed_datasets/medal512")
+medal1024 = medal.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+medal1024.save_to_disk("/home/ahemf/processed_datasets/medal1024")
+
+big_patent = big_patent.map(lambda d: dict(text=d["abstract"]+d["description"]), remove_columns=["description", "abstract"], num_proc=32)
+big_patent128 = big_patent.map(get_text_mapper(["text"], 128, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+big_patent128.save_to_disk("/home/ahemf/processed_datasets/big_patent128")
+big_patent256 = big_patent.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+big_patent256.save_to_disk("/home/ahemf/processed_datasets/big_patent256")
+big_patent512 = big_patent.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+big_patent512.save_to_disk("/home/ahemf/processed_datasets/big_patent512")
+big_patent1024 = big_patent.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+big_patent1024.save_to_disk("/home/ahemf/processed_datasets/big_patent1024")
+
+yahoo_answers_topics = yahoo_answers_topics.map(lambda d: dict(text=d["question_title"]+d["question_content"]+d["best_answer"]), remove_columns=['id', 'topic', 'question_title', 'question_content', 'best_answer'], num_proc=32)
+yahoo_answers_topics128 = yahoo_answers_topics.map(get_text_mapper(["text"], 128, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+yahoo_answers_topics128.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics128")
+yahoo_answers_topics256 = yahoo_answers_topics.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+yahoo_answers_topics256.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics256")
+yahoo_answers_topics512 = yahoo_answers_topics.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+yahoo_answers_topics512.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics512")
+yahoo_answers_topics1024 = yahoo_answers_topics.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+yahoo_answers_topics1024.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics1024")
+
+yahoo_answers_qa = yahoo_answers_qa.map(lambda d: dict(text=d["question"]+d["answer"]+(" ".join(d["nbestanswers"]))), remove_columns=['id', 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=32)
+yahoo_answers_qa512 = yahoo_answers_qa.map(get_text_mapper(["text"], 512, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
+yahoo_answers_qa512.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_qa512")
+
+amazon_polarity512 = amazon_polarity.map(get_text_mapper(["content"], 512, tokenizer, sent_detector), batched=True, remove_columns=['label', 'title', 'content'], num_proc=32)
+amazon_polarity512.save_to_disk("/home/ahemf/processed_datasets/amazon_polarity512")
+
+
+
+scientific_papers_pubmed512 = scientific_papers_pubmed.map(get_text_mapper(["abstract","article"], 512, tokenizer, sent_detector), batched=True, remove_columns=['article', 'abstract', 'section_names'], num_proc=32)
+scientific_papers_pubmed512.save_to_disk("/home/ahemf/processed_datasets/scientific_papers_pubmed512")
+
+scientific_papers_arxiv512 = scientific_papers_arxiv.map(get_text_mapper(["abstract","article"], 512, tokenizer, sent_detector), batched=True, remove_columns=['article', 'abstract', 'section_names'], num_proc=32)
+scientific_papers_arxiv512.save_to_disk("/home/ahemf/processed_datasets/scientific_papers_arxiv512")
+
+reuters512 = reuters.map(get_text_mapper(["title","text"], 512, tokenizer, sent_detector), batched=True, remove_columns=['topics', 'lewis_split', 'cgis_split', 'old_id', 'new_id', 'places', 'people', 'orgs', 'exchanges', 'date', 'title'], num_proc=32)
+reuters512.save_to_disk("/home/ahemf/processed_datasets/reuters512")
+
+amazon_us_reviews1024 = amazon_us_reviews.map(get_text_mapper(["product_title", "product_category", "review_body"], 1024, tokenizer, sent_detector), batched=True, remove_columns=['marketplace', 'customer_id', 'review_id', 'product_id', 'product_parent', 'product_title', 'product_category', 'star_rating', 'helpful_votes', 'total_votes', 'vine', 'verified_purchase', 'review_headline', 'review_body', 'review_date'], num_proc=32)
+amazon_us_reviews1024.save_to_disk("/home/ahemf/processed_datasets/amazon_us_reviews1024")
+
+ohsumed1024 = ohsumed.map(get_text_mapper(["title", "abstract",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['seq_id', 'medline_ui', 'mesh_terms', 'title', 'publication_type', 'abstract', 'author', 'source'], num_proc=32)
+ohsumed1024.save_to_disk("/home/ahemf/processed_datasets/ohsumed1024")
+
+xsum1024 = xsum.map(get_text_mapper(["document",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['document', 'summary', 'id'], num_proc=32)
+xsum1024.save_to_disk("/home/ahemf/processed_datasets/xsum1024")
+
+eli51024 = eli5.map(get_text_mapper(["title", 'selftext', ['answers', 'text']], 1024, tokenizer, sent_detector), batched=True, remove_columns=['q_id', 'title', 'selftext', 'document', 'subreddit', 'answers', 'title_urls', 'selftext_urls', 'answers_urls'], num_proc=32)
+eli51024.save_to_disk("/home/ahemf/processed_datasets/eli51024")
+
+cnn_dailymail1024 = cnn_dailymail.map(get_text_mapper(["article",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['article', 'highlights', 'id'], num_proc=32)
+cnn_dailymail1024.save_to_disk("/home/ahemf/processed_datasets/cnn_dailymail1024")
+
+yelp_review_full1024 = yelp_review_full.map(get_text_mapper(["text",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['text', 'label'], num_proc=32)
+yelp_review_full1024.save_to_disk("/home/ahemf/processed_datasets/yelp_review_full1024")
+
+amazon_reviews_multi1024 = amazon_reviews_multi.map(get_text_mapper(["product_category","review_title", "review_body",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['review_id', 'product_id', 'reviewer_id', 'stars', 'review_body', 'review_title', 'language', 'product_category'], num_proc=32)
+amazon_reviews_multi1024.save_to_disk("/home/ahemf/processed_datasets/amazon_reviews_multi1024")
+
+wmt14de_en1024 = wmt14de_en["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
+wmt14de_en1024.save_to_disk("/home/ahemf/processed_datasets/wmt14de_en1024")
+
+wmt15fr_en1024 = wmt15fr_en["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
+wmt15fr_en1024.save_to_disk("/home/ahemf/processed_datasets/wmt15fr_en1024")
+
+wmt16ru_en1024 = wmt16ru_en["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
+wmt16ru_en1024.save_to_disk("/home/ahemf/processed_datasets/wmt16ru_en1024")
+
+wmt17cs_en1024 = wmt17cs_en["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
+wmt17cs_en1024.save_to_disk("/home/ahemf/processed_datasets/wmt17cs_en1024")
+
+
+giga_fren1024 = giga_fren["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['id', 'translation'], num_proc=16)
+giga_fren1024.save_to_disk("/home/ahemf/processed_datasets/giga_fren1024")
+
+to_en1024 = to_en.map(get_text_mapper(["text"], 1024, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=16)
+to_en1024.save_to_disk("/home/ahemf/processed_datasets/to_en1024")
+
+un_pc1024 = un_pc["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
+un_pc1024.save_to_disk("/home/ahemf/processed_datasets/un_pc1024")
+
+amazon_us_reviews1024 = amazon_us_reviews.map(get_text_mapper(["product_category", "product_title", "review_headline", "review_body"], 1024, tokenizer, sent_detector), batched=True, remove_columns=['marketplace', 'customer_id', 'review_id', 'product_id', 'product_parent', 'product_title', 'product_category', 'star_rating', 'helpful_votes', 'total_votes', 'vine', 'verified_purchase', 'review_headline', 'review_body', 'review_date'], num_proc=24)
+amazon_us_reviews1024.save_to_disk("/home/ahemf/processed_datasets/amazon_us_reviews1024")
+
+"""
 
 
 
