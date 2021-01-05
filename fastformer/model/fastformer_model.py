@@ -173,12 +173,14 @@ class Embeddings(nn.Module):
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size, padding_idx=pad_token_id)
-            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 1, self.embedding_size,
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 2, self.embedding_size // 2,
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
 
-        self.embed_proj = None
+        self.embed_proj = nn.Identity()
+        self.char_embed_proj = nn.Identity()
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
+            self.char_embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
         self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
         self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
         self.dropout = Dropout(config.hidden_dropout)
@@ -201,16 +203,19 @@ class Embeddings(nn.Module):
 
             seq_length = input_shape[1]
             inputs_embeds = self.word_embeddings(input_ids)
-
+            if self.config.num_highway_cls_tokens > 0:
+                highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
+                inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
+            char_embeds = None
             if self.config.char_rnn and char_ids is not None:
                 char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
                 char_embeds = self.char_rnn(self.char_embeddings(char_ids))
                 char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
-                inputs_embeds = inputs_embeds + char_embeds
+                if self.config.num_highway_cls_tokens > 0:
+                    char_embeds = torch.cat((highway_embeddings, char_embeds), dim=1)
+                char_embeds = self.char_embed_proj(char_embeds)
 
-            if self.config.num_highway_cls_tokens > 0:
-                highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
-                inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
+
         else:
             input_shape = input_embeds.size()
             seq_length = input_shape[1]
@@ -237,6 +242,8 @@ class Embeddings(nn.Module):
 
         if self.embed_proj:
             embeddings = self.embed_proj(embeddings)
+        if char_embeds is not None:
+            embeddings = embeddings + char_embeds
 
         embeddings = self.LayerNorm(embeddings)
 
