@@ -429,6 +429,20 @@ def all_datasets():
     wikipedia = load_dataset("wikipedia", '20200501.en')  # select the right title for article
     reddit = load_dataset("reddit")  # Dont take texts below 64? Or combine small ones with big ones for threading structure?
     big_patent = load_dataset("big_patent", 'all', script_version="master")
+    amazon_us_reviews = dict()
+    for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00',
+               'Software_v1_00',
+               'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00',
+               # 'PC_v1_00',
+               'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00',
+               'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00',
+               'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00',
+               'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00',
+               'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00',
+               'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
+        amazon_us_reviews[ds] = load_dataset("amazon_us_reviews", ds, script_version="master")
+    amazon_us_reviews = concatenate_datasets(list([t["train"] for t in amazon_us_reviews.values()]))
+    amazon_us_reviews = amazon_us_reviews.filter(lambda e: len(e["review_body"].split()) > 64)
 
     ## Medium
     yahoo_answers_topics = load_dataset("yahoo_answers_topics")
@@ -537,14 +551,6 @@ def all_datasets():
 
     un_multi = load_dataset("un_multi", 'en-fr', script_version="master")
 
-    amazon_us_reviews = dict()
-    for ds in ['Wireless_v1_00', 'Watches_v1_00', 'Video_Games_v1_00', 'Video_DVD_v1_00', 'Video_v1_00', 'Toys_v1_00', 'Tools_v1_00', 'Sports_v1_00', 'Software_v1_00',
-               'Shoes_v1_00', 'Pet_Products_v1_00', 'Personal_Care_Appliances_v1_00',
-               #'PC_v1_00',
-               'Outdoors_v1_00', 'Office_Products_v1_00', 'Musical_Instruments_v1_00', 'Music_v1_00', 'Mobile_Electronics_v1_00', 'Mobile_Apps_v1_00', 'Major_Appliances_v1_00', 'Luggage_v1_00', 'Lawn_and_Garden_v1_00', 'Kitchen_v1_00', 'Jewelry_v1_00', 'Home_Improvement_v1_00', 'Home_Entertainment_v1_00', 'Home_v1_00', 'Health_Personal_Care_v1_00', 'Grocery_v1_00', 'Gift_Card_v1_00', 'Furniture_v1_00', 'Electronics_v1_00', 'Digital_Video_Games_v1_00', 'Digital_Video_Download_v1_00', 'Digital_Software_v1_00', 'Digital_Music_Purchase_v1_00', 'Digital_Ebook_Purchase_v1_00', 'Camera_v1_00', 'Books_v1_00', 'Beauty_v1_00', 'Baby_v1_00', 'Automotive_v1_00', 'Apparel_v1_00', 'Digital_Ebook_Purchase_v1_01', 'Books_v1_01', 'Books_v1_02']:
-        amazon_us_reviews[ds] = load_dataset("amazon_us_reviews", ds, script_version="master")
-    amazon_us_reviews = concatenate_datasets(list([t["train"] for t in amazon_us_reviews.values()]))
-    amazon_us_reviews = amazon_us_reviews.filter(lambda e: len(e["review_body"].split()) > 64)
 
     glue = dict()
     for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
@@ -582,6 +588,7 @@ def all_datasets():
     ropes = load_dataset("ropes")
 
     tweet_qa = load_dataset("tweet_qa", script_version="master")
+    trivia_qa = load_dataset("trivia_qa", "rc")
     wiki_qa = load_dataset("wiki_qa")  # Is answer correct / relevant or not
     narrativeqa = load_dataset("narrativeqa", script_version="master")
     mc_taco = load_dataset("mc_taco", script_version="master")
@@ -622,7 +629,7 @@ def all_datasets():
     covid_qa_deepset = load_dataset("covid_qa_deepset", script_version="master")
     sciq = load_dataset("sciq")
     peer_read_reviews = load_dataset("peer_read", 'reviews', script_version="master")
-    peer_read_pdf = load_dataset("peer_read", 'parsed_pdfs', script_version="master")
+    # peer_read_pdf = load_dataset("peer_read", 'parsed_pdfs', script_version="master")
     conv_ai_3 = load_dataset("conv_ai_3", script_version="master")
     daily_dialog = load_dataset("daily_dialog")
     medical_questions_pairs = load_dataset("medical_questions_pairs", script_version="master")
@@ -662,10 +669,10 @@ def all_datasets():
         taskmaster2[ds] = load_dataset("taskmaster2", ds, script_version="master")
     taskmaster2 = concatenate_datasets(list([t["train"] for t in taskmaster2.values()]))
 
-    qa4mre = dict()
-    for ds in ['2011.main.EN', '2012.main.EN', '2013.main.EN', '2013.entrance_exam.EN', '2012.alzheimers.EN', '2013.alzheimers.EN']:
-        qa4mre[ds] = load_dataset("qa4mre", ds, script_version="master")
-    qa4mre = concatenate_datasets(list(qa4mre.values()))
+    # qa4mre = dict()
+    # for ds in ['2011.main.EN', '2012.main.EN', '2013.main.EN', '2013.entrance_exam.EN', '2012.alzheimers.EN', '2013.alzheimers.EN']:
+    #     qa4mre[ds] = load_dataset("qa4mre", ds, script_version="master")
+    # qa4mre = concatenate_datasets(list(qa4mre.values()))
 
     seval = load_dataset("joelito/sem_eval_2010_task_8")  # See: https://huggingface.co/datasets/joelito/sem_eval_2010_task_8
 
@@ -689,6 +696,7 @@ def all_datasets():
 def clean_text(text):
     if isinstance(text, (list, tuple)):
         text = " ".join(text)
+    text = str(text)
     text = text.lower()
     EMPTY = ' '
 
@@ -751,17 +759,104 @@ def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
         return dict(text=final_texts, length=final_lengths)
     return mapper
 
+
+def get_matching_mapper(text_cols, query_texts, query_match_cols, query_text_mlm=tuple(), query_match_cols_mlm=tuple(), total_tokens=768, tokenizer=None):
+    asep = " [ANSWER_OPTION_SEP] "
+    aoptbegin = "[ANSWER_OPTION_BEGIN] "
+    aoptend = " [ANSWER_OPTION_END]"
+    word_choice_1 = ["select", "what is", "choose"]
+    word_choice_2 = ["appropriate", "correct", "right"]
+
+    def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
+        texts = []
+        for tcol in text_cols:
+            if isinstance(tcol, str):
+                texts.append(list(map(clean_text, examples[tcol])))
+            elif isinstance(tcol, (list, tuple)):
+                ex = examples[tcol[0]]
+                for tcol2 in tcol[1:]:
+                    ex = [e[tcol2] for e in ex]
+                texts.append(list(map(clean_text, ex)))
+            else:
+                raise NotImplementedError()
+
+
+        one_texts = [" ".join(one_example) for one_example in zip(*texts)]
+        # select/(what is) the correct X from A,B,C,D ?
+        # select/(what is) the correct option for X from 1. A, 2. B, 3. C, 4. D
+        # Which X from A,B,C,D seems appropriate/correct
+        # Which option from 1. A, 2. B, 3. C, 4. D seems appropriate/correct for X
+
+        # Choose / select the right options from 1. A, 2. B, 3. C, 4. D for X?
+
+
+        query = []
+        answer = []
+        for qtxt, qmc in zip(query_texts, query_match_cols):
+            cq_query = []
+            cq_answer = []
+            query_answers = np.array(list(map(clean_text, examples[qmc])))
+            shuffled_idxs = random.sample(range(len(query_answers)), len(query_answers))
+            query_answers_shuffle = list(query_answers[shuffled_idxs])
+            query_answers_shuffle_type_1 = aoptbegin + asep.join(query_answers_shuffle) + aoptend
+            query_answers_shuffle_type_2 = aoptbegin + asep.join([str(i+1)+". " + a for i, a in enumerate(query_answers_shuffle)]) + aoptend
+            for idx in range(len(one_texts)):
+                aidx = shuffled_idxs.index(idx)
+                atext = query_answers[idx]
+                atext_len = len(atext.split())
+                assert query_answers[shuffled_idxs[aidx]] == atext == query_answers_shuffle[aidx]
+                rnd = random.random()
+
+                if rnd < 0.25 and atext_len <= 4:
+                    cq_query.append("%s the correct %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, query_answers_shuffle_type_1))
+                    cq_answer.append(atext)
+                elif rnd < 0.5:
+                    cq_query.append("%s the correct option for %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, query_answers_shuffle_type_2))
+                    cq_answer.append(str(aidx + 1))
+                elif rnd < 0.75 and atext_len <= 4:
+                    cq_query.append("Which %s from %s seems %s?" % (qtxt, query_answers_shuffle_type_1, random.sample(word_choice_2, 1)[0]))
+                    cq_answer.append(atext)
+                else:
+                    cq_query.append("Which option from %s seems %s for %s?" % (query_answers_shuffle_type_2, random.sample(word_choice_2, 1)[0], qtxt))
+                    cq_answer.append(str(aidx + 1))
+            query.append(cq_query)
+            answer.append(cq_answer)
+
+        for qtxt_mlm, qmc_mlm in zip(query_text_mlm, query_match_cols_mlm):
+            qt = qtxt_mlm
+            if isinstance(qtxt_mlm, (list, tuple)):
+                qt = random.sample(qtxt_mlm, 1)[0]
+
+            cq_query = [qt]*len(one_texts)
+            cq_answer = list(map(clean_text, examples[qmc_mlm]))
+            query.append(cq_query)
+            answer.append(cq_answer)
+
+        query = list(zip(*query))
+        answer = list(zip(*answer))
+        qlens = [len(tokenizer.tokenize(" ".join(t) + " ".join(a), add_special_tokens=True)) + 2*len(t) for t, a in zip(query, answer)]
+        remaining_len = [int((total_tokens - ll) / 1.4) for ll in qlens]
+        one_texts = [" ".join(t.split()[:r]) for t, r in zip(one_texts, remaining_len)]
+        final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) + ql for t, ql in zip(one_texts, qlens)]
+        return dict(text=one_texts, length=final_lengths, query=query, answer=answer)
+
+    return mapper
+
+
 """
 import datasets
 import re
+import numpy as np
+import random
 from typing import List, Dict
-from datasets import load_dataset, concatenate_datasets
-from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
-tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+from datasets import load_dataset, concatenate_datasets, Dataset
 import nltk.data
 sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
 os.cpu_count()
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
 bookcorpusopen512 = bookcorpusopen.map(get_text_mapper(["title", "text"], 512, tokenizer, sent_detector), batched=True, remove_columns=["title"], num_proc=24)
 
@@ -873,9 +968,65 @@ to_en1024.save_to_disk("/home/ahemf/processed_datasets/to_en1024")
 
 un_pc1024 = un_pc["train"].map(get_text_mapper([["translation","en"],], 1024, tokenizer, sent_detector), batched=True, remove_columns=['translation'], num_proc=16)
 un_pc1024.save_to_disk("/home/ahemf/processed_datasets/un_pc1024")
+unpc = Dataset.load_from_disk("processed_datasets/un_pc1024")
 
 amazon_us_reviews1024 = amazon_us_reviews.map(get_text_mapper(["product_category", "product_title", "review_headline", "review_body"], 1024, tokenizer, sent_detector), batched=True, remove_columns=['marketplace', 'customer_id', 'review_id', 'product_id', 'product_parent', 'product_title', 'product_category', 'star_rating', 'helpful_votes', 'total_votes', 'vine', 'verified_purchase', 'review_headline', 'review_body', 'review_date'], num_proc=24)
 amazon_us_reviews1024.save_to_disk("/home/ahemf/processed_datasets/amazon_us_reviews1024")
+
+
+rs.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary", "subreddit"], 512, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"])[0]
+
+
+reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary", "subreddit"], 512, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=16)
+reddit_qna.save_to_disk("/home/ahemf/processed_datasets/reddit_qna")
+
+bookcorpusopen = bookcorpusopen.map(lambda x: dict(title=" ".join(x["title"].replace(".epub","").replace(".txt","").split('-')), text=x["text"][4096:]), num_proc=8)
+bookcorpusopen_qna = bookcorpusopen.map(get_matching_mapper(["text"], ["title"], ["title",], 768, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=16)
+bookcorpusopen_qna.save_to_disk("/home/ahemf/processed_datasets/bookcorpusopen_qna")
+
+wikipedia_qna = wikipedia.map(get_matching_mapper(["text"], ["title"], ["title",], 768, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=16)
+wikipedia_qna.save_to_disk("/home/ahemf/processed_datasets/wikipedia_qna")
+
+amazon_polarity = amazon_polarity.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
+amazon_polarity_qna = amazon_polarity.map(get_matching_mapper(["content"], ["title", "sentiment"], ["title", "sentiment"], 768, tokenizer), batched=True, remove_columns=["title", "sentiment", "content"], num_proc=16, batch_size=16)
+amazon_polarity_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_polarity_qna")
+
+yahoo_answers_qa_qna = yahoo_answers_qa.map(get_matching_mapper(["answer"], ["question", "category"], ["question", "main_category"], 768, tokenizer), batched=True, remove_columns=["id", 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=16, batch_size=16)
+yahoo_answers_qa_qna.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_qa_qna")
+
+yahoo_answers_topics_qna = yahoo_answers_topics.map(get_matching_mapper(["best_answer"], ["question"], ["question_title"], 768, tokenizer), batched=True, remove_columns=['id', 'topic', 'question_title', 'question_content', 'best_answer'], num_proc=16, batch_size=16)
+yahoo_answers_topics_qna.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics_qna")
+
+reuters = reuters.map(lambda x: dict(title=x["title"].replace('&lt;', ' ').replace('>', ' ')), num_proc=16, batch_size=16)
+reuters_qna = reuters.map(get_matching_mapper(["text"], ["title"], ["title"], 768, tokenizer), batched=True, remove_columns=['topics', 'lewis_split', 'cgis_split', 'old_id', 'new_id', 'places', 'people', 'orgs', 'exchanges', 'date', 'title'], num_proc=16, batch_size=16)
+reuters_qna.save_to_disk("/home/ahemf/processed_datasets/reuters_qna")
+
+ohsumed_qna = ohsumed.map(get_matching_mapper(["abstract"], ["title"], ["title"], 896, tokenizer), batched=True, remove_columns=['seq_id', 'medline_ui', 'mesh_terms', 'title', 'publication_type', 'abstract', 'author', 'source'], num_proc=16, batch_size=16)
+ohsumed_qna.save_to_disk("/home/ahemf/processed_datasets/ohsumed_qna")
+
+xsum_qna = xsum.map(get_matching_mapper(["document"], ["summary"], ["summary"], 1024, tokenizer), batched=True, remove_columns=['document', 'summary', 'id'], num_proc=16, batch_size=16)
+xsum_qna.save_to_disk("/home/ahemf/processed_datasets/xsum_qna")
+
+eli5_qna = eli5.map(get_matching_mapper([["answers", "text"]], ["title"], ["title"], 896, tokenizer), batched=True, remove_columns=['q_id', 'title', 'selftext', 'document', 'subreddit', 'answers', 'title_urls', 'selftext_urls', 'answers_urls'], num_proc=16, batch_size=16)
+eli5_qna.save_to_disk("/home/ahemf/processed_datasets/eli5_qna")
+
+cnn_dailymail_qna = cnn_dailymail.map(get_matching_mapper(["article"], ["highlights"], ["highlights"], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['article', 'highlights', 'id'])
+cnn_dailymail_qna.save_to_disk("/home/ahemf/processed_datasets/cnn_dailymail_qna")
+
+
+yelp_polarity = yelp_polarity.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
+yelp_polarity_qna = yelp_polarity.map(get_matching_mapper(["text"], [], [], ["Predict the correct sentiment between positive and negative"], ["sentiment"], 512, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['sentiment'])
+yelp_polarity_qna.save_to_disk("/home/ahemf/processed_datasets/yelp_polarity_qna")
+
+amazon_reviews_multi_qna = amazon_reviews_multi.map(get_matching_mapper(["review_body"], ["title"], ["review_title"], [["Predict the review rating", "What is the rating suggested by the review on a scale of 1 to 5?"]], ["stars"], 768, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['review_id', 'product_id', 'reviewer_id', 'stars', 'review_body', 'review_title', 'language', 'product_category'])
+amazon_reviews_multi_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_reviews_multi_qna")
+
+app_reviews_qna = app_reviews.map(get_matching_mapper(["review"], [], [], [["Predict the review rating", "What is the rating suggested by the review on a scale of 1 to 5?"]], ["stars"], 768, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['package_name', 'review', 'date', 'star'])
+app_reviews_qna.save_to_disk("/home/ahemf/processed_datasets/app_reviews_qna")
+
+imdb = imdb.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
+imdb_qna = imdb.map(get_matching_mapper(["text"], [], [], ["Predict the correct sentiment between positive and negative"], ["sentiment"], 512, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['sentiment'])
+imdb_qna.save_to_disk("/home/ahemf/processed_datasets/imdb_qna")
 
 """
 

@@ -2249,6 +2249,19 @@ def get_tokenizer(name):
     setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
     tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
+
+    setattr(tokenizer, "_answer_option_separator_token", "[ANSWER_OPTION_SEP]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_separator_token"]
+    tokenizer.add_special_tokens({"answer_option_separator_token": "[ANSWER_OPTION_SEP]"})
+
+    setattr(tokenizer, "_answer_option_begin_token", "[ANSWER_OPTION_BEGIN]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_begin_token"]
+    tokenizer.add_special_tokens({"answer_option_begin_token": "[ANSWER_OPTION_BEGIN]"})
+
+    setattr(tokenizer, "_answer_option_end_token", "[ANSWER_OPTION_END]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_end_token"]
+    tokenizer.add_special_tokens({"answer_option_end_token": "[ANSWER_OPTION_END]"})
+
     setattr(tokenizer, "_answer_end_token", "[ANSWER_END]")
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token"]
     tokenizer.add_special_tokens({"answer_end_token": "[ANSWER_END]"})
@@ -2299,7 +2312,7 @@ if __name__ == "__main__":
     very_large_max_length = 1536
 
     tokenizer = get_tokenizer("bert")
-    md_config.tokenizer_length = small_max_length
+    md_config.tokenizer_length = medium_max_length
     md_config.max_position_embeddings = md_config.tokenizer_length + md_config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
         md_config.tokenizer_length = min(md_config.tokenizer_length, 512)
@@ -2477,7 +2490,7 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(20):
+        for _ in trange(10):
             st = time.time()
             _ = run()
             et = time.time() - st
