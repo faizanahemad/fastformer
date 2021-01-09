@@ -36,7 +36,7 @@ class AdMSoftmaxLoss(nn.Module):
 
 class AdMSoftmaxLoss(nn.Module):
 
-    def __init__(self, ignore_index=-100, s=1.0, m=0.3):
+    def __init__(self, ignore_index=-100, s=1.0, m=0.3, focal=True, alpha=1, gamma=2, reduce=True):
         '''
         AM Softmax Loss
         '''
@@ -44,7 +44,11 @@ class AdMSoftmaxLoss(nn.Module):
         self.s = s
         self.m = m
         self.ignore_index = ignore_index
-        self.loss_ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.focal = focal
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduce = reduce
+        self.loss_ce = nn.CrossEntropyLoss(ignore_index=ignore_index, reduction="none" if focal or not reduce else "mean")
 
     def forward(self, x, labels):
         '''
@@ -56,4 +60,12 @@ class AdMSoftmaxLoss(nn.Module):
         x = x.clone()
         x[list(range(len(labels))), labels] -= self.m
         x *= self.s
-        return self.loss_ce(x, labels)
+        loss = self.loss_ce(x, labels)
+        if self.focal:
+            pt = torch.exp(-loss)
+            F_loss = self.alpha * (1 - pt) ** self.gamma * loss
+            if self.reduce:
+                return torch.mean(F_loss)
+            else:
+                return F_loss
+        return loss

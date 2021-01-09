@@ -2210,7 +2210,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.loss_hist["word_order_loss"].append(float(word_order_loss))
         self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
-        if self.aitm or self.alum:
+        if (self.aitm or self.alum) and self.training:
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits)
             loss = loss + adv_loss
 
@@ -2441,7 +2441,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=1e-4)
+    optimizer = AdamW(all_params, lr=2e-4)
 
 
     def run():

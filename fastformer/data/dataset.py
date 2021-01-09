@@ -578,6 +578,9 @@ def all_datasets():
     codah = load_dataset("codah", "codah")
     swag = load_dataset("swag", 'regular')
     hellaswag = load_dataset("hellaswag")
+    qangaroo = load_dataset("qangaroo", 'wikihop')
+    qasc = load_dataset("qasc") # 2 tasks can be built
+    wiqa = load_dataset("wiqa")
     search_qa = load_dataset("search_qa", 'train_test_val')
     hotpot_qa = load_dataset("hotpot_qa", 'distractor')
     hotpot_qa = load_dataset("hotpot_qa", 'fullwiki')
@@ -760,12 +763,14 @@ def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
     return mapper
 
 
-def get_matching_mapper(text_cols, query_texts, query_match_cols, query_text_mlm=tuple(), query_match_cols_mlm=tuple(), total_tokens=768, tokenizer=None):
+def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tuple(), mlm_ans=tuple(),
+                        total_tokens=768, tokenizer=None, mcq_query=tuple(), mcq_cols=tuple(), mcq_ans=tuple()):
     asep = " [ANSWER_OPTION_SEP] "
     aoptbegin = "[ANSWER_OPTION_BEGIN] "
     aoptend = " [ANSWER_OPTION_END]"
     word_choice_1 = ["select", "what is", "choose"]
     word_choice_2 = ["appropriate", "correct", "right"]
+    mask = " "+tokenizer.mask_token+" "
 
     def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
         texts = []
@@ -793,6 +798,8 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, query_text_mlm
         query = []
         answer = []
         for qtxt, qmc in zip(query_texts, query_match_cols):
+            if isinstance(qtxt, (list, tuple)):
+                qtxt = random.sample(qtxt, 1)[0]
             cq_query = []
             cq_answer = []
             query_answers = np.array(list(map(clean_text, examples[qmc])))
@@ -803,10 +810,10 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, query_text_mlm
             for idx in range(len(one_texts)):
                 aidx = shuffled_idxs.index(idx)
                 atext = query_answers[idx]
-                atext_len = len(atext.split())
                 assert query_answers[shuffled_idxs[aidx]] == atext == query_answers_shuffle[aidx]
-                rnd = random.random()
 
+                atext_len = len(atext.split())
+                rnd = random.random()
                 if rnd < 0.25 and atext_len <= 4:
                     cq_query.append("%s the correct %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, query_answers_shuffle_type_1))
                     cq_answer.append(atext)
@@ -822,7 +829,49 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, query_text_mlm
             query.append(cq_query)
             answer.append(cq_answer)
 
-        for qtxt_mlm, qmc_mlm in zip(query_text_mlm, query_match_cols_mlm):
+        for qtxt, qmc, mcol in zip(mcq_query, mcq_cols, mcq_ans):
+            if isinstance(qtxt, (list, tuple)):
+                qtxt = random.sample(qtxt, 1)[0]
+            cq_query = []
+            cq_answer = []
+            candidates = list(zip(*[examples[col] for col in qmc])) if isinstance(qmc, (list, tuple)) else examples[qmc]
+            candidates = np.array([d for c in candidates for d in list(map(clean_text, c))])
+            len_per_sample = len(qmc) if isinstance(qmc, (list, tuple)) else len(examples[qmc][0])
+
+
+            shuffled_idxs = random.sample(range(len(candidates)), len(candidates))
+            candidates_shuffle = list(candidates[shuffled_idxs])
+            candidates_shuffle_type_1 = aoptbegin + asep.join(candidates_shuffle) + aoptend
+            candidates_shuffle_type_2 = aoptbegin + asep.join([str(i + 1) + ". " + a for i, a in enumerate(candidates_shuffle)]) + aoptend
+            for idx, aidx_c in zip(range(len(one_texts)), examples[mcol]):
+                if aidx_c != -1 and isinstance(aidx_c, int):
+                    aidx = shuffled_idxs.index(idx * len_per_sample + aidx_c)
+                    atext = candidates[idx * len_per_sample + aidx_c]
+                    assert candidates[shuffled_idxs[aidx]] == atext == candidates_shuffle[aidx]
+                elif isinstance(aidx_c, str) and len(aidx_c) > 0:
+                    atext = aidx_c
+                    aidx = candidates_shuffle.index(atext)
+                    assert candidates[shuffled_idxs[aidx]] == atext == candidates_shuffle[aidx]
+                else:
+                    aidx = atext = mask
+                atext_len = len(atext.split())
+                rnd = random.random()
+                if rnd < 0.25 and atext_len <= 3:
+                    cq_query.append("%s the correct %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_1))
+                    cq_answer.append(atext)
+                elif rnd < 0.5:
+                    cq_query.append("%s the correct option for %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_2))
+                    cq_answer.append(str(aidx + 1) if type(aidx)==int else aidx)
+                elif rnd < 0.75 and atext_len <= 3:
+                    cq_query.append("Which %s from %s seems %s?" % (qtxt, candidates_shuffle_type_1, random.sample(word_choice_2, 1)[0]))
+                    cq_answer.append(atext)
+                else:
+                    cq_query.append("Which option from %s seems %s for %s?" % (candidates_shuffle_type_2, random.sample(word_choice_2, 1)[0], qtxt))
+                    cq_answer.append(str(aidx + 1) if type(aidx)==int else aidx)
+            query.append(cq_query)
+            answer.append(cq_answer)
+
+        for qtxt_mlm, qmc_mlm in zip(mlm_query, mlm_ans):
             qt = qtxt_mlm
             if isinstance(qtxt_mlm, (list, tuple)):
                 qt = random.sample(qtxt_mlm, 1)[0]
@@ -860,6 +909,9 @@ tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
 bookcorpusopen512 = bookcorpusopen.map(get_text_mapper(["title", "text"], 512, tokenizer, sent_detector), batched=True, remove_columns=["title"], num_proc=24)
 
+
+kelm1024 = kelm.map(get_text_mapper(["sentence"], 1024, tokenizer, sent_detector), batched=True, remove_columns=['triple', 'sentence'], num_proc=32)
+kelm1024.save_to_disk("/home/ahemf/processed_datasets/kelm1024")
 
 openwebtext256 = openwebtext.map(get_text_mapper(["text"], 256, tokenizer, sent_detector), batched=True, remove_columns=[], num_proc=32)
 openwebtext256.save_to_disk("/home/ahemf/processed_datasets/openwebtext256")
@@ -1028,7 +1080,151 @@ imdb = imdb.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negat
 imdb_qna = imdb.map(get_matching_mapper(["text"], [], [], ["Predict the correct sentiment between positive and negative"], ["sentiment"], 512, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['sentiment'])
 imdb_qna.save_to_disk("/home/ahemf/processed_datasets/imdb_qna")
 
+wiki_lingua = wiki_lingua.map(batch_process_wiki_lingua, batched=True, num_proc=1, remove_columns=["article"])
+wiki_lingua_qna = wiki_lingua.map(get_matching_mapper(["document"], ["summary", "topic", "heading"], ["summary", "url", "section_name"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['document', 'section_name', 'summary', 'url'])
+wiki_lingua_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_lingua_qna")
+
+samsum_qna = samsum.map(get_matching_mapper(["dialogue"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['dialogue', 'id', 'summary',])
+samsum_qna.save_to_disk("/home/ahemf/processed_datasets/samsum_qna")
+
+multi_news_qna = multi_news.map(get_matching_mapper(["document"], ["summary"], ["summary"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['document', 'summary'])
+multi_news_qna.save_to_disk("/home/ahemf/processed_datasets/multi_news_qna")
+
+wiki_auto = wiki_auto.map(lambda x: dict(simple_sentence=x["simple_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|"), normal_sentence=x["normal_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|")), num_proc=16)
+wiki_auto = wiki_auto["full"]
+wiki_auto_qna = wiki_auto.map(get_matching_mapper(["normal_sentence"], ["simplified sentence"], ["simple_sentence"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['normal_sentence', 'simple_sentence'])
+wiki_auto_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_auto_qna")
+
+gigaword = gigaword.map(lambda x: dict(document=x["document"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|"), summary=x["summary"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|")), num_proc=16)
+gigaword_qna = gigaword.map(get_matching_mapper(["document"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['document', 'summary',])
+gigaword_qna.save_to_disk("/home/ahemf/processed_datasets/gigaword_qna")
+
+
+wiki_atomic_edits_insertions_qna = wiki_atomic_edits_insertions.map(get_matching_mapper(["base_sentence"], ["closest match", "edited phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_insertions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_insertions_qna")
+
+
+wiki_atomic_edits_deletions_qna = wiki_atomic_edits_deletions.map(get_matching_mapper(["base_sentence"], ["closest match", "deleted phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_deletions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_deletions_qna")
+
+wiki_split_qna = wiki_split.map(get_matching_mapper(["complex_sentence"], ["first simple sentence", "second simple sentence"], ["simple_sentence_1", "simple_sentence_2"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['simple_sentence_2', 'simple_sentence_1', 'complex_sentence'])
+wiki_split_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_split_qna")
+
+per_sent = per_sent.map(lambda x: dict(sentiment=({0: "negative", 1: "neutral", 2:"positive", -1:"neutral"}[x["TRUE_SENTIMENT"]])), remove_columns=["TRUE_SENTIMENT"], num_proc=8)
+per_sent_qna = per_sent.map(get_matching_mapper(["DOCUMENT"], ["focused entity", "title"], ["TARGET_ENTITY", "TITLE"], ["Predict the correct sentiment from positive, neutral and negative"], ["sentiment"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['DOCUMENT', 'DOCUMENT_INDEX', 'MASKED_DOCUMENT', 'Paragraph0', 'Paragraph1', 'Paragraph10', 'Paragraph11', 'Paragraph12', 'Paragraph13', 'Paragraph14', 'Paragraph15', 'Paragraph2', 'Paragraph3', 'Paragraph4', 'Paragraph5', 'Paragraph6', 'Paragraph7', 'Paragraph8', 'Paragraph9', 'TARGET_ENTITY', 'TITLE', 'sentiment'])
+per_sent_qna.save_to_disk("/home/ahemf/processed_datasets/per_sent_qna")
+
+
+anli = load_dataset("anli")
+anli = anli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "contradict", 1: "neutral", 2:"agree", -1:"neutral"}[x["label"]])), remove_columns=["hypothesis", "premise", "reason", "uid"], num_proc=8)
+anli_qna_v1 = anli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+anli_qna_v1.save_to_disk("/home/ahemf/processed_datasets/anli_qna_v1")
+
+anli = load_dataset("anli")
+anli = anli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "disagree", 1: "unrelated", 2:"entail", -1:"unrelated"}[x["label"]])), remove_columns=["hypothesis", "premise", "reason", "uid"], num_proc=8)
+anli_qna_v2 = anli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+anli_qna_v2.save_to_disk("/home/ahemf/processed_datasets/anli_qna_v2")
+
+# snli, mnli
+
+# entail, contradict, neither
+snli = load_dataset("snli")
+snli = snli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "agree", 1: "contradict", 2:"neutral", -1:"neutral"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+snli_qna_v1 = snli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+snli_qna_v1.save_to_disk("/home/ahemf/processed_datasets/snli_qna_v1")
+
+snli = load_dataset("snli")
+snli = snli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "entail", 1: "disagree", 2:"unrelated", -1:"unrelated"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+snli_qna_v2 = snli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+snli_qna_v2.save_to_disk("/home/ahemf/processed_datasets/snli_qna_v2")
+
+mnli = load_dataset("multi_nli")
+mnli = mnli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "agree", 1: "contradict", 2:"neutral", -1:"neutral"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+mnli_qna_v1 = mnli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+mnli_qna_v1.save_to_disk("/home/ahemf/processed_datasets/mnli_qna_v1")
+
+mnli = load_dataset("multi_nli")
+mnli = mnli.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "entail", 1: "disagree", 2:"unrelated", -1:"unrelated"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+mnli_qna_v2 = mnli.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+mnli_qna_v2.save_to_disk("/home/ahemf/processed_datasets/mnli_qna_v2")
+
+hans = load_dataset("hans")
+hans = hans.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "agree", 1: "contradict", 2:"neutral", -1:"neutral"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+hans_qna_v1 = hans.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+hans_qna_v1.save_to_disk("/home/ahemf/processed_datasets/hans_qna_v1")
+
+hans = load_dataset("hans")
+hans = hans.map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "entail", 1: "disagree", 2:"unrelated", -1:"unrelated"}[x["label"]])), remove_columns=["hypothesis", "premise"], num_proc=8)
+hans_qna_v2 = hans.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+hans_qna_v2.save_to_disk("/home/ahemf/processed_datasets/hans_qna_v2")
+
+# 
+scitail = load_dataset("scitail", 'snli_format')
+scitail = scitail.map(lambda x: dict(text="premise: "+ x["sentence1"]+ " hypothesis: " + x["sentence2"], label=x["gold_label"]), remove_columns=['sentence1_binary_parse', 'sentence1_parse', 'sentence1', 'sentence2_parse', 'sentence2', 'annotator_labels', 'gold_label'], num_proc=8)
+scitail_qna = scitail.map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+scitail_qna.save_to_disk("/home/ahemf/processed_datasets/scitail_qna")
+
+#
+go_emotions = load_dataset("go_emotions", 'raw', script_version="master")
+go_emotions = go_emotions.filter(lambda x: len(x["text"].split())>16)
+go_emotions = go_emotions.map(lambda x: dict(label=[k for k, v in x.items() if v == 1]), remove_columns=['id', 'author', 'subreddit', 'link_id', 'parent_id', 'created_utc', 'rater_id', 'example_very_unclear', 'admiration', 'amusement', 'anger', 'annoyance', 'approval', 'caring', 'confusion', 'curiosity', 'desire', 'disappointment', 'disapproval', 'disgust', 'embarrassment', 'excitement', 'fear', 'gratitude', 'grief', 'joy', 'love', 'nervousness', 'optimism', 'pride', 'realization', 'relief', 'remorse', 'sadness', 'surprise', 'neutral'])
+go_emotions = go_emotions.filter(lambda x: len(x['label'])>0)
+go_emotions = go_emotions.map(lambda x: dict(label=" ".join(sorted(x["label"]))))
+go_emotions_qna = go_emotions.map(get_matching_mapper(["text"], [], [], ["Select the right set of emotions from admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, optimism, pride, realization, relief, remorse, sadness, surprise, neutral?"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+go_emotions_qna.save_to_disk("/home/ahemf/processed_datasets/go_emotions_qna")
+
+#
+dm = pd.read_csv("https://raw.githubusercontent.com/synapse-developpement/Discovery/master/data/markers_list.txt", header=None, names=["discourse marker"])
+dm = list(map(lambda t: t.replace("_", " ").replace("[no-conn]", "no connection"),dm["discourse marker"].values))
+discovery = load_dataset("discovery", 'discovery', script_version="master").filter(lambda x: len(x["sentence1"].split()) >= 16 and len(x["sentence2"].split()) >= 16)
+discovery = discovery.map(lambda x: dict(label=dm[x["label"]]), remove_columns=["idx"], num_proc=8)
+discovery = discovery.filter(lambda x: len(x['label'])>0)
+discovery_qna = discovery.map(get_matching_mapper(["sentence1","sentence2"], [], [], ["Predict the right connective word or phrase for the two preceding sentences."], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label", "sentence1", "sentence2"])
+discovery_qna.save_to_disk("/home/ahemf/processed_datasets/discovery_qna")
+
+#
+paws = load_dataset("paws", 'labeled_final', script_version="master")
+paws = paws.map(lambda x: dict(label="yes" if x["label"] == 1 else "no", text="first statement: "+x["sentence1"]+" second statement: "+x["sentence2"]), remove_columns=["id", "sentence2", "sentence1"])
+paws_qna = paws.map(get_matching_mapper(["text"], [], [], ["Do the two given statements mean the same or paraphrase each other?"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+paws_qna.save_to_disk("/home/ahemf/processed_datasets/paws_qna")
+
+
+#
+swag = load_dataset("swag", 'regular')
+swag_qna = swag.map(get_matching_mapper(["startphrase"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end"]], [['ending0', 'ending1', 'ending2', 'ending3']], ["label"]), batched=True, num_proc=16, batch_size=4, remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', 'label'])
+swag_qna.save_to_disk("/home/ahemf/processed_datasets/swag_qna")
+
+hellaswag = load_dataset("hellaswag")
+hellaswag = hellaswag.map(lambda x: dict(text="activity: "+x["activity_label"]+ ", context: " + x["ctx"], label=int(x["label"]) if len(x["label"])>0 else -1), remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b','ctx','source_id', 'split', 'split_type',], num_proc=8)
+hellaswag_qna = hellaswag.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end", "ending"]], ["endings"], ["label"]), batched=True, num_proc=16, batch_size=4, remove_columns=['endings', 'label'])
+hellaswag_qna.save_to_disk("/home/ahemf/processed_datasets/hellaswag_qna")
+
+hotpot_qa = load_dataset("hotpot_qa", 'distractor')
+hotpot_qa = hotpot_qa.map(lambda x: dict(context=" ".join([s for p in x["context"]["sentences"] for s in p])), num_proc=8)
+hotpot_qa = hotpot_qa.map(lambda x: dict(text = "question: " + x["question"] + ", context: " + x["context"]),num_proc=8, remove_columns=['context', 'id', 'level', 'question', 'supporting_facts', 'type'])
+hotpot_qa = hotpot_qa.map(lambda x: dict(length=len(x["text"].split())), num_proc=8).filter(lambda x: x["length"] <= 768, num_proc=8)
+hotpot_qa_qna_v1 = hotpot_qa.map(get_matching_mapper(["text"], [], [], [["What is the question's answer?", "Provide an answer to the asked question?", "Answer the question"]], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["answer"])
+hotpot_qa_qna_v1 = hotpot_qa_qna_v1.filter(lambda x: x["length"] <= 1000)
+hotpot_qa_qna_v1.save_to_disk("/home/ahemf/processed_datasets/hotpot_qa_qna_v1")
+
 """
+
+
+def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
+    article: List[Dict[str, List]] = examples["article"]
+    url = examples["url"]
+    url = [" ".join(u.split("/")[-1].split("-")) for u in url]
+    dl2: Dict[str, List[List[str]]] = {key: [item[key] for item in article] for key in article[0].keys()}
+
+    for k, v in dl2.items():
+        dl2[k] = [v2 for v1 in v for v2 in v1]
+        lns = [len(v1) for v1 in v]
+        
+    assert len(lns) == len(url)
+    assert len(set([len(v) for v in dl2.values()]))
+    url = [k for u, l in zip(url, lns) for k in [u]*l]
+    dl2["url"] = url
+    return dl2
 
 
 
