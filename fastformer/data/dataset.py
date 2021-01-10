@@ -579,11 +579,11 @@ def all_datasets():
     swag = load_dataset("swag", 'regular')
     hellaswag = load_dataset("hellaswag")
     qangaroo = load_dataset("qangaroo", 'wikihop')
-    qasc = load_dataset("qasc") # 2 tasks can be built
+    qasc = load_dataset("qasc") # 3 tasks can be built
     wiqa = load_dataset("wiqa")
     search_qa = load_dataset("search_qa", 'train_test_val')
     hotpot_qa = load_dataset("hotpot_qa", 'distractor')
-    hotpot_qa = load_dataset("hotpot_qa", 'fullwiki')
+    hotpot_qa = load_dataset("hotpot_qa", 'fullwiki') # Same as distractor
     inquisitive_qg = load_dataset("inquisitive_qg", script_version="master")
     squad = load_dataset("squad")
     squad_v2 = load_dataset("squad_v2")
@@ -593,7 +593,7 @@ def all_datasets():
     tweet_qa = load_dataset("tweet_qa", script_version="master")
     trivia_qa = load_dataset("trivia_qa", "rc")
     wiki_qa = load_dataset("wiki_qa")  # Is answer correct / relevant or not
-    narrativeqa = load_dataset("narrativeqa", script_version="master")
+    narrativeqa = load_dataset("narrativeqa", script_version="master") # Use the summary column and treat this as a Matching task with matching question to answer.
     mc_taco = load_dataset("mc_taco", script_version="master")
     social_i_qa = load_dataset("social_i_qa", script_version="master")
     quac = load_dataset("quac", script_version="master")
@@ -763,8 +763,9 @@ def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
     return mapper
 
 
-def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tuple(), mlm_ans=tuple(),
-                        total_tokens=768, tokenizer=None, mcq_query=tuple(), mcq_cols=tuple(), mcq_ans=tuple()):
+def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tuple(), mlm_ans=tuple(),
+                        total_tokens=768, tokenizer=None, mcq_query=tuple(), mcq_cols=tuple(), mcq_ans=tuple(),
+                        text_only_answers=False, matching_query_with_adversarial=True):
     asep = " [ANSWER_OPTION_SEP] "
     aoptbegin = "[ANSWER_OPTION_BEGIN] "
     aoptend = " [ANSWER_OPTION_END]"
@@ -797,12 +798,23 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tupl
 
         query = []
         answer = []
-        for qtxt, qmc in zip(query_texts, query_match_cols):
+        for qtxt, qmc in zip(matching_query, matching_cols):
             if isinstance(qtxt, (list, tuple)):
                 qtxt = random.sample(qtxt, 1)[0]
             cq_query = []
             cq_answer = []
-            query_answers = np.array(list(map(clean_text, examples[qmc])))
+            query_answers = list(map(clean_text, examples[qmc]))
+
+            if matching_query_with_adversarial:
+                qaws = [qa.split() for qa in query_answers]
+                qaws = [" ".join(k) for qa in qaws for k in [random.sample(qa, len(qa))]]
+                qaws = [k for k in qaws if k not in query_answers]
+                query_answers = query_answers + qaws
+                adversarial_same_text = [" ".join(t.split()[idx:idx+random.sample([3, 4, 5], 1)[0]]) for t in one_texts for idx in random.sample(range(0, len(t.split())), 1)]
+                query_answers = query_answers + adversarial_same_text
+
+            query_answers = np.array(query_answers)
+
             shuffled_idxs = random.sample(range(len(query_answers)), len(query_answers))
             query_answers_shuffle = list(query_answers[shuffled_idxs])
             query_answers_shuffle_type_1 = aoptbegin + asep.join(query_answers_shuffle) + aoptend
@@ -814,7 +826,7 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tupl
 
                 atext_len = len(atext.split())
                 rnd = random.random()
-                if rnd < 0.25 and atext_len <= 4:
+                if (rnd < 0.25 and atext_len <= 4) or text_only_answers:
                     cq_query.append("%s the correct %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, query_answers_shuffle_type_1))
                     cq_answer.append(atext)
                 elif rnd < 0.5:
@@ -843,7 +855,12 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tupl
             candidates_shuffle = list(candidates[shuffled_idxs])
             candidates_shuffle_type_1 = aoptbegin + asep.join(candidates_shuffle) + aoptend
             candidates_shuffle_type_2 = aoptbegin + asep.join([str(i + 1) + ". " + a for i, a in enumerate(candidates_shuffle)]) + aoptend
-            for idx, aidx_c in zip(range(len(one_texts)), examples[mcol]):
+            if qtxt in examples:
+                qt = [q + " " for q in examples[qtxt]]
+                qtxt = "answer"
+            else:
+                qt = [""] * len(one_texts)
+            for idx, aidx_c, qtx in zip(range(len(one_texts)), examples[mcol], qt):
                 if aidx_c != -1 and isinstance(aidx_c, int):
                     aidx = shuffled_idxs.index(idx * len_per_sample + aidx_c)
                     atext = candidates[idx * len_per_sample + aidx_c]
@@ -856,17 +873,19 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tupl
                     aidx = atext = mask
                 atext_len = len(atext.split())
                 rnd = random.random()
-                if rnd < 0.25 and atext_len <= 3:
-                    cq_query.append("%s the correct %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_1))
+                if (rnd < 0.25 and atext_len <= 3) or text_only_answers:
+                    cq_query.append("%s%s the correct %s from %s?" % (qtx, random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_1))
+                    if text_only_answers and len(qtx)>0:
+                        cq_query[-1] = qtx
                     cq_answer.append(atext)
                 elif rnd < 0.5:
-                    cq_query.append("%s the correct option for %s from %s?" % (random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_2))
+                    cq_query.append("%s%s the correct option for %s from %s?" % (qtx, random.sample(word_choice_1, 1)[0], qtxt, candidates_shuffle_type_2))
                     cq_answer.append(str(aidx + 1) if type(aidx)==int else aidx)
                 elif rnd < 0.75 and atext_len <= 3:
-                    cq_query.append("Which %s from %s seems %s?" % (qtxt, candidates_shuffle_type_1, random.sample(word_choice_2, 1)[0]))
+                    cq_query.append("%sWhich %s from %s seems %s?" % (qtx, qtxt, candidates_shuffle_type_1, random.sample(word_choice_2, 1)[0]))
                     cq_answer.append(atext)
                 else:
-                    cq_query.append("Which option from %s seems %s for %s?" % (candidates_shuffle_type_2, random.sample(word_choice_2, 1)[0], qtxt))
+                    cq_query.append("%sWhich option from %s seems %s for %s?" % (qtx, candidates_shuffle_type_2, random.sample(word_choice_2, 1)[0], qtxt))
                     cq_answer.append(str(aidx + 1) if type(aidx)==int else aidx)
             query.append(cq_query)
             answer.append(cq_answer)
@@ -875,8 +894,10 @@ def get_matching_mapper(text_cols, query_texts, query_match_cols, mlm_query=tupl
             qt = qtxt_mlm
             if isinstance(qtxt_mlm, (list, tuple)):
                 qt = random.sample(qtxt_mlm, 1)[0]
-
-            cq_query = [qt]*len(one_texts)
+            if qt in examples:
+                cq_query = examples[qt]
+            else:
+                cq_query = [qt]*len(one_texts)
             cq_answer = list(map(clean_text, examples[qmc_mlm]))
             query.append(cq_query)
             answer.append(cq_answer)
@@ -1027,9 +1048,9 @@ amazon_us_reviews1024.save_to_disk("/home/ahemf/processed_datasets/amazon_us_rev
 
 
 rs.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary", "subreddit"], 512, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"])[0]
+######
 
-
-reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary", "subreddit"], 512, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=16)
+reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary", "topic category"], ["summary", "subreddit"],[], [], 1024, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=4)
 reddit_qna.save_to_disk("/home/ahemf/processed_datasets/reddit_qna")
 
 bookcorpusopen = bookcorpusopen.map(lambda x: dict(title=" ".join(x["title"].replace(".epub","").replace(".txt","").split('-')), text=x["text"][4096:]), num_proc=8)
@@ -1206,6 +1227,114 @@ hotpot_qa = hotpot_qa.map(lambda x: dict(length=len(x["text"].split())), num_pro
 hotpot_qa_qna_v1 = hotpot_qa.map(get_matching_mapper(["text"], [], [], [["What is the question's answer?", "Provide an answer to the asked question?", "Answer the question"]], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["answer"])
 hotpot_qa_qna_v1 = hotpot_qa_qna_v1.filter(lambda x: x["length"] <= 1000)
 hotpot_qa_qna_v1.save_to_disk("/home/ahemf/processed_datasets/hotpot_qa_qna_v1")
+
+hotpot_qa = load_dataset("hotpot_qa", 'distractor')
+hotpot_qa = hotpot_qa.map(lambda x: dict(context=" ".join([s for p in x["context"]["sentences"] for s in p])), num_proc=8)
+hotpot_qa = hotpot_qa.map(lambda x: dict(text =x["context"]),num_proc=8, remove_columns=['context', 'id', 'level', 'supporting_facts', 'type'])
+hotpot_qa = hotpot_qa.map(lambda x: dict(length=len(x["text"].split())), num_proc=8).filter(lambda x: x["length"] <= 1000, num_proc=8)
+hotpot_qa_qna_v2 = hotpot_qa.map(get_matching_mapper(["text"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["question", "answer"])
+hotpot_qa_qna_v2 = hotpot_qa_qna_v2.filter(lambda x: x["length"] <= 1000)
+hotpot_qa_qna_v2.save_to_disk("/home/ahemf/processed_datasets/hotpot_qa_qna_v2")
+
+#
+qangaroo = load_dataset("qangaroo", 'wikihop')
+qangaroo = qangaroo.map(lambda x: dict(text="query: "+x["query"].replace("_", ' ')+", context: "+" ".join(x["supports"])), remove_columns=["id", "query", "supports"])
+qangaroo = qangaroo.filter(lambda x: x["answer"] in x["candidates"]).filter(lambda x: "!" not in x["answer"])
+qangaroo_qna = qangaroo.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, [["answer to query", "answer to question"]], ["candidates"], ["answer"]), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'candidates'])
+qangaroo_qna.save_to_disk("/home/ahemf/processed_datasets/qangaroo_qna")
+
+qangaroo = load_dataset("qangaroo", 'wikihop')
+qangaroo = qangaroo.map(lambda x: dict(text=" ".join(x["supports"]), query=x["query"].replace("_", ' ')), remove_columns=["id", "supports"])
+qangaroo = qangaroo.filter(lambda x: x["answer"] in x["candidates"]).filter(lambda x: "!" not in x["answer"])
+qangaroo_qna_v2 = qangaroo.map(get_matching_mapper(["text"], [], [], ["query"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'candidates'])
+qangaroo_qna_v2.save_to_disk("/home/ahemf/processed_datasets/qangaroo_qna_v2")
+
+#
+qasc = load_dataset("qasc")
+qasc = qasc.map(lambda x: dict(options=x["choices"]["text"], answerKey=(ord(x["answerKey"]) - ord('A') if len(x["answerKey"]) else -1)), remove_columns=["choices", "id"])
+qasc = qasc.map(lambda x: dict(text="first fact: "+x["fact1"] + ", second fact: "+x["fact2"], answer=x["options"][x["answerKey"]]), remove_columns=['fact1', 'fact2', 'combinedfact'])
+
+qasc_qa_v1 = qasc.map(get_matching_mapper(["text", "formatted_question"], [], [], ["Answer the question with correct choice."], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'answerKey', 'formatted_question', 'options', 'question'])
+qasc_qa_v1.save_to_disk("/home/ahemf/processed_datasets/qasc_qa_v1")
+
+qasc_qa_v2 = qasc.map(get_matching_mapper(["text", "question"], [], [], [], [], 1024, tokenizer, [["answer to query", "answer to question"]], ["options"], ["answerKey"]), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'answerKey', 'formatted_question', 'options', 'question'])
+qasc_qa_v2.save_to_disk("/home/ahemf/processed_datasets/qasc_qa_v2")
+
+qasc_qa_v3 = qasc.map(get_matching_mapper(["text",], [], [], ["formatted_question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'answerKey', 'formatted_question', 'options', 'question'])
+qasc_qa_v3.save_to_disk("/home/ahemf/processed_datasets/qasc_qa_v3")
+
+qasc_qa_v4 = qasc.map(get_matching_mapper(["text",], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'answerKey', 'formatted_question', 'options', 'question'])
+qasc_qa_v4.save_to_disk("/home/ahemf/processed_datasets/qasc_qa_v4")
+
+#
+squad_v2 = squad_v2.map(lambda x: dict(text = x["title"]+". "+x["context"], answer=x["answers"]["text"]), remove_columns=["id", "title", "context", "answers"],)
+squad_v2 = squad_v2.map(lambda x: dict(answer=x["answer"][0] if len(x["answer"]) > 0 else "no answer"))
+squad_v2_qna = squad_v2.map(get_matching_mapper(["text", "question"], [], [], ["Answer the question."], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'question'])
+squad_v2_qna.save_to_disk("/home/ahemf/processed_datasets/squad_v2_qna")
+
+#
+
+squad_v2 = squad_v2.map(lambda x: dict(text = x["title"]+". "+x["context"], answer=x["answers"]["text"]), remove_columns=["id", "title", "context", "answers"],)
+squad_v2 = squad_v2.map(lambda x: dict(answer=x["answer"][0] if len(x["answer"]) > 0 else "no answer"))
+squad_v2_qna_v2 = squad_v2.map(get_matching_mapper(["text", ], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'question'])
+squad_v2_qna_v2.save_to_disk("/home/ahemf/processed_datasets/squad_v2_qna_v2")
+
+
+ropes = ropes.map(lambda x: dict(answer=x["answers"]["text"]), remove_columns=["answers"]).map(lambda x: dict(answer=x["answer"][0] if len(x["answer"]) > 0 else "no answer"))
+ropes_qna = ropes.map(get_matching_mapper(["background", "situation", "question"], [], [], ["Answer the question."], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'background', 'id', 'question', 'situation'])
+ropes_qna.save_to_disk("/home/ahemf/processed_datasets/ropes_qna")
+
+ropes = ropes.map(lambda x: dict(answer=x["answers"]["text"]), remove_columns=["answers"]).map(lambda x: dict(answer=x["answer"][0] if len(x["answer"]) > 0 else "no answer"))
+ropes_qna_v2 = ropes.map(get_matching_mapper(["background", "situation"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'background', 'id', 'question', 'situation'])
+ropes_qna_v2.save_to_disk("/home/ahemf/processed_datasets/ropes_qna_v2")
+
+
+wiki_qa = wiki_qa.map(lambda x: dict(label="yes" if x["label"]==1 else "no"))
+wiki_qa_qna = wiki_qa.map(get_matching_mapper(["document_title", "question", "answer"], [], [], [["Is the question answered correctly?", "Does the previous statement provide valid answer to the asked question?"]], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['question_id', 'question', 'document_title', 'answer', 'label'])
+wiki_qa_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_qa_qna")
+
+
+#
+narrativeqa = load_dataset("narrativeqa", script_version="master")
+narrativeqa = narrativeqa.map(lambda x: dict(text=x["document"]["summary"]["text"], answers=[a["text"] for a in x["answers"]], question=x["question"]["text"]), remove_columns=["document"])
+narrativeqa_v1 = narrativeqa.map(lambda x: dict(answer=x["answers"][0]), remove_columns=["answers"])
+narrativeqa_v2 = narrativeqa.filter(lambda x: len(x["answers"])>1).map(lambda x: dict(answer=x["answers"][1]), remove_columns=["answers"])
+
+narrativeqa_v1 = narrativeqa_v1.map(get_matching_mapper(["text"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'question',])
+narrativeqa_v2 = narrativeqa_v2.map(get_matching_mapper(["text"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'question',])
+narrativeqa_v1.save_to_disk("/home/ahemf/processed_datasets/narrativeqa_v1")
+narrativeqa_v2.save_to_disk("/home/ahemf/processed_datasets/narrativeqa_v2")
+
+#
+social_i_qa = load_dataset("social_i_qa", script_version="master")
+social_i_qa_v1 = social_i_qa.map(lambda x: dict(text=x["context"] + x["question"], label=int(x["label"]) - 1), remove_columns=["context", "question"])
+social_i_qa_v2 = social_i_qa.map(lambda x: dict(text=x["context"], label=int(x["label"]) - 1), remove_columns=["context"])
+social_i_qa_v1 = social_i_qa_v1.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, [["answer to query", "answer to question"]], [["answerA", "answerB", "answerC"]], ["label"]), batched=True, num_proc=16, batch_size=2, remove_columns=['answerA', 'answerB', 'answerC', 'label'])
+social_i_qa_v2 = social_i_qa_v2.map(get_matching_mapper(["text", ], [], [], [], [], 1024, tokenizer, ["question"], [["answerA", "answerB", "answerC"]], ["label"]), batched=True, num_proc=16, batch_size=2, remove_columns=['question', 'answerA', 'answerB', 'answerC', 'label'])
+social_i_qa_v3 = social_i_qa.map(lambda x: dict(text=x["context"], label=[x['answerA'], x['answerB'], x['answerC']][int(x["label"]) - 1]), remove_columns=["context"])
+social_i_qa_v3 = social_i_qa_v3.map(get_matching_mapper(["text", ], [], [], ["question"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['question', 'answerA', 'answerB', 'answerC', 'label'])
+social_i_qa_v1.save_to_disk("/home/ahemf/processed_datasets/social_i_qa_v1")
+social_i_qa_v2.save_to_disk("/home/ahemf/processed_datasets/social_i_qa_v2")
+social_i_qa_v3.save_to_disk("/home/ahemf/processed_datasets/social_i_qa_v3")
+
+#
+quac = load_dataset("quac", script_version="master")
+quac = quac.map(lambda d: dict(text=[d["background"][0]+d["context"][0]]*len(d["questions"][0]), question=d["questions"][0], options=[d["orig_answers"][0]["texts"]]*len(d["questions"][0]), label=list(range(len(d["questions"][0])))), batch_size=1, batched=True, remove_columns=['dialogue_id', 'wikipedia_page_title', 'background', 'section_title', 'context', 'turn_ids', 'questions', 'followups', 'yesnos', 'answers', 'orig_answers'])
+quac = quac.map(lambda x: dict(options=["no answer" if opt=="CANNOTANSWER" else opt for opt in x["options"]]))
+quac_qna = quac.map(get_matching_mapper(["text", ], [], [], [], [], 1024, tokenizer, ["question"], ["options"], ["label"], text_only_answers=True), batched=True, num_proc=16, batch_size=1, remove_columns=['question', "options", 'label'])
+quac_qna.save_to_disk("/home/ahemf/processed_datasets/quac_qna")
+
+#
+e2e_nlg_cleaned = load_dataset("e2e_nlg_cleaned", script_version="master")
+e2e_nlg_cleaned = e2e_nlg_cleaned.map(lambda x:dict(meaning_representation=x["meaning_representation"].split(", ")), )
+e2e_nlg_cleaned = e2e_nlg_cleaned.map(lambda x:dict(question=[q.split("[")[0] for q in x["meaning_representation"]], answer=[q.split("[")[-1].replace("]",'') for q in x["meaning_representation"]]), remove_columns=["meaning_representation"])
+e2e_nlg_cleaned = e2e_nlg_cleaned.map(lambda x:dict(question=[re.sub("([a-z])([A-Z])","\g<1> \g<2>", q) for q in x["question"]], answer=[re.sub(r'([A-Z][a-z]+(?=[A-Z]))', r'\1 ', q) for q in x["answer"]]))
+e2e_nlg_cleaned = e2e_nlg_cleaned.map(lambda d: dict(text=[d["human_reference"][0]]*len(d["question"][0]), question=d["question"][0], options=[d["answer"][0]]*len(d["question"][0]), label=list(range(len(d["question"][0])))), batch_size=1, batched=True, remove_columns=['answer', 'human_reference'])
+e2e_nlg_cleaned_qna = e2e_nlg_cleaned.map(get_matching_mapper(["text", ], [], [], [], [], 1024, tokenizer, ["question"], ["options"], ["label"], text_only_answers=False), batched=True, num_proc=16, batch_size=2, remove_columns=['question', "options", 'label'])
+e2e_nlg_cleaned_qna.save_to_disk("/home/ahemf/processed_datasets/e2e_nlg_cleaned_qna")
+
+# MLM instead of topic modelling for reddit n wikipedia etc with adversarial 
+# by jumbling the match, picking few options from same text (same len as answer), insert stop words within the actual match
 
 """
 
