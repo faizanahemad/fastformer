@@ -666,6 +666,7 @@ def all_datasets():
     wiki_asp = dict()
     for ds in ['album', 'animal', 'artist', 'building', 'company', 'educational_institution', 'event', 'film', 'group', 'historic_place', 'infrastructure', 'mean_of_transportation', 'office_holder', 'plant', 'single', 'soccer_player', 'software', 'television_show', 'town', 'written_work']:
         wiki_asp[ds] = load_dataset("wiki_asp", ds, script_version="master")
+    wiki_asp = concatenate_datasets(list([t["train"] for t in wiki_asp.values()]))
 
     taskmaster2 = dict()
     for ds in ['flights', 'food-ordering', 'hotels', 'movies', 'music', 'restaurant-search', 'sports']:
@@ -765,7 +766,7 @@ def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
 
 def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tuple(), mlm_ans=tuple(),
                         total_tokens=768, tokenizer=None, mcq_query=tuple(), mcq_cols=tuple(), mcq_ans=tuple(),
-                        text_only_answers=False, matching_query_with_adversarial=True):
+                        text_only_answers=False, matching_query_with_adversarial=True, n_jumbled_options=1, n_within_text_options=1):
     asep = " [ANSWER_OPTION_SEP] "
     aoptbegin = "[ANSWER_OPTION_BEGIN] "
     aoptend = " [ANSWER_OPTION_END]"
@@ -807,10 +808,10 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
 
             if matching_query_with_adversarial:
                 qaws = [qa.split() for qa in query_answers]
-                qaws = [" ".join(k) for qa in qaws for k in [random.sample(qa, len(qa))]]
+                qaws = [" ".join(k) for qa in qaws for k in [random.sample(qa, len(qa)) for _ in range(n_jumbled_options)]]
                 qaws = [k for k in qaws if k not in query_answers]
                 query_answers = query_answers + qaws
-                adversarial_same_text = [" ".join(t.split()[idx:idx+random.sample([3, 4, 5], 1)[0]]) for t in one_texts for idx in random.sample(range(0, len(t.split())), 1)]
+                adversarial_same_text = [" ".join(t.split()[idx:idx+random.sample([3, 4, 5], 1)[0]]) for t in one_texts for idx in (random.sample(range(0, len(t.split())), n_within_text_options) if len(t.split()) > 1 else [])]
                 query_answers = query_answers + adversarial_same_text
 
             query_answers = np.array(query_answers)
@@ -847,9 +848,17 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
             cq_query = []
             cq_answer = []
             candidates = list(zip(*[examples[col] for col in qmc])) if isinstance(qmc, (list, tuple)) else examples[qmc]
-            candidates = np.array([d for c in candidates for d in list(map(clean_text, c))])
+            candidates = [d for c in candidates for d in list(map(clean_text, c))]
             len_per_sample = len(qmc) if isinstance(qmc, (list, tuple)) else len(examples[qmc][0])
 
+            if matching_query_with_adversarial:
+                qaws = [qa.split() for qa in candidates]
+                qaws = list(set([" ".join(k) for qa in qaws for k in [random.sample(qa, len(qa)) for _ in range(n_jumbled_options)]]))
+                qaws = [k for k in qaws if k not in candidates]
+                candidates = candidates + qaws
+                adversarial_same_text = [" ".join(t.split()[idx:idx+random.sample([3, 4, 5], 1)[0]]) for t in one_texts for idx in (random.sample(range(0, len(t.split())), n_within_text_options) if len(t.split()) > 1 else [])]
+                candidates = candidates + adversarial_same_text
+            candidates = np.array(candidates)
 
             shuffled_idxs = random.sample(range(len(candidates)), len(candidates))
             candidates_shuffle = list(candidates[shuffled_idxs])
@@ -1053,46 +1062,103 @@ rs.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary",
 reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary", "topic category"], ["summary", "subreddit"],[], [], 1024, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=4)
 reddit_qna.save_to_disk("/home/ahemf/processed_datasets/reddit_qna")
 
+bookcorpusopen = load_dataset("bookcorpusopen")
 bookcorpusopen = bookcorpusopen.map(lambda x: dict(title=" ".join(x["title"].replace(".epub","").replace(".txt","").split('-')), text=x["text"][4096:]), num_proc=8)
-bookcorpusopen_qna = bookcorpusopen.map(get_matching_mapper(["text"], ["title"], ["title",], 768, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=16)
+bookcorpusopen_qna = bookcorpusopen.map(get_matching_mapper(["text"], ["title"], ["title",],[],[], 1024, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=4)
 bookcorpusopen_qna.save_to_disk("/home/ahemf/processed_datasets/bookcorpusopen_qna")
 
-wikipedia_qna = wikipedia.map(get_matching_mapper(["text"], ["title"], ["title",], 768, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=16)
+wikipedia = load_dataset("wikipedia", '20200501.en')
+wikipedia_qna = wikipedia.map(get_matching_mapper(["text"], ["title"], ["title",],[], [], 1024, tokenizer), batched=True, remove_columns=["title"], num_proc=16, batch_size=4)
 wikipedia_qna.save_to_disk("/home/ahemf/processed_datasets/wikipedia_qna")
 
+amazon_polarity = load_dataset("amazon_polarity", script_version="master")
 amazon_polarity = amazon_polarity.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
-amazon_polarity_qna = amazon_polarity.map(get_matching_mapper(["content"], ["title", "sentiment"], ["title", "sentiment"], 768, tokenizer), batched=True, remove_columns=["title", "sentiment", "content"], num_proc=16, batch_size=16)
+amazon_polarity_qna = amazon_polarity.map(get_matching_mapper(["content"], ["title", "sentiment"], ["title", "sentiment"],[],[], 1024, tokenizer), batched=True, remove_columns=["title", "sentiment", "content"], num_proc=16, batch_size=4)
 amazon_polarity_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_polarity_qna")
 
-yahoo_answers_qa_qna = yahoo_answers_qa.map(get_matching_mapper(["answer"], ["question", "category"], ["question", "main_category"], 768, tokenizer), batched=True, remove_columns=["id", 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=16, batch_size=16)
+yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
+yahoo_answers_qa_qna = yahoo_answers_qa.map(get_matching_mapper(["answer"], ["question", "category"], ["question", "main_category"],[], [], 1024, tokenizer), batched=True, remove_columns=["id", 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=16, batch_size=4)
 yahoo_answers_qa_qna.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_qa_qna")
 
-yahoo_answers_topics_qna = yahoo_answers_topics.map(get_matching_mapper(["best_answer"], ["question"], ["question_title"], 768, tokenizer), batched=True, remove_columns=['id', 'topic', 'question_title', 'question_content', 'best_answer'], num_proc=16, batch_size=16)
+yahoo_answers_topics = load_dataset("yahoo_answers_topics")
+yahoo_answers_topics_qna = yahoo_answers_topics.map(get_matching_mapper(["best_answer"], ["question"], ["question_title"],[],[], 1024, tokenizer), batched=True, remove_columns=['id', 'topic', 'question_title', 'question_content', 'best_answer'], num_proc=16, batch_size=4)
 yahoo_answers_topics_qna.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_topics_qna")
 
+reuters_hayes = load_dataset("reuters21578", 'ModHayes')
+reuters_lewis = load_dataset("reuters21578", 'ModLewis')
+reuters_apte = load_dataset("reuters21578", 'ModApte')
+reuters = concatenate_datasets([d[split] for d in [reuters_hayes, reuters_lewis, reuters_apte] for split in ["train", "test"]])
 reuters = reuters.map(lambda x: dict(title=x["title"].replace('&lt;', ' ').replace('>', ' ')), num_proc=16, batch_size=16)
-reuters_qna = reuters.map(get_matching_mapper(["text"], ["title"], ["title"], 768, tokenizer), batched=True, remove_columns=['topics', 'lewis_split', 'cgis_split', 'old_id', 'new_id', 'places', 'people', 'orgs', 'exchanges', 'date', 'title'], num_proc=16, batch_size=16)
+reuters_qna = reuters.map(get_matching_mapper(["text"], ["title"], ["title"],[],[], 1024, tokenizer), batched=True, remove_columns=['topics', 'lewis_split', 'cgis_split', 'old_id', 'new_id', 'places', 'people', 'orgs', 'exchanges', 'date', 'title'], num_proc=16, batch_size=4)
 reuters_qna.save_to_disk("/home/ahemf/processed_datasets/reuters_qna")
 
-ohsumed_qna = ohsumed.map(get_matching_mapper(["abstract"], ["title"], ["title"], 896, tokenizer), batched=True, remove_columns=['seq_id', 'medline_ui', 'mesh_terms', 'title', 'publication_type', 'abstract', 'author', 'source'], num_proc=16, batch_size=16)
+ohsumed = load_dataset("ohsumed", script_version="master")
+ohsumed_qna = ohsumed.map(get_matching_mapper(["abstract"], ["title"], ["title"],[],[], 1024, tokenizer), batched=True, remove_columns=['seq_id', 'medline_ui', 'mesh_terms', 'title', 'publication_type', 'abstract', 'author', 'source'], num_proc=16, batch_size=4)
 ohsumed_qna.save_to_disk("/home/ahemf/processed_datasets/ohsumed_qna")
 
-xsum_qna = xsum.map(get_matching_mapper(["document"], ["summary"], ["summary"], 1024, tokenizer), batched=True, remove_columns=['document', 'summary', 'id'], num_proc=16, batch_size=16)
+xsum = load_dataset("xsum")
+xsum_qna = xsum.map(get_matching_mapper(["document"], ["summary"], ["summary"],[],[], 1024, tokenizer), batched=True, remove_columns=['document', 'summary', 'id'], num_proc=16, batch_size=4)
 xsum_qna.save_to_disk("/home/ahemf/processed_datasets/xsum_qna")
 
-eli5_qna = eli5.map(get_matching_mapper([["answers", "text"]], ["title"], ["title"], 896, tokenizer), batched=True, remove_columns=['q_id', 'title', 'selftext', 'document', 'subreddit', 'answers', 'title_urls', 'selftext_urls', 'answers_urls'], num_proc=16, batch_size=16)
+eli5 = load_dataset("eli5")
+eli5_qna = eli5.map(get_matching_mapper([["answers", "text"]], ["title"], ["title"],[],[], 1024, tokenizer), batched=True, remove_columns=['q_id', 'title', 'selftext', 'document', 'subreddit', 'answers', 'title_urls', 'selftext_urls', 'answers_urls'], num_proc=16, batch_size=4)
 eli5_qna.save_to_disk("/home/ahemf/processed_datasets/eli5_qna")
 
-cnn_dailymail_qna = cnn_dailymail.map(get_matching_mapper(["article"], ["highlights"], ["highlights"], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['article', 'highlights', 'id'])
+cnn_dailymail = load_dataset("cnn_dailymail", '3.0.0')
+cnn_dailymail_qna = cnn_dailymail.map(get_matching_mapper(["article"], ["highlights"], ["highlights"],[],[],  1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['article', 'highlights', 'id'])
 cnn_dailymail_qna.save_to_disk("/home/ahemf/processed_datasets/cnn_dailymail_qna")
+
+amazon_reviews_multi = load_dataset("amazon_reviews_multi", 'en')
+amazon_reviews_multi_qna = amazon_reviews_multi.map(get_matching_mapper(["review_body"], ["title"], ["review_title"], [["Predict the review rating", "What is the rating suggested by the review on a scale of 1 to 5?"]], ["stars"], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['review_id', 'product_id', 'reviewer_id', 'stars', 'review_body', 'review_title', 'language', 'product_category'])
+amazon_reviews_multi_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_reviews_multi_qna")
+
+
+wiki_lingua = load_dataset("wiki_lingua", 'english', script_version="master")
+wiki_lingua = wiki_lingua.map(batch_process_wiki_lingua, batched=True, num_proc=1, remove_columns=["article"])
+wiki_lingua_qna = wiki_lingua.map(get_matching_mapper(["document"], ["summary", "topic", "heading"], ["summary", "url", "section_name"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['document', 'section_name', 'summary', 'url'])
+wiki_lingua_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_lingua_qna")
+
+samsum = load_dataset("samsum", script_version="master")
+samsum_qna = samsum.map(get_matching_mapper(["dialogue"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['dialogue', 'id', 'summary',])
+samsum_qna.save_to_disk("/home/ahemf/processed_datasets/samsum_qna")
+
+multi_news = load_dataset("multi_news")
+multi_news_qna = multi_news.map(get_matching_mapper(["document"], ["summary"], ["summary"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['document', 'summary'])
+multi_news_qna.save_to_disk("/home/ahemf/processed_datasets/multi_news_qna")
+
+wiki_auto = load_dataset("wiki_auto", 'auto_acl')
+wiki_auto = wiki_auto.map(lambda x: dict(simple_sentence=x["simple_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|"), normal_sentence=x["normal_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|")), num_proc=16)
+wiki_auto = wiki_auto["full"]
+wiki_auto_qna = wiki_auto.map(get_matching_mapper(["normal_sentence"], ["simplified sentence"], ["simple_sentence"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['normal_sentence', 'simple_sentence'])
+wiki_auto_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_auto_qna")
+
+gigaword = load_dataset("gigaword")
+gigaword = gigaword.map(lambda x: dict(document=x["document"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|"), summary=x["summary"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|")), num_proc=16)
+gigaword_qna = gigaword.map(get_matching_mapper(["document"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['document', 'summary',])
+gigaword_qna.save_to_disk("/home/ahemf/processed_datasets/gigaword_qna")
+
+wiki_atomic_edits_insertions = load_dataset("wiki_atomic_edits", 'english_insertions', script_version="master")
+wiki_atomic_edits_insertions_qna = wiki_atomic_edits_insertions.map(get_matching_mapper(["base_sentence"], ["closest match", "edited phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_insertions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_insertions_qna")
+
+wiki_atomic_edits_deletions = load_dataset("wiki_atomic_edits", 'english_deletions', script_version="master")
+wiki_atomic_edits_deletions_qna = wiki_atomic_edits_deletions.map(get_matching_mapper(["base_sentence"], ["closest match", "deleted phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_deletions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_deletions_qna")
+
+wiki_split = load_dataset("wiki_split", script_version="master") 
+wiki_split_qna = wiki_split.map(get_matching_mapper(["complex_sentence"], ["first simple sentence", "second simple sentence"], ["simple_sentence_1", "simple_sentence_2"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['simple_sentence_2', 'simple_sentence_1', 'complex_sentence'])
+wiki_split_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_split_qna")
+
+per_sent = load_dataset("per_sent", script_version="master")
+per_sent = per_sent.map(lambda x: dict(sentiment=({0: "negative", 1: "neutral", 2:"positive", -1:"neutral"}[x["TRUE_SENTIMENT"]])), remove_columns=["TRUE_SENTIMENT"], num_proc=8)
+per_sent_qna = per_sent.map(get_matching_mapper(["DOCUMENT"], ["focused entity", "title"], ["TARGET_ENTITY", "TITLE"], ["Predict the correct sentiment from positive, neutral and negative"], ["sentiment"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['DOCUMENT', 'DOCUMENT_INDEX', 'MASKED_DOCUMENT', 'Paragraph0', 'Paragraph1', 'Paragraph10', 'Paragraph11', 'Paragraph12', 'Paragraph13', 'Paragraph14', 'Paragraph15', 'Paragraph2', 'Paragraph3', 'Paragraph4', 'Paragraph5', 'Paragraph6', 'Paragraph7', 'Paragraph8', 'Paragraph9', 'TARGET_ENTITY', 'TITLE', 'sentiment'])
+per_sent_qna.save_to_disk("/home/ahemf/processed_datasets/per_sent_qna")
 
 
 yelp_polarity = yelp_polarity.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
 yelp_polarity_qna = yelp_polarity.map(get_matching_mapper(["text"], [], [], ["Predict the correct sentiment between positive and negative"], ["sentiment"], 512, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['sentiment'])
 yelp_polarity_qna.save_to_disk("/home/ahemf/processed_datasets/yelp_polarity_qna")
 
-amazon_reviews_multi_qna = amazon_reviews_multi.map(get_matching_mapper(["review_body"], ["title"], ["review_title"], [["Predict the review rating", "What is the rating suggested by the review on a scale of 1 to 5?"]], ["stars"], 768, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['review_id', 'product_id', 'reviewer_id', 'stars', 'review_body', 'review_title', 'language', 'product_category'])
-amazon_reviews_multi_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_reviews_multi_qna")
 
 app_reviews_qna = app_reviews.map(get_matching_mapper(["review"], [], [], [["Predict the review rating", "What is the rating suggested by the review on a scale of 1 to 5?"]], ["stars"], 768, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['package_name', 'review', 'date', 'star'])
 app_reviews_qna.save_to_disk("/home/ahemf/processed_datasets/app_reviews_qna")
@@ -1100,40 +1166,6 @@ app_reviews_qna.save_to_disk("/home/ahemf/processed_datasets/app_reviews_qna")
 imdb = imdb.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
 imdb_qna = imdb.map(get_matching_mapper(["text"], [], [], ["Predict the correct sentiment between positive and negative"], ["sentiment"], 512, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['sentiment'])
 imdb_qna.save_to_disk("/home/ahemf/processed_datasets/imdb_qna")
-
-wiki_lingua = wiki_lingua.map(batch_process_wiki_lingua, batched=True, num_proc=1, remove_columns=["article"])
-wiki_lingua_qna = wiki_lingua.map(get_matching_mapper(["document"], ["summary", "topic", "heading"], ["summary", "url", "section_name"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['document', 'section_name', 'summary', 'url'])
-wiki_lingua_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_lingua_qna")
-
-samsum_qna = samsum.map(get_matching_mapper(["dialogue"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['dialogue', 'id', 'summary',])
-samsum_qna.save_to_disk("/home/ahemf/processed_datasets/samsum_qna")
-
-multi_news_qna = multi_news.map(get_matching_mapper(["document"], ["summary"], ["summary"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['document', 'summary'])
-multi_news_qna.save_to_disk("/home/ahemf/processed_datasets/multi_news_qna")
-
-wiki_auto = wiki_auto.map(lambda x: dict(simple_sentence=x["simple_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|"), normal_sentence=x["normal_sentence"].replace("-RRB-", ")").replace("-LRB-", "(").replace("-PIPE-", "|")), num_proc=16)
-wiki_auto = wiki_auto["full"]
-wiki_auto_qna = wiki_auto.map(get_matching_mapper(["normal_sentence"], ["simplified sentence"], ["simple_sentence"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['normal_sentence', 'simple_sentence'])
-wiki_auto_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_auto_qna")
-
-gigaword = gigaword.map(lambda x: dict(document=x["document"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|"), summary=x["summary"].replace("-rrb-", ")").replace("-lrb-", "(").replace("-PIPE-", "|")), num_proc=16)
-gigaword_qna = gigaword.map(get_matching_mapper(["document"], ["summary"], ["summary"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['document', 'summary',])
-gigaword_qna.save_to_disk("/home/ahemf/processed_datasets/gigaword_qna")
-
-
-wiki_atomic_edits_insertions_qna = wiki_atomic_edits_insertions.map(get_matching_mapper(["base_sentence"], ["closest match", "edited phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
-wiki_atomic_edits_insertions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_insertions_qna")
-
-
-wiki_atomic_edits_deletions_qna = wiki_atomic_edits_deletions.map(get_matching_mapper(["base_sentence"], ["closest match", "deleted phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
-wiki_atomic_edits_deletions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_deletions_qna")
-
-wiki_split_qna = wiki_split.map(get_matching_mapper(["complex_sentence"], ["first simple sentence", "second simple sentence"], ["simple_sentence_1", "simple_sentence_2"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['simple_sentence_2', 'simple_sentence_1', 'complex_sentence'])
-wiki_split_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_split_qna")
-
-per_sent = per_sent.map(lambda x: dict(sentiment=({0: "negative", 1: "neutral", 2:"positive", -1:"neutral"}[x["TRUE_SENTIMENT"]])), remove_columns=["TRUE_SENTIMENT"], num_proc=8)
-per_sent_qna = per_sent.map(get_matching_mapper(["DOCUMENT"], ["focused entity", "title"], ["TARGET_ENTITY", "TITLE"], ["Predict the correct sentiment from positive, neutral and negative"], ["sentiment"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['DOCUMENT', 'DOCUMENT_INDEX', 'MASKED_DOCUMENT', 'Paragraph0', 'Paragraph1', 'Paragraph10', 'Paragraph11', 'Paragraph12', 'Paragraph13', 'Paragraph14', 'Paragraph15', 'Paragraph2', 'Paragraph3', 'Paragraph4', 'Paragraph5', 'Paragraph6', 'Paragraph7', 'Paragraph8', 'Paragraph9', 'TARGET_ENTITY', 'TITLE', 'sentiment'])
-per_sent_qna.save_to_disk("/home/ahemf/processed_datasets/per_sent_qna")
 
 
 anli = load_dataset("anli")
@@ -1212,12 +1244,12 @@ paws_qna.save_to_disk("/home/ahemf/processed_datasets/paws_qna")
 
 #
 swag = load_dataset("swag", 'regular')
-swag_qna = swag.map(get_matching_mapper(["startphrase"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end"]], [['ending0', 'ending1', 'ending2', 'ending3']], ["label"]), batched=True, num_proc=16, batch_size=4, remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', 'label'])
+swag_qna = swag.map(get_matching_mapper(["startphrase"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end"]], [['ending0', 'ending1', 'ending2', 'ending3']], ["label"]), batched=True, num_proc=16, batch_size=2, remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', 'label'])
 swag_qna.save_to_disk("/home/ahemf/processed_datasets/swag_qna")
 
 hellaswag = load_dataset("hellaswag")
 hellaswag = hellaswag.map(lambda x: dict(text="activity: "+x["activity_label"]+ ", context: " + x["ctx"], label=int(x["label"]) if len(x["label"])>0 else -1), remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b','ctx','source_id', 'split', 'split_type',], num_proc=8)
-hellaswag_qna = hellaswag.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end", "ending"]], ["endings"], ["label"]), batched=True, num_proc=16, batch_size=4, remove_columns=['endings', 'label'])
+hellaswag_qna = hellaswag.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, [["completion phrase", "end phrase", "end", "ending"]], ["endings"], ["label"]), batched=True, num_proc=16, batch_size=2, remove_columns=['endings', 'label'])
 hellaswag_qna.save_to_disk("/home/ahemf/processed_datasets/hellaswag_qna")
 
 hotpot_qa = load_dataset("hotpot_qa", 'distractor')
@@ -1335,6 +1367,118 @@ e2e_nlg_cleaned_qna.save_to_disk("/home/ahemf/processed_datasets/e2e_nlg_cleaned
 
 # MLM instead of topic modelling for reddit n wikipedia etc with adversarial 
 # by jumbling the match, picking few options from same text (same len as answer), insert stop words within the actual match
+
+sent_comp = load_dataset("sent_comp", script_version="master")
+sent_comp = sent_comp.map(lambda x: dict(text=x["graph"]["sentence"], shortened=x["compression"]["text"]),num_proc=16, remove_columns=['graph', 'compression', 'compression_ratio', 'doc_id', 'source_tree', 'compression_untransformed'])
+sent_comp_qna = sent_comp.map(get_matching_mapper(["text"], ["shortened text", "headline"], ["shortened", "headline"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=["shortened", "headline"])
+sent_comp_qna.save_to_disk("/home/ahemf/processed_datasets/sent_comp_qna")
+
+# 
+quartz = load_dataset("quartz")
+quartz = quartz.map(lambda x: dict(options=x["choices"]["text"], text=x["para"], label=ord(x["answerKey"]) - ord('A'),physical_effect_direction=x["para_anno"]["effect_dir_str"], physical_effect=x["para_anno"]["effect_prop"],), remove_columns=['id', 'choices', 'answerKey', 'para', 'para_id', 'para_anno', 'question_anno'],)
+quartz_qna = quartz.map(get_matching_mapper(["text"], [], [], ["Physical phenomena", "Physical phenomena Direction"], ["physical_effect", "physical_effect_direction"], 1024, tokenizer, ["question"], ["options"], ["label"]), batched=True, num_proc=16, batch_size=2, remove_columns=['label', 'options', 'physical_effect', 'physical_effect_direction', 'question'])
+quartz_qna.save_to_disk("/home/ahemf/processed_datasets/quartz_qna")
+
+# Given an answer+text, generate a plausible question 
+mocha = load_dataset("mocha", script_version="master").map(lambda x: dict(label=0))
+mocha_qna = mocha.map(get_matching_mapper(["context"], [], [], [], [], 1024, tokenizer, ["question"], [["reference", "candidate"]], ["label"]), batched=True, num_proc=16, batch_size=4, remove_columns=['constituent_dataset', 'id', 'context', 'question', 'reference', 'candidate', 'score', 'metadata', 'candidate2', 'score2'])
+mocha_qna.save_to_disk("/home/ahemf/processed_datasets/mocha_qna")
+
+#
+quoref = load_dataset("quoref").map(lambda x: dict(answer=x["answers"]["text"][0], text=x["context"]), remove_columns=['id', 'context', 'title', 'url', 'answers'])
+quoref_qna = quoref.map(get_matching_mapper(["text"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['answer', 'question'])
+quoref_qna.save_to_disk("/home/ahemf/processed_datasets/quoref_qna")
+
+#
+race = load_dataset("race", 'all').map(lambda x: dict(answer=ord(x["answer"])-ord('A')))
+race_qna = race.map(get_matching_mapper(["article"], [], [], [], [], 1024, tokenizer, ["question"], ["options"], ["answer"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'article', 'example_id', 'options', 'question'])
+race_qna.filter(lambda x: x["length"]>1024)
+race_qna.save_to_disk("/home/ahemf/processed_datasets/race_qna")
+#
+winogrande = load_dataset("winogrande", 'winogrande_xl').map(lambda x: dict(answer=(ord(x["answer"]) - ord('1')) if len(x["answer"]) else -1, question="Fill in the blank."))
+winogrande_qna = winogrande.map(get_matching_mapper(["sentence"], [], [], [], [], 1024, tokenizer, ["question"], [["option1", "option2"]], ["answer"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'option1', 'option2', 'question', 'sentence'])
+winogrande_qna.save_to_disk("/home/ahemf/processed_datasets/winogrande_qna")
+
+#
+qed = load_dataset("qed", script_version="master").map(lambda x: dict(label=0, answer=x["original_nq_answers"][0]["string"], selected_sentence=x["annotation"]["selected_sentence"]["string"]), remove_columns=['example_id', 'title_text', 'url', 'sentence_starts', 'original_nq_answers', 'annotation'])
+qed_qna_v1 = qed.map(get_matching_mapper(["paragraph_text"], [], [], [], [], 1024, tokenizer, ["question"], [["selected_sentence"]], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'paragraph_text', 'question', 'selected_sentence'])
+qed_qna_v1.save_to_disk("/home/ahemf/processed_datasets/qed_qna_v1")
+
+qed_qna_v2 = qed.map(get_matching_mapper(["paragraph_text"], [], [], ["question"], ["answer"], 1024, tokenizer,), batched=True, num_proc=16, batch_size=2, remove_columns=['answer', 'paragraph_text', 'question', 'selected_sentence'])
+qed_qna_v2.save_to_disk("/home/ahemf/processed_datasets/qed_qna_v2")
+
+commonsense_qa = load_dataset("commonsense_qa").map(lambda x: dict(text=x['question'], options=x["choices"]["text"], label=(ord(x["answerKey"]) - ord('A')) if len(x["answerKey"]) else -1), remove_columns=["answerKey", "choices"])
+commonsense_qa = commonsense_qa.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, ["answer"], ['options'], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['label', 'options', 'question'])
+commonsense_qa.save_to_disk("/home/ahemf/processed_datasets/commonsense_qa")
+
+cosmos_qa = load_dataset("cosmos_qa")
+cosmos_qa = cosmos_qa.map(get_matching_mapper(["context"], [], [], [], [], 1024, tokenizer, ["question"], [['answer0', 'answer1', 'answer2', 'answer3']], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', 'label'])
+cosmos_qa.save_to_disk("/home/ahemf/processed_datasets/cosmos_qa")
+
+mrqa = load_dataset("mrqa", script_version="master").map(lambda x: dict(answers=x["answers"][0]), remove_columns=['subset', 'context_tokens', 'qid', 'question_tokens', 'detected_answers'],)
+mrqa_v1 = mrqa.map(lambda x: dict(label=0)).map(get_matching_mapper(["context"], [], [], [], [], 1024, tokenizer, ["question"], [['answers']], ["label"], n_jumbled_options=0, n_within_text_options=1), batched=True, num_proc=16, batch_size=2, remove_columns=['answers', 'context', 'question', 'label'])
+mrqa_v1.save_to_disk("/home/ahemf/processed_datasets/mrqa_v1")
+
+mrqa_v2 = mrqa.map(lambda x: dict(label=0)).map(get_matching_mapper(["context"], [], [], ["question"], ["answers"], 1024, tokenizer, [], [], [], n_jumbled_options=0, n_within_text_options=1), batched=True, num_proc=16, batch_size=2, remove_columns=['answers', 'context', 'question', 'label'])
+mrqa_v2.save_to_disk("/home/ahemf/processed_datasets/mrqa_v2")
+
+
+# 
+natural_questions = load_dataset("natural_questions")
+natural_questions = natural_questions.map(lambda x: dict(question=x['question']['text'], answer=" ".join([t for a in x['annotations']['short_answers'][:1] for t in a['text'][:1]]), context=" ".join(x['document']['tokens']['token'])), remove_columns=['id', 'document','annotations'], num_proc=16)
+natural_questions_qna = natural_questions.map(get_matching_mapper(["context"], [], [], ["question"], ["answer"], 1024, tokenizer), batched=True, num_proc=16, batch_size=256, remove_columns=['answer', 'context', 'question'])
+natural_questions_qna.save_to_disk("/home/ahemf/processed_datasets/natural_questions_qna")
+
+#
+piqa = load_dataset("piqa")
+piqa = piqa.map(get_matching_mapper(["goal"], [], [], [], [], 1024, tokenizer, [["action", "procedure", "solution"]], [['sol1', 'sol2']], ["label"], n_jumbled_options=0, n_within_text_options=1), batched=True, num_proc=16, batch_size=2, remove_columns=['goal', 'sol1', 'sol2', 'label'])
+piqa.save_to_disk("/home/ahemf/processed_datasets/piqa")
+
+#
+pubmed_qa = load_dataset("pubmed_qa", 'pqa_labeled', script_version="master")
+pubmed_qa = pubmed_qa.map(get_matching_mapper(["context"], [], [], ["question"], ["final_decision"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['pubid', 'question', 'context', 'long_answer', 'final_decision'])
+pubmed_qa.save_to_disk("/home/ahemf/processed_datasets/pubmed_qa")
+
+#
+quora = load_dataset("quora").map(lambda x:dict(question1=x["questions"]["text"][0], question2=x["questions"]["text"][1], label = "yes" if x["is_duplicate"] else "no"), remove_columns=['questions', 'is_duplicate'])
+quora = quora.map(get_matching_mapper(["question1", "question2"], [], [], ["Do the two questions mean the same?", "Are the queestions asking the same thing", "Are they same?"], ["label"], 1024, tokenizer,), batched=True, num_proc=16, batch_size=2, remove_columns=['question1', 'question2', 'label'])
+quora.save_to_disk("/home/ahemf/processed_datasets/quora")
+
+#
+sciq = load_dataset("sciq").map(lambda x: dict(label=0))
+sciq = sciq.map(get_matching_mapper(["support"], [], [], [], [], 1024, tokenizer, ["question"], [['correct_answer', 'distractor1', 'distractor2', 'distractor3']], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['question', 'distractor3', 'distractor1', 'distractor2', 'correct_answer', 'support', 'label'])
+sciq.save_to_disk("/home/ahemf/processed_datasets/sciq")
+
+#
+peer_read_reviews = load_dataset("peer_read", 'reviews', script_version="master")
+peer_read_reviews_qna = peer_read_reviews.map(get_matching_mapper(["abstract"], ["title"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=1, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'conference', 'comments', 'subjects', 'version', 'date_of_submission', 'title', 'authors', 'accepted', 'abstract', 'histories', 'reviews'])
+peer_read_reviews_qna.save_to_disk("/home/ahemf/processed_datasets/peer_read_reviews_qna")
+
+#
+medical_questions_pairs = load_dataset("medical_questions_pairs", script_version="master").map(lambda x: dict(label="yes" if x["label"] else "no", question_1="first question: "+x["question_1"], question_2=", second question: " + x["question_2"]))
+medical_questions_pairs_qna = medical_questions_pairs.map(get_matching_mapper(["question_1", "question_2"], [], [], ["Do the two statements mean the same?", "Are the queestions asking the same thing", "Are they same?"], ["label"], 1024, tokenizer,), batched=True, num_proc=16, batch_size=2, remove_columns=['dr_id', 'question_1', 'question_2', 'label'])
+medical_questions_pairs_qna.save_to_disk("/home/ahemf/processed_datasets/medical_questions_pairs_qna")
+
+#
+empathetic_dialogues = load_dataset("empathetic_dialogues")
+empathetic_dialogues_qna = empathetic_dialogues.map(get_matching_mapper(["utterance"], [], [], ["emotion"], ["context"], 1024, tokenizer,), batched=True, num_proc=16, batch_size=2, remove_columns=['conv_id', 'utterance_idx', 'context', 'prompt', 'speaker_idx', 'utterance', 'selfeval', 'tags'])
+empathetic_dialogues_qna.save_to_disk("/home/ahemf/processed_datasets/empathetic_dialogues_qna")
+
+#
+ai2_arc = load_dataset("ai2_arc", 'ARC-Challenge').map(lambda x: dict(answerKey=ord(x["answerKey"]) - ord(x["choices"]["label"][0]), choices=x["choices"]['text']))
+ai2_arc_qna = ai2_arc.map(get_matching_mapper(["question"], [], [], [], [], 1024, tokenizer, ["option"], ["choices"], ["answerKey"], n_jumbled_options=0, n_within_text_options=0), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'question', 'choices', 'answerKey'])
+ai2_arc_qna.save_to_disk("/home/ahemf/processed_datasets/ai2_arc_qna")
+
+ai2_arc_easy = load_dataset("ai2_arc", 'ARC-Easy').map(lambda x: dict(answerKey=ord(x["answerKey"]) - ord(x["choices"]["label"][0]), choices=x["choices"]['text']))
+ai2_arc_easy_qna = ai2_arc_easy.map(get_matching_mapper(["question"], [], [], [], [], 1024, tokenizer, ["option"], ["choices"], ["answerKey"], n_jumbled_options=0, n_within_text_options=0), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'question', 'choices', 'answerKey'])
+ai2_arc_easy_qna.save_to_disk("/home/ahemf/processed_datasets/ai2_arc_easy_qna")
+
+#
+eraser_multi_rc = load_dataset("eraser_multi_rc").map(lambda x: dict(query=x["query_and_answer"].split('||')[0], answer=x["query_and_answer"].split('||')[1], ql=0))
+eraser_multi_rc_qna = eraser_multi_rc.map(get_matching_mapper(["passage"], [], [], [], [], 1024, tokenizer, ["query", "supporting fact"], [["answer"], "evidences"], ["ql", "label"], n_jumbled_options=1, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=[ 'evidences', 'label', 'passage', 'ql', 'query_and_answer'])
+eraser_multi_rc_qna.save_to_disk("/home/ahemf/processed_datasets/eraser_multi_rc_qna")
+
+# biomrc_large_A, biomrc_large_B, kilt, crawl_domain
 
 """
 
