@@ -520,8 +520,6 @@ def all_datasets():
 
     imdb = load_dataset("imdb", script_version="master")
 
-
-
     # generics_kb = load_dataset("generics_kb",'generics_kb_best', script_version="master")
     open_subtitles = load_dataset("open_subtitles", 'en-hi', script_version="master")
 
@@ -531,8 +529,9 @@ def all_datasets():
 
     wiki_lingua = load_dataset("wiki_lingua", 'english', script_version="master")
     samsum = load_dataset("samsum", script_version="master")
-    wikihow = load_dataset("wikihow", 'all')
-    wikihow = load_dataset("wikihow", 'sep')
+
+    wikihow_all = load_dataset("wikihow", 'all', data_dir='/local/') # Correct order (title +  headline) || (title + text), title + text match, Correct order (title + text)
+    wikihow_sep = load_dataset("wikihow", 'sep', data_dir='/local/') # headline+text match/mlm, title+text match,
     multi_news = load_dataset("multi_news")
 
     wiki_auto = load_dataset("wiki_auto", 'auto_acl')  # select the right summary from simple wiki
@@ -997,6 +996,11 @@ yahoo_answers_qa512.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_q
 amazon_polarity512 = amazon_polarity.map(get_text_mapper(["content"], 512, tokenizer, sent_detector), batched=True, remove_columns=['label', 'title', 'content'], num_proc=32)
 amazon_polarity512.save_to_disk("/home/ahemf/processed_datasets/amazon_polarity512")
 
+wikihow_all1024 = wikihow_all.map(get_text_mapper(["title", "headline", "text",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['headline', 'title'], num_proc=32)
+wikihow_all1024.save_to_disk("/home/ahemf/processed_datasets/wikihow_all1024")
+
+wikihow_sep1024 = wikihow_sep.map(get_text_mapper(["title", "overview", "headline", "text",], 1024, tokenizer, sent_detector), batched=True, remove_columns=['text', 'headline', 'title', 'overview', 'sectionLabel'], num_proc=32)
+wikihow_sep1024.save_to_disk("/home/ahemf/processed_datasets/wikihow_sep1024")
 
 
 scientific_papers_pubmed512 = scientific_papers_pubmed.map(get_text_mapper(["abstract","article"], 512, tokenizer, sent_detector), batched=True, remove_columns=['article', 'abstract', 'section_names'], num_proc=32)
@@ -1477,6 +1481,50 @@ ai2_arc_easy_qna.save_to_disk("/home/ahemf/processed_datasets/ai2_arc_easy_qna")
 eraser_multi_rc = load_dataset("eraser_multi_rc").map(lambda x: dict(query=x["query_and_answer"].split('||')[0], answer=x["query_and_answer"].split('||')[1], ql=0))
 eraser_multi_rc_qna = eraser_multi_rc.map(get_matching_mapper(["passage"], [], [], [], [], 1024, tokenizer, ["query", "supporting fact"], [["answer"], "evidences"], ["ql", "label"], n_jumbled_options=1, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=[ 'evidences', 'label', 'passage', 'ql', 'query_and_answer'])
 eraser_multi_rc_qna.save_to_disk("/home/ahemf/processed_datasets/eraser_multi_rc_qna")
+
+#
+rotten_tomatoes = load_dataset("rotten_tomatoes").map(lambda x: dict(label="positive" if x["label"] else "negative"))
+rotten_tomatoes_qna = rotten_tomatoes.map(get_matching_mapper(["text"], [], [], ["Is the sentiment expressed positive or negative"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['label'])
+rotten_tomatoes_qna.save_to_disk("/home/ahemf/processed_datasets/rotten_tomatoes_qna")
+
+#
+sentiment140 = load_dataset("sentiment140").filter(lambda x: len(x['text'].split())>=24, num_proc=16).map(lambda x: dict(label={0: "negative", 2: "neutral", 4: "positive"}[x["sentiment"]]), remove_columns=['date', 'user', 'sentiment', 'query'])
+sentiment140 = sentiment140.map(lambda x: dict(text=" ".join(filter(lambda x: not x.startswith('@'),x["text"].split()))), num_proc=16)
+sentiment140_qna = sentiment140.map(get_matching_mapper(["text"], [], [], ["Is the sentiment expressed positive or negative"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['label'])
+sentiment140_qna.save_to_disk("/home/ahemf/processed_datasets/sentiment140_qna")
+
+#
+scitldr = load_dataset("scitldr", 'Abstract', script_version="master").map(lambda x: dict(text=" ".join(x["source"])), remove_columns=['source', 'source_labels', 'rouge_scores', 'paper_id',])
+scitldr_qna = scitldr.map(get_matching_mapper(["text"], ["summary"], ["target"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=4, remove_columns=["target"])
+
+
+scitldr = load_dataset("scitldr", 'Abstract', script_version="master").map(lambda x: dict(text=" ".join(x["source"]), options=x["source"], label=x["source_labels"].index(1)), remove_columns=['source', 'source_labels', 'rouge_scores', 'paper_id', 'target'])
+scitldr_qna_v2 = scitldr.map(get_matching_mapper(["text"], [], [], [], [], 1024, tokenizer, ["most important sentence"], ["options"], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=1, remove_columns=["options", "label"])
+
+scitldr = load_dataset("scitldr", 'Abstract', script_version="master").map(lambda x: dict(text=" ".join([("sentence %s: " % i) + s for i, s in enumerate(x["source"])]), label=["sentence %s" % i for i, _ in enumerate(x["source"])][x["source_labels"].index(1)]), remove_columns=['source', 'source_labels', 'rouge_scores', 'paper_id', 'target'])
+scitldr_qna_v3 = scitldr.map(get_matching_mapper(["text"], [], [], ["most important sentence"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=1, remove_columns=["label"])
+
+scitldr_qna.save_to_disk("/home/ahemf/processed_datasets/scitldr_qna")
+scitldr_qna_v2.save_to_disk("/home/ahemf/processed_datasets/scitldr_qna_v2")
+scitldr_qna_v3.save_to_disk("/home/ahemf/processed_datasets/scitldr_qna_v3")
+
+#
+
+wikihow_all = load_dataset("wikihow", 'all', data_dir='/local/')
+wikihow_all_qna_v1 = wikihow_all.map(get_matching_mapper(["text"], ["title"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['headline', 'title'])
+wikihow_all_qna_v2 = wikihow_all.map(get_matching_mapper(["headline"], ["title"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=4, remove_columns=['headline', 'title'])
+
+wikihow_sep = load_dataset("wikihow", 'sep', data_dir='/local/')
+wikihow_sep_qna_v1 = wikihow_sep.map(get_matching_mapper(["text"], ["title"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=4, remove_columns=['headline', 'title', 'overview', 'sectionLabel'])
+wikihow_sep_qna_v2 = wikihow_sep.map(get_matching_mapper(["overview"], ["title"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=4, remove_columns=['headline', 'title', 'overview', 'sectionLabel'])
+wikihow_sep_qna_v3 = wikihow_sep.map(get_matching_mapper(["text"], ["headline"], ["title"], [], [], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=4, remove_columns=['headline', 'title', 'overview', 'sectionLabel'])
+
+wikihow_all_qna_v1.save_to_disk("/home/ahemf/processed_datasets/wikihow_all_qna_v1")
+wikihow_all_qna_v2.save_to_disk("/home/ahemf/processed_datasets/wikihow_all_qna_v2")
+wikihow_sep_qna_v1.save_to_disk("/home/ahemf/processed_datasets/wikihow_sep_qna_v1")
+wikihow_sep_qna_v2.save_to_disk("/home/ahemf/processed_datasets/wikihow_sep_qna_v2")
+wikihow_sep_qna_v3.save_to_disk("/home/ahemf/processed_datasets/wikihow_sep_qna_v3")
+#
 
 # biomrc_large_A, biomrc_large_B, kilt, crawl_domain
 

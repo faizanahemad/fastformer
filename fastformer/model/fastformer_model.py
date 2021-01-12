@@ -1844,6 +1844,8 @@ class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
         active_logits = logits.view(-1, input_shape[1])[active_loss]
         active_labels = labels[active_loss]
         loss = self.electra_loss_w * loss_fct(active_logits, active_labels)
+
+        self.accuracy_hist["electra"].append(torch.mean((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).item())
         self.loss_hist["electra_loss"].append(float(loss))
         self.loss_hist["masked_lm_loss"].append(float(masked_lm_loss))
 
@@ -2201,6 +2203,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_logits = logits.view(-1, input_shape[1])[active_loss]
         active_labels = labels[active_loss]
         loss = self.electra_loss_w * loss_fct(active_logits, active_labels)
+        self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
 
         # TODO: Store losses here
 
@@ -2332,7 +2335,7 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3)
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3, lm_loss_w=0.5)
             sm_pt_batch = pt_batch
             assert not forward_only
         if model_name == "fastformer_mlm":
