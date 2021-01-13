@@ -1974,7 +1974,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         electra_pre_kl = KL(electra_logits, electra_predictions.detach(), reduction="batchmean")
         if reverse_loss:
             electra_pre_kl = (electra_pre_kl + KL(electra_logits.detach(), electra_predictions, reduction="batchmean")) / 2.0
-        return lm_pre_kl, sent_order_pre_kl, electra_pre_kl
+        return self.lm_loss_w * lm_pre_kl, self.sentence_order_prediction_w * sent_order_pre_kl, self.electra_loss_w * electra_pre_kl
 
     def forward_for_aitm(self, embed, position_embeds, attention_mask,
                          mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions):
@@ -2335,7 +2335,7 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3, lm_loss_w=0.5)
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3, lm_loss_w=2.5, electra_loss_w=0.5)
             sm_pt_batch = pt_batch
             assert not forward_only
         if model_name == "fastformer_mlm":
@@ -2444,7 +2444,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=2e-4)
+    optimizer = AdamW(all_params, lr=1e-4)
 
 
     def run():

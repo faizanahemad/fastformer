@@ -1528,6 +1528,48 @@ wikihow_sep_qna_v3.save_to_disk("/home/ahemf/processed_datasets/wikihow_sep_qna_
 
 # biomrc_large_A, biomrc_large_B, kilt, crawl_domain
 
+#
+sglue_proc = dict()
+sglue_proc['boolq'] = super_glue['boolq'].map(lambda x: dict(label={1:"yes", 0:"no", -1:tokenizer.mask_token}[x["label"]]))
+sglue_proc['boolq'] = sglue_proc['boolq'].map(get_matching_mapper(["passage"], [], [], ["question"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['question', 'passage', 'idx', 'label'])
+sglue_proc['boolq'].save_to_disk("/home/ahemf/processed_datasets/superglue_boolq")
+
+
+sglue_proc['cb_v1'] = super_glue['cb'].map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "agree", 1: "contradict", 2:"neutral", -1:tokenizer.mask_token}[x["label"]])), remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
+sglue_proc['cb_v1'] = sglue_proc['cb_v1'].map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+sglue_proc['cb_v1'].save_to_disk("/home/ahemf/processed_datasets/superglue_cb_v1")
+
+
+sglue_proc['cb_v2'] = super_glue['cb'].map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "entail", 1: "disagree", 2:"unrelated", -1:tokenizer.mask_token}[x["label"]])), remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
+sglue_proc['cb_v2'] = sglue_proc['cb_v2'].map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+sglue_proc['cb_v2'].save_to_disk("/home/ahemf/processed_datasets/superglue_cb_v2")
+
+sglue_proc['copa_v1'] = super_glue["copa"].map(lambda x: dict(question=x["question"] + ", ")).map(get_matching_mapper(["premise"], [], [], [], [], 1024, tokenizer, ['question'], [["choice1", "choice2"]], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=2, remove_columns=['premise', 'choice1', 'choice2', 'question', 'idx', 'label'])
+sglue_proc['copa_v2'] = super_glue["copa"].map(lambda x: dict(question=x["question"] + ", ")).map(get_matching_mapper(["premise"], [], [], [], [], 1024, tokenizer, ['question'], [["choice1", "choice2"]], ["label"], n_jumbled_options=0, n_within_text_options=0), batched=True, num_proc=16, batch_size=2, remove_columns=['premise', 'choice1', 'choice2', 'question', 'idx', 'label'])
+sglue_proc['copa_v3'] = super_glue["copa"].map(lambda x: dict(question=x["question"] + ", ")).map(get_matching_mapper(["premise"], [], [], [], [], 1024, tokenizer, ['question'], [["choice1", "choice2"]], ["label"], n_jumbled_options=0, n_within_text_options=0), batched=True, num_proc=16, batch_size=1, remove_columns=['premise', 'choice1', 'choice2', 'question', 'idx', 'label'])
+
+sglue_proc['copa_v1'].save_to_disk("/home/ahemf/processed_datasets/superglue_copa_v1")
+sglue_proc['copa_v2'].save_to_disk("/home/ahemf/processed_datasets/superglue_copa_v2")
+sglue_proc['copa_v3'].save_to_disk("/home/ahemf/processed_datasets/superglue_copa_v3")
+
+
+sglue_proc['multirc_v1'] = super_glue["multirc"].map(lambda x: dict(label=({0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]])))
+sglue_proc['multirc_v1'] = sglue_proc['multirc_v1'].map(get_matching_mapper(["paragraph", "question", "answer"], [], [], [["Is the question answered correctly?", "Does the previous statement provide valid answer to the asked question?"]], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['paragraph', 'question', 'answer', 'idx', 'label'])
+sglue_proc['multirc_v1'].save_to_disk("/home/ahemf/processed_datasets/superglue_multirc_v1")
+
+sglue_proc['multirc_v2'] = super_glue["multirc"].map(lambda x: dict(paragraph ="context: "+ x["paragraph"] + " question: "+x["question"] + " answer: "+x["answer"],  label=({0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]])))
+sglue_proc['multirc_v2'] = sglue_proc['multirc_v2'].map(get_matching_mapper(["paragraph"], [], [], [["Is the question answered correctly?", "Does the previous statement provide valid answer to the asked question?"]], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['paragraph', 'question', 'answer', 'idx', 'label'])
+sglue_proc['multirc_v2'].save_to_disk("/home/ahemf/processed_datasets/superglue_multirc_v2")
+
+from datasets import DatasetDict
+sglue_proc['multirc_v3'] = DatasetDict(**super_glue["multirc"])
+del sglue_proc['multirc_v3']["test"]
+sglue_proc['multirc_v3'] = sglue_proc['multirc_v3'].filter(lambda x: x["label"]==1).map(lambda x: dict(label=0))
+sglue_proc['multirc_v3'] = sglue_proc['multirc_v3'].map(get_matching_mapper(["paragraph"], [], [], [], [], 1024, tokenizer, ["question"], [["answer"]], ["label"], n_jumbled_options=1, n_within_text_options=2), batched=True, num_proc=16, batch_size=1, remove_columns=['paragraph', 'question', 'answer', 'idx', 'label'])
+sglue_proc['multirc_v3'].save_to_disk("/home/ahemf/processed_datasets/superglue_multirc_v3")
+
+
+# MRC can be used as mcq and mlm
 """
 
 
