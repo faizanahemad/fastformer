@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 """
 class AdMSoftmaxLoss(nn.Module):
@@ -61,6 +62,27 @@ class AdMSoftmaxLoss(nn.Module):
         x[list(range(len(labels))), labels] -= self.m
         x *= self.s
         loss = self.loss_ce(x, labels)
+        if self.focal:
+            pt = torch.exp(-loss)
+            F_loss = self.alpha * (1 - pt) ** self.gamma * loss
+            if self.reduce:
+                return torch.mean(F_loss)
+            else:
+                return F_loss
+        return loss
+
+
+class BCELossFocal(nn.Module):
+    def __init__(self, focal=True, alpha=1, gamma=2, reduce=True):
+        super().__init__()
+        self.focal = focal
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduce = reduce
+        self.loss = nn.BCEWithLogitsLoss(reduction="none" if focal or not reduce else "mean")
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        loss = self.loss(input, target)
         if self.focal:
             pt = torch.exp(-loss)
             F_loss = self.alpha * (1 - pt) ** self.gamma * loss

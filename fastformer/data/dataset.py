@@ -275,8 +275,8 @@ class TokenizerDataset(Dataset):
             label = 0
 
         text = item["text"]
-        tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)
-        # TODO: try one in ten words
+        tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
+        # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         results = dict(labels=label, n_pet_queries=n_queries)
 
