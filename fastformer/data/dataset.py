@@ -223,6 +223,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=0.75,
+                 word_mask_in_pet=False,
                  word_mask_proba: float = 0.15, word_noise_proba: float = 0.15, max_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens + 1
@@ -278,6 +279,8 @@ class TokenizerDataset(Dataset):
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
+        length = torch.sum(highway_cls_ar__attention_mask).item()
+        length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
 
         if self.training:
@@ -551,6 +554,7 @@ def all_datasets():
     un_multi = load_dataset("un_multi", 'en-fr', script_version="master")
 
 
+    # cola, sst2, qqp, qnli
     glue = dict()
     for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
         glue[gl] = load_dataset("glue", gl)
@@ -920,6 +924,8 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
 
     return mapper
 
+# https://github.com/niderhoff/nlp-datasets
+# https://amitness.com/toolbox/
 
 """
 import datasets
@@ -927,7 +933,7 @@ import re
 import numpy as np
 import random
 from typing import List, Dict
-from datasets import load_dataset, concatenate_datasets, Dataset
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 import nltk.data
 sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
@@ -1063,7 +1069,8 @@ amazon_us_reviews1024.save_to_disk("/home/ahemf/processed_datasets/amazon_us_rev
 rs.map(get_matching_mapper(["normalizedBody"], ["summary", "topic"], ["summary", "subreddit"], 512, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"])[0]
 ######
 
-reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary", "topic category"], ["summary", "subreddit"],[], [], 1024, tokenizer), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=4)
+reddit = load_dataset("reddit") 
+reddit_qna = reddit.map(get_matching_mapper(["normalizedBody"], ["summary"], ["summary"],["topic category"], ["subreddit"], 1024, tokenizer, n_jumbled_options=0, n_within_text_options=2), batched=True, remove_columns=["author", "body", "content", "normalizedBody", "subreddit", "subreddit_id", "summary", "id"], num_proc=16, batch_size=2)
 reddit_qna.save_to_disk("/home/ahemf/processed_datasets/reddit_qna")
 
 bookcorpusopen = load_dataset("bookcorpusopen")
@@ -1077,11 +1084,11 @@ wikipedia_qna.save_to_disk("/home/ahemf/processed_datasets/wikipedia_qna")
 
 amazon_polarity = load_dataset("amazon_polarity", script_version="master")
 amazon_polarity = amazon_polarity.map(lambda x: dict(sentiment="positive" if x['label']==1 else 'negative'), remove_columns=["label"], num_proc=8)
-amazon_polarity_qna = amazon_polarity.map(get_matching_mapper(["content"], ["title", "sentiment"], ["title", "sentiment"],[],[], 1024, tokenizer), batched=True, remove_columns=["title", "sentiment", "content"], num_proc=16, batch_size=4)
+amazon_polarity_qna = amazon_polarity.map(get_matching_mapper(["content"], ["title", ], ["title", ],["sentiment expressed in review?"], ["sentiment"], 1024, tokenizer, n_jumbled_options=1, n_within_text_options=1), batched=True, remove_columns=["title", "sentiment", "content"], num_proc=16, batch_size=4)
 amazon_polarity_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_polarity_qna")
 
 yahoo_answers_qa = load_dataset("yahoo_answers_qa")  # World knowledge testing rather than answer selection.
-yahoo_answers_qa_qna = yahoo_answers_qa.map(get_matching_mapper(["answer"], ["question", "category"], ["question", "main_category"],[], [], 1024, tokenizer), batched=True, remove_columns=["id", 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=16, batch_size=4)
+yahoo_answers_qa_qna = yahoo_answers_qa.map(get_matching_mapper(["answer"], ["question"], ["question"],["category"], ["main_category"], 1024, tokenizer, n_jumbled_options=1, n_within_text_options=2), batched=True, remove_columns=["id", 'question', 'answer', 'nbestanswers', 'main_category'], num_proc=16, batch_size=2)
 yahoo_answers_qa_qna.save_to_disk("/home/ahemf/processed_datasets/yahoo_answers_qa_qna")
 
 yahoo_answers_topics = load_dataset("yahoo_answers_topics")
@@ -1119,7 +1126,7 @@ amazon_reviews_multi_qna.save_to_disk("/home/ahemf/processed_datasets/amazon_rev
 
 wiki_lingua = load_dataset("wiki_lingua", 'english', script_version="master")
 wiki_lingua = wiki_lingua.map(batch_process_wiki_lingua, batched=True, num_proc=1, remove_columns=["article"])
-wiki_lingua_qna = wiki_lingua.map(get_matching_mapper(["document"], ["summary", "topic", "heading"], ["summary", "url", "section_name"],[], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['document', 'section_name', 'summary', 'url'])
+wiki_lingua_qna = wiki_lingua.map(get_matching_mapper(["document"], ["summary", "heading"], ["summary", "section_name"],["topic",], ["url",], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['document', 'section_name', 'summary', 'url'])
 wiki_lingua_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_lingua_qna")
 
 samsum = load_dataset("samsum", script_version="master")
@@ -1142,11 +1149,11 @@ gigaword_qna = gigaword.map(get_matching_mapper(["document"], ["summary"], ["sum
 gigaword_qna.save_to_disk("/home/ahemf/processed_datasets/gigaword_qna")
 
 wiki_atomic_edits_insertions = load_dataset("wiki_atomic_edits", 'english_insertions', script_version="master")
-wiki_atomic_edits_insertions_qna = wiki_atomic_edits_insertions.map(get_matching_mapper(["base_sentence"], ["closest match", "edited phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_insertions_qna = wiki_atomic_edits_insertions.map(get_matching_mapper(["base_sentence"], ["closest match"], ["edited_sentence"], ["edited phrase"], ["phrase"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
 wiki_atomic_edits_insertions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_insertions_qna")
 
 wiki_atomic_edits_deletions = load_dataset("wiki_atomic_edits", 'english_deletions', script_version="master")
-wiki_atomic_edits_deletions_qna = wiki_atomic_edits_deletions.map(get_matching_mapper(["base_sentence"], ["closest match", "deleted phrase"], ["edited_sentence", "phrase"], [], [], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
+wiki_atomic_edits_deletions_qna = wiki_atomic_edits_deletions.map(get_matching_mapper(["base_sentence"], ["closest match], ["edited_sentence", ], ["deleted phrase"], ["phrase"], 1024, tokenizer), batched=True, num_proc=16, batch_size=4, remove_columns=['id', 'base_sentence', 'phrase', 'edited_sentence'])
 wiki_atomic_edits_deletions_qna.save_to_disk("/home/ahemf/processed_datasets/wiki_atomic_edits_deletions_qna")
 
 wiki_split = load_dataset("wiki_split", script_version="master") 
@@ -1568,8 +1575,109 @@ sglue_proc['multirc_v3'] = sglue_proc['multirc_v3'].filter(lambda x: x["label"]=
 sglue_proc['multirc_v3'] = sglue_proc['multirc_v3'].map(get_matching_mapper(["paragraph"], [], [], [], [], 1024, tokenizer, ["question"], [["answer"]], ["label"], n_jumbled_options=1, n_within_text_options=2), batched=True, num_proc=16, batch_size=1, remove_columns=['paragraph', 'question', 'answer', 'idx', 'label'])
 sglue_proc['multirc_v3'].save_to_disk("/home/ahemf/processed_datasets/superglue_multirc_v3")
 
+sglue_proc['record_v1'] = super_glue['record'].map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder from the given options.", label=x['entities'].index(x['answers'][0]) if len(x['answers']) > 0 else -1))
+sglue_proc['record_v1'] = sglue_proc['record_v1'].map(get_matching_mapper(["passage"], [], [], [], [], 1024, tokenizer, ["query"], ['entities'], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=1, remove_columns=['passage', 'query', 'entities', 'answers', 'idx', 'label'])
+sglue_proc['record_v2'] = super_glue['record'].map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder from the given options.", label=x['entities'].index(x['answers'][0]) if len(x['answers']) > 0 else -1))
+sglue_proc['record_v2'] = sglue_proc['record_v2'].map(lambda x: dict(answers=x["answers"][0] if len(x["answers"]) > 0 else tokenizer.mask_token)).map(get_matching_mapper(["passage"], [], [], ["query"], ["answers"], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['passage', 'query', 'entities', 'answers', 'idx', 'label'])
+
+sglue_proc['record_v3'] = DatasetDict(**super_glue["record"])
+del sglue_proc['record_v3']["test"]
+sglue_proc['record_v3'] = sglue_proc['record_v3'].filter(lambda x: len(set([i.lower() for i in x['answers']])) > 1).map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder from the given options.", label=x['entities'].index(x['answers'][1] if len(x['answers']) > 0 else -1)))
+sglue_proc['record_v3'] = sglue_proc['record_v3'].map(get_matching_mapper(["passage"], [], [], [], [], 1024, tokenizer, ["query"], ['entities'], ["label"], n_jumbled_options=0, n_within_text_options=2), batched=True, num_proc=16, batch_size=1, remove_columns=['passage', 'query', 'entities', 'answers', 'idx', 'label'])
+sglue_proc['record_v4'] = DatasetDict(**super_glue["record"])
+del sglue_proc['record_v4']["test"]
+sglue_proc['record_v4'] = sglue_proc['record_v4'].filter(lambda x: len(set([i.lower() for i in x['answers']])) > 1).map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder.", label=x['entities'].index(x['answers'][1] if len(x['answers']) > 0 else -1)))
+sglue_proc['record_v4'] = sglue_proc['record_v4'].map(lambda x: dict(answers=x["answers"][1]  if len(x["answers"]) > 1 else tokenizer.mask_token)).map(get_matching_mapper(["passage"], [], [], ["query"], ["answers"], 1024, tokenizer), batched=True, num_proc=16, batch_size=16, remove_columns=['passage', 'query', 'entities', 'answers', 'idx', 'label'])
+
+sglue_proc['record_v1'].save_to_disk("/home/ahemf/processed_datasets/superglue_record_v1")
+sglue_proc['record_v2'].save_to_disk("/home/ahemf/processed_datasets/superglue_record_v2")
+sglue_proc['record_v3'].save_to_disk("/home/ahemf/processed_datasets/superglue_record_v3")
+sglue_proc['record_v4'].save_to_disk("/home/ahemf/processed_datasets/superglue_record_v4")
+
+sglue_proc['rte_v1'] = super_glue['rte'].map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "agree", 1: "contradict", 2:"neutral", -1:tokenizer.mask_token}[x["label"]])), remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
+sglue_proc['rte_v1'] = sglue_proc['rte_v1'].map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+sglue_proc['rte_v1'].save_to_disk("/home/ahemf/processed_datasets/superglue_rte_v1")
+
+
+sglue_proc['rte_v2'] = super_glue['rte'].map(lambda x: dict(text="premise: "+ x["premise"]+ " hypothesis: " + x["hypothesis"], label=({0: "entail", 1: "disagree", 2:"unrelated", -1:tokenizer.mask_token}[x["label"]])), remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
+sglue_proc['rte_v2'] = sglue_proc['rte_v2'].map(get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis entail, disagree or are unrelated"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
+sglue_proc['rte_v2'].save_to_disk("/home/ahemf/processed_datasets/superglue_rte_v2")
+
+
+sglue_proc["wic_v1"] = super_glue["wic"].map(lambda x: dict(text="first sentence: " + x["sentence1"] + ", second sentence: "+x["sentence2"], query="Does the word '%s' have same meaning in first sentence and second sentence" % x["word"], label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]]))
+sglue_proc["wic_v2"] = super_glue["wic"].map(lambda x: dict(query="Does the word '%s' mean the same in both sentences" % x["word"], label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]]))
+sglue_proc["wic_v1"] = sglue_proc["wic_v1"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['word', 'sentence1', 'sentence2', 'start1', 'start2', 'end1', 'end2', 'idx', 'label'])
+sglue_proc["wic_v2"] = sglue_proc["wic_v2"].map(get_matching_mapper(["sentence1", "sentence2"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['word', 'sentence1', 'sentence2', 'start1', 'start2', 'end1', 'end2', 'idx', 'label'])
+sglue_proc["wic_v2"].save_to_disk("/home/ahemf/processed_datasets/superglue_wic_v2")
+sglue_proc["wic_v1"].save_to_disk("/home/ahemf/processed_datasets/superglue_wic_v1")
+
+
+sglue_proc["wsc_v1"] = super_glue["wsc"].map(lambda x: dict(label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]], 
+                                            query="Do [word1] %s and [word2] %s refer to the same entity" % (x["span1_text"], x["span2_text"]),
+                                            text=" ".join([defaultdict(str, {x["span1_index"]: "[word1] ", x["span2_index"]: "[word2] "})[idx] + w for idx, w in enumerate(x["text"].split())])))
+sglue_proc["wsc_v2"] = super_glue["wsc"].map(lambda x: dict(label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]], 
+                                            query="Do [%s] and [%s] refer to the same thing" % (x["span1_text"], x["span2_text"]),
+                                            text=" ".join([("[" if idx in [x["span1_index"], x["span2_index"]] else "") +  w + ("]" if idx in [x["span1_index"], x["span2_index"]] else "") for idx, w in enumerate(x["text"].split())])))
+
+sglue_proc["wsc_v1"] = sglue_proc["wsc_v1"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index', 'span2_text'])
+sglue_proc["wsc_v2"] = sglue_proc["wsc_v2"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index', 'span2_text'])
+sglue_proc["wsc_v1"].save_to_disk("/home/ahemf/processed_datasets/superglue_wsc_v1")
+sglue_proc["wsc_v2"].save_to_disk("/home/ahemf/processed_datasets/superglue_wsc_v2")
+
+#
+
+sglue_proc["wsc.fixed_v1"] = super_glue["wsc.fixed"].map(lambda x: dict(label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]], 
+                                            query="Do [word1] %s and [word2] %s refer to the same entity" % (x["span1_text"], x["span2_text"]),
+                                            text=" ".join([defaultdict(str, {x["span1_index"]: "[word1] ", x["span2_index"]: "[word2] "})[idx] + w for idx, w in enumerate(x["text"].split())])))
+sglue_proc["wsc.fixed_v2"] = super_glue["wsc.fixed"].map(lambda x: dict(label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]], 
+                                            query="Do [%s] and [%s] refer to the same thing" % (x["span1_text"], x["span2_text"]),
+                                            text=" ".join([("[" if idx in [x["span1_index"], x["span2_index"]] else "") +  w + ("]" if idx in [x["span1_index"], x["span2_index"]] else "") for idx, w in enumerate(x["text"].split())])))
+
+sglue_proc["wsc.fixed_v1"] = sglue_proc["wsc.fixed_v1"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index', 'span2_text'])
+sglue_proc["wsc.fixed_v2"] = sglue_proc["wsc.fixed_v2"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index', 'span2_text'])
+sglue_proc["wsc.fixed_v1"].save_to_disk("/home/ahemf/processed_datasets/superglue_wsc_fixed_v1")
+sglue_proc["wsc.fixed_v2"].save_to_disk("/home/ahemf/processed_datasets/superglue_wsc_fixed_v2")
+
+
+glue_proc = dict()
+glue_proc['cola'] = glue['cola'].map(lambda x: dict(label={0: "no", 1: "yes", -1:tokenizer.mask_token}[x["label"]]))
+glue_proc['cola'] = glue_proc['cola'].map(get_matching_mapper(["sentence"], [], [], ["Is the sentence grammatically and syntactically correct?"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=8, remove_columns=['sentence', 'label', 'idx'])
+glue_proc['cola'].save_to_disk("/home/ahemf/processed_datasets/glue_cola")
+
+glue_proc['sst2'] = glue['sst2'].map(lambda x: dict(label={0: "negative", -1: tokenizer.mask_token, 1: "positive"}[x["label"]]))
+glue_proc['sst2'] = glue_proc['sst2'].map(get_matching_mapper(["sentence"], [], [], ["Is the sentiment expressed positive or negative"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['sentence', 'label', 'idx'])
+glue_proc['sst2'].save_to_disk("/home/ahemf/processed_datasets/glue_sst2")
+
+glue_proc['sst2_v2'] = glue['sst2'].map(lambda x: dict(label={0: "no", -1: tokenizer.mask_token, 1: "yes"}[x["label"]]))
+glue_proc['sst2_v2'] = glue_proc['sst2_v2'].map(get_matching_mapper(["sentence"], [], [], ["Is positive sentiment expressed?"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['sentence', 'label', 'idx'])
+glue_proc['sst2_v2'].save_to_disk("/home/ahemf/processed_datasets/glue_sst2_v2")
+
+glue_proc["qnli"] = glue["qnli"].map(lambda x: dict(text="context: "+x["sentence"] + ", question: "+x["question"], label={0: "yes", -1: tokenizer.mask_token, 1: "no"}[x["label"]]))
+glue_proc["qnli"] = glue_proc["qnli"].map(get_matching_mapper(["text"], [], [], ["Does the context answer the question?"], ["label"], 1024, tokenizer), batched=True, num_proc=16, batch_size=2, remove_columns=['question', 'sentence', 'label', 'idx'])
+glue_proc['qnli'].save_to_disk("/home/ahemf/processed_datasets/glue_qnli")
 
 # MRC can be used as mcq and mlm
+
+
+"""
+
+"""
+import os
+contents = os.listdir("processed_datasets")
+dataset_dict = dict()
+unloadable = []
+loadable = []
+for c in contents:
+    try:
+        try:
+            dataset_dict[c] = Dataset.load_from_disk("processed_datasets/%s" % c)
+        except:
+            dataset_dict[c] = DatasetDict.load_from_disk("processed_datasets/%s" % c)
+        loadable.append(c)
+    except:
+        unloadable.append(c)
+        
+print(len(unloadable), len(loadable), len(contents))
 """
 
 

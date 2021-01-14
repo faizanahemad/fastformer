@@ -76,6 +76,7 @@ def train(local_rank, args):
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     np.random.seed(args.seed)
+    # Check if all initialised model weights are same??
 
     pass
 

@@ -1870,6 +1870,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
+                 input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1, second_block_cls_orthogonal_w=0.05, third_block_cls_orthogonal_w=0.0,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
                  gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.2):
         super().__init__(config)
@@ -1905,6 +1906,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.loss_bce = BCELossFocal()
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
+        self.input_cls_orthogonal_w = input_cls_orthogonal_w
+        self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
+        self.second_block_cls_orthogonal_w = second_block_cls_orthogonal_w
+        self.third_block_cls_orthogonal_w = third_block_cls_orthogonal_w
+        self.diag_mat = 1 - torch.eye(self.cls_tokens, self.cls_tokens)
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = defaultdict(list)
@@ -2101,7 +2107,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         tokenizer_attn_mask = attention_mask
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
-
+        inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         encoder_outputs = self.funnel.encoder(
             inputs_embeds,
             position_embeds,
@@ -2126,18 +2132,50 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
+        first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
 
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
+        second_block_cls = second_block_hidden[:, :self.funnel.cls_tokens]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
+        third_block_cls = third_block_hidden[:, :self.funnel.cls_tokens]
+
+        cls_orthogonal_loss = 0.0
+        if self.input_cls_orthogonal_w > 0 and self.training:
+            inputs_embeds_cls = inputs_embeds_cls/inputs_embeds_cls.norm(2, -1, True)
+            inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
+            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls * self.diag_mat) ** 2).mean()
+            self.loss_hist["input_cls_orthogonal_loss"].append(float(input_cls_orthogonal_loss))
+            cls_orthogonal_loss += input_cls_orthogonal_loss
+
+        if self.first_block_cls_orthogonal_w > 0 and self.training:
+            first_block_cls = first_block_cls/first_block_cls.norm(2, -1, True)
+            first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
+            first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * ((first_block_cls * self.diag_mat) ** 2).mean()
+            self.loss_hist["first_block_cls_orthogonal_loss"].append(float(first_block_cls_orthogonal_loss))
+            cls_orthogonal_loss += first_block_cls_orthogonal_loss
+
+        if self.second_block_cls_orthogonal_w > 0 and self.training:
+            second_block_cls = second_block_cls/second_block_cls.norm(2, -1, True)
+            second_block_cls = second_block_cls.bmm(second_block_cls.transpose(1, 2))
+            second_block_cls_orthogonal_loss = self.second_block_cls_orthogonal_w * ((second_block_cls * self.diag_mat) ** 2).mean()
+            self.loss_hist["second_block_cls_orthogonal_loss"].append(float(second_block_cls_orthogonal_loss))
+            cls_orthogonal_loss += second_block_cls_orthogonal_loss
+
+        if self.third_block_cls_orthogonal_w > 0 and self.training:
+            third_block_cls = third_block_cls/third_block_cls.norm(2, -1, True)
+            third_block_cls = third_block_cls.bmm(third_block_cls.transpose(1, 2))
+            third_block_cls_orthogonal_loss = self.third_block_cls_orthogonal_w * ((third_block_cls * self.diag_mat) ** 2).mean()
+            self.loss_hist["third_block_cls_orthogonal_loss"].append(float(third_block_cls_orthogonal_loss))
+            cls_orthogonal_loss += third_block_cls_orthogonal_loss
 
         sentence_order_loss = 0.0
         word_order_loss = 0.0
         gap_sentence_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
-        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
+        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None and self.training:
             second_block_hidden_cls = self.order_prediction_fc(second_block_hidden[:, :self.cls_tokens])
             two_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:1]), 1)
             three_sent_order_hidden = torch.cat((second_block_hidden_cls, second_block_hidden_cls[:, 0:4]), 1)
@@ -2165,7 +2203,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
             third_block_hidden = self.word_gap_prediction_fc(third_block_hidden)  # [:, :self.cls_tokens]
 
-        if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
+        if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
             word_order_inputs_embeds, _ = self.funnel.embeddings(shift_right(jumble_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             initiator_emb = self.initiator_emb(torch.tensor(0))[None, None, :]
             word_order_inputs_embeds = word_order_inputs_embeds + initiator_emb
@@ -2182,7 +2220,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.accuracy_hist["word_order"].append(float(word_order_out.sum() / len(word_order_out.view(-1))))
             self.loss_hist["word_order_loss"].append(float(word_order_loss))
 
-        if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
+        if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
             gap_inputs_embeds, _ = self.funnel.embeddings(shift_right(gap_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             initiator_emb = self.initiator_emb(torch.tensor(1))[None, None, :]
             gap_inputs_embeds = gap_inputs_embeds + initiator_emb
@@ -2199,7 +2237,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.accuracy_hist["gap_sentence"].append(float(gap_sentence_out.sum() / len(gap_sentence_out.view(-1))))
             self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
-        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None:
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             initiator_emb = self.initiator_emb(torch.tensor(2))[None, None, :]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds + initiator_emb
@@ -2259,7 +2297,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                              labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_logits)
             loss = loss + adv_loss
 
-        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss
+        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss
 
 
         # TODO: return one loss
@@ -2377,7 +2415,8 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, aitm=aitm, adv_step_size=1e-3, lm_loss_w=2.5, electra_loss_w=0.5, highway_cls_ar_w=1.0)
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=0.1, highway_cls_ar_w=0.5,
+                                                         aitm=False, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only
         if model_name == "fastformer_mlm":
@@ -2486,7 +2525,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=1e-4)
+    optimizer = AdamW(all_params, lr=5e-5, eps=1e-6, weight_decay=1e-2)
 
 
     def run():
@@ -2535,7 +2574,7 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(10):
+        for _ in trange(40):
             st = time.time()
             _ = run()
             et = time.time() - st
