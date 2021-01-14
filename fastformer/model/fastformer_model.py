@@ -1872,7 +1872,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                  input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1, second_block_cls_orthogonal_w=0.05, third_block_cls_orthogonal_w=0.0,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
-                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.2):
+                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.0):
         super().__init__(config)
 
         self.config = config
@@ -1884,8 +1884,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+            self.loss_bce = nn.BCEWithLogitsLoss()
         else:
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id)
+            self.loss_bce = BCELossFocal()
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
@@ -1903,7 +1905,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.word_order_prediction_w = word_order_prediction_w
             self.gap_sentence_prediction_w = gap_sentence_prediction_w
 
-        self.loss_bce = BCELossFocal()
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
         self.input_cls_orthogonal_w = input_cls_orthogonal_w

@@ -222,9 +222,10 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
-                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=0.75,
-                 word_mask_in_pet=False,
-                 word_mask_proba: float = 0.15, word_noise_proba: float = 0.15, max_span_length: int = 3):
+                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.75)),
+                 word_mask_in_pet=False, word_noise_in_pet=False,
+                 word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
+                 word_noise_proba: float = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens + 1
         assert self.cls_tokens > 2
@@ -238,6 +239,11 @@ class TokenizerDataset(Dataset):
         self.word_noise_proba = word_noise_proba
         self.training = True
         self.sentence_jumble_proba = sentence_jumble_proba
+        self.wp_l, self.wp_p = zip(*word_mask_proba)
+        self.word_mask_in_pet = word_mask_in_pet
+        self.word_noise_in_pet = word_noise_in_pet
+        self.wn_l, self.wn_p = zip(*word_noise_proba)
+        self.sj_l, self.sj_p = zip(*sentence_jumble_proba)
 
     def train(self):
         self.training = True
@@ -253,6 +259,7 @@ class TokenizerDataset(Dataset):
 
         labels_seq = item["labels_seq"] if "labels_seq" in item else None
         labels_seq_prompt = item["labels_seq_prompt"] if "labels_seq_prompt" in item else None
+
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
 
@@ -282,13 +289,16 @@ class TokenizerDataset(Dataset):
         length = torch.sum(highway_cls_ar__attention_mask).item()
         length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
+        wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
+        wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
+        sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
 
         if self.training:
             segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
             # TODO: No jumbling for cases where more than 2 of segment is PAD
             count_pad_tokens = sum(segments == tokenizer.pad_token)
             assert len(segments) == self.cls_tokens
-            if random.random() < self.sentence_jumble_proba and n_queries == 0 and count_pad_tokens <= 2:
+            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 2:
                 seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
             else:
                 seg_idxs = list(range(self.cls_tokens))
@@ -358,10 +368,12 @@ class TokenizerDataset(Dataset):
 
             noised_seg_idxs = [word_jumble_seg_idxs, masked_seg_idxs]
             for idx, seq in enumerate(segments):
-                if idx in noised_seg_idxs or n_queries != 0:
+                if idx in noised_seg_idxs:
                     continue
-                seq = span_based_whole_word_masking(seq, self.tokenizer, self.word_mask_proba, self.vocab, self.max_span_length)
-                seq = word_level_noising(seq, self.tokenizer, self.word_noise_proba)
+                if n_queries == 0 or self.word_mask_in_pet:
+                    seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)
+                if n_queries == 0 or self.word_noise_in_pet:
+                    seq = word_level_noising(seq, self.tokenizer, wn)
                 segments[idx] = seq
 
             text = " ".join(segments)
