@@ -280,7 +280,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               (1, 3), (1, 4),
                                                               (2, 3), (2, 4)
                                                               ],
-                             n_head=[(2, 2, 4), (4, 2, 2), (4, 4, 4)],
+                             n_head=[(4, 2, 2), (4, 2, 2), (4, 4, 4)],
                              block_channel_size=[384, 512, 768], no_v_head=True,
                              )
 md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
@@ -301,6 +301,6 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
                              # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                              # n_head=[(8,), (12,), (12,)],
-                             n_head=[(2, 2, 4), (4, 4, 4), (4, 4, 4)],
+                             n_head=[(4, 2, 2), (4, 4, 4), (4, 4, 4)],
                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
                              )

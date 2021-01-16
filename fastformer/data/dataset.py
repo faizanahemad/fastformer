@@ -227,7 +227,7 @@ class TokenizerDataset(Dataset):
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
                  word_noise_proba: float = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3, max_jumbling_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
-        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.cls_tokens = config.num_highway_cls_tokens
         assert self.cls_tokens > 2
         self.tokenizer = copy.deepcopy(tokenizer)
         self.tokenizer_args = tokenizer_args
