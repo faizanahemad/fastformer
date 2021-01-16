@@ -34,7 +34,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
 from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
-from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts
+from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts, very_small_texts
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
 
 try:
@@ -1872,7 +1872,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                  input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1, second_block_cls_orthogonal_w=0.05, third_block_cls_orthogonal_w=0.0,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
-                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.0):
+                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
 
         self.config = config
@@ -1883,10 +1883,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
-            self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+            self.loss_ce = CrossEntropyLoss(ignore_index=-100)
             self.loss_bce = nn.BCEWithLogitsLoss()
         else:
-            self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id)
+            self.loss_ce = AdMSoftmaxLoss(ignore_index=-100)
             self.loss_bce = BCELossFocal()
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
         if sentence_order_prediction_w > 0:
@@ -2106,6 +2106,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: deal with head_mask
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
+        tokenizer = self.tokenizer
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
@@ -2248,11 +2249,16 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
                      highway_cls_ar__attention_mask], dim=1)
 
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, third_block_hidden, third_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1]) # [:, :self.cls_tokens]
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, third_block_hidden, third_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][:, :self.cls_tokens]) #
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, third_block_hidden, third_block_hidden, highway_cls_ar__attention_mask,
+                                                         encoder_outputs[-1][:, :self.cls_tokens])
+
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.view(-1, self.config.vocab_size), highway_cls_ar_input_ids.view(-1))
-            highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1) == highway_cls_ar_input_ids
+            highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
+            self.accuracy_hist["highway_cls_ar_sentence_outputs"].append((tokenizer.decode(highway_cls_ar_input_ids[0, 1:].tolist()), tokenizer.decode(highway_cls_ar_out[0, 1:].tolist())))
+            highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
             self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.sum() / len(highway_cls_ar_out.view(-1))))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
@@ -2396,14 +2402,14 @@ if __name__ == "__main__":
     very_large_max_length = 1536
 
     tokenizer = get_tokenizer("bert")
-    md_config.tokenizer_length = medium_max_length
+    md_config.tokenizer_length = small_max_length
     md_config.max_position_embeddings = md_config.tokenizer_length + md_config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
         md_config.tokenizer_length = min(md_config.tokenizer_length, 512)
         md_config.max_position_embeddings = min(md_config.tokenizer_length, 512)
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
-    dataset = SmallTextDataset(very_large_texts)
+    dataset = SmallTextDataset(very_small_texts)
     assert md_config.tokenizer_length % 16 == 0  # Due to our collate fn
     dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length), dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
@@ -2416,7 +2422,7 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=0.1, highway_cls_ar_w=0.5,
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=1.0, electra_loss_w=0.1, highway_cls_ar_w=2.0,
                                                          aitm=False, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only
@@ -2575,7 +2581,7 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(40):
+        for _ in trange(100):
             st = time.time()
             _ = run()
             et = time.time() - st

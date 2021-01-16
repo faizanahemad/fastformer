@@ -225,7 +225,7 @@ class TokenizerDataset(Dataset):
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.75)),
                  word_mask_in_pet=False, word_noise_in_pet=False,
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_noise_proba: float = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3):
+                 word_noise_proba: float = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3, max_jumbling_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens + 1
         assert self.cls_tokens > 2
@@ -244,6 +244,7 @@ class TokenizerDataset(Dataset):
         self.word_noise_in_pet = word_noise_in_pet
         self.wn_l, self.wn_p = zip(*word_noise_proba)
         self.sj_l, self.sj_p = zip(*sentence_jumble_proba)
+        self.max_jumbling_span_length = max_jumbling_span_length
 
     def train(self):
         self.training = True
@@ -336,7 +337,7 @@ class TokenizerDataset(Dataset):
             if n_queries == 0 and count_pad_tokens <= 2:
                 seq = segments[word_jumble_seg_idxs].split()
                 wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
-                random.shuffle(wj_seq2)
+                wj_seq2 = [w for i in range(len(wj_seq2))[::self.max_jumbling_span_length] for w in random.sample(wj_seq2[i:i+self.max_jumbling_span_length], len(wj_seq2[i:i+self.max_jumbling_span_length]))]
                 seq = wj_seq1 + wj_seq2
                 segments[word_jumble_seg_idxs] = " ".join(seq).strip()
                 segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 4]) + " " + self.tokenizer.sentence_mask_token

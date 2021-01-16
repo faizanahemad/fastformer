@@ -38,6 +38,7 @@ large_texts = [
     t2 + t3
 ]
 
+very_small_texts = ["The quick brown fox jumps over the lazy dog."] * 4
 small_texts = [" ".join(t.split()[:128]) for t in large_texts]
 very_large_texts = [
     t1 + t2 + t3,
