@@ -225,7 +225,7 @@ class TokenizerDataset(Dataset):
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.75)),
                  word_mask_in_pet=False, word_noise_in_pet=False,
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_noise_proba: float = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3, max_jumbling_span_length: int = 3):
+                 word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3, max_jumbling_span_length: int = 3):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens
         assert self.cls_tokens > 2
@@ -288,6 +288,8 @@ class TokenizerDataset(Dataset):
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
+        text_len = length
+
         length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
         wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
@@ -334,7 +336,7 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
 
-            if n_queries == 0 and count_pad_tokens <= 2:
+            if n_queries == 0 and count_pad_tokens <= 1:
                 seq = segments[word_jumble_seg_idxs].split()
                 wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
                 wj_seq2 = [w for i in range(len(wj_seq2))[::self.max_jumbling_span_length] for w in random.sample(wj_seq2[i:i+self.max_jumbling_span_length], len(wj_seq2[i:i+self.max_jumbling_span_length]))]

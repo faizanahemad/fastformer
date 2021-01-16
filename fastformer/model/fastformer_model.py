@@ -220,6 +220,8 @@ class Embeddings(nn.Module):
             input_shape = input_embeds.size()
             seq_length = input_shape[1]
 
+        embeddings = inputs_embeds
+        position_embeddings = None
         if use_position_embeddings:
             if position_ids is None:
                 position_ids = self.position_ids[:, :seq_length]
@@ -228,7 +230,6 @@ class Embeddings(nn.Module):
 
             position_embeddings = self.position_embeddings(position_ids.long())
 
-            embeddings = inputs_embeds
             if self.position_biased_input:
                 embeddings += position_embeddings
         if self.config.type_vocab_size > 0:
@@ -259,7 +260,7 @@ class Embeddings(nn.Module):
             embeddings = embeddings * mask
 
         embeddings = self.dropout(embeddings)
-        return embeddings, self.LayerNormPosEmb(position_embeddings.squeeze(0))
+        return embeddings, self.LayerNormPosEmb(position_embeddings.squeeze(0)) if position_embeddings is not None else None
 
 
 def pool_tensor_basic(tensor, mode="mean", stride=2):
@@ -1334,11 +1335,13 @@ class TransformerEncoder(nn.Module):
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
         pre_ffn_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
+        block_attention_masks = [attention_inputs[1]]
         for block_index, (_, _) in enumerate(zip(self.blocks, self.repeats)):
             one_block_res = self.forward_one_block(block_index, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, output_attentions, output_hidden_states)
             hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
+            block_attention_masks.append(attention_inputs[1])
 
-        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs[1]] if v is not None)
+        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, block_attention_masks] if v is not None)
 
 
 def shift_right(input_ids, decoder_start_token_id, pad_token_id):
@@ -2219,7 +2222,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(jumble_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=jumble_sentence_attention_mask.device),
                      jumble_sentence_attention_mask], dim=1)
 
-            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, highway_block_hidden, highway_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1]) # [:, :self.cls_tokens + 1]
+            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, highway_block_hidden, highway_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1][2]) # [:, :self.cls_tokens + 1]
             word_order_out = self.lm_dim_match(word_order_out[:, (self.funnel.cls_tokens - 1):])
             word_order_out = self.lm_head(word_order_out)[:, :, :self.config.vocab_size]
             word_order_loss = self.word_order_prediction_w * self.loss_ce(word_order_out.view(-1, self.config.vocab_size), jumble_sentence_input_ids.view(-1))
@@ -2236,7 +2239,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(gap_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=gap_sentence_attention_mask.device),
                      gap_sentence_attention_mask], dim=1)
 
-            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, highway_block_hidden, highway_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1]) # [:, :self.cls_tokens + 1]
+            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, highway_block_hidden, highway_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1][2]) # [:, :self.cls_tokens + 1]
             gap_sentence_out = self.lm_dim_match(gap_sentence_out[:, (self.funnel.cls_tokens - 1):])
             gap_sentence_out = self.lm_head(gap_sentence_out)[:, :, :self.config.vocab_size]
             gap_sentence_loss = self.gap_sentence_prediction_w * self.loss_ce(gap_sentence_out.view(-1, self.config.vocab_size), gap_sentence_input_ids.view(-1))
@@ -2246,6 +2249,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
+            highway_cls_ar_inputs_embeds_non_positional, _ = self.funnel.embeddings(highway_cls_ar_input_ids, None, None,
+                                                                                    char_ids=None, char_offsets=None, use_position_embeddings=False)
             initiator_emb = self.initiator_emb(torch.tensor(2))[None, None, :]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds + initiator_emb
 
@@ -2254,9 +2259,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
                      highway_cls_ar__attention_mask], dim=1)
 
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][:, :highway_block_hidden.size(1)])
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask,
-                                                         encoder_outputs[-1][:, :highway_block_hidden.size(1)])
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_cls_ar_inputs_embeds_non_positional, highway_cls_ar_inputs_embeds_non_positional, highway_cls_ar__attention_mask,
+                                                         highway_cls_ar__attention_mask)
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
@@ -2408,16 +2413,19 @@ if __name__ == "__main__":
     very_large_max_length = 1536
 
     tokenizer = get_tokenizer("bert")
-    md_config.tokenizer_length = small_max_length
+    md_config.tokenizer_length = large_max_length
     md_config.max_position_embeddings = md_config.tokenizer_length + md_config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
         md_config.tokenizer_length = min(md_config.tokenizer_length, 512)
         md_config.max_position_embeddings = min(md_config.tokenizer_length, 512)
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
-    dataset = SmallTextDataset(very_small_texts)
+    dataset = SmallTextDataset(very_large_texts)
     assert md_config.tokenizer_length % 16 == 0  # Due to our collate fn
-    dataset = TokenizerDataset(md_config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length), dataset)
+    dataset = TokenizerDataset(md_config, tokenizer, char_to_id,
+                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length),
+                               sentence_jumble_proba=((1024, 0.0),), word_noise_proba=((1024, 0.0),), max_jumbling_span_length=2,
+                               dataset=dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
     pt_batch = next(iter(dataloader))
 
@@ -2506,6 +2514,12 @@ if __name__ == "__main__":
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (params / 1_000_000))
+
+    if hasattr(model, "funnel"):
+        funnel = model.funnel
+        model_parameters = list(filter(lambda p: p.requires_grad, funnel.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        print("Funnel Params = %s" % (params / 1_000_000))
     print(model)
     # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
 
@@ -2538,7 +2552,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=5e-5, eps=1e-6, weight_decay=1e-2)
+    optimizer = AdamW(all_params, lr=1e-4, eps=1e-6, weight_decay=1e-2)
 
 
     def run():
@@ -2587,7 +2601,7 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(100):
+        for _ in trange(20):
             st = time.time()
             _ = run()
             et = time.time() - st
