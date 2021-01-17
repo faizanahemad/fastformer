@@ -225,7 +225,8 @@ class TokenizerDataset(Dataset):
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.75)),
                  word_mask_in_pet=False, word_noise_in_pet=False,
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)), max_span_length: int = 3, max_jumbling_span_length: int = 3):
+                 word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
+                 max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens
         assert self.cls_tokens > 2
@@ -245,6 +246,8 @@ class TokenizerDataset(Dataset):
         self.wn_l, self.wn_p = zip(*word_noise_proba)
         self.sj_l, self.sj_p = zip(*sentence_jumble_proba)
         self.max_jumbling_span_length = max_jumbling_span_length
+        self.n_anchors = n_anchors
+        self.n_positives = n_positives
 
     def train(self):
         self.training = True
@@ -289,6 +292,30 @@ class TokenizerDataset(Dataset):
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
         text_len = length
+        max_anchor_len = text_len // (2 * self.n_anchors)
+        min_anchor_len = 32
+        anchor_min_start = 0
+        anchor_max_start = anchor_min_start + max_anchor_len
+        anchors = []
+        positives = []
+        while len(anchors) < self.n_anchors and anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:
+            anchor_len = int(np.random.beta(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+            anchor_len = int(np.round(anchor_len / 8) * 8)
+            anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
+            anchor_end = min(anchor_start + anchor_len, text_len)
+            anchors.append([anchor_start, anchor_end])
+            positives_for_anchor = []
+            while len(positives_for_anchor) < self.n_positives:
+                positive_len = int(np.random.beta(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+                positive_len = int(np.round(positive_len / 8) * 8)
+                positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
+                positive_end = min(positive_start + positive_len, text_len)
+                positives_for_anchor.append([positive_start, positive_end])
+            positives.append(positives_for_anchor)
+            anchor_min_start = anchor_end + max_anchor_len
+            anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
+        anchors = anchors if min_anchor_len < max_anchor_len else []
+        positives = positives if min_anchor_len < max_anchor_len else []
 
         length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
@@ -310,7 +337,7 @@ class TokenizerDataset(Dataset):
             seg_slides = seg_idxs + seg_idxs[0:4]
             three_ordered_dilated = torch.tensor([int(s1 < s2 < s3) for s1, s2, s3 in zip(seg_slides[0:-4:1], seg_slides[2:-2:1], seg_slides[4::1])])
             results = dict(labels=label, labels_two_sentence_order=two_ordered, labels_three_sentence_dilated_order=three_ordered_dilated,
-                           labels_segment_index=torch.tensor(seg_idxs),
+                           labels_segment_index=torch.tensor(seg_idxs), anchors=anchors, positives=positives,
                            highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
             segments = segments[seg_idxs]
@@ -412,12 +439,18 @@ def collate_fn(samples):
         char_ids = torch.cat([char_ids, char_ids.new(char_ids.shape[0], padding).fill_(padding_index)], 1)
 
     print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
+    anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
+    positives = [s["positives"] if "positives" in s else [] for s in samples]
     samples = default_collate(samples)
+    samples["contrastive_anchors"] = anchors
+    samples["contrastive_positives"] = positives
+    del samples["anchors"]
+    del samples["positives"]
     if char_ids is not None:
         samples["char_ids"] = char_ids
     # TODO: reduce the batch seq length to minimum required and a multiple of 16.
     for k, v in samples.items():
-        if len(v.size()) < 2 or k == "char_offsets" or k == "token_type_ids":
+        if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
             continue
         if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
             continue

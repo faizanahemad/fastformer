@@ -49,6 +49,18 @@ logger = logging.get_logger(__name__)
 INF = 1e6
 EPS = 1e-6
 
+def numel(m: torch.nn.Module, only_trainable: bool = True):
+    """
+    returns the total number of parameters used by `m` (only counting
+    shared parameters once); if `only_trainable` is True, then only
+    includes parameters with `requires_grad = True`
+    """
+    parameters = m.parameters()
+    if only_trainable:
+        parameters = list(p for p in parameters if p.requires_grad)
+    unique = dict((p.data_ptr(), p) for p in parameters).values()
+    return sum(p.numel() for p in unique)
+
 
 class DropoutContext(object):
     def __init__(self):
@@ -1619,7 +1631,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
         self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.answering_ffn = BertFFN(config, config.block_channel_size[-1], config.block_channel_size[-1], d_out=config.embedding_size)
+        self.answering_ffn = nn.Sequential(Conv1d(config.block_channel_size[-1], config.block_channel_size[0], 1, config.ffn_groups, bias=False), nn.GELU(), nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
+        self.answering_ffn[2].weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.init_weights()
 
@@ -1885,6 +1898,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
+        self.contrastive_ffn = ConvFFN(config, config.block_channel_size[-1], config.block_channel_size[-1], config.ffn_groups, 0, config.block_channel_size[0])
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.loss_ce = CrossEntropyLoss(ignore_index=-100)
@@ -1968,7 +1982,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_hidden_states=True,
         )
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
-        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
@@ -2012,10 +2026,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
 
             answering_hidden = self.funnel.answering_ffn(encoder_last_layer_out[:, :alen])
-            answering_logits = self.funnel.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
-            answering_lm_loss_kl = KL(answering_logits, answering_predictions.detach(), reduction="batchmean")
+            answering_lm_loss_kl = KL(answering_hidden, answering_predictions.detach(), reduction="batchmean")
             if reverse_loss:
-                answering_lm_loss_kl = (answering_lm_loss_kl + KL(answering_logits.detach(), answering_predictions, reduction="batchmean")) / 2.0
+                answering_lm_loss_kl = (answering_lm_loss_kl + KL(answering_hidden.detach(), answering_predictions, reduction="batchmean")) / 2.0
 
             answering_lm_loss_kl = self.answering_lm_w * answering_lm_loss_kl
 
@@ -2101,6 +2114,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
             jumble_sentence_input_ids=None, jumble_sentence_attention_mask=None,
             labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
+            contrastive_anchors=None, contrastive_positives=None,
             **kwargs
 
     ):
@@ -2142,7 +2156,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
-        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.funnel.cls_tokens - 1):])
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
 
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
@@ -2272,14 +2286,17 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.sum() / len(highway_cls_ar_out.view(-1))))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
-        active_loss = tokenizer_attn_mask.view(-1, input_shape[1]) == 1
+        tokenizer_attn_mask = tokenizer_attn_mask[:, 1:]
+        active_loss = tokenizer_attn_mask.view(-1, input_shape[1] - 1) == 1
         assert labels is not None
         loss_fct = self.loss_ce  # -100 index = padding token
-        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
+        labels = labels[:, 1:]
+        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.reshape(-1, self.config.vocab_size), labels.reshape(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
         mlm_positions = input_ids == self.tokenizer.mask_token_id
         self.accuracy_hist["lm"].append(float(labels[active_loss].sum() / len(labels[active_loss].view(-1))))
+        mlm_positions = mlm_positions[:, 1:]
         self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].sum() / len(labels[mlm_positions].view(-1))))
 
         decoder_outputs = self.funnel.decoder(
@@ -2292,11 +2309,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         )
 
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
-        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens:], decoder_outputs[1:])
+        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
         discriminator_sequence_output = decoder_outputs[0]
         logits = self.discriminator_predictions(discriminator_sequence_output)
 
-        active_logits = logits.view(-1, input_shape[1])[active_loss]
+        active_logits = logits.view(-1, input_shape[1] - 1)[active_loss]
         active_labels = labels[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, active_labels)
         self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
@@ -2311,7 +2328,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if (self.aitm or self.alum) and self.training:
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits,
-                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_logits)
+                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden)
             loss = loss + adv_loss
 
         loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss
@@ -2324,7 +2341,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: CLS correction needed
         results = dict(loss=loss,
                        decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
-                       encoder_output=torch.cat((encoder_outputs[0][:, 0:1], encoder_outputs[0][:, self.cls_tokens + 1:]), 1), encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
+                       encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results
 
 
@@ -2426,7 +2443,7 @@ if __name__ == "__main__":
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length),
                                sentence_jumble_proba=((1024, 0.0),), word_noise_proba=((1024, 0.0),), max_jumbling_span_length=2,
                                dataset=dataset)
-    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
     pt_batch = next(iter(dataloader))
 
     if "fastformer" in model_name:
@@ -2513,13 +2530,13 @@ if __name__ == "__main__":
 
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print("Trainable Params = %s" % (params / 1_000_000))
+    print("Trainable Params = %s" % (numel(model) / 1_000_000))
 
     if hasattr(model, "funnel"):
         funnel = model.funnel
         model_parameters = list(filter(lambda p: p.requires_grad, funnel.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
-        print("Funnel Params = %s" % (params / 1_000_000))
+        print("Funnel Params = %s" % (numel(funnel) / 1_000_000))
     print(model)
     # print(model.funnel.encoder.repeats if hasattr(model, "funnel") else "")
 
@@ -2538,7 +2555,7 @@ if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
 
     model = model.to(device)
-    pt_batch = {k: v.to(device) for k, v in pt_batch.items()}
+    pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
 
     try:
         from torch.cuda.amp import GradScaler, autocast
