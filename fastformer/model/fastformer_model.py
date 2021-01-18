@@ -1888,7 +1888,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                  input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1, second_block_cls_orthogonal_w=0.05, third_block_cls_orthogonal_w=0.0,
-                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0,
+                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
                  gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
 
@@ -1900,11 +1900,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.contrastive_ffn = ConvFFN(config, config.block_channel_size[-1], config.block_channel_size[-1], config.ffn_groups, 0, config.block_channel_size[0])
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
+        self.ce = CrossEntropyLoss(ignore_index=-100)
         if additive_margin_softmax_w == 0:
-            self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+            self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
             self.loss_bce = nn.BCEWithLogitsLoss()
         else:
-            self.loss_ce = AdMSoftmaxLoss(ignore_index=-100)
+            self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id)
             self.loss_bce = BCELossFocal()
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
         self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
@@ -1946,6 +1947,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.adv_w = adv_w
         self.answering_lm_w = answering_lm_w
         self.highway_cls_ar_w = highway_cls_ar_w
+        self.contrastive_w = contrastive_w
+        self.contrastive_temperature = contrastive_temperature
         self.additive_margin_softmax_w = additive_margin_softmax_w
         if alum_aitm_alternate:
             pass
@@ -2163,7 +2166,49 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         second_block_cls = second_block_hidden[:, :self.funnel.cls_tokens]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
         third_block_cls = third_block_hidden[:, :self.funnel.cls_tokens]
+        loss_contrastive = 0.0
+        if contrastive_anchors is not None:
+            contrastive_block_hidden = third_block_hidden
 
+            contrastive_positives = (torch.tensor(contrastive_positives) / self.config.stride ** 2).type(torch.int64).tolist()
+            contrastive_anchors = (torch.tensor(contrastive_anchors) / self.config.stride ** 2).type(torch.int64).tolist()
+
+            n_positives_per_anchor = len(contrastive_positives[0][0])
+            anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
+            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
+
+            contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+
+            positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
+            n_anchors = len(anchors)
+            n_positives = len(positives)
+            assert n_positives % n_anchors == 0
+            assert (n_positives / n_anchors) == n_positives_per_anchor
+            contrastive_block_hidden = torch.stack(anchors + positives)
+            contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
+            contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
+            contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0)))
+            labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
+
+            loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+            mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+            mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+            for i in range(n_positives_per_anchor):
+                mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = 0
+            vertical_lc = 0.0
+            for i in range(n_positives_per_anchor):
+
+                labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
+                mask_c = mask2.clone()
+                mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = 1
+                mask_c = mask1 + mask_c
+                l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                vertical_lc += l2
+            vertical_lc /= n_positives_per_anchor
+            loss_contrastive += vertical_lc
+        loss_contrastive = self.contrastive_w * loss_contrastive
+        self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
         cls_orthogonal_loss = 0.0
         if self.input_cls_orthogonal_w > 0 and self.training:
             inputs_embeds_cls = inputs_embeds_cls/inputs_embeds_cls.norm(2, -1, True)
@@ -2331,7 +2376,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                              labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden)
             loss = loss + adv_loss
 
-        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss
+        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
 
 
         # TODO: return one loss
