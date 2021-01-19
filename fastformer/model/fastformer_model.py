@@ -2241,7 +2241,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
             contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
             contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0)))
+            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
             labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
 
             loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
