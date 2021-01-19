@@ -2512,6 +2512,7 @@ if __name__ == "__main__":
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=True)
+    ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
@@ -2521,6 +2522,7 @@ if __name__ == "__main__":
     fp16 = args["fp16"]
     model_name = args["model"]
     aitm = args["aitm"]
+    epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
     HuggingFaceModelClass = AutoModel if forward_only else AutoModelForMaskedLM
@@ -2717,13 +2719,13 @@ if __name__ == "__main__":
 
         _ = [run() for _ in range(2)]
         with profiler.profile(record_shapes=True) as prof:
-            _ = [run() for _ in range(5)]
+            _ = [run() for _ in range(epochs)]
         print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
         print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=100))
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(5):
+        for _ in trange(epochs):
             st = time.time()
             _ = run()
             et = time.time() - st
