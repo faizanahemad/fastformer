@@ -1934,7 +1934,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
         self.second_block_cls_orthogonal_w = second_block_cls_orthogonal_w
         self.third_block_cls_orthogonal_w = third_block_cls_orthogonal_w
-        self.diag_mat = 1 - torch.eye(self.cls_tokens + 1, self.cls_tokens + 1)
+        self.register_buffer("diag_mat", 1 - torch.eye(self.cls_tokens + 1, self.cls_tokens + 1, device=next(self.parameters()).device))
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = defaultdict(list)
@@ -2056,7 +2056,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
             contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
             contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0)))
+            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
             contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
             if reverse_loss:
                 contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
