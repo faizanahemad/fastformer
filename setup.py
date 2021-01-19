@@ -17,13 +17,7 @@ setup(
     'transformers',
     'adversarial training',
   ],
-  install_requires=[
-    'einops>=0.3',
-    'local-attention>=1.1.1',
-    'pytorch-fast-transformers>=0.3.0',
-    'torch>=1.7',
-    'transformers>=3.5',
-  ],
+  install_requires=[],
   classifiers=[
     'Development Status :: 1 - Alpha',
     'Intended Audience :: Developers',

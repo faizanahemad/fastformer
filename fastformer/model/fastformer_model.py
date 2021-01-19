@@ -8,7 +8,10 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
-from performer_pytorch import SelfAttention, FastAttention
+try:
+    from performer_pytorch import SelfAttention, FastAttention
+except:
+    pass
 from collections import defaultdict
 from torch.nn import TransformerDecoder
 
