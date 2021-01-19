@@ -2388,8 +2388,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         tokenizer_attn_mask = tokenizer_attn_mask[:, 1:]
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1] - 1) == 1
         assert labels is not None
+        print(labels.device)
         loss_fct = self.loss_ce  # -100 index = padding token
         labels = labels[:, 1:]
+        print(labels.device)
         masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.reshape(-1, self.config.vocab_size), labels.reshape(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
