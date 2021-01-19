@@ -2647,8 +2647,10 @@ if __name__ == "__main__":
 
     if "electra" in model_name:
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
+        labels = labels.to(device)
     else:
         labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
+        labels = labels.to(device)
     if "labels" in pt_batch:
         del pt_batch["labels"]
     print("Input Sizes", pt_batch["input_ids"].size())
@@ -2658,6 +2660,7 @@ if __name__ == "__main__":
 
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
+
 
     try:
         from torch.cuda.amp import GradScaler, autocast
