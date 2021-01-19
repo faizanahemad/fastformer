@@ -1976,7 +1976,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
     def aitm_loss(self, embed, position_embeds, attention_mask, mlm_predictions, mlm_correct,
                   sent_order_predictions, electra_predictions,
-                  labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_predictions=None, reverse_loss=False):
+                  labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_predictions=None,
+                  contrastive_anchors=None, contrastive_positives=None, contrastive_logits=None,
+                  reverse_loss=False):
         encoder_outputs = self.funnel.encoder(
             embed,
             position_embeds,
@@ -1990,19 +1992,24 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
         clip_min, clip_max = self.aitm_clip_min, self.aitm_clip_max
-        if self.alum_aitm_alternate:
-            self.adv_lm_w = -1 * self.adv_lm_w
-            if self.adv_lm_w > 0:
-                clip_min = clip_max = 1.0
-            else:
-                clip_min, clip_max = self.aitm_clip_min, self.aitm_clip_max
+        if self.adv_lm_w > 0:
+            clip_min = clip_max = 1.0
+        else:
+            clip_min, clip_max = self.aitm_clip_min, self.aitm_clip_max
         lm_pre_kl = self.adv_lm_w * (
                     mlm_correct.float().clamp(clip_min, clip_max) * KL(first_block_hidden, mlm_predictions.detach(), reduction="none").sum(
                 -1)).mean(0).sum()
+        if reverse_loss:
+            lm_kl_rev = self.adv_lm_w * (
+                    mlm_correct.float().clamp(clip_min, clip_max) * KL(first_block_hidden.detach(), mlm_predictions, reduction="none").sum(
+                -1)).mean(0).sum()
+            lm_pre_kl = (lm_pre_kl + lm_kl_rev) / 2.0
+
+
         sent_order_pre_kl = 0
         if self.sentence_order_prediction_w > 0 and sent_order_predictions is not None:
             sent_order_block_hidden_cls = self.order_prediction_fc(third_block_hidden[:, :self.cls_tokens + 1])
-            sent_order_block_hidden_cls = sent_order_block_hidden_cls[:, 1:self.cls_tokens] + sent_order_block_hidden_cls[:, 0]
+            sent_order_block_hidden_cls = sent_order_block_hidden_cls[:, 1:self.cls_tokens + 1] + sent_order_block_hidden_cls[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_pre_kl = KL(sent_order_logits, sent_order_predictions.detach(), reduction="batchmean")
             if reverse_loss:
@@ -2016,11 +2023,40 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
-        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:]
+        discriminator_sequence_output = decoder_outputs[0][:, (self.cls_tokens + 1):]
         electra_logits = self.discriminator_predictions(discriminator_sequence_output)
         electra_pre_kl = KL(electra_logits, electra_predictions.detach(), reduction="batchmean")
         if reverse_loss:
             electra_pre_kl = (electra_pre_kl + KL(electra_logits.detach(), electra_predictions, reduction="batchmean")) / 2.0
+
+        contrastive_kl = 0.0
+        if contrastive_anchors is not None:
+            contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
+
+            contrastive_positives = (torch.tensor(contrastive_positives) / self.config.stride ** 2).type(torch.int64).tolist()
+            contrastive_anchors = (torch.tensor(contrastive_anchors) / self.config.stride ** 2).type(torch.int64).tolist()
+
+            n_positives_per_anchor = len(contrastive_positives[0][0])
+            anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors)
+                       for anchor in anchors]
+            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
+                                     anchors_cp]
+
+            contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+
+            positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
+            n_anchors = len(anchors)
+            n_positives = len(positives)
+            assert n_positives % n_anchors == 0
+            assert (n_positives / n_anchors) == n_positives_per_anchor
+            contrastive_block_hidden = torch.stack(anchors + positives)
+            contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
+            contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
+            contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0)))
+            contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
+            if reverse_loss:
+                contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
 
         answering_lm_loss_kl = 0.0
         if labels_pet_input_ids is not None:
@@ -2035,27 +2071,33 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             answering_lm_loss_kl = self.answering_lm_w * answering_lm_loss_kl
 
-        return self.lm_loss_w * lm_pre_kl, self.sentence_order_prediction_w * sent_order_pre_kl, self.electra_loss_w * electra_pre_kl, answering_lm_loss_kl
+        return self.lm_loss_w * lm_pre_kl, self.sentence_order_prediction_w * sent_order_pre_kl, self.electra_loss_w * electra_pre_kl, answering_lm_loss_kl, self.contrastive_w * contrastive_kl
 
     def forward_for_aitm(self, embed, position_embeds, attention_mask,
                          mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions,
-                         labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_logits=None):
+                         labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_logits=None,
+                         contrastive_anchors=None, contrastive_positives=None, contrastive_logits=None):
+        if self.alum_aitm_alternate:
+            self.adv_lm_w = -1 * self.adv_lm_w
         noise = embed.new(embed.size()).normal_(0, 1) * self.aitm_noise_var
         noise.requires_grad_()
         for _ in range(self.adv_ascent_steps):
             newembed = embed.detach() + noise
-            lm_pre_kl, sent_order_pre_kl, electra_pre_kl, answering_lm_pre_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
-                                                                                               mlm_predictions, mlm_correct,
-                                                                                               sent_order_predictions, electra_predictions,
-                                                                                               labels_pet_input_ids,
-                                                                                               labels_pet_attention_mask, labels_pet_max_length, answering_logits)
+            lm_pre_kl, sent_order_pre_kl, electra_pre_kl, answering_lm_pre_kl, contrastive_pre_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
+                                                                                                                   mlm_predictions, mlm_correct,
+                                                                                                                   sent_order_predictions, electra_predictions,
+                                                                                                                   labels_pet_input_ids,
+                                                                                                                   labels_pet_attention_mask,
+                                                                                                                   labels_pet_max_length, answering_logits,
+                                                                                                                   contrastive_anchors, contrastive_positives, contrastive_logits)
 
-            adv_loss = electra_pre_kl + sent_order_pre_kl + lm_pre_kl + answering_lm_pre_kl
+            adv_loss = electra_pre_kl + sent_order_pre_kl + lm_pre_kl + answering_lm_pre_kl + contrastive_pre_kl
             self.loss_hist["electra_pre_kl"].append(float(electra_pre_kl))
             self.loss_hist["lm_pre_kl"].append(float(lm_pre_kl))
             self.loss_hist["sent_order_pre_kl"].append(float(sent_order_pre_kl))
             self.loss_hist["adv_loss_pre_kl"].append(float(adv_loss))
             self.loss_hist["answering_lm_pre_kl"].append(float(answering_lm_pre_kl))
+            self.loss_hist["contrastive_pre_kl"].append(float(contrastive_pre_kl))
             delta_grad, = torch.autograd.grad(adv_loss, noise, only_inputs=True)
             norm = delta_grad.norm()
             if (torch.isnan(norm) or torch.isinf(norm)):
@@ -2067,15 +2109,21 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         #
         newembed = embed + noise.detach()
-        lm_post_kl, sent_order_post_kl, electra_post_kl, answering_lm_post_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
-                                                                                               mlm_predictions, mlm_correct,
-                                                                                               sent_order_predictions, electra_predictions, labels_pet_input_ids,
-                                                                                               labels_pet_attention_mask, labels_pet_max_length, answering_logits, reverse_loss=True)
+        lm_post_kl, sent_order_post_kl, electra_post_kl, answering_lm_post_kl, contrastive_post_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
+                                                                                                                    mlm_predictions, mlm_correct,
+                                                                                                                    sent_order_predictions, electra_predictions,
+                                                                                                                    labels_pet_input_ids,
+                                                                                                                    labels_pet_attention_mask,
+                                                                                                                    labels_pet_max_length, answering_logits,
+                                                                                                                    contrastive_anchors, contrastive_positives,
+                                                                                                                    contrastive_logits,
+                                                                                                                    reverse_loss=True)
         self.loss_hist["electra_post_kl"].append(float(electra_post_kl))
         self.loss_hist["lm_post_kl"].append(float(lm_post_kl))
         self.loss_hist["sent_order_post_kl"].append(float(sent_order_post_kl))
         self.loss_hist["answering_lm_post_kl"].append(float(answering_lm_post_kl))
-        adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2)
+        self.loss_hist["contrastive_post_kl"].append(float(contrastive_post_kl))
+        adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2) + answering_lm_post_kl + contrastive_post_kl
         self.loss_hist["adv_loss_post_kl"].append(float(adv_loss))
         return self.adv_w * adv_loss
 
@@ -2142,7 +2190,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_hidden_states=True,
         )
         answering_lm_loss = 0.0
-        answering_logits = None
+        answering_hidden = None
         if labels_pet_input_ids is not None:
             encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
             alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
@@ -2167,8 +2215,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
         third_block_cls = third_block_hidden[:, :self.funnel.cls_tokens]
         loss_contrastive = 0.0
+        contrastive_block_matrix = None
+        contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
         if contrastive_anchors is not None:
-            contrastive_block_hidden = third_block_hidden
+            contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
 
             contrastive_positives = (torch.tensor(contrastive_positives) / self.config.stride ** 2).type(torch.int64).tolist()
             contrastive_anchors = (torch.tensor(contrastive_anchors) / self.config.stride ** 2).type(torch.int64).tolist()
@@ -2192,6 +2242,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
 
             loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+            self.accuracy_hist["contrastive"].append((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
             mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
             mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
             for i in range(n_positives_per_anchor):
@@ -2373,7 +2424,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if (self.aitm or self.alum) and self.training:
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits,
-                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden)
+                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden,
+                                             contrastive_anchors_copy, contrastive_positives_copy, contrastive_block_matrix)
             loss = loss + adv_loss
 
         loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
@@ -2499,7 +2551,7 @@ if __name__ == "__main__":
             assert not forward_only
         if model_name == "fastformer_fused_electra":
             model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=1.0, electra_loss_w=0.1, highway_cls_ar_w=2.0,
-                                                         aitm=False, alum=False, alum_aitm_alternate=False)
+                                                         aitm=True, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only
         if model_name == "fastformer_mlm":
@@ -2614,7 +2666,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=1e-4, eps=1e-6, weight_decay=1e-2)
+    optimizer = AdamW(all_params, lr=5e-5, eps=1e-6, weight_decay=1e-2)
 
 
     def run():
@@ -2663,7 +2715,7 @@ if __name__ == "__main__":
     else:
         _ = [run() for _ in range(1)]
         times = []
-        for _ in trange(20):
+        for _ in trange(5):
             st = time.time()
             _ = run()
             et = time.time() - st
