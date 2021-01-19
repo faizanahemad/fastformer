@@ -2328,7 +2328,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
             word_order_inputs_embeds, _ = self.funnel.embeddings(shift_right(jumble_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            initiator_emb = self.initiator_emb(torch.tensor(0))[None, None, :]
+            initiator_emb = self.initiator_emb(torch.tensor(0, device=highway_block_hidden.device))[None, None, :]
             word_order_inputs_embeds = word_order_inputs_embeds + initiator_emb
             if self.config.num_highway_cls_tokens > 0:
                 jumble_sentence_attention_mask = torch.cat(
@@ -2345,7 +2345,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
             gap_inputs_embeds, _ = self.funnel.embeddings(shift_right(gap_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            initiator_emb = self.initiator_emb(torch.tensor(1))[None, None, :]
+            initiator_emb = self.initiator_emb(torch.tensor(1, device=highway_block_hidden.device))[None, None, :]
             gap_inputs_embeds = gap_inputs_embeds + initiator_emb
             if self.config.num_highway_cls_tokens > 0:
                 gap_sentence_attention_mask = torch.cat(
@@ -2364,7 +2364,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             highway_cls_ar_inputs_embeds_non_positional, _ = self.funnel.embeddings(highway_cls_ar_input_ids, None, None,
                                                                                     char_ids=None, char_offsets=None, use_position_embeddings=False)
-            initiator_emb = self.initiator_emb(torch.tensor(2))[None, None, :]
+            initiator_emb = self.initiator_emb(torch.tensor(2, device=highway_block_hidden.device))[None, None, :]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds + initiator_emb
 
             if self.config.num_highway_cls_tokens > 0:
