@@ -2518,7 +2518,7 @@ if __name__ == "__main__":
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
+    ap.add_argument("--model", type=str, default='funnel-transformer/intermediate')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2545,6 +2545,7 @@ if __name__ == "__main__":
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
         config.tokenizer_length = min(config.tokenizer_length, 512)
         config.max_position_embeddings = min(config.tokenizer_length, 512)
+        config.num_highway_cls_tokens = 0
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     dataset = SmallTextDataset(very_large_texts)

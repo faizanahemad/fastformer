@@ -229,7 +229,6 @@ class TokenizerDataset(Dataset):
                  max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = config.num_highway_cls_tokens
-        assert self.cls_tokens > 2
         self.tokenizer = copy.deepcopy(tokenizer)
         self.tokenizer_args = tokenizer_args
         self.dataset = dataset
@@ -324,11 +323,10 @@ class TokenizerDataset(Dataset):
         sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
 
         if self.training:
-            segments = np.array(segment(text, self.cls_tokens, self.sent_detector, tokenizer.pad_token))
-            # TODO: No jumbling for cases where more than 2 of segment is PAD
+            segments = np.array(segment(text, max(self.cls_tokens, 1), self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
-            assert len(segments) == self.cls_tokens
-            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 2:
+            assert len(segments) == max(self.cls_tokens, 1)
+            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 2 and self.cls_tokens > 2:
                 seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
             else:
                 seg_idxs = list(range(self.cls_tokens))
@@ -345,7 +343,7 @@ class TokenizerDataset(Dataset):
             iters = 0
             word_jumble_seg_idxs = -1
             masked_seg_idxs = self.cls_tokens - 1
-            while (masked_segments == tokenizer.pad_token or word_jumble_segments == tokenizer.pad_token) and iters <= 16:
+            while (masked_segments == tokenizer.pad_token or word_jumble_segments == tokenizer.pad_token) and iters <= 16 and self.cls_tokens > 2:
                 iters += 1
                 if word_jumble_segments == tokenizer.pad_token:
                     word_jumble_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {masked_seg_idxs}), 1)[0]
@@ -356,14 +354,14 @@ class TokenizerDataset(Dataset):
 
             small_segment_tokenizer_args = dict(**self.tokenizer_args)
             small_segment_tokenizer_args["max_length"] = self.tokenizer_args["max_length"] // (self.cls_tokens - 1)
-            tokenizer_outputs = tokenizer(masked_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
-            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-            results.update(dict(gap_sentence_input_ids=input_ids.squeeze(), gap_sentence_attention_mask=attention_mask.squeeze()))
-            tokenizer_outputs = tokenizer(word_jumble_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
-            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-            results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
 
-            if n_queries == 0 and count_pad_tokens <= 1:
+            if n_queries == 0 and count_pad_tokens <= 1 and self.cls_tokens > 2:
+                tokenizer_outputs = tokenizer(masked_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
+                input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+                results.update(dict(gap_sentence_input_ids=input_ids.squeeze(), gap_sentence_attention_mask=attention_mask.squeeze()))
+                tokenizer_outputs = tokenizer(word_jumble_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
+                input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+                results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
                 seq = segments[word_jumble_seg_idxs].split()
                 wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
                 wj_seq2 = [w for i in range(len(wj_seq2))[::self.max_jumbling_span_length] for w in random.sample(wj_seq2[i:i+self.max_jumbling_span_length], len(wj_seq2[i:i+self.max_jumbling_span_length]))]
