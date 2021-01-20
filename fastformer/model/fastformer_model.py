@@ -2513,7 +2513,7 @@ if __name__ == "__main__":
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--model", type=str, default='microsoft/deberta-base')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2563,6 +2563,8 @@ if __name__ == "__main__":
             assert not forward_only
         if model_name == "fastformer_mlm":
             model = FastFormerForMaskedLM(config)
+        if model_name == "fastformer":
+            model = FastFormerModel(config)
 
         pt_batch = sm_pt_batch
 
