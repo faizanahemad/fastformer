@@ -2741,5 +2741,6 @@ if __name__ == "__main__":
 
     if not forward_only and isinstance(model, FastFormerForFusedELECTRAPretraining):
         from pprint import pprint
-        pprint(model.accuracy_hist)
-        pprint(model.loss_hist)
+        del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
+        pprint("Accuracies = \n", model.accuracy_hist)
+        pprint("Loss hist = \n", model.loss_hist)
