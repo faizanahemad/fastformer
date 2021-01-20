@@ -2696,10 +2696,6 @@ if __name__ == "__main__":
                 with autocast():
                     output = model(**pt_batch, labels=labels)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(all_params, 1.0)
-                    optimizer.step()
-                    optimizer.zero_grad()
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
