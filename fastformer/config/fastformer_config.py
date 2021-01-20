@@ -106,10 +106,10 @@ class FastFormerConfig(PretrainedConfig):
             pooling_type="mean",  # learn, #learn_sdconv
             pooling_kernel_size=5,
             stride=2,
-            ffn_groups=4,
+            ffn_groups=1,
             ffn_layers=0,
             ffn_width=4,
-            qkv_transform_groups=4,
+            qkv_transform_groups=1,
             embedding_size=128,
             num_highway_cls_tokens=7,
             position_biased_input=True,
@@ -120,7 +120,7 @@ class FastFormerConfig(PretrainedConfig):
             qkv_squeeze_fraction=1,
             light_first_layer=False,
             light_last_layer=False,
-            compress_query_method="learn",
+            compress_query_method=None,
             compressed_query_attention_kernel_size=3,
             compressed_query_attention_stride=2,
             compressed_query_attention_layers=[],
@@ -184,6 +184,7 @@ class FastFormerConfig(PretrainedConfig):
             'learn_rnn',
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
         assert compress_query_method in [
+            None,
             "mean",
             "learn",
             "learn_sdconv",
@@ -304,3 +305,50 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(4, 2, 2), (4, 4, 4), (4, 4, 4)],
                              block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
                              )
+
+md_config_no_rnn = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
+                                    sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+                                    approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[24, 64, 80],
+                                    separate_compressiion_layer=True,
+                                    qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
+                                    sdconv=True, full_channel_separation=True, short_rnn=False,
+                                    sdconv_kernel_size=[5, 7, 9],
+                                    compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                                    compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
+                                                                       (1, 1), (1, 2), (1, 3), (1, 4),
+                                                                       (2, 1), (2, 2), (2, 3), (2, 4)
+                                                                       ],
+                                    compressed_key_attention_layers=[(0, 3), (0, 4),
+                                                                     (1, 3), (1, 4),
+                                                                     (2, 3), (2, 4)
+                                                                     ],
+                                    # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
+                                    # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
+                                    # n_head=[(8,), (12,), (12,)],
+                                    n_head=[(4, 4, 0), (6, 6, 0), (6, 6, 0)],
+                                    block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=False,
+                                    )
+
+
+md_config_funnel = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
+                                    sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+                                    approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=64,
+                                    separate_compressiion_layer=True,
+                                    qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
+                                    sdconv=False, full_channel_separation=True, short_rnn=False,
+                                    sdconv_kernel_size=[5, 7, 9],
+                                    compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                                    compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
+                                                                       (1, 1), (1, 2), (1, 3), (1, 4),
+                                                                       (2, 1), (2, 2), (2, 3), (2, 4)
+                                                                       ],
+                                    compressed_key_attention_layers=[(0, 3), (0, 4),
+                                                                     (1, 3), (1, 4),
+                                                                     (2, 3), (2, 4)
+                                                                     ],
+                                    # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
+                                    # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
+                                    # n_head=[(8,), (12,), (12,)],
+                                    n_head=[(4, 4, 0), (6, 6, 0), (6, 6, 0)],
+                                    block_channel_size=[768, 768, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=False,
+                                    )

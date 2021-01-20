@@ -1,1 +1,1 @@
-from .fastformer_config import FastFormerConfig, md_config, sm_config
+from .fastformer_config import FastFormerConfig, md_config, sm_config, md_config_funnel, md_config_no_rnn

@@ -45,7 +45,7 @@ try:
 except:
     pass
 
-from fastformer.config import FastFormerConfig, md_config, sm_config
+from fastformer.config import FastFormerConfig, md_config, sm_config, md_config_funnel, md_config_no_rnn
 
 logger = logging.get_logger(__name__)
 
@@ -842,6 +842,9 @@ class MultiheadAttention(nn.Module):
             CompressionClass = CompressSeqShortSeqRNN
         elif config.compress_query_method == 'mean':
             CompressionClass = CompressSeqMeanPooling
+        elif config.compress_query_method is None:
+            compress_query = False
+            compress_key = False
         else:
             assert not compress_query and not compress_key
 
@@ -931,8 +934,8 @@ class MultiheadAttention(nn.Module):
         position_embeds, attention_mask = attention_inputs
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
-        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer
-        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer
+        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
+        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
         stride = dim // (n_head * d_head)
         if need_query_compress:
             query = self.q_head_compress(query)
@@ -2508,6 +2511,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
+    ap.add_argument("--config", type=str, default='md_config_no_rnn',
+                    help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=True)
     ap.add_argument("--fp16", type=str2bool, default=False)
@@ -2522,29 +2527,30 @@ if __name__ == "__main__":
     fp16 = args["fp16"]
     model_name = args["model"]
     aitm = args["aitm"]
+    config = dict(md_config=md_config, md_config_no_rnn=md_config_no_rnn, md_config_funnel=md_config_funnel, sm_config=sm_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
     HuggingFaceModelClass = AutoModel if forward_only else AutoModelForMaskedLM
-    config = md_config
 
     small_max_length = 128
     medium_max_length = 512
     large_max_length = 1024
     very_large_max_length = 1536
 
+
     tokenizer = get_tokenizer("bert")
-    md_config.tokenizer_length = medium_max_length
-    md_config.max_position_embeddings = md_config.tokenizer_length + md_config.num_highway_cls_tokens
+    config.tokenizer_length = medium_max_length
+    config.max_position_embeddings = config.tokenizer_length + config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
-        md_config.tokenizer_length = min(md_config.tokenizer_length, 512)
-        md_config.max_position_embeddings = min(md_config.tokenizer_length, 512)
+        config.tokenizer_length = min(config.tokenizer_length, 512)
+        config.max_position_embeddings = min(config.tokenizer_length, 512)
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     dataset = SmallTextDataset(very_large_texts)
-    assert md_config.tokenizer_length % 16 == 0  # Due to our collate fn
-    dataset = TokenizerDataset(md_config, tokenizer, char_to_id,
-                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=md_config.tokenizer_length),
+    assert config.tokenizer_length % 16 == 0  # Due to our collate fn
+    dataset = TokenizerDataset(config, tokenizer, char_to_id,
+                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length),
                                sentence_jumble_proba=((1024, 0.0),), word_noise_proba=((1024, 0.0),), max_jumbling_span_length=2,
                                dataset=dataset)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
