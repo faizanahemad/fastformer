@@ -2509,11 +2509,11 @@ if __name__ == "__main__":
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
     ap.add_argument("--profile", type=str2bool, default=False)
-    ap.add_argument("--forward_only", type=str2bool, default=False)
+    ap.add_argument("--forward_only", type=str2bool, default=True)
     ap.add_argument("--fp16", type=str2bool, default=False)
-    ap.add_argument("--aitm", type=str2bool, default=True)
+    ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
+    ap.add_argument("--model", type=str, default='microsoft/deberta-base')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2570,6 +2570,8 @@ if __name__ == "__main__":
         pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"])
         if "electra" in model_name:
             HuggingFaceModelClass = ElectraForPreTraining
+        elif "deberta" in model_name:
+            HuggingFaceModelClass = AutoModel
         model = HuggingFaceModelClass.from_pretrained(model_name)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
