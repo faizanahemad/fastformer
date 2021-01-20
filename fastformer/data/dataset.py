@@ -329,7 +329,7 @@ class TokenizerDataset(Dataset):
             if random.random() < sj and n_queries == 0 and count_pad_tokens <= 2 and self.cls_tokens > 2:
                 seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
             else:
-                seg_idxs = list(range(self.cls_tokens))
+                seg_idxs = list(range(max(self.cls_tokens, 1)))
             seg_slides = seg_idxs + seg_idxs[0:1]
             two_ordered = torch.tensor([int(s1 < s2) for s1, s2 in zip(seg_slides[:-1], seg_slides[1:])])
             seg_slides = seg_idxs + seg_idxs[0:4]

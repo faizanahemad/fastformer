@@ -2511,14 +2511,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='md_config_no_rnn',
+    ap.add_argument("--config", type=str, default='md_config_no_sdconv',
                     help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=True)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--model", type=str, default='funnel-transformer/intermediate')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
+    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
