@@ -2394,8 +2394,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         loss_fct = self.loss_ce  # -100 index = padding token
         labels = labels[:, 1:]
-
-        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits.reshape(-1, self.config.vocab_size), labels.reshape(-1))
+        active_labels = labels[active_loss]
+        active_prediction_logits = prediction_logits[active_loss]
+        masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits.reshape(-1, self.config.vocab_size), active_labels.reshape(-1))
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
         mlm_positions = input_ids == self.tokenizer.mask_token_id
