@@ -372,7 +372,7 @@ md_config_no_sdconv = FastFormerConfig(separate_content_and_position_attention=F
                                        # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
                                        # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                                        # n_head=[(8,), (12,), (12,)],
-                                       n_head=[(4, 0, 4), (6, 0, 6), (6, 0, 6)],
+                                       n_head=[(6, 0, 6), (6, 0, 6), (6, 0, 6)],
                                        block_channel_size=[768, 768, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
                                        short_rnn_kernel=[64, 64, 64], short_rnn_overlap=[8, 8, 8], char_rnn_window_overlap=16, char_rnn_window_size=128,
                                        )
