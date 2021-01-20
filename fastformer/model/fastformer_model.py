@@ -2511,7 +2511,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='md_config_no_sdconv',
+    ap.add_argument("--config", type=str, default='md_config_funnel',
                     help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=True)
@@ -2542,7 +2542,7 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer("bert")
     config.tokenizer_length = medium_max_length
     config.max_position_embeddings = config.tokenizer_length + config.num_highway_cls_tokens
-    if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra"]:
+    if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra", "fastformer"]:
         config.tokenizer_length = min(config.tokenizer_length, 512)
         config.max_position_embeddings = min(config.tokenizer_length, 512)
         config.num_highway_cls_tokens = 0
