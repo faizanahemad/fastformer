@@ -375,7 +375,7 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
                                     # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                                     # n_head=[(8,), (12,), (12,)],
                                     n_head=[(12, 0, 0), (12, 0, 0), (12, 0, 0)],
-                                    block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=16, char_rnn_window_size=64,
+                                    block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=16, char_rnn_window_size=128,
                                     )
 
 # Slow
