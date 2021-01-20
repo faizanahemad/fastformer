@@ -2385,7 +2385,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append((tokenizer.decode(highway_cls_ar_input_ids[0, 1:].tolist()), tokenizer.decode(highway_cls_ar_out[0, 1:].tolist())))
             highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
-            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.mean()))
+            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
         tokenizer_attn_mask = tokenizer_attn_mask[:, 1:]
@@ -2399,9 +2399,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         predictions = prediction_logits.argmax(dim=-1)
         labels = (labels == predictions).float()
         mlm_positions = input_ids == self.tokenizer.mask_token_id
-        self.accuracy_hist["lm"].append(float(labels[active_loss].mean()))
+        self.accuracy_hist["lm"].append(float(labels[active_loss].float().mean()))
         mlm_positions = mlm_positions[:, 1:]
-        self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].mean()))
+        self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].float().mean()))
 
         decoder_outputs = self.funnel.decoder(
             final_hidden=encoder_outputs[0],
