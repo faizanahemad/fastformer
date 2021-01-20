@@ -356,26 +356,26 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
 
 # Fasttest
 md_config_funnel = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
-                                    sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
-                                    approximate_attention=[False, False, False], max_position_embeddings=2048, d_head=[32, 64, 80],
+                                    sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=4, ffn_groups=4,
+                                    approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[32, 64, 80],
                                     separate_compressiion_layer=True,
                                     qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                                     sdconv=False, full_channel_separation=True, short_rnn=False,
                                     sdconv_kernel_size=[5, 7, 9],
                                     compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                                    compressed_query_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                                       (1, 1), (1, 2), (1, 3), (1, 4),
-                                                                       (2, 1), (2, 2), (2, 3), (2, 4)
+                                    compressed_query_attention_layers=[(0, 3), (0, 4),
+                                                                       (1, 3), (1, 4),
+                                                                       (2, 3), (2, 4)
                                                                        ],
-                                    compressed_key_attention_layers=[(0, 3), (0, 4),
-                                                                     (1, 3), (1, 4),
-                                                                     (2, 3), (2, 4)
+                                    compressed_key_attention_layers=[(0, 2), (0, 3), (0, 4),
+                                                                     (1, 2), (1, 3), (1, 4),
+                                                                     (2, 2), (2, 3), (2, 4)
                                                                      ],
                                     # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
                                     # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                                     # n_head=[(8,), (12,), (12,)],
                                     n_head=[(12, 0, 0), (12, 0, 0), (12, 0, 0)],
-                                    block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=False, char_rnn=False,
+                                    block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True, char_rnn=False,
                                     )
 
 # Slow
