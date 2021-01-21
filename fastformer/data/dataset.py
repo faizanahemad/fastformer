@@ -436,7 +436,7 @@ def collate_fn(samples):
         padding = max_chars - char_ids.shape[1]
         char_ids = torch.cat([char_ids, char_ids.new(char_ids.shape[0], padding).fill_(padding_index)], 1)
 
-    print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
+    # print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
     anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
     positives = [s["positives"] if "positives" in s else [] for s in samples]
     samples = default_collate(samples)
