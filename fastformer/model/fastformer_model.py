@@ -2703,7 +2703,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=5e-5, eps=1e-6, weight_decay=1e-2)
+    optimizer = AdamW(all_params, lr=5e-4, eps=1e-6, weight_decay=1e-2)
 
 
     def run():
