@@ -2515,6 +2515,7 @@ if __name__ == "__main__":
     ap.add_argument("--config", type=str, default='md_config_funnel',
                     help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
+    ap.add_argument("--sdconv", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=True)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
@@ -2528,6 +2529,7 @@ if __name__ == "__main__":
     fp16 = args["fp16"]
     model_name = args["model"]
     aitm = args["aitm"]
+    sdconv = args["sdconv"]
     config = dict(md_config=md_config, md_config_no_rnn=md_config_no_rnn, md_config_funnel=md_config_funnel, sm_config=sm_config, md_config_no_sdconv=md_config_no_sdconv)[args["config"]]
     epochs = args["epochs"]
     if aitm:
