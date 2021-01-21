@@ -2543,7 +2543,6 @@ if __name__ == "__main__":
     large_max_length = 1024
     very_large_max_length = 1536
 
-
     tokenizer = get_tokenizer("bert")
     config.tokenizer_length = medium_max_length
     config.max_position_embeddings = config.tokenizer_length + config.num_highway_cls_tokens
@@ -2554,7 +2553,7 @@ if __name__ == "__main__":
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     if batch_size > len(very_large_texts):
-        for _ in range(len(very_large_texts)//batch_size):
+        for _ in range(batch_size // len(very_large_texts)):
             very_large_texts += very_large_texts
     dataset = SmallTextDataset(very_large_texts)
     assert config.tokenizer_length % 16 == 0  # Due to our collate fn
