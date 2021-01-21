@@ -1748,6 +1748,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.lm_dim_match = None
         self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.accuracy_hist = defaultdict(list)
         self.loss_ce = CrossEntropyLoss(ignore_index=config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0)
         if config.embedding_size != config.block_channel_size[0]:
             self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
@@ -1781,6 +1782,8 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 
         last_hidden_state = outputs[0]
         prediction_logits = None
+        input_shape = input_ids.size()
+        active_loss = attention_mask == 1
 
         masked_lm_loss = None
         if labels is not None:
@@ -1789,7 +1792,9 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             prediction_logits = self.lm_head(last_hidden_state)
             loss_fct = self.loss_ce  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
-
+            predictions = prediction_logits.argmax(dim=-1)
+            labels = (labels == predictions).float()
+            self.accuracy_hist["lm"].append(float(labels[active_loss].float().mean()))
 
         output = (prediction_logits,) + outputs[1:]
         return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
@@ -2757,7 +2762,7 @@ if __name__ == "__main__":
             times.append(et)
         print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
 
-    if not forward_only and isinstance(model, FastFormerForFusedELECTRAPretraining):
+    if not forward_only and hasattr(model, "accuracy_hist"):
         from pprint import pprint
         del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
         pprint(dict(**model.accuracy_hist))
