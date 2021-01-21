@@ -356,7 +356,7 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
 
 # Fasttest
 md_config_funnel = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
-                                    sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=4, ffn_groups=4,
+                                    sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=4, ffn_groups=4,
                                     approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[32, 64, 80],
                                     separate_compressiion_layer=True,
                                     qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
