@@ -2520,6 +2520,7 @@ if __name__ == "__main__":
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
+    ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
 
     args = vars(ap.parse_args())
@@ -2530,6 +2531,7 @@ if __name__ == "__main__":
     model_name = args["model"]
     aitm = args["aitm"]
     sdconv = args["sdconv"]
+    batch_size = args["batch_size"]
     config = dict(md_config=md_config, md_config_no_rnn=md_config_no_rnn, md_config_funnel=md_config_funnel, sm_config=sm_config, md_config_no_sdconv=md_config_no_sdconv)[args["config"]]
     epochs = args["epochs"]
     if aitm:
@@ -2551,13 +2553,16 @@ if __name__ == "__main__":
         config.num_highway_cls_tokens = 0
     char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
     char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
+    if batch_size > len(very_large_texts):
+        for _ in range(len(very_large_texts)//batch_size):
+            very_large_texts += very_large_texts
     dataset = SmallTextDataset(very_large_texts)
     assert config.tokenizer_length % 16 == 0  # Due to our collate fn
     dataset = TokenizerDataset(config, tokenizer, char_to_id,
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length),
                                sentence_jumble_proba=((1024, 0.0),), word_noise_proba=((1024, 0.0),), max_jumbling_span_length=2,
                                dataset=dataset)
-    dataloader = DataLoader(dataset, batch_size=4, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
     pt_batch = next(iter(dataloader))
 
     if "fastformer" in model_name:
