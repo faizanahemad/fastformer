@@ -2764,6 +2764,7 @@ if __name__ == "__main__":
 
     if not forward_only and hasattr(model, "accuracy_hist"):
         from pprint import pprint
-        del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
+        if hasattr(model, "highway_cls_ar_sentence_outputs"):
+            del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
         pprint(dict(**model.accuracy_hist))
         # pprint(model.loss_hist)
