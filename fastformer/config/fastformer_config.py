@@ -383,7 +383,7 @@ md_config_sdconv = FastFormerConfig(separate_content_and_position_attention=Fals
                                     approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[32, 64, 80],
                                     separate_compressiion_layer=True,
                                     qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
-                                    sdconv=[True, False, False], full_channel_separation=True, short_rnn=False,
+                                    sdconv=[True, False, False], full_channel_separation=True, short_rnn=False, use_cuda_conv=True,
                                     sdconv_kernel_size=[7, 7, 9],
                                     compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                                     compressed_query_attention_layers=[(0, 3), (0, 4),

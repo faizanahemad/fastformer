@@ -2523,7 +2523,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument("--batch_size", type=int, default=4)
-    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer
+    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
