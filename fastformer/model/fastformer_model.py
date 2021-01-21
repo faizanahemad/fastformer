@@ -2524,12 +2524,12 @@ if __name__ == "__main__":
                     help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--sdconv", type=str2bool, default=False)
-    ap.add_argument("--forward_only", type=str2bool, default=True)
+    ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--batch_size", type=int, default=4)
-    ap.add_argument("--model", type=str, default='fastformer')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
+    ap.add_argument("--batch_size", type=int, default=16)
+    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2674,7 +2674,7 @@ if __name__ == "__main__":
     model = model.eval()
     config = md_config
 
-    if "electra" in model_name:
+    if "google/electra-base-discriminator" in model_name:
         labels = torch.randint_like(pt_batch["input_ids"], 0, 2)
         labels = labels.to(device)
     else:
