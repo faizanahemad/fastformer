@@ -2580,7 +2580,7 @@ if __name__ == "__main__":
             model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
             assert not forward_only
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=1.0, electra_loss_w=1.0, highway_cls_ar_w=2.0,
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0, highway_cls_ar_w=2.0,
                                                          aitm=aitm, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only
