@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 import numpy as np
+import random
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -2508,6 +2509,7 @@ if __name__ == "__main__":
     from torch.optim import AdamW
 
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
+    from transformers.models.deberta import DebertaModel
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
@@ -2702,7 +2704,11 @@ if __name__ == "__main__":
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(**pt_batch, labels=labels)
+                    if isinstance(model, (AutoModel, DebertaModel)):
+                        output = model(**pt_batch)
+                        output = ((output['last_hidden_state'][:, 0] - random.random()).mean(),)
+                    else:
+                        output = model(**pt_batch, labels=labels)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
@@ -2711,7 +2717,11 @@ if __name__ == "__main__":
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(**pt_batch, labels=labels)
+                if isinstance(model, (AutoModel, DebertaModel)):
+                    output = model(**pt_batch)
+                    output = ((output['last_hidden_state'][:, 0] - random.random()).mean(),)
+                else:
+                    output = model(**pt_batch, labels=labels)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(all_params, 1.0)
