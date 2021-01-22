@@ -817,7 +817,7 @@ class MultiheadAttention(nn.Module):
             else:
                 self.rnn_dims = d_model
             assert self.rnn_dims % self.n_rnn_head == 0
-            self.rnn = ShortSeqRNN(config, self.rnn_dims, self.n_rnn_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+            self.rnn = ShortSeqRNN(config, self.rnn_dims, 1, self.rnn_dims, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
         self.n_head = n_head
         d_model = remaining_d_model
