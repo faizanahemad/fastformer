@@ -46,7 +46,7 @@ try:
 except:
     pass
 
-from fastformer.config import FastFormerConfig, md_config, sm_config, md_config_funnel, md_config_no_rnn, md_config_no_sdconv, md_config_sdconv
+from fastformer.config import *
 
 logger = logging.get_logger(__name__)
 
@@ -2540,8 +2540,8 @@ if __name__ == "__main__":
     aitm = args["aitm"]
     sdconv = args["sdconv"]
     batch_size = args["batch_size"]
-    config = dict(md_config=md_config, md_config_no_rnn=md_config_no_rnn, md_config_funnel=md_config_funnel, md_config_sdconv=md_config_sdconv,
-                  sm_config=sm_config, md_config_no_sdconv=md_config_no_sdconv)[args["config"]]
+    config = dict(md_config=md_config, md_config_rnn=md_config_rnn, md_config_funnel=md_config_funnel,
+                  sm_config=sm_config, md_config_sdconv=md_config_sdconv)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
