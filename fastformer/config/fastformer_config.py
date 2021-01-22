@@ -383,7 +383,7 @@ md_config_sdconv = FastFormerConfig(separate_content_and_position_attention=Fals
                                     approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[32, 64, 80],
                                     separate_compressiion_layer=True,
                                     qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
-                                    sdconv=[True, False, False], full_channel_separation=True, short_rnn=False, use_cuda_conv=True,
+                                    sdconv=[True, True, True], full_channel_separation=True, short_rnn=False, use_cuda_conv=True,
                                     sdconv_kernel_size=[7, 7, 9],
                                     compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                                     compressed_query_attention_layers=[(0, 3), (0, 4),
@@ -397,7 +397,7 @@ md_config_sdconv = FastFormerConfig(separate_content_and_position_attention=Fals
                                     # n_head=[(1, 0, 7), (1, 0, 11), (1, 0, 11)],
                                     # n_head=[(1, 7, 0), (1, 11, 0), (1, 11, 0)],
                                     # n_head=[(8,), (12,), (12,)],
-                                    n_head=[(6, 6, 0), (12, 0, 0), (12, 0, 0)],
+                                    n_head=[(6, 6, 0), (6, 6, 0), (6, 6, 0)],
                                     block_channel_size=[384, 768, 960], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=16, char_rnn_window_size=128,
                                     )
 
