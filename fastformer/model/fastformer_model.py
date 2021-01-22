@@ -189,7 +189,7 @@ class Embeddings(nn.Module):
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size, padding_idx=pad_token_id)
-            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 2, self.embedding_size // 2,
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 1, self.embedding_size,
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
 
         self.embed_proj = nn.Identity()
