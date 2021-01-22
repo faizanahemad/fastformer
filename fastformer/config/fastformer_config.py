@@ -362,7 +362,7 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
                                     qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                                     sdconv=[False, False, False], full_channel_separation=True, short_rnn=False,
                                     sdconv_kernel_size=[7, 7, 9],
-                                    compress_query_method="mean", compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                                    compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                                     compressed_query_attention_layers=[(0, 3), (0, 4),
                                                                        # (1, 2), (1, 3), (1, 4),
                                                                        # (2, 2), (2, 3), (2, 4)
