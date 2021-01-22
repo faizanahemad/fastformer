@@ -1874,6 +1874,8 @@ dataset_dict_filtered = {k:v for k, v in dataset_dict.items() if k in dsets}
 
 for k, v in dataset_dict_filtered.items():
     
+# TODO: test for sequences of 1024 length 
+# dataset_name, dataset_type, make qna and mlm datasets separate?
 
 """
 

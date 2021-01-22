@@ -2553,7 +2553,7 @@ if __name__ == "__main__":
     very_large_max_length = 1536
 
     tokenizer = get_tokenizer("bert")
-    config.tokenizer_length = medium_max_length
+    config.tokenizer_length = large_max_length
     config.max_position_embeddings = config.tokenizer_length + config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra", "fastformer"]:
         config.tokenizer_length = min(config.tokenizer_length, 512)
