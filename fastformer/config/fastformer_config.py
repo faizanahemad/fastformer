@@ -356,8 +356,8 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
 
 # Fasttest
 md_config_funnel = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=7,
-                                    sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8,
-                                    approximate_attention=[False, False, False], max_position_embeddings=1088, d_head=[48, 64, 80],
+                                    sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=4, ffn_groups=4,
+                                    approximate_attention=[False, False, False], max_position_embeddings=1088, d_head=[64, 64, 80],
                                     separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                                     sdconv=[False, False, False], full_channel_separation=True, short_rnn=False,
                                     sdconv_kernel_size=[7, 7, 9],
@@ -371,7 +371,7 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
                                                                      # (2, 1), (2, 2), (2, 3), (2, 4)
                                                                      ],
                                     n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
-                                    block_channel_size=[384, 768, 1280], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=16, char_rnn_window_size=128,
+                                    block_channel_size=[512, 768, 1280], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=16, char_rnn_window_size=128,
                                     )
 
 md_config_sdconv = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5,
