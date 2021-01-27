@@ -1919,6 +1919,9 @@ for k, v in dataset_dict_filtered.items():
 # TODO: test for sequences of 1024 length 
 # dataset_name, dataset_type, make qna and mlm datasets separate?
 
+train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/train_fastformer")
+validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
+test_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/test_fastformer")
 """
 
 
@@ -1937,6 +1940,24 @@ def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     url = [k for u, l in zip(url, lns) for k in [u]*l]
     dl2["url"] = url
     return dl2
+
+
+def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1024)), tokenizer=None):
+    from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    if isinstance(ds, Dataset):
+        ds = DatasetDict(dict(ds=ds))
+
+    splits = list(ds.keys())
+    split_info = defaultdict(dict)
+    len_info = defaultdict(dict)
+    for key in splits:
+        split = splits[key]
+        for lb in lbs:
+            l = len(split.filter(lambda x: lb[0]<=x["length"]<lb[1]))
+            split_info[key][lb] = l
+            len_info[lb][key] = l
+    aggregate_len_info = {ll: sum(vl.values()) for ll, vl in len_info.items()}
+    return aggregate_len_info, len_info, split_info
 
 
 
