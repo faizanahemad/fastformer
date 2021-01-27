@@ -458,7 +458,10 @@ def collate_fn(samples):
             v = v[:, :-step_size]
         required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
         padding = required_len - v.shape[-1]
-        v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+        if padding > 0:
+            v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+        elif padding < 0:
+            v = v[:, :padding]
         samples[k] = v
     if "label_mlm_input_ids" in samples:
         samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
