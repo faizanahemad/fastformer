@@ -217,7 +217,6 @@ class Embeddings(nn.Module):
             input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
             input_shape = tuple(input_shape)
 
-            seq_length = input_shape[1]
             inputs_embeds = self.word_embeddings(input_ids)
             if self.config.num_highway_cls_tokens > 0:
                 highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
@@ -234,7 +233,7 @@ class Embeddings(nn.Module):
 
         else:
             input_shape = input_embeds.size()
-            seq_length = input_shape[1]
+        seq_length = input_shape[1]
 
         embeddings = inputs_embeds
         position_embeddings = None
@@ -247,6 +246,7 @@ class Embeddings(nn.Module):
             position_embeddings = self.position_embeddings(position_ids.long())
 
             if self.position_biased_input:
+                print("Seq len = ", seq_length, "embeddings dim = ", embeddings.size(), position_embeddings.size(), self.position_ids.size())
                 embeddings += position_embeddings
         if self.config.type_vocab_size > 0:
             if token_type_ids is None:
