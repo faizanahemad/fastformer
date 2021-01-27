@@ -1708,7 +1708,20 @@ glue_proc['qnli'].save_to_disk("/home/ahemf/processed_datasets/glue_qnli")
 """
 
 """
+import datasets
+import re
+import numpy as np
+import random
+from typing import List, Dict
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import nltk.data
+sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
+os.cpu_count()
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
 contents = os.listdir("processed_datasets")
 dataset_dict = dict()
 unloadable = []
@@ -1872,8 +1885,37 @@ dsets = ['ai2_arc_easy_qna',
  ]
 dataset_dict_filtered = {k:v for k, v in dataset_dict.items() if k in dsets}
 
+train_ds = dict()
+validation_ds = dict()
+test_ds = dict()
 for k, v in dataset_dict_filtered.items():
+    train = None
+    test = None
+    validation = None
+    if isinstance(v, Dataset):
+        train = v
+    else:
+        splits = list(v.keys())
+        train = v["train"] if "train" in v else None
+        test = v["test"] if "test" in v else None
+        validation = v["validation"] if "validation" in v else None
+    for split in [train, validation, test]:
+        if split is None:
+            continue
+        feats = split.column_names
+        
+        if "query" not in feats:
+            split.map(lambda x: dict(query=[[]] * len(x["text"])), num_proc=1, batched=True, batch_size=4096)
+        if "answer" not in feats:
+            split.map(lambda x: dict(answer=[[]] * len(x["text"])), num_proc=1, batched=True, batch_size=4096)
     
+    if train is not None:
+        train_ds[k] = train
+    if validation is not None:
+        validation_ds[k] = validation
+    if test is not None:
+        test_ds[k] = test
+
 # TODO: test for sequences of 1024 length 
 # dataset_name, dataset_type, make qna and mlm datasets separate?
 
