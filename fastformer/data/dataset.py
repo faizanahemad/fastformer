@@ -423,6 +423,7 @@ class TokenizerDataset(Dataset):
 
 def collate_fn(samples):
     char_ids = None
+    num_cls = 7
     padding_index = 0
     if isinstance(samples, list) and isinstance(samples[0], dict) and "char_ids" in samples[0]:
         char_ids = [s["char_ids"] for s in samples]
@@ -455,7 +456,7 @@ def collate_fn(samples):
         step_size = 64 if k == "char_ids" else 16
         while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
             v = v[:, :-step_size]
-        required_len = int(step_size * np.ceil(v.shape[1]/step_size))
+        required_len = int(step_size * np.ceil(v.shape[1]/step_size)) + (step_size - num_cls)
         padding = required_len - v.shape[-1]
         v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
         samples[k] = v
@@ -1944,6 +1945,7 @@ def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
 
 def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1024)), tokenizer=None):
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    from collections import defaultdict
     if isinstance(ds, Dataset):
         ds = DatasetDict(dict(ds=ds))
 
@@ -1951,7 +1953,7 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
     split_info = defaultdict(dict)
     len_info = defaultdict(dict)
     for key in splits:
-        split = splits[key]
+        split = ds[key]
         for lb in lbs:
             l = len(split.filter(lambda x: lb[0]<=x["length"]<lb[1]))
             split_info[key][lb] = l
