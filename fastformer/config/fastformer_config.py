@@ -418,7 +418,7 @@ md_config_rnn = FastFormerConfig(separate_content_and_position_attention=False, 
 
 md_config_funnel = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=7,
                                     sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
-                                    approximate_attention=[False, False, False], max_position_embeddings=1088, d_head=[48, 64, 80],
+                                    approximate_attention=[False, False, False], max_position_embeddings=1152, d_head=[48, 64, 80],
                                     separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                                     sdconv=[False, False, False], full_channel_separation=True,
                                     sdconv_kernel_size=[7, 7, 9],
