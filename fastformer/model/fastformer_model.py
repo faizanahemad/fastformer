@@ -729,7 +729,7 @@ class CompressSeqShortSeqRNN(nn.Module):
         d_head = config.d_head[block_index] * self.expansion_factor
         self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, n_head, d_head, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
+        self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, 1, d_model * self.expansion_factor, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
     def forward(self, query):
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
