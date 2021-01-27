@@ -1319,6 +1319,7 @@ class TransformerEncoder(nn.Module):
                     key = value = hidden
                 else:
                     query = key = value = hidden
+                print("Block = ", block_index, ", Layer = ", layer_index, ", Sizes = ", query.size(), key.size(), value.size())
                 layer_output = layer(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
                 layer_index += 1
                 hidden = layer_output[0]
@@ -1356,6 +1357,7 @@ class TransformerEncoder(nn.Module):
         all_attentions = () if output_attentions else None
         block_attention_masks = [attention_inputs[1]]
         for block_index, (_, _) in enumerate(zip(self.blocks, self.repeats)):
+            print("Block = ", block_index, ", Sizes = ", hidden.size(), attention_mask[0].size(), attention_mask[1].size(), all_hidden_states[-1].size())
             one_block_res = self.forward_one_block(block_index, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, output_attentions, output_hidden_states)
             hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
             block_attention_masks.append(attention_inputs[1])
