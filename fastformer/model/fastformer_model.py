@@ -2685,7 +2685,7 @@ if __name__ == "__main__":
         labels = labels.to(device)
     if "labels" in pt_batch:
         del pt_batch["labels"]
-    print("Input Sizes", pt_batch["input_ids"].size())
+    print("Input Sizes = ", {k: v.size() if hasattr(v, "size") else len(v) for k, v in pt_batch.items()})
 
     device = torch.device(device)
     # torch.autograd.set_detect_anomaly(True)
