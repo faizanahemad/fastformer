@@ -456,7 +456,7 @@ def collate_fn(samples):
         step_size = 64 if k == "char_ids" else 16
         while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
             v = v[:, :-step_size]
-        required_len = int(step_size * np.ceil(v.shape[1]/step_size)) + (step_size - num_cls)
+        required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
         padding = required_len - v.shape[-1]
         v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
         samples[k] = v
