@@ -15,6 +15,7 @@ except:
     pass
 from collections import defaultdict
 from torch.nn import TransformerDecoder
+import time
 
 from torch.utils.data import DataLoader
 from transformers.activations import ACT2FN
@@ -490,6 +491,7 @@ class ShortSeqRNN(nn.Module):
         # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
+        st = time.time()
         if key is None:
             key = query
         if value is None:
@@ -523,6 +525,7 @@ class ShortSeqRNN(nn.Module):
 
         query = query.permute(2, 0, 1, 3)
         processed_query = []
+        stg = time.time()
         for i in range(query.size(0)):
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
@@ -538,6 +541,8 @@ class ShortSeqRNN(nn.Module):
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
 
+        et = time.time()
+        print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg))
         return query
 
 
@@ -706,9 +711,12 @@ class CompressSeqMeanPooling(nn.Module):
             self.expansion_factor = 1
 
     def forward(self, query):
+        st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
         query = self.expand(query)
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
+        ext = time.time()
+        print("Mean pooling = %.5f" % (ext - st))
         return qskip + query
 
 
@@ -732,10 +740,15 @@ class CompressSeqShortSeqRNN(nn.Module):
         self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, 1, d_model * self.expansion_factor, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
     def forward(self, query):
+        st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
         query = self.expand(query)
+        rnnst = time.time()
         query = self.rnn(query)
+        rnnet = time.time()
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
+        ext = time.time()
+        print("RNN pooling Total = %.5f" % (ext - st), "Only RNN in pooling = %.5f" % (rnnet - rnnst), "RNN Extra = %.5f" % ((ext - st) - (rnnet - rnnst)))
         return query + qskip
 
 

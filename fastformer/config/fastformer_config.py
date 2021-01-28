@@ -439,3 +439,8 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
 
 # 20 % -> expand_dim_before_pooling=True, char_rnn=True
 # 40 % -> expand_dim_before_pooling=True, char_rnn=True, pooling_type="learn_sdconv"
+# 30% -> expand_dim_before_pooling=True, char_rnn=True,  pooling_type="learn_rnn"
+
+# Try -> SDCONV may have non 8 divisible items in the compression module. same with RNN compression.
+# Try -> Early Compression with 3 blocks->stride 4->3 blocks->stride 2->6 blocks->stride 2->6 blocks->end
+# Try -> RNN and SDCONV
