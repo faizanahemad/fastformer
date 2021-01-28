@@ -2420,7 +2420,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
-            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.view(-1, self.config.vocab_size), highway_cls_ar_input_ids.view(-1))
+            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append((tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())))
             highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
@@ -2581,8 +2581,8 @@ if __name__ == "__main__":
     ap.add_argument("--forward_only", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--aitm", type=str2bool, default=False)
-    ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--batch_size", type=int, default=16)
+    ap.add_argument("--epochs", type=int, default=1)
+    ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
@@ -2828,8 +2828,8 @@ if __name__ == "__main__":
         pprint(model.timing_hist[-1])
         import pandas as pd
         th = pd.DataFrame([td for tm in model.timing_hist for td in tm], columns = ["step", "cumulative"])
-        th = th.groupby("step")[["cumulative"]].mean()
-        timings = [0] + list(th.values[0])[:-1]
+        th = th.groupby("step", sort=False)[["cumulative"]].mean()
+        timings = [0] + list(th["cumulative"].values)[:-1]
         th["differ"] = timings
         th["absolute"] = th["cumulative"] - th["differ"]
         th.drop(columns=["differ"], inplace=True)
