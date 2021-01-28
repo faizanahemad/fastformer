@@ -1926,6 +1926,29 @@ for k, v in dataset_dict_filtered.items():
 train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/train_fastformer")
 validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
 test_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/test_fastformer")
+
+def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1024)), tokenizer=None):
+    from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    from collections import defaultdict
+    if isinstance(ds, Dataset):
+        ds = DatasetDict(dict(ds=ds))
+
+    splits = list(ds.keys())
+    split_info = defaultdict(dict)
+    len_info = defaultdict(dict)
+    for key in splits:
+        split = ds[key]
+        remove_cols = list(set(split.column_names) - {'length'})
+        split = split.map(lambda x: dict(length=x["length"]), batch_size=4096, batched=True, remove_columns=remove_cols)
+        for lb in lbs:
+            l = len(split.filter(lambda x: lb[0]<=x["length"]<lb[1]))
+            split_info[key][lb] = l
+            len_info[lb][key] = l
+    aggregate_len_info = {ll: sum(vl.values()) for ll, vl in len_info.items()}
+    return aggregate_len_info, len_info, split_info
+
+
+ds_length_stats(train_fastformer)
 """
 
 
@@ -1957,8 +1980,10 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
     len_info = defaultdict(dict)
     for key in splits:
         split = ds[key]
+        remove_cols = list(set(split.column_names) - {'length'})
+        split = split.map(lambda x: dict(length=x["length"]), batch_size=4096, batched=True, remove_columns=remove_cols)
         for lb in lbs:
-            l = len(split.map(lambda x: dict(length=x["length"]), batch_size=4096, batched=True, remove_columns=["text", "query", "answer"]).filter(lambda x: lb[0]<=x["length"]<lb[1]))
+            l = len(split.filter(lambda x: lb[0]<=x["length"]<lb[1]))
             split_info[key][lb] = l
             len_info[lb][key] = l
     aggregate_len_info = {ll: sum(vl.values()) for ll, vl in len_info.items()}
