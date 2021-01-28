@@ -2498,7 +2498,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
 
         et = time.time() - st
-        timing_dict = dict([(k, 100 * (v/et)) for k, v in timing_dict])
+        timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
 
         # TODO: return one loss
