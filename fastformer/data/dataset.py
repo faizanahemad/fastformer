@@ -1958,7 +1958,7 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
     for key in splits:
         split = ds[key]
         for lb in lbs:
-            l = len(split.filter(lambda x: lb[0]<=x["length"]<lb[1]))
+            l = len(split.map(lambda x: dict(length=x["length"]), batch_size=4096, batched=True, remove_columns=["text", "query", "answer"]).filter(lambda x: lb[0]<=x["length"]<lb[1]))
             split_info[key][lb] = l
             len_info[lb][key] = l
     aggregate_len_info = {ll: sum(vl.values()) for ll, vl in len_info.items()}
