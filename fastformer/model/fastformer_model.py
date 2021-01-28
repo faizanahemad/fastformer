@@ -1963,6 +1963,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = defaultdict(list)
+        self.timing_hist = list()
         self.aitm = aitm
         self.alum = alum
         self.aitm_noise_var = aitm_noise_var
@@ -2198,11 +2199,15 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
     ):
 
+        timing_dict = dict()
+        st = time.time()
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         embedding_generation_params = input_ids, token_type_ids, inputs_embeds, char_ids, char_offsets
         inputs_embeds, position_embeds, input_shape = self.get_emb(embedding_generation_params)
+        et = time.time() - st
+        timing_dict["get_emb"] = et
         # TODO: deal with head_mask
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
@@ -2210,6 +2215,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
+        et = time.time() - st
+        timing_dict["prepare_encoder_input"] = et
         encoder_outputs = self.funnel.encoder(
             inputs_embeds,
             position_embeds,
@@ -2217,6 +2224,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
+        et = time.time() - st
+        timing_dict["encoder_outputs"] = et
         answering_lm_loss = 0.0
         answering_hidden = None
         if labels_pet_input_ids is not None:
@@ -2237,6 +2246,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
+        et = time.time() - st
+        timing_dict["lm_logits"] = et
 
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
         second_block_cls = second_block_hidden[:, :self.funnel.cls_tokens]
@@ -2288,6 +2299,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             loss_contrastive += vertical_lc
         loss_contrastive = self.contrastive_w * loss_contrastive
         self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
+        et = time.time() - st
+        timing_dict["contrastive_loss"] = et
         cls_orthogonal_loss = 0.0
         if self.input_cls_orthogonal_w > 0 and self.training:
             inputs_embeds_cls = inputs_embeds_cls/inputs_embeds_cls.norm(2, -1, True)
@@ -2317,6 +2330,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.loss_hist["third_block_cls_orthogonal_loss"].append(float(third_block_cls_orthogonal_loss))
             cls_orthogonal_loss += third_block_cls_orthogonal_loss
 
+        et = time.time() - st
+        timing_dict["cls_orthogonal_loss"] = et
         sentence_order_loss = 0.0
         word_order_loss = 0.0
         gap_sentence_loss = 0.0
@@ -2345,6 +2360,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 float(((three_sent_order_preds > 0.) == labels_three_sentence_dilated_order).sum() / len(labels_three_sentence_dilated_order.view(-1))))
 
             sentence_order_loss = self.sentence_order_prediction_w * (sent_order_loss + two_sent_loss + three_sent_loss)
+        et = time.time() - st
+        timing_dict["sentence_order_loss"] = et
 
         if (self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None) or \
                 (self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None) or \
@@ -2410,6 +2427,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
+        et = time.time() - st
+        timing_dict["highway_cls_ar_sentence_loss"] = et
         tokenizer_attn_mask = tokenizer_attn_mask[:, 1:]
         active_loss = tokenizer_attn_mask.view(-1, input_shape[1] - 1) == 1
         assert labels is not None
@@ -2427,6 +2446,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         mlm_positions = mlm_positions[:, 1:]
         self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].float().mean()))
 
+        et = time.time() - st
+        timing_dict["lm_accuracy_loss"] = et
+
         decoder_outputs = self.funnel.decoder(
             final_hidden=encoder_outputs[0],
             first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
@@ -2436,16 +2458,24 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_hidden_states=output_hidden_states,
         )
 
+        et = time.time() - st
+        timing_dict["decoder_outputs"] = et
+
         cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
         decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
         discriminator_sequence_output = decoder_outputs[0]
         logits = self.discriminator_predictions(discriminator_sequence_output)
+
+        et = time.time() - st
+        timing_dict["electra_discriminator_logits"] = et
 
         active_logits = logits.view(-1, input_shape[1] - 1)[active_loss]
         active_labels = labels[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, active_labels)
         self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
 
+        et = time.time() - st
+        timing_dict["electra_discriminator_accuracy"] = et
         # TODO: Store losses here
 
         self.loss_hist["electra_loss"].append(float(loss))
@@ -2454,14 +2484,22 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.loss_hist["word_order_loss"].append(float(word_order_loss))
         self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
+        et = time.time() - st
+        timing_dict["aitm_alum_start"] = et
         if (self.aitm or self.alum) and self.training:
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits,
                                              labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden,
                                              contrastive_anchors_copy, contrastive_positives_copy, contrastive_block_matrix)
             loss = loss + adv_loss
 
+        et = time.time() - st
+        timing_dict["aitm_alum_end"] = et
+
         loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
 
+        et = time.time() - st
+        timing_dict = {k: 100 * (v/et) for k, v in timing_dict.items()}
+        self.timing_hist.append(timing_dict)
 
         # TODO: return one loss
         # TODO: check various loss history and accuracies over time
@@ -2787,4 +2825,5 @@ if __name__ == "__main__":
         if hasattr(model, "highway_cls_ar_sentence_outputs"):
             del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
         pprint({k: v[-10:] for k, v in model.accuracy_hist.items()})
+        pprint(model.timing_hist[-1])
         # pprint(model.loss_hist)
