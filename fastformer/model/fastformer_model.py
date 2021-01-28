@@ -2557,7 +2557,9 @@ if __name__ == "__main__":
     sdconv = args["sdconv"]
     batch_size = args["batch_size"]
     config = dict(md_config=md_config, md_config_rnn=md_config_rnn, md_config_funnel=md_config_funnel,
-                  sm_config=sm_config, md_config_sdconv=md_config_sdconv, md_config_mean=md_config_mean)[args["config"]]
+                  sm_config=sm_config, md_config_sdconv=md_config_sdconv,
+                  md_config_funnel_mp=md_config_funnel_mp, md_config_funnel_sp=md_config_funnel_sp,
+                  md_config_funnel_lp=md_config_funnel_lp, md_config_funnel_rp=md_config_funnel_rp)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
