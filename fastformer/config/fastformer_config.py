@@ -436,6 +436,26 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
                                     short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                                     )
 
+md_config_mean = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=7, use_cuda_conv=False,
+                                    sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
+                                    approximate_attention=[False, False, False], max_position_embeddings=1152, d_head=[48, 64, 80],
+                                    separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
+                                    sdconv=[False, False, False], full_channel_separation=True,
+                                    sdconv_kernel_size=[7, 7, 9],
+                                    compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
+                                    compressed_query_attention_layers=[(0, 3), (0, 4),
+                                                                       # (1, 2), (1, 3), (1, 4),
+                                                                       # (2, 2), (2, 3), (2, 4)
+                                                                       ],
+                                    compressed_key_attention_layers=[(0, 3), (0, 4),
+                                                                     # (1, 1), (1, 2), (1, 3), (1, 4),
+                                                                     # (2, 1), (2, 2), (2, 3), (2, 4)
+                                                                     ],
+                                    n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
+                                    block_channel_size=[384, 768, 1280], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=32, char_rnn_window_size=128,
+                                    short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
+                                    )
+
 
 # 20 % -> expand_dim_before_pooling=True, char_rnn=True
 # 40 % -> expand_dim_before_pooling=True, char_rnn=True, pooling_type="learn_sdconv"
