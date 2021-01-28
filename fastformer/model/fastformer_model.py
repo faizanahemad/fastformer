@@ -527,6 +527,7 @@ class ShortSeqRNN(nn.Module):
         processed_query = []
         stg = time.time()
         for i in range(query.size(0)):
+            print("Short Seq RNN sizes = ", query[i].size(), query.size())
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
@@ -542,7 +543,7 @@ class ShortSeqRNN(nn.Module):
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
 
         et = time.time()
-        print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg))
+        print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg), query.size())
         return query
 
 
