@@ -426,7 +426,7 @@ class AttentionStructure(nn.Module):
 
 
 class Conv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1):
+    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1, padding=0, padding_mode='zeros'):
         super().__init__()
         if kernel_size == 1 and stride == 1 and dilation == 1 and False:
             self.conv = nn.Linear(in_channels, out_channels, bias=bias)
@@ -436,7 +436,7 @@ class Conv1d(nn.Module):
             self.pre_permute = True
             self.post_permute = True
             self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                  groups=groups, bias=bias, stride=stride, dilation=dilation)
+                                  groups=groups, bias=bias, stride=stride, dilation=dilation, padding=padding, padding_mode=padding_mode)
 
     def forward(self, x, pre_permute=True, post_permute=True):
         unsqueeze = False
@@ -1121,7 +1121,6 @@ class ConvFFN(nn.Module):
         act = config.hidden_act
         self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
         self.activation_dropout = Dropout(config.activation_dropout)
-        self.dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
@@ -1141,7 +1140,6 @@ class ConvFFN(nn.Module):
                 output = self.act(output)
                 output = self.activation_dropout(output)
         output = self.conv1d_out(output)
-        output = self.dropout(output)
 
         return output
 
@@ -1154,7 +1152,6 @@ class BertFFN(nn.Module):
         self.activation_dropout = Dropout(config.activation_dropout)
         d_out = d_model if d_out is None else d_out
         self.linear_2 = nn.Linear(d_inner, d_out)
-        self.dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(nn.Linear(d_inner, d_inner))
@@ -1169,7 +1166,6 @@ class BertFFN(nn.Module):
                 h = self.act(h)
                 h = self.activation_dropout(h)
         h = self.linear_2(h)
-        h = self.dropout(h)
         return h
 
 
@@ -1184,7 +1180,6 @@ class PositionwiseFFN(nn.Module):
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.activation_function = ACT2FN[config.hidden_act]
-        self.activation_dropout = Dropout(config.activation_dropout)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
@@ -1224,24 +1219,22 @@ class LightLayer(nn.Module):
         cout = cin // 2
         self.is_encoder_layer = is_encoder_layer
         super().__init__()
-        self.c1 = nn.Conv1d(in_channels=cout, out_channels=cout, kernel_size=5, groups=sum(config.n_head[block_index]) // 2, padding=2, padding_mode='zeros')
+        self.c1 = Conv1d(in_channels=cout, out_channels=cout, kernel_size=5, groups=sum(config.n_head[block_index]) // 2, padding=2, padding_mode='zeros')
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
-        self.dropout = Dropout(config.attention_dropout)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         d_head = config.d_head[block_index]
-        self.rnn = ShortSeqRNN(config, cout, sum(config.n_head[block_index]) // 2, d_head, config.short_rnn_kernel[block_index],
+        self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
                                config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin)
         self.cout = cout
         # padding
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        qcnn = self.c1(query[:, :, :self.cout].permute(0, 2, 1)).permute(0, 2, 1)
+        qcnn = self.c1(query[:, :, :self.cout])
         qrnn = self.rnn(query[:, :, self.cout:])
         q = torch.cat((qcnn, qrnn), 2)
         q = self.activation_function(q)
-        q = self.dropout(q)
         q = self.lin(q)
         if self.config.identity_preserving_norm:
             res = query + self.layer_norm(q)
@@ -1630,20 +1623,6 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             if not hasattr(module, 'projection_matrix'):
                 projection_matrix = module.create_projection(device=next(self.parameters()).device)
                 module.register_buffer('projection_matrix', projection_matrix)
-
-
-class ClassificationHead(nn.Module):
-    def __init__(self, config, n_labels):
-        super().__init__()
-        self.linear_hidden = nn.Linear(config.d_model, config.d_model)
-        self.dropout = Dropout(config.hidden_dropout)
-        self.linear_out = nn.Linear(config.d_model, n_labels)
-
-    def forward(self, hidden):
-        hidden = self.linear_hidden(hidden)
-        hidden = torch.tanh(hidden)
-        hidden = self.dropout(hidden)
-        return self.linear_out(hidden)
 
 
 @dataclass
