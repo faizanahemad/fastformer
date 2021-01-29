@@ -555,12 +555,9 @@ class SeparableConv1d(nn.Module):
             padding = (kernel_size - 1) // 2
         if groups is None:
             groups = in_channels
-        if pointwise_groups is None:
-            pointwise_groups = 1
         self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
                                    kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
-        self.pointwise = nn.Conv1d(in_channels=in_channels, out_channels=out_channels,
-                                   kernel_size=1, groups=pointwise_groups, bias=bias, stride=1, padding=0)
+        self.pointwise = nn.Linear(in_channels, out_channels, bias=bias)
 
         self.out_channels = out_channels
 
@@ -570,7 +567,9 @@ class SeparableConv1d(nn.Module):
         :param inputs:
         :return:
         """
+        inputs = inputs.permute(0, 2, 1)
         inputs = self.depthwise(inputs)
+        inputs = inputs.permute(0, 2, 1)
         inputs = self.pointwise(inputs)
         return inputs
 
@@ -591,11 +590,11 @@ class SDConv(nn.Module):
         self.head_size = head_size
         self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
-        self.conv_attn_kernel = nn.Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
+        self.conv_attn_kernel = Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
         if config.no_v_head:
             self.conv_attn_point = nn.Identity()
         else:
-            self.conv_attn_point = nn.Conv1d(hidden_size, hidden_size, 1, groups=heads)
+            self.conv_attn_point = Conv1d(hidden_size, hidden_size, 1, groups=heads)
         self.use_cuda_conv = config.use_cuda_conv
         if not self.use_cuda_conv:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
@@ -621,19 +620,19 @@ class SDConv(nn.Module):
             query = upsample(query, self.config.stride, context_len, self.cls_tokens)
             seqlen = context_len
 
-        key_conv_attn_layer = self.separable_conv1d(key.permute(0, 2, 1))
+        key_conv_attn_layer = self.separable_conv1d(key.permute(0, 2, 1)).permute(0, 2, 1)
         if self.stride == 1:
-            conv_attn_layer = key_conv_attn_layer * query.permute(0, 2, 1)
+            conv_attn_layer = key_conv_attn_layer * query
         else:
             conv_attn_layer = self.act(key_conv_attn_layer)
-        conv_kernel_layer = self.conv_attn_kernel(conv_attn_layer).permute(0, 2, 1)  # Softmax only in kernel dim
+        conv_kernel_layer = self.conv_attn_kernel(conv_attn_layer)  # Softmax only in kernel dim
 
         if not self.use_cuda_conv or self.stride != 1:
             conv_kernel_layer = conv_kernel_layer.reshape(-1, self.kernel_size, 1)  # BxSxH, k, 1
             conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
             # conv_out_layer
-            conv_out_layer = self.conv_attn_point(value.permute(0, 2, 1)).unsqueeze(-1)  # B,D,Seq, 1
+            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
             unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
             # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
             unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2)  # B, seq, D, kernel_size
@@ -651,7 +650,7 @@ class SDConv(nn.Module):
             weights = torch.softmax(conv_kernel_layer, dim=-2)
 
             # B,C,T
-            conv_out_layer = self.conv_attn_point(value.permute(0, 2, 1)).contiguous()
+            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).contiguous()
 
             conv_out_layer = dynamicconvFunction.apply(
                 conv_out_layer, weights,
