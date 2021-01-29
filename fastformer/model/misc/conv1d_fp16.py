@@ -110,6 +110,7 @@ if __name__ == "__main__":
                 with autocast():
                     output = model(tensor)
                     loss = ((output.float() - torch.randn(1, device=device, dtype=torch.float)) ** 2).mean()
+                    print(loss)
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
