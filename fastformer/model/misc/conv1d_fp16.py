@@ -91,7 +91,7 @@ class SeparableConv1dV2(nn.Module):
             groups = in_channels
         self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
                                    kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
-        self.pointwise = nn.Linear(in_channels=in_channels, out_channels=out_channels, bias=bias)
+        self.pointwise = nn.Linear(in_channels, out_channels, bias=bias)
 
         self.out_channels = out_channels
 
