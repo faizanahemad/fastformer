@@ -428,7 +428,7 @@ class AttentionStructure(nn.Module):
 class Conv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1):
         super().__init__()
-        if kernel_size == 1 and stride == 1 and dilation == 1:
+        if kernel_size == 1 and stride == 1 and dilation == 1 and False:
             self.conv = nn.Linear(in_channels, out_channels, bias=bias)
             self.pre_permute = False
             self.post_permute = False
