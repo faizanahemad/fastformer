@@ -2581,6 +2581,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=4)
+    ap.add_argument("--length", type=int, default=1024)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
@@ -2592,6 +2593,7 @@ if __name__ == "__main__":
     aitm = args["aitm"]
     sdconv = args["sdconv"]
     batch_size = args["batch_size"]
+    length = args["length"]
     config = dict(md_config=md_config, md_config_rnn=md_config_rnn, md_config_funnel=md_config_funnel,
                   sm_config=sm_config, md_config_sdconv=md_config_sdconv,
                   md_config_funnel_mp=md_config_funnel_mp, md_config_funnel_sp=md_config_funnel_sp,
@@ -2608,7 +2610,7 @@ if __name__ == "__main__":
     texts = very_large_texts
 
     tokenizer = get_tokenizer("bert")
-    config.tokenizer_length = large_max_length
+    config.tokenizer_length = length
     config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra", "fastformer"]:
         config.tokenizer_length = min(config.tokenizer_length, 512)
