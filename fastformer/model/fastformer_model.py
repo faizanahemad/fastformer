@@ -428,18 +428,26 @@ class AttentionStructure(nn.Module):
 class Conv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1):
         super().__init__()
-        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                              groups=groups, bias=bias, stride=stride, dilation=dilation)
+        if kernel_size == 1 and stride == 1 and dilation == 1:
+            self.conv = nn.Linear(in_channels, out_channels, bias=bias)
+            self.pre_permute = False
+            self.post_permute = False
+        else:
+            self.pre_permute = True
+            self.post_permute = True
+            self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                                  groups=groups, bias=bias, stride=stride, dilation=dilation)
+
 
     def forward(self, x, pre_permute=True, post_permute=True):
         unsqueeze = False
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
             unsqueeze = True
-        if pre_permute:
+        if pre_permute and self.pre_permute:
             x = x.permute(0, 2, 1)
         x = self.conv(x)
-        if post_permute:
+        if post_permute and self.post_permute:
             x = x.permute(0, 2, 1)
         if unsqueeze:
             x = x.squeeze(0)
