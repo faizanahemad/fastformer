@@ -97,6 +97,7 @@ if __name__ == "__main__":
     ap.add_argument("--kernel", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--stride", type=int, default=2)
+    ap.add_argument("--model", type=str, default="conv")
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -108,9 +109,14 @@ if __name__ == "__main__":
     kernel = args["kernel"]
     batch_size = args["batch_size"]
     stride = args["stride"]
+    model = args["model"]
 
-    model = Conv1d(channels, channels, kernel, groups).to(device)
-    # model = SeparableConv1d(channels, channels, kernel, pointwise_groups=groups, stride=stride).to(device)
+    if model == "conv":
+        model = Conv1d(channels, channels, kernel, groups).to(device)
+    elif model == "sep":
+        model = SeparableConv1d(channels, channels, kernel, pointwise_groups=groups, stride=stride).to(device)
+    else:
+        raise ValueError
 
     try:
         from torch.cuda.amp import GradScaler, autocast
