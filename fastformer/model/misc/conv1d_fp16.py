@@ -138,6 +138,8 @@ if __name__ == "__main__":
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
 
+
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
@@ -150,6 +152,7 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--stride", type=int, default=2)
     ap.add_argument("--model", type=str, default="conv")
+    ap.add_argument("--cudnn_benchmark", type=str2bool, default=False)
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -162,6 +165,8 @@ if __name__ == "__main__":
     batch_size = args["batch_size"]
     stride = args["stride"]
     model = args["model"]
+    cudnn_benchmark = args["cudnn_benchmark"]
+    torch.backends.cudnn.benchmark = cudnn_benchmark
 
     if model == "conv":
         model = Conv1d(channels, channels, kernel, groups).to(device)
