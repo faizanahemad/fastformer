@@ -438,7 +438,6 @@ class Conv1d(nn.Module):
             self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                   groups=groups, bias=bias, stride=stride, dilation=dilation)
 
-
     def forward(self, x, pre_permute=True, post_permute=True):
         unsqueeze = False
         if len(x.shape) == 2:
