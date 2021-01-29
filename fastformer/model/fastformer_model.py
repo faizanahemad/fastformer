@@ -224,11 +224,11 @@ class Embeddings(nn.Module):
                 inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
             char_embeds = None
             if self.config.char_rnn and char_ids is not None:
-                char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
+                char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size // 4)
                 char_embeds = self.char_rnn(self.char_embeddings(char_ids))
-                char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
+                char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // 4).mean(2)
                 if self.config.num_highway_cls_tokens > 0:
-                    char_embeds = torch.cat((highway_embeddings, char_embeds), dim=1)
+                    char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
                 char_embeds = self.char_embed_proj(char_embeds)
 
 
