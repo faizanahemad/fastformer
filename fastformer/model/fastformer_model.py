@@ -189,12 +189,12 @@ class Embeddings(nn.Module):
         if config.char_rnn:
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
-            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size, padding_idx=pad_token_id)
-            self.char_rnn = ShortSeqRNN(config, self.embedding_size, 1, self.embedding_size,
+            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // 4, padding_idx=pad_token_id)
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size // 4, 1, self.embedding_size // 4,
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
 
         self.embed_proj = nn.Identity()
-        self.char_embed_proj = nn.Identity()
+        self.char_embed_proj = nn.Linear(self.embedding_size // 4, self.embedding_size, bias = False)
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
             self.char_embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
