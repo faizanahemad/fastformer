@@ -2568,6 +2568,8 @@ if __name__ == "__main__":
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
 
+    torch.backends.cudnn.benchmark = True
+
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
     from transformers.models.deberta import DebertaModel
 
