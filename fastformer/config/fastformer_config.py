@@ -431,9 +431,9 @@ md_config_funnel = FastFormerConfig(separate_content_and_position_attention=Fals
                                                                      # (1, 1), (1, 2), (1, 3), (1, 4),
                                                                      # (2, 1), (2, 2), (2, 3), (2, 4)
                                                                      ],
-                                    n_head=[(4, 4, 0), (12, 0, 0), (16, 0, 0)],
+                                    n_head=[(2, 4, 2), (12, 0, 0), (16, 0, 0)],
                                     block_channel_size=[384, 768, 1280], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=32, char_rnn_window_size=128,
-                                    short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
+                                    short_rnn=[True, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                                     )
 
 md_config_funnel_mp = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=7, use_cuda_conv=False,
