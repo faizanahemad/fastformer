@@ -1214,29 +1214,27 @@ class PositionwiseFFN(nn.Module):
 
 class LightLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_encoder_layer):
+        super().__init__()
         self.config = config
         cin = config.block_channel_size[block_index]
         cout = cin // 2
         self.is_encoder_layer = is_encoder_layer
-        super().__init__()
-        self.c1 = Conv1d(in_channels=cout, out_channels=cout, kernel_size=5, groups=sum(config.n_head[block_index]) // 2, padding=2, padding_mode='zeros')
+
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
         self.cls_tokens = config.num_highway_cls_tokens + 1
         d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
-        self.rnn = nn.RNN(cout, cout // 2, 1, nonlinearity="tanh",
-                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
-        # self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
-        #                        config.short_rnn_overlap[block_index])
+        self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
+                               config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin)
         self.cout = cout
         # padding
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         qcnn = self.c1(query[:, :, :self.cout])
-        qrnn = self.rnn(query[:, :, self.cout:])[0]
+        qrnn = self.rnn(query[:, :, self.cout:])
         q = torch.cat((qcnn, qrnn), 2)
         q = self.activation_function(q)
         q = self.lin(q)
