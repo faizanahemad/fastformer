@@ -1126,7 +1126,7 @@ class ConvFFN(nn.Module):
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             self.layers.append(Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
-        self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
+        self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
 
         self.dropout = Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
