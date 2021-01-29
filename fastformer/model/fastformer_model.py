@@ -566,7 +566,7 @@ class SeparableConv1d(nn.Module):
             groups = in_channels
         self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
                                    kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
-        self.pointwise = nn.Linear(in_channels, out_channels, bias=bias)
+        self.pointwise = nn.Conv1d(in_channels, out_channels, bias=bias, kernel_size=1, groups=pointwise_groups)
 
         self.out_channels = out_channels
 
@@ -578,8 +578,8 @@ class SeparableConv1d(nn.Module):
         """
         inputs = inputs.permute(0, 2, 1)
         inputs = self.depthwise(inputs)
-        inputs = inputs.permute(0, 2, 1)
         inputs = self.pointwise(inputs)
+        inputs = inputs.permute(0, 2, 1)
         return inputs
 
 
