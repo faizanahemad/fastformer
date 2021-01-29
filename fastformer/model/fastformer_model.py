@@ -1120,19 +1120,19 @@ class ConvFFN(nn.Module):
         d_out = d_model if d_out is None else d_out
         cin, cout = d_model, d_out
         act = config.hidden_act
-        self.conv1d_in = nn.Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
+        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
         self.activation_dropout = Dropout(config.activation_dropout)
         self.dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
-            self.layers.append(nn.Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
+            self.layers.append(Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
         self.conv1d_out = nn.Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
 
         self.dropout = Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
     def forward(self, x):
-        h = x.permute(0, 2, 1)
+        h = x
         output = self.conv1d_in(h)
         output = self.act(output)
         output = self.activation_dropout(output)
@@ -1143,7 +1143,7 @@ class ConvFFN(nn.Module):
                 output = self.activation_dropout(output)
         output = self.conv1d_out(output)
         output = self.dropout(output)
-        output = output.permute(0, 2, 1)
+
         return output
 
 
