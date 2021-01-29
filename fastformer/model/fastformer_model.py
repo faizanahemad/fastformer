@@ -642,7 +642,7 @@ class SDConv(nn.Module):
             conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
             # conv_out_layer
-            conv_out_layer = self.conv_attn_point(value, post_permute=False).unsqueeze(-1)  # B,D,Seq, 1
+            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
             unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
             # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
             unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2)  # B, seq, D, kernel_size
@@ -660,7 +660,7 @@ class SDConv(nn.Module):
             weights = torch.softmax(conv_kernel_layer, dim=-2)
 
             # B,C,T
-            conv_out_layer = self.conv_attn_point(value, post_permute=False).contiguous()
+            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).contiguous()
 
             conv_out_layer = dynamicconvFunction.apply(
                 conv_out_layer, weights,
