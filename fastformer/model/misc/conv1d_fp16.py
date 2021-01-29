@@ -74,8 +74,10 @@ class SeparableConv1d(nn.Module):
         :param inputs:
         :return:
         """
+        inputs = inputs.permute(0, 2, 1)
         inputs = self.depthwise(inputs)
         inputs = self.pointwise(inputs)
+        inputs = inputs.permute(0, 2, 1)
         return inputs
 
 
