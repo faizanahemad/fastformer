@@ -109,7 +109,7 @@ if __name__ == "__main__":
             if fp16:
                 with autocast():
                     output = model(tensor)
-                    loss = ((output - torch.randn(1, device=device)) ** 2).mean()
+                    loss = ((output - torch.randn(1, device=device, dtype=torch.half)) ** 2).mean()
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
