@@ -67,6 +67,7 @@ if __name__ == "__main__":
     ap.add_argument("--channels", type=int, default=384)
     ap.add_argument("--groups", type=int, default=8)
     ap.add_argument("--kernel", type=int, default=1)
+    ap.add_argument("--batch_size", type=int, default=32)
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -76,6 +77,7 @@ if __name__ == "__main__":
     channels = args["channels"]
     groups = args["groups"]
     kernel = args["kernel"]
+    batch_size = args["batch_size"]
 
     model = Conv1d(channels, channels, kernel, groups).to(device)
 
@@ -97,7 +99,7 @@ if __name__ == "__main__":
         _ = model.train()
 
 
-    tensor = torch.randn(32, 512, channels).to(device)
+    tensor = torch.randn(batch_size, 512, channels).to(device)
 
     epochs = 100
 
@@ -107,10 +109,10 @@ if __name__ == "__main__":
     def run():
         if not forward_only:
             if fp16:
+                lv = torch.randn(1, device=device)
                 with autocast():
                     output = model(tensor)
-                    loss = ((output.float() - torch.randn(1, device=device, dtype=torch.float)) ** 2).mean()
-                    print(loss)
+                    loss = ((output - lv) ** 2).mean()
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
