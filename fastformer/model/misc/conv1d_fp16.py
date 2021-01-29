@@ -176,6 +176,8 @@ if __name__ == "__main__":
         model = SeparableConv1dV2(channels, channels, kernel, pointwise_groups=groups, stride=stride).to(device)
     elif model == "sep_v3":
         model = SeparableConv1dV3(channels, channels, kernel, pointwise_groups=groups, stride=stride).to(device)
+    elif model == "linear":
+        model = nn.Linear(channels, channels).to(device)
     else:
         raise ValueError
 
