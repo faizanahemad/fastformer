@@ -1224,8 +1224,8 @@ class LightLayer(nn.Module):
         self.activation_function = ACT2FN[config.hidden_act]
         self.cls_tokens = config.num_highway_cls_tokens + 1
         d_head = config.d_head[block_index]
-        assert cout % 8 == 0
-        self.c1 = SDConv(config, cout, 8, cout // 8, config.sdconv_kernel_size[0])
+        assert cout % (sum(config.n_head[block_index]) // 2) == 0
+        self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
         self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
                                config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin)
