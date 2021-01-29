@@ -1236,7 +1236,7 @@ class LightLayer(nn.Module):
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         qcnn = self.c1(query[:, :, :self.cout])
-        qrnn = self.rnn(query[:, :, self.cout:])
+        qrnn = self.rnn(query[:, :, self.cout:])[0]
         q = torch.cat((qcnn, qrnn), 2)
         q = self.activation_function(q)
         q = self.lin(q)
