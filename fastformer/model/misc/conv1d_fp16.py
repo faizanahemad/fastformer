@@ -33,7 +33,7 @@ def str2bool(v):
 
 
 class Conv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1):
+    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=False, stride=1, dilation=1):
         super().__init__()
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                               groups=groups, bias=bias, stride=stride, dilation=dilation)
@@ -49,6 +49,34 @@ class Conv1d(nn.Module):
         if unsqueeze:
             x = x.squeeze(0)
         return x
+
+
+class SeparableConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
+                 bias=True, stride=1, padding=None):
+        super().__init__()
+        if padding is None:
+            padding = (kernel_size - 1) // 2
+        if groups is None:
+            groups = in_channels
+        if pointwise_groups is None:
+            pointwise_groups = 1
+        self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
+                                   kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
+        self.pointwise = nn.Conv1d(in_channels=in_channels, out_channels=out_channels,
+                                   kernel_size=1, groups=pointwise_groups, bias=bias, stride=1, padding=0)
+
+        self.out_channels = out_channels
+
+    def forward(self, inputs):
+        """
+        Expect inputs in channels first format
+        :param inputs:
+        :return:
+        """
+        inputs = self.depthwise(inputs)
+        inputs = self.pointwise(inputs)
+        return inputs
 
 
 if __name__ == "__main__":
@@ -68,6 +96,7 @@ if __name__ == "__main__":
     ap.add_argument("--groups", type=int, default=8)
     ap.add_argument("--kernel", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=32)
+    ap.add_argument("--stride", type=int, default=2)
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -78,8 +107,10 @@ if __name__ == "__main__":
     groups = args["groups"]
     kernel = args["kernel"]
     batch_size = args["batch_size"]
+    stride = args["stride"]
 
     model = Conv1d(channels, channels, kernel, groups).to(device)
+    # model = SeparableConv1d(channels, channels, kernel, pointwise_groups=groups, stride=stride).to(device)
 
     try:
         from torch.cuda.amp import GradScaler, autocast
