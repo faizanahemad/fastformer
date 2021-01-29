@@ -1258,7 +1258,7 @@ class TransformerLayer(nn.Module):
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
         pre_ffn, output = attn[0], attn[0]
-        if self.alternate_ffn and not self.is_last_layer_of_block and layer_index % 2 == 0:
+        if self.alternate_ffn and layer_index % 2 == 0:
             pass
         else:
             pre_ffn, output = self.ffn(attn[0], layer_index)
