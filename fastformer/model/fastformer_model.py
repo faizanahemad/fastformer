@@ -431,14 +431,16 @@ class Conv1d(nn.Module):
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                               groups=groups, bias=bias, stride=stride, dilation=dilation)
 
-    def forward(self, x):
+    def forward(self, x, pre_permute=True, post_permute=True):
         unsqueeze = False
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
             unsqueeze = True
-        x = x.permute(0, 2, 1)
+        if pre_permute:
+            x = x.permute(0, 2, 1)
         x = self.conv(x)
-        x = x.permute(0, 2, 1)
+        if post_permute:
+            x = x.permute(0, 2, 1)
         if unsqueeze:
             x = x.squeeze(0)
         return x
@@ -620,7 +622,7 @@ class SDConv(nn.Module):
             query = upsample(query, self.config.stride, context_len, self.cls_tokens)
             seqlen = context_len
 
-        key_conv_attn_layer = self.separable_conv1d(key.permute(0, 2, 1)).permute(0, 2, 1)
+        key_conv_attn_layer = self.separable_conv1d(key)
         if self.stride == 1:
             conv_attn_layer = key_conv_attn_layer * query
         else:
@@ -632,7 +634,7 @@ class SDConv(nn.Module):
             conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
             # conv_out_layer
-            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
+            conv_out_layer = self.conv_attn_point(value, post_permute=False).unsqueeze(-1)  # B,D,Seq, 1
             unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
             # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
             unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2)  # B, seq, D, kernel_size
@@ -650,7 +652,7 @@ class SDConv(nn.Module):
             weights = torch.softmax(conv_kernel_layer, dim=-2)
 
             # B,C,T
-            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).contiguous()
+            conv_out_layer = self.conv_attn_point(value, post_permute=False).contiguous()
 
             conv_out_layer = dynamicconvFunction.apply(
                 conv_out_layer, weights,
