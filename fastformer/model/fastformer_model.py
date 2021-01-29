@@ -1226,8 +1226,10 @@ class LightLayer(nn.Module):
         d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
-        self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
-                               config.short_rnn_overlap[block_index])
+        self.rnn = nn.RNN(cout, cout // 2, 1, nonlinearity="tanh",
+                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+        # self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
+        #                        config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin)
         self.cout = cout
         # padding
