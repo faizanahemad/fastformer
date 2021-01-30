@@ -1934,8 +1934,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.sent_predict_pre_fc = nn.Sequential(nn.Linear(config.block_channel_size[-1], 128), nn.GELU(), nn.GRU(128, (self.cls_tokens + 1) * 4, bidirectional = True))
-            self.sent_predict_fc = nn.Linear((self.cls_tokens + 1) * 8, (self.cls_tokens + 1))
+            self.sent_predict_fc = nn.Sequential(nn.Linear(config.block_channel_size[-1], 128), nn.GELU(), nn.Linear(128, (self.cls_tokens + 1)))
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
@@ -2023,7 +2022,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sent_order_pre_kl = 0
         if self.sentence_order_prediction_w > 0 and sent_order_predictions is not None:
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
-            sent_order_logits = self.sent_predict_fc(self.sent_predict_pre_fc(sent_order_block_hidden_cls)[0])
+            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_pre_kl = KL(sent_order_logits, sent_order_predictions.detach(), reduction="batchmean")
             if reverse_loss:
                 sent_order_pre_kl = (sent_order_pre_kl + KL(sent_order_logits.detach(), sent_order_predictions, reduction="batchmean")) / 2.0
@@ -2305,7 +2304,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sent_order_logits = None
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None and self.training:
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
-            sent_order_logits = self.sent_predict_fc(self.sent_predict_pre_fc(sent_order_block_hidden_cls)[0])
+            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
             self.loss_hist["sent_order_loss"].append(float(sent_order_loss))
             sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
