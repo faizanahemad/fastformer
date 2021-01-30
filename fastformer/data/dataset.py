@@ -355,6 +355,10 @@ class TokenizerDataset(Dataset):
             small_segment_tokenizer_args = dict(**self.tokenizer_args)
             small_segment_tokenizer_args["max_length"] = self.tokenizer_args["max_length"] // (self.cls_tokens - 1)
 
+            # TODO: Gap Sentence to be sentence specific not segment specific and have only 3 segments? Or 3 mode + 7 mode so that for small text also we can use sentence jumble
+            # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.
+            # TODO: remove if blocks of GSP and word ordering. and also the embedding , have only full ar.
+            # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
             if n_queries == 0 and count_pad_tokens <= 1 and self.cls_tokens > 2:
                 tokenizer_outputs = tokenizer(masked_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
                 input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]

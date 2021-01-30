@@ -1183,7 +1183,7 @@ class PositionwiseFFN(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 4) if d_model % 4 == 0 and self.diff % 4 == 0 else nn.Linear(d_model, self.diff)
+            self.dlin = Conv1d(d_model, self.diff, 1, 8) if d_model % 8 == 0 and self.diff % 8 == 0 else nn.Linear(d_model, self.diff)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
@@ -1257,9 +1257,9 @@ class TransformerLayer(nn.Module):
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
-        pre_ffn, output = attn[0], attn[0]
         if self.alternate_ffn and layer_index % 2 == 0:
-            pass
+            h = self.ffn.lin(attn[0])
+            pre_ffn, output = h, h
         else:
             pre_ffn, output = self.ffn(attn[0], layer_index)
         return (output, pre_ffn, attn[1]) if output_attentions else (output, pre_ffn)
@@ -1509,14 +1509,14 @@ class TransformerDecoder(nn.Module):
 
         block_channel_size = self.config.block_channel_size
         self.decoder_ln = nn.LayerNorm(block_channel_size[0], config.layer_norm_eps)
-        self.final_hidden_fc = None
+        self.final_hidden_fc = nn.Identity()
         ffn_groups = self.config.ffn_groups
         if block_channel_size[0] != block_channel_size[-1]:
             if ffn_groups > 1:
                 assert block_channel_size[0] % ffn_groups == 0 and block_channel_size[-1] % ffn_groups == 0
-                self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups)
+                self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
-                self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0])
+                self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
 
     def forward(
             self,
@@ -1527,9 +1527,8 @@ class TransformerDecoder(nn.Module):
             output_attentions=False,
             output_hidden_states=False,
     ):
-        if self.final_hidden_fc:
-            final_hidden = self.final_hidden_fc(final_hidden)
-        final_hidden = final_hidden[:, :, :first_block_hidden.shape[-1]]
+        final_hidden = self.final_hidden_fc(final_hidden)
+
         if not self.layers:
             hidden = final_hidden
             all_hidden_states = (hidden,) if output_hidden_states else None
@@ -1650,7 +1649,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
         self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.answering_ffn = nn.Sequential(Conv1d(config.block_channel_size[-1], config.block_channel_size[0], 1, config.ffn_groups, bias=False), nn.GELU(), nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
+        self.answering_ffn = nn.Sequential(self.decoder.final_hidden_fc, nn.GELU(), nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
         self.answering_ffn[2].weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.init_weights()
@@ -1984,7 +1983,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             assert not aitm
             self.adv_lm_w = abs(self.adv_lm_w)
             self.aitm_clip_min = self.aitm_clip_max = 1.0
-        self.funnel.decoder.final_hidden_fc = None
         self.init_weights()
 
     def get_output_embeddings(self):
@@ -2572,7 +2570,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='md_config_funnel',
+    ap.add_argument("--config", type=str, default='md_config',
                     help="Config")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--sdconv", type=str2bool, default=False)
@@ -2594,10 +2592,7 @@ if __name__ == "__main__":
     sdconv = args["sdconv"]
     batch_size = args["batch_size"]
     length = args["length"]
-    config = dict(md_config=md_config, md_config_rnn=md_config_rnn, md_config_funnel=md_config_funnel,
-                  sm_config=sm_config, md_config_sdconv=md_config_sdconv,
-                  md_config_funnel_mp=md_config_funnel_mp, md_config_funnel_sp=md_config_funnel_sp,
-                  md_config_funnel_lp=md_config_funnel_lp, md_config_funnel_rp=md_config_funnel_rp)[args["config"]]
+    config = dict(md_config=md_config, sm_config=sm_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
