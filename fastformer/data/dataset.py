@@ -15,6 +15,7 @@ char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data._utils.collate import default_collate
 import copy
+import random
 
 from dataclasses import dataclass
 from datasets import load_dataset, concatenate_datasets
@@ -228,6 +229,7 @@ class TokenizerDataset(Dataset):
                  word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
                  max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+        self.min_segments = 2
         self.cls_tokens = config.num_highway_cls_tokens
         self.tokenizer = copy.deepcopy(tokenizer)
         self.tokenizer_args = tokenizer_args
@@ -298,14 +300,14 @@ class TokenizerDataset(Dataset):
         anchors = []
         positives = []
         while len(anchors) < self.n_anchors and anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:
-            anchor_len = int(np.random.beta(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+            anchor_len = int(random.betavariate(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
             anchor_len = int(np.round(anchor_len / 8) * 8)
             anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
             anchor_end = min(anchor_start + anchor_len, text_len)
             anchors.append([anchor_start, anchor_end])
             positives_for_anchor = []
             while len(positives_for_anchor) < self.n_positives:
-                positive_len = int(np.random.beta(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+                positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
                 positive_len = int(np.round(positive_len / 8) * 8)
                 positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
                 positive_end = min(positive_start + positive_len, text_len)
@@ -323,57 +325,41 @@ class TokenizerDataset(Dataset):
         sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
 
         if self.training:
-            segments = np.array(segment(text, max(self.cls_tokens, 1), self.sent_detector, tokenizer.pad_token))
+            num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments)))
+            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
-            assert len(segments) == max(self.cls_tokens, 1)
-            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 2 and self.cls_tokens > 2:
-                seg_idxs = random.sample(range(self.cls_tokens), self.cls_tokens)
+            assert len(segments) == num_segments
+            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 1:
+                seg_idxs = random.sample(range(num_segments), num_segments)
             else:
-                seg_idxs = list(range(max(self.cls_tokens, 1)))
-            seg_slides = seg_idxs + seg_idxs[0:1]
-            two_ordered = torch.tensor([int(s1 < s2) for s1, s2 in zip(seg_slides[:-1], seg_slides[1:])])
-            seg_slides = seg_idxs + seg_idxs[0:4]
-            three_ordered_dilated = torch.tensor([int(s1 < s2 < s3) for s1, s2, s3 in zip(seg_slides[0:-4:1], seg_slides[2:-2:1], seg_slides[4::1])])
-            results = dict(labels=label, labels_two_sentence_order=two_ordered, labels_three_sentence_dilated_order=three_ordered_dilated,
-                           labels_segment_index=torch.tensor(seg_idxs), anchors=anchors, positives=positives,
+                seg_idxs = list(range(num_segments))
+            labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
+            results = dict(labels=label,
+                           labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
                            highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
             segments = segments[seg_idxs]
-            masked_segments = word_jumble_segments = tokenizer.pad_token
+            word_jumble_segments = tokenizer.pad_token
             iters = 0
             word_jumble_seg_idxs = -1
-            masked_seg_idxs = self.cls_tokens - 1
-            while (masked_segments == tokenizer.pad_token or word_jumble_segments == tokenizer.pad_token) and iters <= 16 and self.cls_tokens > 2:
+            while word_jumble_segments == tokenizer.pad_token and iters <= 8 and count_pad_tokens <= 1:
                 iters += 1
                 if word_jumble_segments == tokenizer.pad_token:
-                    word_jumble_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {masked_seg_idxs}), 1)[0]
+                    word_jumble_seg_idxs = random.sample(list(set(list(range(num_segments)))), 1)[0]
                     word_jumble_segments = segments[word_jumble_seg_idxs]
-                if masked_segments == tokenizer.pad_token or seg_idxs[masked_seg_idxs] == self.cls_tokens - 1:
-                    masked_seg_idxs = random.sample(list(set(list(range(self.cls_tokens))) - {word_jumble_seg_idxs}), 1)[0]
-                    masked_segments = segments[masked_seg_idxs]
-
-            small_segment_tokenizer_args = dict(**self.tokenizer_args)
-            small_segment_tokenizer_args["max_length"] = self.tokenizer_args["max_length"] // (self.cls_tokens - 1)
 
             # TODO: Gap Sentence to be sentence specific not segment specific and have only 3 segments? Or 3 mode + 7 mode so that for small text also we can use sentence jumble
             # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.
             # TODO: remove if blocks of GSP and word ordering. and also the embedding , have only full ar.
             # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
             if n_queries == 0 and count_pad_tokens <= 1 and self.cls_tokens > 2:
-                tokenizer_outputs = tokenizer(masked_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
-                input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-                results.update(dict(gap_sentence_input_ids=input_ids.squeeze(), gap_sentence_attention_mask=attention_mask.squeeze()))
-                tokenizer_outputs = tokenizer(word_jumble_segments, return_offsets_mapping=True, **small_segment_tokenizer_args)
-                input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-                results.update(dict(jumble_sentence_input_ids=input_ids.squeeze(), jumble_sentence_attention_mask=attention_mask.squeeze()))
                 seq = segments[word_jumble_seg_idxs].split()
                 wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
                 wj_seq2 = [w for i in range(len(wj_seq2))[::self.max_jumbling_span_length] for w in random.sample(wj_seq2[i:i+self.max_jumbling_span_length], len(wj_seq2[i:i+self.max_jumbling_span_length]))]
                 seq = wj_seq1 + wj_seq2
                 segments[word_jumble_seg_idxs] = " ".join(seq).strip()
-                segments[masked_seg_idxs] = " ".join(masked_segments.split()[:len(masked_segments.split()) // 4]) + " " + self.tokenizer.sentence_mask_token
             else:
-                word_jumble_seg_idxs = masked_seg_idxs = -1
+                word_jumble_seg_idxs = -1
             mlm_text = " ".join(segments)  # Training Labels for MLM
             labels_pet_text = ""
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
@@ -398,9 +384,8 @@ class TokenizerDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
-            noised_seg_idxs = [word_jumble_seg_idxs, masked_seg_idxs]
             for idx, seq in enumerate(segments):
-                if idx in noised_seg_idxs:
+                if idx == word_jumble_seg_idxs:
                     continue
                 if n_queries == 0 or self.word_mask_in_pet:
                     seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)

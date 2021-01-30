@@ -1910,9 +1910,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
-                 input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1, second_block_cls_orthogonal_w=0.05, third_block_cls_orthogonal_w=0.0,
-                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, word_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
-                 gap_sentence_prediction_w=1.0, answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
+                 input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1,
+                 electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
+                answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
 
         self.config = config
@@ -1934,26 +1934,19 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.order_prediction_fc = nn.Identity()
-            self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], self.cls_tokens)
-            self.two_sent_order_fc = Conv1d(config.block_channel_size[-1], 1, 2, 1)
-            self.three_sent_order_fc = Conv1d(config.block_channel_size[-1], 1, 3, 1, dilation=2)
+            self.sent_predict_pre_fc = nn.Sequential(nn.Linear(config.block_channel_size[-1], 128), nn.GELU(), nn.GRU(128, (self.cls_tokens + 1) * 4, bidirectional = True))
+            self.sent_predict_fc = nn.Linear((self.cls_tokens + 1) * 8, (self.cls_tokens + 1))
 
-        if word_order_prediction_w > 0 or gap_sentence_prediction_w > 0 or highway_cls_ar_w > 0:
+        if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.word_gap_prediction_fc = nn.Sequential(Conv1d(self.config.block_channel_size[1], self.config.block_channel_size[0], kernel_size=1, groups=4),
-                                                        nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
-            self.initiator_emb = nn.Embedding(4, self.config.block_channel_size[0])
+            self.ar_fc = nn.Sequential(Conv1d(self.config.block_channel_size[1], self.config.block_channel_size[0], kernel_size=1, groups=8),
+                                       nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
             self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
-            self.word_order_prediction_w = word_order_prediction_w
-            self.gap_sentence_prediction_w = gap_sentence_prediction_w
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
-        self.second_block_cls_orthogonal_w = second_block_cls_orthogonal_w
-        self.third_block_cls_orthogonal_w = third_block_cls_orthogonal_w
         self.register_buffer("diag_mat", 1 - torch.eye(self.cls_tokens + 1, self.cls_tokens + 1, device=next(self.parameters()).device))
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
@@ -2011,10 +2004,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         )
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
-        second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
-        clip_min, clip_max = self.aitm_clip_min, self.aitm_clip_max
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0
         else:
@@ -2031,9 +2022,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         sent_order_pre_kl = 0
         if self.sentence_order_prediction_w > 0 and sent_order_predictions is not None:
-            sent_order_block_hidden_cls = self.order_prediction_fc(third_block_hidden[:, :self.cls_tokens + 1])
-            sent_order_block_hidden_cls = sent_order_block_hidden_cls[:, 1:self.cls_tokens + 1] + sent_order_block_hidden_cls[:, 0].unsqueeze(1)
-            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
+            sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
+            sent_order_logits = self.sent_predict_fc(self.sent_predict_pre_fc(sent_order_block_hidden_cls)[0])
             sent_order_pre_kl = KL(sent_order_logits, sent_order_predictions.detach(), reduction="batchmean")
             if reverse_loss:
                 sent_order_pre_kl = (sent_order_pre_kl + KL(sent_order_logits.detach(), sent_order_predictions, reduction="batchmean")) / 2.0
@@ -2178,15 +2168,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             token_type_ids=None,
             inputs_embeds=None,
             labels=None,
-            labels_two_sentence_order=None,
-            labels_three_sentence_dilated_order=None,
             labels_segment_index=None,
             output_attentions=None,
             output_hidden_states=None,
             char_ids=None, char_offsets=None,
-            gap_sentence_input_ids=None, gap_sentence_attention_mask=None,
             highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
-            jumble_sentence_input_ids=None, jumble_sentence_attention_mask=None,
             labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
             contrastive_anchors=None, contrastive_positives=None,
             **kwargs
@@ -2310,20 +2296,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.loss_hist["first_block_cls_orthogonal_loss"].append(float(first_block_cls_orthogonal_loss))
             cls_orthogonal_loss += first_block_cls_orthogonal_loss
 
-        if self.second_block_cls_orthogonal_w > 0 and self.training:
-            second_block_cls = second_block_cls/second_block_cls.norm(2, -1, True)
-            second_block_cls = second_block_cls.bmm(second_block_cls.transpose(1, 2))
-            second_block_cls_orthogonal_loss = self.second_block_cls_orthogonal_w * ((second_block_cls * self.diag_mat) ** 2).mean()
-            self.loss_hist["second_block_cls_orthogonal_loss"].append(float(second_block_cls_orthogonal_loss))
-            cls_orthogonal_loss += second_block_cls_orthogonal_loss
-
-        if self.third_block_cls_orthogonal_w > 0 and self.training:
-            third_block_cls = third_block_cls/third_block_cls.norm(2, -1, True)
-            third_block_cls = third_block_cls.bmm(third_block_cls.transpose(1, 2))
-            third_block_cls_orthogonal_loss = self.third_block_cls_orthogonal_w * ((third_block_cls * self.diag_mat) ** 2).mean()
-            self.loss_hist["third_block_cls_orthogonal_loss"].append(float(third_block_cls_orthogonal_loss))
-            cls_orthogonal_loss += third_block_cls_orthogonal_loss
-
         et = time.time() - st
         timing_dict.append(("cls_orthogonal_loss", et))
         sentence_order_loss = 0.0
@@ -2332,77 +2304,24 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None and self.training:
-            sent_order_block_hidden_cls = self.order_prediction_fc(third_block_hidden[:, :self.cls_tokens + 1])
-            sent_order_block_hidden_cls = sent_order_block_hidden_cls[:, 1:self.cls_tokens + 1] + sent_order_block_hidden_cls[:, 0].unsqueeze(1)
-            two_sent_order_hidden = torch.cat((sent_order_block_hidden_cls, sent_order_block_hidden_cls[:, 0:1]), 1)
-            three_sent_order_hidden = torch.cat((sent_order_block_hidden_cls, sent_order_block_hidden_cls[:, 0:4]), 1)
-
-            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
-            sent_order_loss = self.loss_ce(sent_order_logits.view(-1, self.cls_tokens), labels_segment_index.view(-1))
+            sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
+            sent_order_logits = self.sent_predict_fc(self.sent_predict_pre_fc(sent_order_block_hidden_cls)[0])
+            sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
             self.loss_hist["sent_order_loss"].append(float(sent_order_loss))
             sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
             self.accuracy_hist["sent_order"].append(float(sent_order_out.sum() / len(sent_order_out.view(-1))))
 
-            two_sent_order_preds = self.two_sent_order_fc(two_sent_order_hidden).view(-1, self.cls_tokens)
-            three_sent_order_preds = self.three_sent_order_fc(three_sent_order_hidden).view(-1, self.cls_tokens)
-            two_sent_loss = self.loss_bce(two_sent_order_preds, labels_two_sentence_order.float())
-            three_sent_loss = self.loss_bce(three_sent_order_preds, labels_three_sentence_dilated_order.float())
-            self.loss_hist["two_sent_loss"].append(float(two_sent_loss))
-            self.loss_hist["three_sent_loss"].append(float(three_sent_loss))
-            self.accuracy_hist["two_sent_order"].append(float(((two_sent_order_preds > 0.) == labels_two_sentence_order).sum() / len(labels_two_sentence_order.view(-1))))
-            self.accuracy_hist["three_sent_order"].append(
-                float(((three_sent_order_preds > 0.) == labels_three_sentence_dilated_order).sum() / len(labels_three_sentence_dilated_order.view(-1))))
-
-            sentence_order_loss = self.sentence_order_prediction_w * (sent_order_loss + two_sent_loss + three_sent_loss)
+            sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
-        if (self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None) or \
-                (self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None) or \
-                (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
-            highway_block_hidden = self.word_gap_prediction_fc(second_block_hidden[:, :self.cls_tokens + 1])
-
-        if self.word_order_prediction_w > 0 and jumble_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
-            word_order_inputs_embeds, _ = self.funnel.embeddings(shift_right(jumble_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            initiator_emb = self.initiator_emb(torch.tensor(0, device=highway_block_hidden.device))[None, None, :]
-            word_order_inputs_embeds = word_order_inputs_embeds + initiator_emb
-            if self.config.num_highway_cls_tokens > 0:
-                jumble_sentence_attention_mask = torch.cat(
-                    [torch.ones(jumble_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=jumble_sentence_attention_mask.device),
-                     jumble_sentence_attention_mask], dim=1)
-
-            word_order_out = self.sentence_task_attn(word_order_inputs_embeds, highway_block_hidden, highway_block_hidden, jumble_sentence_attention_mask, encoder_outputs[-1][2]) # [:, :self.cls_tokens + 1]
-            word_order_out = self.lm_dim_match(word_order_out[:, (self.funnel.cls_tokens - 1):])
-            word_order_out = self.lm_head(word_order_out)[:, :, :self.config.vocab_size]
-            word_order_loss = self.word_order_prediction_w * self.loss_ce(word_order_out.view(-1, self.config.vocab_size), jumble_sentence_input_ids.view(-1))
-            word_order_out = word_order_out.argmax(dim=-1) == jumble_sentence_input_ids
-            self.accuracy_hist["word_order"].append(float(word_order_out.sum() / len(word_order_out.view(-1))))
-            self.loss_hist["word_order_loss"].append(float(word_order_loss))
-
-        if self.gap_sentence_prediction_w > 0 and gap_sentence_input_ids is not None and self.training and not (self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None):
-            gap_inputs_embeds, _ = self.funnel.embeddings(shift_right(gap_sentence_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            initiator_emb = self.initiator_emb(torch.tensor(1, device=highway_block_hidden.device))[None, None, :]
-            gap_inputs_embeds = gap_inputs_embeds + initiator_emb
-            if self.config.num_highway_cls_tokens > 0:
-                gap_sentence_attention_mask = torch.cat(
-                    [torch.ones(gap_sentence_attention_mask.shape[0], self.config.num_highway_cls_tokens, device=gap_sentence_attention_mask.device),
-                     gap_sentence_attention_mask], dim=1)
-
-            gap_sentence_out = self.sentence_task_attn(gap_inputs_embeds, highway_block_hidden, highway_block_hidden, gap_sentence_attention_mask, encoder_outputs[-1][2]) # [:, :self.cls_tokens + 1]
-            gap_sentence_out = self.lm_dim_match(gap_sentence_out[:, (self.funnel.cls_tokens - 1):])
-            gap_sentence_out = self.lm_head(gap_sentence_out)[:, :, :self.config.vocab_size]
-            gap_sentence_loss = self.gap_sentence_prediction_w * self.loss_ce(gap_sentence_out.view(-1, self.config.vocab_size), gap_sentence_input_ids.view(-1))
-            gap_sentence_out = gap_sentence_out.argmax(dim=-1) == gap_sentence_input_ids
-            self.accuracy_hist["gap_sentence"].append(float(gap_sentence_out.sum() / len(gap_sentence_out.view(-1))))
-            self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None:
+            highway_block_hidden = self.ar_fc(second_block_hidden[:, :self.cls_tokens + 1])
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             highway_cls_ar_inputs_embeds_non_positional, _ = self.funnel.embeddings(highway_cls_ar_input_ids, None, None,
                                                                                     char_ids=None, char_offsets=None, use_position_embeddings=False)
-            initiator_emb = self.initiator_emb(torch.tensor(2, device=highway_block_hidden.device))[None, None, :]
-            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds + initiator_emb
-
             if self.config.num_highway_cls_tokens > 0:
                 highway_cls_ar__attention_mask = torch.cat(
                     [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
