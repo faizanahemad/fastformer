@@ -38,7 +38,7 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-from fastformer.data import very_large_texts, TokenizerDataset, collate_fn
+from fastformer.data import very_large_texts, TokenizerDataset, get_collate_fn
 from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts, very_small_texts
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
 
@@ -2525,7 +2525,9 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer("bert")
     config.tokenizer_length = length
     config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
+    collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra", "fastformer"]:
+        collate_fn = get_collate_fn(0, tokenizer.pad_token_id)
         config.tokenizer_length = min(config.tokenizer_length, 512)
         config.max_position_embeddings = min(config.tokenizer_length, 512)
         config.num_highway_cls_tokens = 0

@@ -325,7 +325,7 @@ class TokenizerDataset(Dataset):
         sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
 
         if self.training:
-            num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments)))
+            num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
             assert len(segments) == num_segments
@@ -410,55 +410,56 @@ class TokenizerDataset(Dataset):
         return len(self.dataset)
 
 
-def collate_fn(samples):
-    char_ids = None
-    num_cls = 7
-    padding_index = 0
-    if isinstance(samples, list) and isinstance(samples[0], dict) and "char_ids" in samples[0]:
-        char_ids = [s["char_ids"] for s in samples]
-        for s in samples:
-            del s["char_ids"]
+def get_collate_fn(num_cls, padding_index):
+    def collate_fn(samples):
+        char_ids = None
+        if isinstance(samples, list) and isinstance(samples[0], dict) and "char_ids" in samples[0]:
+            char_ids = [s["char_ids"] for s in samples]
+            for s in samples:
+                del s["char_ids"]
 
-        max_chars = max(list(map(len, char_ids)))
-        max_chars = int(32 * np.ceil(max_chars / 32))
-        char_ids = [torch.tensor(cid) for cid in char_ids]
-        char_ids = torch.nn.utils.rnn.pad_sequence(char_ids, batch_first=True, padding_value=padding_index)
-        padding = max_chars - char_ids.shape[1]
-        char_ids = torch.cat([char_ids, char_ids.new(char_ids.shape[0], padding).fill_(padding_index)], 1)
+            max_chars = max(list(map(len, char_ids)))
+            max_chars = int(32 * np.ceil(max_chars / 32))
+            char_ids = [torch.tensor(cid) for cid in char_ids]
+            char_ids = torch.nn.utils.rnn.pad_sequence(char_ids, batch_first=True, padding_value=padding_index)
+            padding = max_chars - char_ids.shape[1]
+            char_ids = torch.cat([char_ids, char_ids.new(char_ids.shape[0], padding).fill_(padding_index)], 1)
 
-    # print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
-    anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
-    positives = [s["positives"] if "positives" in s else [] for s in samples]
-    samples = default_collate(samples)
-    samples["contrastive_anchors"] = anchors
-    samples["contrastive_positives"] = positives
-    del samples["anchors"]
-    del samples["positives"]
-    if char_ids is not None:
-        samples["char_ids"] = char_ids
-    # TODO: reduce the batch seq length to minimum required and a multiple of 16.
-    for k, v in samples.items():
-        if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
-            continue
-        if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
-            continue
-        step_size = 64 if k == "char_ids" else 16
-        while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
-            v = v[:, :-step_size]
-        required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
-        padding = required_len - v.shape[-1]
-        if padding > 0:
-            v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
-        elif padding < 0:
-            v = v[:, :padding]
-        samples[k] = v
-    if "label_mlm_input_ids" in samples:
-        samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
-    if "token_type_ids" in samples:
-        samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
-    if "char_offsets" in samples:
-        samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
-    return samples
+        # print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
+        anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
+        positives = [s["positives"] if "positives" in s else [] for s in samples]
+        samples = default_collate(samples)
+        samples["contrastive_anchors"] = anchors
+        samples["contrastive_positives"] = positives
+        del samples["anchors"]
+        del samples["positives"]
+        if char_ids is not None:
+            samples["char_ids"] = char_ids
+        # TODO: reduce the batch seq length to minimum required and a multiple of 16.
+        for k, v in samples.items():
+            if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
+                continue
+            if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
+                continue
+            step_size = 32 if k == "char_ids" else 16
+            while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
+                v = v[:, :-step_size]
+            required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
+            padding = required_len - v.shape[-1]
+            if padding > 0:
+                v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+            elif padding < 0:
+                v = v[:, :padding]
+            samples[k] = v
+        if "label_mlm_input_ids" in samples:
+            samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
+        if "token_type_ids" in samples:
+            samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
+        if "char_offsets" in samples:
+            samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
+        samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        return samples
+    return collate_fn
 
 
 def all_datasets():
