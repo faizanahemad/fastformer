@@ -2499,6 +2499,7 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--length", type=int, default=1024)
+    ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
@@ -2511,6 +2512,7 @@ if __name__ == "__main__":
     sdconv = args["sdconv"]
     batch_size = args["batch_size"]
     length = args["length"]
+    lr = args["lr"]
     config = dict(md_config=md_config, sm_config=sm_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
@@ -2676,7 +2678,7 @@ if __name__ == "__main__":
         _ = model.train()
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
-    optimizer = AdamW(all_params, lr=5e-4, eps=1e-6, weight_decay=1e-2)
+    optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
 
 
     def run():
