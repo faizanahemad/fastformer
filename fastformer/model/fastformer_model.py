@@ -2740,13 +2740,14 @@ if __name__ == "__main__":
         if hasattr(model, "highway_cls_ar_sentence_outputs"):
             del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
         pprint({k: v[-10:] for k, v in model.accuracy_hist.items()})
+        if hasattr(model, "timing_hist"):
         pprint(model.timing_hist[-1])
-        import pandas as pd
-        th = pd.DataFrame([td for tm in model.timing_hist for td in tm], columns = ["step", "cumulative"])
-        th = th.groupby("step", sort=False)[["cumulative"]].mean()
-        timings = [0] + list(th["cumulative"].values)[:-1]
-        th["differ"] = timings
-        th["absolute"] = th["cumulative"] - th["differ"]
-        th.drop(columns=["differ"], inplace=True)
-        pprint(th)
+            import pandas as pd
+            th = pd.DataFrame([td for tm in model.timing_hist for td in tm], columns = ["step", "cumulative"])
+            th = th.groupby("step", sort=False)[["cumulative"]].mean()
+            timings = [0] + list(th["cumulative"].values)[:-1]
+            th["differ"] = timings
+            th["absolute"] = th["cumulative"] - th["differ"]
+            th.drop(columns=["differ"], inplace=True)
+            pprint(th)
         # pprint(model.loss_hist)
