@@ -2741,7 +2741,7 @@ if __name__ == "__main__":
             del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
         pprint({k: v[-10:] for k, v in model.accuracy_hist.items()})
         if hasattr(model, "timing_hist"):
-        pprint(model.timing_hist[-1])
+            pprint(model.timing_hist[-1])
             import pandas as pd
             th = pd.DataFrame([td for tm in model.timing_hist for td in tm], columns = ["step", "cumulative"])
             th = th.groupby("step", sort=False)[["cumulative"]].mean()
