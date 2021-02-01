@@ -2733,7 +2733,7 @@ if __name__ == "__main__":
             _ = run()
             et = time.time() - st
             times.append(et)
-        print("Time Taken = %.4f, Lowest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.std(times)), times)
+        print("Time Taken = %.4f, Lowest = %.4f, Highest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.max(times), np.std(times)))
 
     if not forward_only and hasattr(model, "accuracy_hist"):
         from pprint import pprint
