@@ -1806,6 +1806,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             predictions = prediction_logits.argmax(dim=-1)
             labels = (labels == predictions).float()
             self.accuracy_hist["lm"].append(float(labels[active_loss].float().mean()))
+            self.accuracy_hist['lm_loss'].append(float(masked_lm_loss))
 
         output = (prediction_logits,) + outputs[1:]
         return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
