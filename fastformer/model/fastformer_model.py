@@ -38,8 +38,7 @@ from transformers.modeling_outputs import (
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 
-from fastformer.data import very_large_texts, TokenizerDataset, get_collate_fn
-from fastformer.data.sample_data import SmallTextDataset, small_texts, large_texts, very_large_texts, very_small_texts
+from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
 
 try:
@@ -2188,7 +2187,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         inputs_embeds, position_embeds, input_shape = self.get_emb(embedding_generation_params)
         et = time.time() - st
         timing_dict.append(("get_emb", et))
-        # TODO: deal with head_mask
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
         tokenizer = self.tokenizer
@@ -2230,9 +2228,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("lm_logits", et))
 
         second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
-        second_block_cls = second_block_hidden[:, :self.funnel.cls_tokens]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
-        third_block_cls = third_block_hidden[:, :self.funnel.cls_tokens]
         loss_contrastive = 0.0
         contrastive_block_matrix = None
         contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
@@ -2389,7 +2385,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
-        # TODO: Store losses here
 
         self.loss_hist["electra_loss"].append(float(loss))
         self.loss_hist["lm_loss"].append(float(masked_lm_loss))
@@ -2491,6 +2486,8 @@ if __name__ == "__main__":
                     help="Device")
     ap.add_argument("--config", type=str, default='md_config',
                     help="Config")
+    ap.add_argument("--texts", type=str, default='large_texts',
+                    help="Text Set")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--sdconv", type=str2bool, default=False)
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -2513,6 +2510,7 @@ if __name__ == "__main__":
     batch_size = args["batch_size"]
     length = args["length"]
     lr = args["lr"]
+    texts = args["texts"]
     config = dict(md_config=md_config, sm_config=sm_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
@@ -2523,7 +2521,7 @@ if __name__ == "__main__":
     medium_max_length = 512
     large_max_length = 1024
     very_large_max_length = 1536
-    texts = very_large_texts
+    texts = dict(large_texts=large_texts, very_small_texts=very_small_texts, small_texts=small_texts)[texts]
 
     tokenizer = get_tokenizer("bert")
     config.tokenizer_length = length
