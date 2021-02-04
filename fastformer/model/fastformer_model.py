@@ -2486,7 +2486,7 @@ if __name__ == "__main__":
                     help="Device")
     ap.add_argument("--config", type=str, default='md_config',
                     help="Config")
-    ap.add_argument("--texts", type=str, default='large_texts',
+    ap.add_argument("--texts", type=str, default='small_texts',
                     help="Text Set")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--sdconv", type=str2bool, default=False)
@@ -2495,7 +2495,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=4)
-    ap.add_argument("--length", type=int, default=1024)
+    ap.add_argument("--length", type=int, default=512)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
