@@ -80,6 +80,7 @@ def train(local_rank, args):
 
     pass
 
+
 if __name__ == "__main__":
     args = training_args()
 
