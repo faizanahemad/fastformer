@@ -2763,8 +2763,8 @@ if __name__ == "__main__":
         from pprint import pprint
         if hasattr(model, "highway_cls_ar_sentence_outputs"):
             del model.accuracy_hist["highway_cls_ar_sentence_outputs"]
-        pprint({k: v[-10:] for k, v in model.accuracy_hist.items()})
-        pprint({k: v[:10] for k, v in model.accuracy_hist.items()})
+        pprint({k: v[-5:] for k, v in model.accuracy_hist.items()})
+        pprint({k: v[:5] for k, v in model.accuracy_hist.items()})
         if hasattr(model, "timing_hist"):
             pprint(model.timing_hist[-1])
             import pandas as pd
