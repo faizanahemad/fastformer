@@ -2356,7 +2356,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append((tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())))
             highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
-            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().numpy().mean()))
+            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().cpu().numpy().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
         et = time.time() - st
@@ -2374,9 +2374,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
         labels = (labels == predictions).float()
         mlm_positions = input_ids == self.tokenizer.mask_token_id
-        self.accuracy_hist["lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[active_loss].float().numpy().mean())})
+        self.accuracy_hist["lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[active_loss].float().cpu().numpy().mean())})
         mlm_positions = mlm_positions[:, 1:]
-        self.accuracy_hist["masked_lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[mlm_positions].float().numpy().mean())})
+        self.accuracy_hist["masked_lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[mlm_positions].float().cpu().numpy().mean())})
 
         et = time.time() - st
         timing_dict.append(("lm_accuracy_loss", et))
