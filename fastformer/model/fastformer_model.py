@@ -2264,7 +2264,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             n_anchors = len(anchors)
             n_positives = len(positives)
             assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
-            assert (n_positives / n_anchors) == n_positives_per_anchor
+            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
             contrastive_block_hidden = torch.stack(anchors + positives)
             contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
             contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
