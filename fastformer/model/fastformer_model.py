@@ -2060,27 +2060,31 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if contrastive_anchors is not None:
             contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
 
-            contrastive_positives = (torch.tensor(contrastive_positives) / self.config.stride ** 2).type(torch.int64).tolist()
-            contrastive_anchors = (torch.tensor(contrastive_anchors) / self.config.stride ** 2).type(torch.int64).tolist()
+            dpow = self.config.stride ** 2
+            contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
+            contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
 
-            n_positives_per_anchor = len(contrastive_positives[0][0])
             anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors)
                        for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
                                      anchors_cp]
-
-            contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
+            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
+            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
 
             positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
             n_anchors = len(anchors)
             n_positives = len(positives)
-            assert n_positives % n_anchors == 0
-            assert (n_positives / n_anchors) == n_positives_per_anchor
-            contrastive_block_hidden = torch.stack(anchors + positives)
-            contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
-            contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
-            contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
+            assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
+            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
+            if n_positives == 0 or n_anchors == 0:
+                pass
+            else:
+                contrastive_block_hidden = torch.stack(anchors + positives)
+                contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
+                contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
+                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
             contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
             if reverse_loss:
                 contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
@@ -2265,30 +2269,33 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             n_positives = len(positives)
             assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
             assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
-            contrastive_block_hidden = torch.stack(anchors + positives)
-            contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
-            contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
-            contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-            contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-            labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
+            if n_positives == 0 or n_anchors == 0:
+                pass
+            else:
+                contrastive_block_hidden = torch.stack(anchors + positives)
+                contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
+                contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
+                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
+                labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
 
-            loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
-            self.accuracy_hist["contrastive"].append((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
-            mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-            mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-            for i in range(n_positives_per_anchor):
-                mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = 0
-            vertical_lc = 0.0
-            for i in range(n_positives_per_anchor):
+                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+                self.accuracy_hist["contrastive"].append((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                for i in range(n_positives_per_anchor):
+                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = 0
+                vertical_lc = 0.0
+                for i in range(n_positives_per_anchor):
 
-                labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
-                mask_c = mask2.clone()
-                mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = 1
-                mask_c = mask1 + mask_c
-                l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
-                vertical_lc += l2
-            vertical_lc /= n_positives_per_anchor
-            loss_contrastive += vertical_lc
+                    labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
+                    mask_c = mask2.clone()
+                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = 1
+                    mask_c = mask1 + mask_c
+                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                    vertical_lc += l2
+                vertical_lc /= n_positives_per_anchor
+                loss_contrastive += vertical_lc
         loss_contrastive = self.contrastive_w * loss_contrastive
         self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
         et = time.time() - st
