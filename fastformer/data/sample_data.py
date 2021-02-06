@@ -118,8 +118,12 @@ large_texts = [
     t4
 ]
 
+
+
 very_small_texts = ["The quick brown fox jumps over the lazy dog."] * 4
 small_texts = [" ".join(t1.split()[:256]) for _ in range(4)]
+hetero_texts = [a for x in zip(very_small_texts, large_texts) for a in x]
+
 
 class SmallTextDataset(Dataset):
     def __init__(self, texts):

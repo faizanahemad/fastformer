@@ -316,7 +316,7 @@ class TokenizerDataset(Dataset):
             anchor_min_start = anchor_end + max_anchor_len
             anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
         anchors = anchors if min_anchor_len < max_anchor_len else []
-        positives = positives if min_anchor_len < max_anchor_len else []
+        positives = positives if min_anchor_len < max_anchor_len else [[]]
 
         length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
@@ -427,12 +427,14 @@ def get_collate_fn(num_cls, padding_index):
 
         # print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
         anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
-        positives = [s["positives"] if "positives" in s else [] for s in samples]
+        positives = [s["positives"] if "positives" in s else [[]] for s in samples]
+        for s in samples:
+            _ = s.pop("anchors", None)
+            _ = s.pop("positives", None)
+
         samples = default_collate(samples)
         samples["contrastive_anchors"] = anchors
         samples["contrastive_positives"] = positives
-        del samples["anchors"]
-        del samples["positives"]
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.

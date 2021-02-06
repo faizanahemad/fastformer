@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 import numpy as np
+import math
 import random
 import torch
 from torch import nn
@@ -328,8 +329,14 @@ def pool_tensor(tensor, cls_size, mode="mean", stride=2):
     tensor = tensor[:, cls_size:]
     tensor = pool_tensor_basic(tensor, mode, stride)
 
-    tensor = torch.cat([cls_tokens, tensor.squeeze(1)], dim=1)
-    tensor = tensor[:, :2 * (tensor.size(1) // 2)]
+    tensor = torch.cat([cls_tokens, tensor], dim=1)
+    ts = tensor.size()
+    padding_extra = 8 * math.ceil(ts[1] / 8) - ts[1]
+    # https://pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.pad
+    if len(ts) == 3:
+        tensor = nn.functional.pad(tensor, (0, 0, 0, padding_extra), mode="constant")
+    elif len(ts) == 2:
+        tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
     return tensor
 
 
@@ -1906,6 +1913,14 @@ def KL(input, target, reduction="sum"):
     return loss
 
 
+def recursive_op(arr, op):
+    if isinstance(arr, (list, tuple)):
+        arr = list(map(lambda x: recursive_op(x, op), arr))
+    else:
+        arr = op(arr)
+    return arr
+
+
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
@@ -2235,14 +2250,15 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if contrastive_anchors is not None:
             contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
 
-            contrastive_positives = (torch.tensor(contrastive_positives) / self.config.stride ** 2).type(torch.int64).tolist()
-            contrastive_anchors = (torch.tensor(contrastive_anchors) / self.config.stride ** 2).type(torch.int64).tolist()
+            dpow = self.config.stride ** 2
+            contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
+            contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
 
-            n_positives_per_anchor = len(contrastive_positives[0][0])
             anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
-
-            contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
+            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
+            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
 
             positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
             n_anchors = len(anchors)
@@ -2486,7 +2502,7 @@ if __name__ == "__main__":
                     help="Device")
     ap.add_argument("--config", type=str, default='md_config',
                     help="Config")
-    ap.add_argument("--texts", type=str, default='small_texts',
+    ap.add_argument("--texts", type=str, default='hetero_texts',
                     help="Text Set")
     ap.add_argument("--profile", type=str2bool, default=False)
     ap.add_argument("--sdconv", type=str2bool, default=False)
@@ -2521,7 +2537,7 @@ if __name__ == "__main__":
     medium_max_length = 512
     large_max_length = 1024
     very_large_max_length = 1536
-    texts = dict(large_texts=large_texts, very_small_texts=very_small_texts, small_texts=small_texts)[texts]
+    texts = dict(large_texts=large_texts, very_small_texts=very_small_texts, small_texts=small_texts, hetero_texts=hetero_texts)[texts]
 
     tokenizer = get_tokenizer("bert")
     config.tokenizer_length = length
