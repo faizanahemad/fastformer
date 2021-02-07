@@ -1953,7 +1953,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.ar_fc = nn.Sequential(Conv1d(self.config.block_channel_size[1], self.config.block_channel_size[0], kernel_size=1, groups=8),
+            self.ar_fc = nn.Sequential(Conv1d(self.config.block_channel_size[2], self.config.block_channel_size[0], kernel_size=1, groups=8),
                                        nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
             self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
 
@@ -2333,7 +2333,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("sentence_order_loss", et))
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None:
-            highway_block_hidden = self.ar_fc(second_block_hidden[:, :self.cls_tokens + 1])
+            highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1])
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
@@ -2346,7 +2346,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
-            highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, 8:, :self.config.vocab_size]
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[: 8:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
