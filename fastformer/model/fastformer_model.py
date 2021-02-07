@@ -2423,9 +2423,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("aitm_alum_end", et))
 
         loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
-        loss_dict = dict(masked_lm_loss=masked_lm_loss.detach().item(), sentence_order_loss=sentence_order_loss.detach().item(), answering_lm_loss=answering_lm_loss.detach().item(),
-                         highway_cls_ar_loss=highway_cls_ar_loss.detach().item(), cls_orthogonal_loss=cls_orthogonal_loss.detach().item(),
-                         loss_contrastive=loss_contrastive.detach().item(), adv_loss=adv_loss.detach().item(), electra_loss=electra_loss.detach().item(), loss=loss.detach().item())
+        loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
+                         highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
+                         loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
