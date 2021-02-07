@@ -2339,16 +2339,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            highway_cls_ar_inputs_embeds_non_positional, _ = self.funnel.embeddings(highway_cls_ar_input_ids, None, None,
-                                                                                    char_ids=None, char_offsets=None, use_position_embeddings=False)
             if self.config.num_highway_cls_tokens > 0:
                 highway_cls_ar__attention_mask = torch.cat(
                     [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
                      highway_cls_ar__attention_mask], dim=1)
 
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_cls_ar_inputs_embeds_non_positional, highway_cls_ar_inputs_embeds_non_positional, highway_cls_ar__attention_mask,
-                                                         highway_cls_ar__attention_mask)
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
