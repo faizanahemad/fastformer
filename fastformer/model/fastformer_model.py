@@ -2328,7 +2328,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
             self.loss_hist["sent_order_loss"].append(float(sent_order_loss))
             sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
-            self.accuracy_hist["sent_order"].append(float(sent_order_out.sum() / len(sent_order_out.view(-1))))
+            self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].mean().detach().cpu())})
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
@@ -2351,7 +2351,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
-            self.accuracy_hist["highway_cls_ar_sentence_outputs"].append((tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())))
+            self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
             highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
             self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().cpu().numpy().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
