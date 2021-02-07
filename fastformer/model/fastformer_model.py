@@ -2318,8 +2318,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("cls_orthogonal_loss", et))
         sentence_order_loss = 0.0
-        word_order_loss = 0.0
-        gap_sentence_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None and self.training:
@@ -2406,13 +2404,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
 
+        electra_loss = loss
         self.loss_hist["electra_loss"].append(float(loss))
         self.loss_hist["lm_loss"].append(float(masked_lm_loss))
         self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
-        self.loss_hist["word_order_loss"].append(float(word_order_loss))
-        self.loss_hist["gap_sentence_loss"].append(float(gap_sentence_loss))
 
         et = time.time() - st
+        adv_loss = torch.tensor(0.0)
         timing_dict.append(("aitm_alum_start", et))
         if (self.aitm or self.alum) and self.training:
             adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits,
@@ -2423,8 +2421,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("aitm_alum_end", et))
 
-        loss = loss + masked_lm_loss + sentence_order_loss + word_order_loss + gap_sentence_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
-
+        loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
+        loss_dict = dict(masked_lm_loss=masked_lm_loss.detach().item(), sentence_order_loss=sentence_order_loss.detach().item(), answering_lm_loss=answering_lm_loss.detach().item(),
+                         highway_cls_ar_loss=highway_cls_ar_loss.detach().item(), cls_orthogonal_loss=cls_orthogonal_loss.detach().item(),
+                         loss_contrastive=loss_contrastive.detach().item(), adv_loss=adv_loss.detach().item(), electra_loss=electra_loss.detach().item(), loss=loss.detach().item())
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
@@ -2434,9 +2434,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
-        results = dict(loss=loss,
-                       decoder_output=decoder_outputs[0], decoder_cls=cls_tokens,
-                       encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
+        results = dict(loss=loss, loss_dict=loss_dict)
+                       # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results
 
 
