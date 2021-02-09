@@ -2352,7 +2352,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
-            highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids == self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids == self.pad_token_id].reshape(-1)
+            highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
             self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
