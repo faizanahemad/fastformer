@@ -2562,7 +2562,8 @@ if __name__ == "__main__":
     assert config.tokenizer_length % 16 == 0  # Due to our collate fn
     dataset = TokenizerDataset(config, tokenizer, char_to_id,
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length),
-                               sentence_jumble_proba=((1024, 0.0),), word_noise_proba=((1024, 0.0),), max_jumbling_span_length=2,
+                               # sentence_jumble_proba=((1024, 0.1),), word_noise_proba=((1024, 0.1),),
+                               max_jumbling_span_length=2,
                                dataset=dataset)
     dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
     pt_batch = next(iter(dataloader))
