@@ -154,6 +154,7 @@ def word_level_noising(text, tokenizer, probability=0.15):
     skip_next_word = False
     for idx, token in enumerate(tokens):
         if skip_next_word:
+            skip_next_word = False
             continue
         if token != mask_token and token != pad_token:
             prob = random.random()
@@ -173,7 +174,8 @@ def word_level_noising(text, tokenizer, probability=0.15):
 
 
         new_tokens.append(token)
-    return " ".join(new_tokens)
+    new_text = " ".join(new_tokens)
+    return new_text
 
 
 def span_based_whole_word_masking(text: str, tokenizer, probability: float, vocab: list, max_span_length: int = 3) -> str:
