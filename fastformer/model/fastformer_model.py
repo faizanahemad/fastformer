@@ -2352,8 +2352,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
             self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
-            highway_cls_ar_out = highway_cls_ar_out == highway_cls_ar_input_ids
-            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.float().cpu().numpy().mean()))
+            highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids == self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids == self.pad_token_id].reshape(-1)
+            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
             self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
 
         et = time.time() - st
@@ -2516,7 +2516,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=4)
-    ap.add_argument("--length", type=int, default=512)
+    ap.add_argument("--length", type=int, default=1024)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
