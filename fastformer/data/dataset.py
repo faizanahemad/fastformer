@@ -224,9 +224,10 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.75)),
-                 word_mask_in_pet=False, word_noise_in_pet=False,
-                 word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
+                 word_jumble_proba=((0, 0.0), (256, 0.1), (512, 0.15), (1024, 0.2)),
+                 word_mask_in_pet=False, word_noise_in_pet=False, sentence_jumble_in_pet=False, word_jumble_in_pet=False,
+                 word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
+                 word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.15)),
                  max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.min_segments = 2
@@ -240,13 +241,15 @@ class TokenizerDataset(Dataset):
         self.max_span_length = max_span_length
         self.word_noise_proba = word_noise_proba
         self.training = True
-        self.sentence_jumble_proba = sentence_jumble_proba
         self.wp_l, self.wp_p = zip(*word_mask_proba)
         self.word_mask_in_pet = word_mask_in_pet
         self.word_noise_in_pet = word_noise_in_pet
         self.wn_l, self.wn_p = zip(*word_noise_proba)
+        self.wj_l, self.wj_p = zip(*word_jumble_proba)
         self.sj_l, self.sj_p = zip(*sentence_jumble_proba)
         self.max_jumbling_span_length = max_jumbling_span_length
+        self.sentence_jumble_in_pet = sentence_jumble_in_pet
+        self.word_jumble_in_pet = word_jumble_in_pet
         self.n_anchors = n_anchors
         self.n_positives = n_positives
 
@@ -323,13 +326,14 @@ class TokenizerDataset(Dataset):
         wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
         wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
         sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
+        wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
 
         if self.training:
             num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
             assert len(segments) == num_segments
-            if random.random() < sj and n_queries == 0 and count_pad_tokens <= 1:
+            if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1:
                 seg_idxs = random.sample(range(num_segments), num_segments)
             else:
                 seg_idxs = list(range(num_segments))
@@ -339,27 +343,11 @@ class TokenizerDataset(Dataset):
                            highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
             segments = segments[seg_idxs]
-            word_jumble_segments = tokenizer.pad_token
-            iters = 0
-            word_jumble_seg_idxs = -1
-            while word_jumble_segments == tokenizer.pad_token and iters <= 8 and count_pad_tokens <= 1:
-                iters += 1
-                if word_jumble_segments == tokenizer.pad_token:
-                    word_jumble_seg_idxs = random.sample(list(set(list(range(num_segments)))), 1)[0]
-                    word_jumble_segments = segments[word_jumble_seg_idxs]
 
             # TODO: Gap Sentence to be sentence specific not segment specific and have only 3 segments? Or 3 mode + 7 mode so that for small text also we can use sentence jumble
             # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.
             # TODO: remove if blocks of GSP and word ordering. and also the embedding , have only full ar.
             # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
-            if n_queries == 0 and count_pad_tokens <= 1 and self.cls_tokens > 2:
-                seq = segments[word_jumble_seg_idxs].split()
-                wj_seq1, wj_seq2 = seq[:len(seq)//4], seq[len(seq)//4:]
-                wj_seq2 = [w for i in range(len(wj_seq2))[::self.max_jumbling_span_length] for w in random.sample(wj_seq2[i:i+self.max_jumbling_span_length], len(wj_seq2[i:i+self.max_jumbling_span_length]))]
-                seq = wj_seq1 + wj_seq2
-                segments[word_jumble_seg_idxs] = " ".join(seq).strip()
-            else:
-                word_jumble_seg_idxs = -1
             mlm_text = " ".join(segments)  # Training Labels for MLM
             labels_pet_text = ""
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
@@ -385,10 +373,19 @@ class TokenizerDataset(Dataset):
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
             for idx, seq in enumerate(segments):
-                if idx == word_jumble_seg_idxs:
-                    continue
                 if n_queries == 0 or self.word_mask_in_pet:
                     seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)
+                if n_queries == 0 or self.word_jumble_in_pet:
+                    seq = seq.split()
+                    new_seq = []
+                    for i in range(len(seq))[::self.max_jumbling_span_length]:
+                        small_seq = seq[i:i+self.max_jumbling_span_length]
+                        if random.random() <= wj and self.tokenizer.mask_token not in small_seq:
+                            new_seq.extend(random.sample(small_seq, len(small_seq)))
+                        else:
+                            new_seq.extend(small_seq)
+                    # seq = [w for i in range(len(seq))[::self.max_jumbling_span_length] for w in (random.sample(seq[i:i+self.max_jumbling_span_length], len(seq[i: i+self.max_jumbling_span_length])) if random.random() <= wj and self.tokenizer.mask_token not in seq[i:i+self.max_jumbling_span_length] else seq[i:i+self.max_jumbling_span_length])]
+                    seq = " ".join(new_seq).strip()
                 if n_queries == 0 or self.word_noise_in_pet:
                     seq = word_level_noising(seq, self.tokenizer, wn)
                 segments[idx] = seq

@@ -814,7 +814,7 @@ class ChannelCompress(nn.Module):
 
 class MultiheadAttention(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
-                 last_layer_index=None):
+                 last_layer_index=None, force_no_sdconv=False, force_no_rnn=False):
         super().__init__()
         if last_layer_index is None:
             last_layer_index = layer_index
@@ -825,7 +825,7 @@ class MultiheadAttention(nn.Module):
         total_heads = sum(all_head)
         assert d_model % 16 == 0
         remaining_d_model = d_model
-        self.sdconv = config.sdconv[block_index]
+        self.sdconv = config.sdconv[block_index] and not force_no_sdconv
         self.full_channel_separation = config.full_channel_separation[block_index]
         if self.sdconv:
             self.n_conv_head = all_head[1]
@@ -836,7 +836,7 @@ class MultiheadAttention(nn.Module):
                 self.conv_dims = d_model
             self.sdconv = SDConv(config, self.conv_dims, self.n_conv_head, d_head, config.sdconv_kernel_size[block_index])
 
-        self.short_rnn = config.short_rnn[block_index]
+        self.short_rnn = config.short_rnn[block_index] and not force_no_rnn
         if self.short_rnn:
             self.n_rnn_head = all_head[2]
             if self.full_channel_separation:
@@ -1439,11 +1439,10 @@ class TransformerCrossAttentionDecoder(nn.Module):
         total_heads = sum(all_head)
         config.n_head[block_index] = (total_heads,) + config.n_head[block_index][1:]
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0)
-        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index])
+        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
+        self.self_attn_lin = nn.Sequential(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index]), nn.GELU())
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
-        self.cross_attn = MultiheadAttention(config, block_index, False, True, False, 0)
-        self.ffn = PositionwiseFFN(config, block_index, False, False)
+        self.cross_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
 
     def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
         bs, seq_len, dim = query.shape
@@ -1459,8 +1458,10 @@ class TransformerCrossAttentionDecoder(nn.Module):
         (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
         query = self.self_attn_ln(self.self_attn_lin(query))
         query = query_temp + query
+        query_temp = query
         (query,) = self.cross_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
-        _, query = self.ffn(query)
+        query = self.self_attn_ln(self.self_attn_lin(query))
+        query = query_temp + query
         return query
 
 
