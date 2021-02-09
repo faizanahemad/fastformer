@@ -90,7 +90,7 @@ class FastFormerConfig(PretrainedConfig):
             block_channel_size=[576, 768, 960],  # [512, 768, 1024]
             block_repeats=True,
             separate_compressiion_layer=False,
-            num_decoder_layers=2,
+            num_decoder_layers=1,
             n_head=[(8,), (12,), (12,)],  # 8
             use_cuda_conv=True,
             d_head=[72, 64, 80],  # 32
