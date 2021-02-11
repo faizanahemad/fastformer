@@ -2747,7 +2747,7 @@ if __name__ == "__main__":
         print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
         print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=100))
     else:
-        _ = [run() for _ in range(1)]
+        _ = [run() for _ in range(10)]
         times = []
         for _ in trange(epochs):
             st = time.time()
