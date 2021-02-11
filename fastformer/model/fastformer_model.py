@@ -1966,6 +1966,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = defaultdict(list)
+        self.reccord_loss = False
+        self.record_accuracy = False
         self.timing_hist = list()
         self.aitm = aitm
         self.alum = alum
@@ -2086,9 +2088,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_block_hidden = contrastive_block_hidden / contrastive_block_hidden.norm(2, -1, True)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-            contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
-            if reverse_loss:
-                contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
+
+                contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
+                if reverse_loss:
+                    contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
 
         answering_lm_loss_kl = 0.0
         if labels_pet_input_ids is not None:
@@ -2124,12 +2127,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                                                                                                    contrastive_anchors, contrastive_positives, contrastive_logits)
 
             adv_loss = electra_pre_kl + sent_order_pre_kl + lm_pre_kl + answering_lm_pre_kl + contrastive_pre_kl
-            self.loss_hist["electra_pre_kl"].append(float(electra_pre_kl))
-            self.loss_hist["lm_pre_kl"].append(float(lm_pre_kl))
-            self.loss_hist["sent_order_pre_kl"].append(float(sent_order_pre_kl))
-            self.loss_hist["adv_loss_pre_kl"].append(float(adv_loss))
-            self.loss_hist["answering_lm_pre_kl"].append(float(answering_lm_pre_kl))
-            self.loss_hist["contrastive_pre_kl"].append(float(contrastive_pre_kl))
             delta_grad, = torch.autograd.grad(adv_loss, noise, only_inputs=True)
             norm = delta_grad.norm()
             if (torch.isnan(norm) or torch.isinf(norm)):
@@ -2150,13 +2147,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                                                                                                     contrastive_anchors, contrastive_positives,
                                                                                                                     contrastive_logits,
                                                                                                                     reverse_loss=True)
-        self.loss_hist["electra_post_kl"].append(float(electra_post_kl))
-        self.loss_hist["lm_post_kl"].append(float(lm_post_kl))
-        self.loss_hist["sent_order_post_kl"].append(float(sent_order_post_kl))
-        self.loss_hist["answering_lm_post_kl"].append(float(answering_lm_post_kl))
-        self.loss_hist["contrastive_post_kl"].append(float(contrastive_post_kl))
         adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2) + answering_lm_post_kl + contrastive_post_kl
-        self.loss_hist["adv_loss_post_kl"].append(float(adv_loss))
+        if self.reccord_loss:
+            self.loss_hist["electra_kl"].append(float(electra_post_kl))
+            self.loss_hist["lm_kl"].append(float(lm_post_kl))
+            self.loss_hist["sentence_order_kl"].append(float(sent_order_post_kl))
+            self.loss_hist["answering_lm_kl"].append(float(answering_lm_post_kl))
+            self.loss_hist["contrastive_kl"].append(float(contrastive_post_kl))
+            self.loss_hist["adv_loss_kl"].append(float(adv_loss))
         return self.adv_w * adv_loss
 
     def get_emb(self, embedding_generation_params):
@@ -2236,9 +2234,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             answering_predictions = answering_logits.argmax(dim=-1)
             loss_fct = self.loss_ce
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
-            self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
-            answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
-            self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
+            if self.record_accuracy:
+                answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
+                self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
@@ -2247,12 +2245,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
-        second_block_hidden = encoder_outputs[2][sum(self.config.block_sizes[0:2])]
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
         loss_contrastive = 0.0
         contrastive_block_matrix = None
-        contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
+        contrastive_anchors_copy = contrastive_positives_copy = None
         if contrastive_anchors is not None:
+            contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
             contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
 
             dpow = self.config.stride ** 2
@@ -2281,7 +2279,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
 
                 loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
-                self.accuracy_hist["contrastive"].append((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                if self.record_accuracy:
+                    self.accuracy_hist["contrastive"].append((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 for i in range(n_positives_per_anchor):
@@ -2297,8 +2296,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     vertical_lc += l2
                 vertical_lc /= n_positives_per_anchor
                 loss_contrastive += vertical_lc
-        loss_contrastive = self.contrastive_w * loss_contrastive
-        self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
+            loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))
         cls_orthogonal_loss = 0.0
@@ -2306,14 +2304,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             inputs_embeds_cls = inputs_embeds_cls/inputs_embeds_cls.norm(2, -1, True)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls * self.diag_mat) ** 2).mean()
-            self.loss_hist["input_cls_orthogonal_loss"].append(float(input_cls_orthogonal_loss))
             cls_orthogonal_loss += input_cls_orthogonal_loss
 
         if self.first_block_cls_orthogonal_w > 0 and self.training:
             first_block_cls = first_block_cls/first_block_cls.norm(2, -1, True)
             first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
             first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * ((first_block_cls * self.diag_mat) ** 2).mean()
-            self.loss_hist["first_block_cls_orthogonal_loss"].append(float(first_block_cls_orthogonal_loss))
             cls_orthogonal_loss += first_block_cls_orthogonal_loss
 
         et = time.time() - st
@@ -2325,36 +2321,30 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
-            self.loss_hist["sent_order_loss"].append(float(sent_order_loss))
-            sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
-            self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
+            if self.record_accuracy:
+                sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
+                self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
-        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None:
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1])
-
-        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training:
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            if self.config.num_highway_cls_tokens > 0:
-                highway_cls_ar__attention_mask = torch.cat(
-                    [torch.ones(highway_cls_ar__attention_mask.shape[0], self.config.num_highway_cls_tokens, device=highway_cls_ar__attention_mask.device),
-                     highway_cls_ar__attention_mask], dim=1)
-
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, (self.funnel.cls_tokens - 1):]
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
 
-            highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, (self.funnel.cls_tokens - 1):])
-            highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, 8:, :self.config.vocab_size]
+            highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, 8:])
+            highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 8:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
-            highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
-            self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
-            highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
-            self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
-            self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
+            if self.record_accuracy:
+                highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
+                self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
+                highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
+                self.accuracy_hist["highway_cls_ar_sentence"].append(float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
@@ -2368,12 +2358,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_prediction_logits = prediction_logits[active_loss]
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits.reshape(-1, self.config.vocab_size), active_labels.reshape(-1))
         predictions = prediction_logits.argmax(dim=-1)
-        self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
         labels = (labels == predictions).float()
-        mlm_positions = input_ids == self.tokenizer.mask_token_id
-        self.accuracy_hist["lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[active_loss].float().cpu().numpy().mean())})
-        mlm_positions = mlm_positions[:, 1:]
-        self.accuracy_hist["masked_lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[mlm_positions].float().cpu().numpy().mean())})
+        if self.record_accuracy:
+            self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
+            mlm_positions = input_ids == self.tokenizer.mask_token_id
+            self.accuracy_hist["lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[active_loss].float().cpu().numpy().mean())})
+            mlm_positions = mlm_positions[:, 1:]
+            self.accuracy_hist["masked_lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[mlm_positions].float().cpu().numpy().mean())})
 
         et = time.time() - st
         timing_dict.append(("lm_accuracy_loss", et))
@@ -2401,15 +2392,22 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_logits = logits.view(-1, input_shape[1] - 1)[active_loss]
         active_labels = labels[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, active_labels)
-        self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
+        if self.record_accuracy:
+            self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
 
         electra_loss = loss
-        self.loss_hist["electra_loss"].append(float(loss))
-        self.loss_hist["lm_loss"].append(float(masked_lm_loss))
-        self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
+        if self.reccord_loss:
+            self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
+            self.loss_hist["cls_orthogonal_loss"].append(float(cls_orthogonal_loss))
+            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
+            self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
+            self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
+            self.loss_hist["electra_loss"].append(float(loss))
+            self.loss_hist["lm_loss"].append(float(masked_lm_loss))
+            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
 
         et = time.time() - st
         adv_loss = torch.tensor(0.0)
