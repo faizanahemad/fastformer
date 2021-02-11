@@ -2241,12 +2241,25 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1])
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, (self.funnel.cls_tokens - 1):]
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, encoder_outputs[-1][2][:, :highway_block_hidden.size(1)])
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
+            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
+            hshape = highway_cls_ar_inputs_embeds.size()
+            hshape2 = 32 * (hshape[1] // 32)
+            key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
+            if hshape2 > 128:
+                highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
+                highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds.reshape(-1, hshape2 // 4, hshape[2])
+                highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
+                highway_cls_ar__attention_mask = highway_cls_ar__attention_mask.reshape(-1, hshape2 // 4)
+                highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
+                key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
+
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, 8:])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1].reshape(-1, hshape2 // 4)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 8:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             if self.record_accuracy:
@@ -2263,8 +2276,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss].reshape(-1)
         active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
-        predictions = active_prediction_logits.argmax(dim=-1)
-        labels = (active_labels == predictions).float()
+        labels = (active_labels == active_prediction_logits.argmax(dim=-1)).float()
         if self.record_accuracy:
             predictions = prediction_logits.argmax(dim=-1)
             self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
@@ -2338,7 +2350,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         # TODO: CLS correction needed
         results = dict(loss=loss, loss_dict=loss_dict)
-                       # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
+        # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results
 
 
