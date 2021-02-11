@@ -2341,11 +2341,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
-        active_loss = tokenizer_attn_mask == 1
+        active_loss = tokenizer_attn_mask.bool()
 
         loss_fct = self.loss_ce  # -100 index = padding token
-        active_labels = labels[tokenizer_attn_mask].reshape(-1)
-        active_prediction_logits = prediction_logits[tokenizer_attn_mask].reshape(-1, self.config.vocab_size)
+        active_labels = labels[active_loss].reshape(-1)
+        active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
         predictions = active_prediction_logits.argmax(dim=-1)
         labels = (active_labels == predictions).float()
@@ -2377,7 +2377,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("electra_discriminator_logits", et))
 
-        active_logits = logits.view(-1, input_shape[1])[tokenizer_attn_mask]
+        active_logits = logits.view(-1, input_shape[1])[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if self.record_accuracy:
             self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
