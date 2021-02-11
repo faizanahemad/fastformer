@@ -2381,9 +2381,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("decoder_outputs", et))
 
-        cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
-        decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
-        discriminator_sequence_output = decoder_outputs[0]
+        # cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
+        # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
+        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens + 1:]
         logits = self.discriminator_predictions(discriminator_sequence_output)
 
         et = time.time() - st
