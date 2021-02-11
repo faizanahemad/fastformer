@@ -1823,90 +1823,6 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 from abc import ABC, abstractmethod
 
 
-class FastFormerForELECTRAPretraining(FastFormerPreTrainedModel):
-    def __init__(self, config_generator: FastFormerConfig, config_discriminator: FastFormerConfig,
-                 generator: FastFormerModel = None, discriminator: FastFormerModel=None, tokenizer = None,
-                 electra_loss_w=1.0, lm_loss_w=1.0,
-                 alum=False):
-        super().__init__(config)
-        assert config_discriminator.embedding_size == config_generator.embedding_size
-        assert config_discriminator.vocab_size == config_generator.vocab_size
-        assert config_discriminator.block_channel_size[0] == config_generator.block_channel_size[0]
-        self.tokenizer = tokenizer
-        self.config = config_discriminator
-        self.funnel: FastFormerModel = FastFormerModel(config_discriminator) if discriminator is None else discriminator
-        self.lm_head = nn.Linear(config_generator.embedding_size, config.vocab_size)
-        self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.loss_ce = CrossEntropyLoss(ignore_index=config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0)
-        self.generator = FastFormerModel(config_generator) if generator is None else generator
-        assert self.generator.config.embedding_size == self.funnel.config.embedding_size
-        if self.generator.config.embedding_size != self.generator.config.block_channel_size[0]:
-            self.lm_dim_match = nn.Linear(self.generator.config.block_channel_size[0], self.generator.config.embedding_size)
-        self.funnel.embeddings = self.generator.embeddings
-        self.lm_loss_w = lm_loss_w
-        self.electra_loss_w = electra_loss_w
-        self.loss_hist = defaultdict(list)
-        self.accuracy_hist = defaultdict(list)
-        self.init_weights()
-
-    def get_input_embeddings(self):
-        return self.generator.get_input_embeddings()
-
-    def get_output_embeddings(self):
-        return self.lm_head
-
-    def forward(self, input_ids=None,
-                attention_mask=None,
-                token_type_ids=None,
-                labels=None, char_ids=None, char_offsets=None,):
-
-        # TODO: can do forward pass of embedding layer once instead of twice?
-        # TODO: can share the full 1st block instead of just embedding? Is this similar to fused ELECTRA
-
-        outputs = self.generator(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            char_ids=char_ids, char_offsets=char_offsets,
-            output_attentions=False,
-            output_hidden_states=False,
-        )
-        input_shape = input_ids.size()
-
-        last_hidden_state = outputs[0]
-        if self.lm_dim_match:
-            last_hidden_state = self.lm_dim_match(last_hidden_state)
-        prediction_logits = self.lm_head(last_hidden_state)
-        loss_fct = self.loss_ce
-        masked_lm_loss = self.lm_loss_w * loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
-        predictions = prediction_logits.argmax(dim=-1)
-        labels = (labels == predictions).float()
-        mlm_positions = input_ids == self.tokenizer.mask_token_id
-        self.accuracy_hist["lm"].append(float(labels[active_loss].sum() / len(labels[active_loss].view(-1))))
-        self.accuracy_hist["masked_lm"].append(float(labels[mlm_positions].sum() / len(labels[mlm_positions].view(-1))))
-
-        outputs = self.funnel(input_ids=predictions, attention_mask=attention_mask, token_type_ids=token_type_ids, output_attentions=False, output_hidden_states=True,)
-        discriminator_sequence_output = outputs[0]
-        logits = self.discriminator_predictions(discriminator_sequence_output)
-
-        active_loss = attention_mask.view(-1, input_shape[1]) == 1
-        loss_fct = nn.BCEWithLogitsLoss()
-        active_logits = logits.view(-1, input_shape[1])[active_loss]
-        active_labels = labels[active_loss]
-        loss = self.electra_loss_w * loss_fct(active_logits, active_labels)
-
-        self.accuracy_hist["electra"].append(torch.mean((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).item())
-        self.loss_hist["electra_loss"].append(float(loss))
-        self.loss_hist["masked_lm_loss"].append(float(masked_lm_loss))
-
-        results = dict(loss=loss + masked_lm_loss,
-                       decoder_output=outputs[0], decoder_cls=outputs[-1],
-                       encoder_output=outputs[1], encoder_cls=outputs[-2],
-                       encoder_hidden_states=outputs[2])
-        return results
-
-
 def KL(input, target, reduction="sum"):
     input = input.float()
     target = target.float()
@@ -2377,7 +2293,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("electra_discriminator_logits", et))
 
-        active_logits = logits.view(-1, input_shape[1])[active_loss]
+        active_logits = logits[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if self.record_accuracy:
             self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
