@@ -2020,7 +2020,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_hidden_states=True,
         )
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
-        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, self.cls_tokens:])
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
         if self.adv_lm_w > 0:
@@ -2053,7 +2053,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
-        discriminator_sequence_output = decoder_outputs[0][:, (self.cls_tokens + 1):]
+        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:]
         electra_logits = self.discriminator_predictions(discriminator_sequence_output)
         electra_pre_kl = KL(electra_logits, electra_predictions.detach(), reduction="batchmean")
         if reverse_loss:
@@ -2233,7 +2233,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
-        first_block_hidden = self.lm_dim_match(first_block_hidden[:, (self.cls_tokens + 1):])
+        first_block_hidden = self.lm_dim_match(first_block_hidden[:, self.cls_tokens:])
         prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
@@ -2341,23 +2341,18 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
-        tokenizer_attn_mask = tokenizer_attn_mask[:, 1:]
-        active_loss = tokenizer_attn_mask.view(-1, input_shape[1] - 1) == 1
-        assert labels is not None
+        active_loss = tokenizer_attn_mask == 1
 
         loss_fct = self.loss_ce  # -100 index = padding token
-        labels = labels[:, 1:]
-        active_labels = labels[active_loss]
-        active_prediction_logits = prediction_logits[active_loss]
-        masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits.reshape(-1, self.config.vocab_size), active_labels.reshape(-1))
-        predictions = prediction_logits.argmax(dim=-1)
-        labels = (labels == predictions).float()
+        active_labels = labels[tokenizer_attn_mask].reshape(-1)
+        active_prediction_logits = prediction_logits[tokenizer_attn_mask].reshape(-1, self.config.vocab_size)
+        masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
+        predictions = active_prediction_logits.argmax(dim=-1)
+        labels = (active_labels == predictions).float()
         if self.record_accuracy:
+            predictions = prediction_logits.argmax(dim=-1)
             self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
-            mlm_positions = input_ids == self.tokenizer.mask_token_id
-            self.accuracy_hist["lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[active_loss].float().cpu().numpy().mean())})
-            mlm_positions = mlm_positions[:, 1:]
-            self.accuracy_hist["masked_lm"].append({"all": labels[active_loss].detach().cpu(), "mean": float(labels[mlm_positions].float().cpu().numpy().mean())})
+            self.accuracy_hist["lm"].append({"all": labels.detach().cpu(), "mean": float(labels.float().cpu().numpy().mean())})
 
         et = time.time() - st
         timing_dict.append(("lm_accuracy_loss", et))
@@ -2376,17 +2371,16 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         # cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
         # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
-        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens + 1:]
+        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:]
         logits = self.discriminator_predictions(discriminator_sequence_output)
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_logits", et))
 
-        active_logits = logits.view(-1, input_shape[1] - 1)[active_loss]
-        active_labels = labels[active_loss]
-        loss = self.electra_loss_w * self.loss_bce(active_logits, active_labels)
+        active_logits = logits.view(-1, input_shape[1])[tokenizer_attn_mask]
+        loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if self.record_accuracy:
-            self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == active_labels).type(torch.float)).item())
+            self.accuracy_hist["electra"].append(torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
