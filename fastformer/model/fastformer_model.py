@@ -2168,13 +2168,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
-
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
-
-        # TODO: deal with head_mask
-
         inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
         return inputs_embeds, position_embeds, input_shape
 
