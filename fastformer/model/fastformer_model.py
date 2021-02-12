@@ -2343,13 +2343,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
+        self.timing_hist = self.timing_hist[-100:]
 
         # TODO: return one loss
         # TODO: check various loss history and accuracies over time
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
-        results = dict(loss=loss, loss_dict=loss_dict)
+        results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict)
         # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results
 
