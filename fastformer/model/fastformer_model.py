@@ -2133,17 +2133,16 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("encoder_outputs", et))
         answering_lm_loss = 0.0
         answering_hidden = None
+        encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
         if labels_pet_input_ids is not None:
-            encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
             alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
             assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
-
             answering_hidden = self.funnel.answering_ffn(encoder_last_layer_out[:, :alen])
             answering_logits = self.funnel.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
-            answering_predictions = answering_logits.argmax(dim=-1)
             loss_fct = self.loss_ce
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
             if self.record_accuracy:
+                answering_predictions = answering_logits.argmax(dim=-1)
                 answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
                 self.accuracy_hist["answering_lm"].append(float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1))))
 
@@ -2160,7 +2159,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         contrastive_anchors_copy = contrastive_positives_copy = None
         if contrastive_anchors is not None:
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
+            contrastive_block_hidden = encoder_last_layer_out
 
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))

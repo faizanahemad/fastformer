@@ -85,7 +85,7 @@ class FastFormerConfig(PretrainedConfig):
 
     def __init__(
             self,
-            vocab_size=30522 + 18,
+            vocab_size=30522 + 22,
             block_sizes=[6, 6, 6],
             block_channel_size=[576, 768, 960],  # [512, 768, 1024]
             block_repeats=True,

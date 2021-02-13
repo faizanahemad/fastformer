@@ -236,6 +236,11 @@ class TokenizerDataset(Dataset):
         self.cls_tokens = config.num_highway_cls_tokens
         self.tokenizer = copy.deepcopy(tokenizer)
         self.tokenizer_args = tokenizer_args
+        labels_pet_text_tokenizer_args = dict(**self.tokenizer_args)
+        labels_pet_text_tokenizer_args["add_special_tokens"] = False
+        labels_pet_text_max_length = 128
+        labels_pet_text_tokenizer_args["max_length"] = labels_pet_text_max_length
+        self.labels_pet_text_tokenizer_args = labels_pet_text_tokenizer_args
         self.dataset = dataset
         self.char_to_id = copy.deepcopy(char_to_id)
         self.word_mask_proba = word_mask_proba
@@ -273,8 +278,8 @@ class TokenizerDataset(Dataset):
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
 
-        # pet_query = ["how many queens?"] * 8
-        # pet_answer = ["eight"] * 8
+        pet_query = ["how many queens?"] * 8
+        pet_answer = ["eight"] * 8
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
@@ -362,10 +367,7 @@ class TokenizerDataset(Dataset):
                 labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + a + " " + getattr(tokenizer, "answer_token_%s" % i)
             labels_pet_text = (labels_pet_text + " " + getattr(tokenizer, "answer_end_token")).strip()
             if n_queries > 0:
-                labels_pet_text_tokenizer_args = dict(**self.tokenizer_args)
-                labels_pet_text_max_length = 128
-                labels_pet_text_tokenizer_args["max_length"] = labels_pet_text_max_length
-                tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=True, **labels_pet_text_tokenizer_args)
+                tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=False, **self.labels_pet_text_tokenizer_args)
                 input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
                 results.update(dict(labels_pet_input_ids=input_ids.squeeze(),
                                     labels_pet_attention_mask=attention_mask.squeeze()))
@@ -445,12 +447,13 @@ def get_collate_fn(num_cls, padding_index):
             step_size = 32 if k == "char_ids" else 16
             while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
                 v = v[:, :-step_size]
-            required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
-            padding = required_len - v.shape[-1]
-            if padding > 0:
-                v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
-            elif padding < 0:
-                v = v[:, :padding]
+            if k not in ["labels_pet_input_ids", "labels_pet_attention_mask"]:
+                required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
+                padding = required_len - v.shape[-1]
+                if padding > 0:
+                    v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+                elif padding < 0:
+                    v = v[:, :padding]
             samples[k] = v
         if "label_mlm_input_ids" in samples:
             samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]

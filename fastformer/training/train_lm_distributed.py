@@ -61,6 +61,14 @@ def training_args():
     return args
 
 
+def validate_mlm_dataset(model, dataset):
+    pass
+
+
+def validate_qna_dataset(model, dataset):
+    pass
+
+
 def cleanup():
     # save model
     dist.destroy_process_group()
