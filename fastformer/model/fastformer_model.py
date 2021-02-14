@@ -899,9 +899,9 @@ class MultiheadAttention(nn.Module):
         if qkv_transform_groups > 1:
             # assert n_head % qkv_transform_groups == 0 and n_head >= qkv_transform_groups
             self.q_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
-                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=True)
             self.k_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
-                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
@@ -918,8 +918,8 @@ class MultiheadAttention(nn.Module):
 
         else:
             self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
-                                                                                                                            bias=False)
-            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head)
+                                                                                                                            bias=True)
+            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
 
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
