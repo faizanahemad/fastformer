@@ -336,7 +336,8 @@ class TokenizerDataset(Dataset):
         wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
 
         if self.training:
-            num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
+            alpha, beta = (2, 4) if length > 256 else (1, 5)
+            num_segments = int(np.round(self.min_segments + random.betavariate(alpha, beta) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
             if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1:
