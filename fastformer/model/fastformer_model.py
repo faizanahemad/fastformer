@@ -2226,10 +2226,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             hshape = highway_cls_ar_inputs_embeds.size()
             hshape2 = 32 * (hshape[1] // 32)
             key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
+            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
             if hshape2 > 128:
-                highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
                 highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds.reshape(-1, hshape2 // 4, hshape[2])
-                highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
                 highway_cls_ar__attention_mask = highway_cls_ar__attention_mask.reshape(-1, hshape2 // 4)
                 highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
                 key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
@@ -2239,7 +2239,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             highway_cls_ar_out = self.lm_dim_match(highway_cls_ar_out[:, 8:])
             highway_cls_ar_out = self.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1].reshape(-1, hshape2 // 4)
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
+            if hshape2 > 128:
+                highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 8:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             if self.record_accuracy:
@@ -2362,7 +2364,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=8)
-    ap.add_argument("--length", type=int, default=256)
+    ap.add_argument("--length", type=int, default=128)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
