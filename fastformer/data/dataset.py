@@ -278,8 +278,8 @@ class TokenizerDataset(Dataset):
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
 
-        pet_query = ["how many queens?"] * 4
-        pet_answer = ["eight"] * 4
+        # pet_query = ["how many queens?"] * 4
+        # pet_answer = ["eight"] * 4
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
