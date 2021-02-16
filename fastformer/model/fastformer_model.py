@@ -1834,7 +1834,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = ConvFFN(config, config.block_channel_size[-1], config.block_channel_size[-1], config.ffn_groups, 0, config.block_channel_size[0])
+        self.contrastive_ffn = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], config.block_channel_size[0]))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         self.ce = CrossEntropyLoss(ignore_index=-100)
         if additive_margin_softmax_w == 0:
@@ -1847,7 +1847,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.sent_predict_fc = nn.Sequential(nn.Linear(config.block_channel_size[-1], 128), nn.GELU(), nn.Linear(128, (self.cls_tokens + 1)))
+            self.sent_predict_fc = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1)))
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
