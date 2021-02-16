@@ -278,8 +278,8 @@ class TokenizerDataset(Dataset):
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
 
-        pet_query = ["how many queens?"] * 8
-        pet_answer = ["eight"] * 8
+        pet_query = ["how many queens?"] * 4
+        pet_answer = ["eight"] * 4
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
@@ -339,7 +339,6 @@ class TokenizerDataset(Dataset):
             num_segments = int(np.round(self.min_segments + random.betavariate(2, 4) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             count_pad_tokens = sum(segments == tokenizer.pad_token)
-            assert len(segments) == num_segments
             if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1:
                 seg_idxs = random.sample(range(num_segments), num_segments)
             else:
@@ -444,7 +443,7 @@ def get_collate_fn(num_cls, padding_index):
                 continue
             if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
                 continue
-            step_size = 32 if k == "char_ids" else 16
+            step_size = 32 if k == "char_ids" else 8
             while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
                 v = v[:, :-step_size]
             if k not in ["labels_pet_input_ids", "labels_pet_attention_mask"]:

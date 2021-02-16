@@ -12,9 +12,37 @@ from transformers import PretrainedConfig
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
+
+
+
 @dataclass_json
 @dataclass
-class AdversarialConfig:
+class OptimizerConfig:
+    lr: float
+    eps: float
+    weight_decay: float
+    beta_1: float
+    beta_2: float
+
+    batch_size: int
+    test_batch_size: int
+    warmup_steps: int
+    validate_every_steps: int
+    save_every_steps: int
+    gradient_clipping: float
+    fp16: bool
+    reduce_lr_on_plateau: bool
+    reduce_lr_on_plateau_steps: int
+
+    datasets: Dict[str, float]  # Dataset name and probability of choice
+    sampling_fraction: float
+
+
+@dataclass_json
+@dataclass
+class ModelConfig:
+    tokenizer_name: str
+    model_size: str
     aitm: bool
     alum: bool
     adv_lm_w: float = 1.0
@@ -25,58 +53,6 @@ class AdversarialConfig:
     adv_epsilon: float = 1e-2
     aitm_noise_var: float = 0.1
     adv_w: float = 1.0
-
-
-@dataclass_json
-@dataclass
-class DatasetConfig:
-    num_batches_to_train: int
-    num_batches_to_validate: int
-    datasets: Dict[str, float]  # Dataset name and probability of choice
-
-
-
-@dataclass_json
-@dataclass
-class OptimizerConfig:
-    lr: float
-    epsilon: float
-    beta_1: float
-    beta_2: float
-    batch_size: int
-    test_batch_size: int
-    optimizer_class: str
-    scheduler_class: str
-    do_eval: bool
-    validate_every_steps: int
-    gradient_clipping: float
-    fp16: bool
-    early_stopping: bool
-    early_stopping_steps: int
-    reduce_lr_on_plateau: bool
-    reduce_lr_on_plateau_steps: int
-
-
-@dataclass_json
-@dataclass
-class ModelConfig:
-    tokenizer_name: str
-    tokenizer_class: str
-    model_class: str
-    model_name: str
-
-
-
-@dataclass_json
-@dataclass
-class TrainingConfig:
-    experiment_name: str
-    experiment_desc: str
-    seed: int
-    optimizer: OptimizerConfig
-    dataset: DatasetConfig
-    model: ModelConfig
-    adversary: AdversarialConfig
 
 
 @dataclass_json

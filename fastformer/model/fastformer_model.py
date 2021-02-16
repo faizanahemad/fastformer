@@ -41,6 +41,7 @@ from transformers.utils import logging
 
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
+from fastformer.utils import *
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -53,18 +54,6 @@ logger = logging.get_logger(__name__)
 
 INF = 1e6
 EPS = 1e-6
-
-def numel(m: torch.nn.Module, only_trainable: bool = True):
-    """
-    returns the total number of parameters used by `m` (only counting
-    shared parameters once); if `only_trainable` is True, then only
-    includes parameters with `requires_grad = True`
-    """
-    parameters = m.parameters()
-    if only_trainable:
-        parameters = list(p for p in parameters if p.requires_grad)
-    unique = dict((p.data_ptr(), p) for p in parameters).values()
-    return sum(p.numel() for p in unique)
 
 
 class DropoutContext(object):
@@ -1640,14 +1629,6 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 module.register_buffer('projection_matrix', projection_matrix)
 
 
-@dataclass
-class PreTrainingOutput(ModelOutput):
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
-
-
 class FastFormerModel(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig):
         super().__init__(config)
@@ -2354,54 +2335,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         return results
 
 
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
-
-
-def get_tokenizer(name):
-    from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
-    if "roberta" in name:
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-    elif "bert" in name:
-        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-    else:
-        tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-    setattr(tokenizer, "_sentence_mask_token", "[MASK1]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["sentence_mask_token"]
-    tokenizer.add_special_tokens({"sentence_mask_token": "[MASK1]"})
-
-    setattr(tokenizer, "_answer_option_separator_token", "[ANSWER_OPTION_SEP]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_separator_token"]
-    tokenizer.add_special_tokens({"answer_option_separator_token": "[ANSWER_OPTION_SEP]"})
-
-    setattr(tokenizer, "_answer_option_begin_token", "[ANSWER_OPTION_BEGIN]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_begin_token"]
-    tokenizer.add_special_tokens({"answer_option_begin_token": "[ANSWER_OPTION_BEGIN]"})
-
-    setattr(tokenizer, "_answer_option_end_token", "[ANSWER_OPTION_END]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_end_token"]
-    tokenizer.add_special_tokens({"answer_option_end_token": "[ANSWER_OPTION_END]"})
-
-    setattr(tokenizer, "_answer_end_token", "[ANSWER_END]")
-    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token"]
-    tokenizer.add_special_tokens({"answer_end_token": "[ANSWER_END]"})
-    n_question_tokens = 8
-    for i in range(n_question_tokens):
-        setattr(tokenizer, "_question_token_%s" % i, "[QUESTION_%s]" % i)
-        setattr(tokenizer, "_answer_token_%s" % i, "[ANSWER_%s]" % i)
-        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["question_token_%s" % i]
-        tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_token_%s" % i]
-        tokenizer.add_special_tokens({"question_token_%s" % i: "[QUESTION_%s]" % i, "answer_token_%s" % i: "[ANSWER_%s]" % i})
-
-    return tokenizer
-
 
 if __name__ == "__main__":
     import time
@@ -2429,7 +2362,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=8)
-    ap.add_argument("--length", type=int, default=1024)
+    ap.add_argument("--length", type=int, default=256)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
@@ -2458,6 +2391,7 @@ if __name__ == "__main__":
     texts = dict(large_texts=large_texts, very_small_texts=very_small_texts, small_texts=small_texts, hetero_texts=hetero_texts)[texts]
 
     tokenizer = get_tokenizer("bert")
+    config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = length
     config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
@@ -2484,9 +2418,6 @@ if __name__ == "__main__":
     if "fastformer" in model_name:
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
                         char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
-        if model_name == "fastformer_electra":
-            model = FastFormerForELECTRAPretraining(sm_config, config, tokenizer=tokenizer)
-            assert not forward_only
         if model_name == "fastformer_fused_electra":
             model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0, highway_cls_ar_w=2.0,
                                                          aitm=aitm, alum=False, alum_aitm_alternate=False)
