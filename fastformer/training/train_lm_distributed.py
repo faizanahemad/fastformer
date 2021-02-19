@@ -24,6 +24,8 @@ from torch.multiprocessing import Process
 import torch.multiprocessing as mp
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
@@ -57,11 +59,17 @@ def training_args():
     parser.add_argument('--test_only', required=False, type=str2bool, default=False,
                         help='Test Only')
 
+    parser.add_argument('--shuffle_dataset', required=False, type=str2bool, default=False,
+                        help='Shuffle Train')
+
     parser.add_argument('--train_dataset', required=False, type=str,
                         help='Train Dataset')
 
     parser.add_argument('--validation_dataset', required=False, type=str,
                         help='Validation Dataset')
+
+    parser.add_argument('--test_dataset', required=False, type=str,
+                        help='Test Dataset')
 
     parser.add_argument('--test_fastformer', required=False, type=str,
                         help='Test Dataset')
@@ -85,7 +93,8 @@ def training_args():
 
     seed = 0
     args.seed = seed
-
+    assert hasattr(args, "test_dataset") or not args["test_only"]
+    assert hasattr(args, "validation_dataset") or not args["validate_only"]
     return args
 
 
@@ -106,9 +115,29 @@ def cleanup():
     dist.destroy_process_group()
 
 
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn):
+    try:
+        train_dataset = Dataset.load_from_disk(location)
+        train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
+        train_loader = DataLoader(train_dataset, sampler=DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
+        train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn)
+    except:
+        train_dataset = DatasetDict.load_from_disk(location)
+        train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_dataset.items()}
+        lsum = sum(train_dataset_sampling_proba.values())
+        train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
+        train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4) for k, v in train_dataset.items()}
+        train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn) for k, dataloader in train_loader.items()}
+    return train_loader, train_dataset_sampling_proba
+
+
 def train(local_rank, args):
     # Build dataset and dataloader with distributed sampler
     # Build model with DDP
+    os.environ['MASTER_ADDR'] = args.master_addr
+    os.environ['MASTER_PORT'] = args.master_PORT
+    torch.backends.cudnn.benchmark = True
     rank = args.nr * args.gpus_per_node + local_rank
     dist.init_process_group(args.dist_backend, rank=rank, world_size=args.world_size)
     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
@@ -122,11 +151,10 @@ def train(local_rank, args):
     tokenizer = get_tokenizer(args["model_config"]["tokenizer_name"])
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
+    config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
     config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
 
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
-    char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
-    char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **model_config).to(device)
     if args["pretrained_model"] is not None:
@@ -142,6 +170,15 @@ def train(local_rank, args):
     model_save_dir = args["model_save_dir"]
     assert os.path.exists(model_save_dir)
     model_save_name = args["model_save_name"]
+
+    shuffle_dataset = args["shuffle_dataset"]
+    sampling_fraction = optc["sampling_fraction"]
+    if not args["validate_only"] and not args["test_only"]:
+        train_loader, train_dataset_sampling_proba = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+    val_loader, _ = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+    test_loader, _ = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+
+
     # Take inputs to local_rank
 
     # TODO: validate on multigpu, sort the val datasets alphabetically and let the gpu with rank == dataset rank in sort pick up the dataset. GPUs with rank > len(datasetDict) stay idle.

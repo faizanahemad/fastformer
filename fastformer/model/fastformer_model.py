@@ -2364,7 +2364,7 @@ if __name__ == "__main__":
     ap.add_argument("--aitm", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=8)
-    ap.add_argument("--length", type=int, default=128)
+    ap.add_argument("--length", type=int, default=512)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
@@ -2402,20 +2402,22 @@ if __name__ == "__main__":
         config.tokenizer_length = min(config.tokenizer_length, 512)
         config.max_position_embeddings = min(config.tokenizer_length, 512)
         config.num_highway_cls_tokens = 0
-    char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
-    char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
     if batch_size > len(texts):
-        for _ in range(batch_size // len(texts)):
+        for _ in range(8):
             texts += texts
     dataset = SmallTextDataset(texts)
-    assert config.tokenizer_length % 16 == 0  # Due to our collate fn
+    config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
     dataset = TokenizerDataset(config, tokenizer, char_to_id,
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length),
                                # sentence_jumble_proba=((1024, 0.1),), word_noise_proba=((1024, 0.1),),
                                max_jumbling_span_length=2,
                                dataset=dataset)
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
-    pt_batch = next(iter(dataloader))
+    # dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+    # iter_dataloader = iter(dataloader)
+    # pt_batch = next(iter_dataloader)
+    dataloader = DataLoader(dataset, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=2)
+    pt_batch = next(custom_batching_fn(dataloader, size_dicts, collate_fn))
+
 
     if "fastformer" in model_name:
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],

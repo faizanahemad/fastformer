@@ -4,7 +4,7 @@ from seaborn import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
 import torch
-from ..config import FastFormerConfig
+from ..config import FastFormerConfig, size_dicts
 from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 
@@ -227,7 +227,7 @@ class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.5)),
                  word_jumble_proba=((0, 0.0), (256, 0.1), (512, 0.15), (1024, 0.2)),
-                 word_mask_in_pet=False, word_noise_in_pet=False, sentence_jumble_in_pet=False, word_jumble_in_pet=False,
+                 word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=True,
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
                  word_noise_proba: tuple = ((0, 0.0), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.15)),
                  max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
@@ -439,6 +439,7 @@ def get_collate_fn(num_cls, padding_index):
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
+        samples = {k: v.squeeze() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         for k, v in samples.items():
             if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
                 continue
@@ -462,8 +463,27 @@ def get_collate_fn(num_cls, padding_index):
         if "char_offsets" in samples:
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
         return samples
     return collate_fn
+
+
+def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
+    batch = []
+    size, batch_size = zip(*list(batch_size_dict.items()))
+    i = 1
+    while i > 0:
+        for one_example in dataloader:
+            cur_seq_len = one_example["input_ids"].size(-1)
+            batch.append(one_example)
+            max_batch_size_possible = batch_size[np.searchsorted(size, cur_seq_len)]
+            cur_batch_size = len(batch)
+            if max_batch_size_possible <= cur_batch_size:
+                give_batch = batch[:max_batch_size_possible]
+                batch = batch[max_batch_size_possible:]
+                yield collate_fn(give_batch)
+        if not continuous_iter:
+            i = i - 1
 
 
 def all_datasets():
