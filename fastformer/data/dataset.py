@@ -468,6 +468,21 @@ def get_collate_fn(num_cls, padding_index):
     return collate_fn
 
 
+def datadict_iterator(dict_loader, dict_probas):
+    keys, probas = zip(*list(dict_probas.items()))
+    dict_loader = dict(**dict_loader)
+    while len(dict_loader) > 0:
+        cur_key = random.choices(keys, probas)[0]
+        try:
+            yield next(dict_loader[cur_key])
+        except StopIteration as st:
+            _ = dict_loader.pop(cur_key, None)
+            _ = dict_probas.pop(cur_key, None)
+            keys, probas = zip(*list(dict_probas.items()))
+    raise StopIteration()
+
+
+
 def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
     batch = []
     size, batch_size = zip(*list(batch_size_dict.items()))

@@ -17,6 +17,8 @@ import random
 import os
 import argparse
 import time
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm, trange
 from torch.optim import AdamW
 import torch.distributed as dist
@@ -29,8 +31,10 @@ from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
+from fastformer.data.dataset import datadict_iterator
 from fastformer.utils import *
 from fastformer.model import *
+from transformers import optimization
 
 
 def training_args():
@@ -43,8 +47,6 @@ def training_args():
                         help='ranking within the nodes')
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
-    parser.add_argument('--optimizer_config', required=True, type=str,
-                        help='Optimizer config')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
@@ -115,12 +117,12 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn):
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, continuous_iter=True):
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
         train_loader = DataLoader(train_dataset, sampler=DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
-        train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn)
+        train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
         train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_dataset.items()}
@@ -128,8 +130,9 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
         train_loader = {k: DataLoader(v, sampler=DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4) for k, v in train_dataset.items()}
-        train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn) for k, dataloader in train_loader.items()}
-    return train_loader, train_dataset_sampling_proba
+        train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
+        train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
+    return train_loader
 
 
 def train(local_rank, args):
@@ -147,7 +150,6 @@ def train(local_rank, args):
 
     model_config = dict(**args["model_config"])
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[model_config.pop("model_size")]
-    optimizer_config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[args["optimizer_config"]]
     tokenizer = get_tokenizer(args["model_config"]["tokenizer_name"])
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
@@ -174,9 +176,32 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader, train_dataset_sampling_proba = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
-    val_loader, _ = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
-    test_loader, _ = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+    val_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+    test_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+
+    validate_every_steps = optc["validate_every_steps"]
+    save_every_steps = optc["save_every_steps"]
+    scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
+    gradient_clipping = optc["gradient_clipping"]
+    _ = model.train()
+
+    for step, batch in enumerate(train_loader):
+        if (step + 1) % save_every_steps == 0 and local_rank == 0:
+            torch.save(model.state_dict(), os.path.join(model_save_dir, model_save_name))
+        if (step + 1) % validate_every_steps == 0:
+            pass
+        with autocast():
+            output = ddp_model(**batch)
+            loss = output["loss"]
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+
+
 
 
     # Take inputs to local_rank

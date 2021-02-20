@@ -1836,12 +1836,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.contrastive_ffn = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], config.block_channel_size[0]))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
-        self.ce = CrossEntropyLoss(ignore_index=-100)
         if additive_margin_softmax_w == 0:
+            self.ce = CrossEntropyLoss(ignore_index=-100)
             self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
             self.loss_bce = nn.BCEWithLogitsLoss()
         else:
-            self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id)
+            self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
+            self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
         self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
         self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
