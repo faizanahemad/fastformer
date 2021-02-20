@@ -1630,9 +1630,10 @@ class FastFormerPreTrainedModel(PreTrainedModel):
 
 
 class FastFormerModel(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig):
+    def __init__(self, config: FastFormerConfig, tokenizer):
         super().__init__(config)
         self.config = config
+        self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
@@ -1830,7 +1831,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         self.config = config
         self.tokenizer = tokenizer
-        self.funnel: FastFormerModel = FastFormerModel(config) if model is None else model
+        self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)

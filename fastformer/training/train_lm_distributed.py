@@ -100,16 +100,39 @@ def training_args():
     return args
 
 
-def validate_mlm_dataset(model, dataset):
-    pass
+class SuperGLUEValidator:
+    def __init__(self, location, model, config):
+        self.location = location
+        self.model = model
+        self.config = config
+        self.superglue_validation_set = ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc_fixed']
 
+    def read_data(self):
+        import glob
+        datasets = glob.glob(os.path.join(self.location, "superglue_*"))
+        datadict = dict()
+        for d in datasets:
+            load_point = os.path.join(self.location, d)
+            try:
+                ds = Dataset.load_from_disk(load_point)
+            except:
+                ds = DatasetDict.load_from_disk(load_point)
+            datadict[d.replace("superglue_", '')] = ds
+        return datadict
 
-def validate_qna_dataset(model, dataset):
-    pass
+    def __call__(self, generate_test_predictions=True):
+        datadict = self.read_data()
+        tokenizer = self.model.tokenizer
+        collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
+        for d in self.superglue_validation_set:
+            dataset = datadict[d]["validation"]
 
-
-def validate_superglue(model, datasets):
-    pass
+            dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
+                                       dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
+                                       dataset)
+            data_loader = DataLoader(dataset, sampler=None, batch_size=1, collate_fn=None,
+                                     prefetch_factor=8, num_workers=4)
+            data_loader = custom_batching_fn(data_loader, size_dicts, collate_fn, False)
 
 
 def cleanup():
