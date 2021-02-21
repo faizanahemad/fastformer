@@ -2382,11 +2382,14 @@ if __name__ == "__main__":
                                max_jumbling_span_length=2,
                                dataset=dataset)
     dataset.training = True
-    # dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
-    # iter_dataloader = iter(dataloader)
-    # pt_batch = next(iter_dataloader)
-    dataloader = DataLoader(dataset, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=2)
-    pt_batch = next(custom_batching_fn(dataloader, size_dicts, collate_fn))
+
+    if "fastformer" in model_name:
+        dataloader = DataLoader(dataset, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=2)
+        pt_batch = next(custom_batching_fn(dataloader, size_dicts, collate_fn))
+    else:
+        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+        iter_dataloader = iter(dataloader)
+        pt_batch = next(iter_dataloader)
 
 
     if "fastformer" in model_name:
