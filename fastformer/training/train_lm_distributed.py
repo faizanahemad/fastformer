@@ -125,14 +125,44 @@ class SuperGLUEValidator:
         tokenizer = self.model.tokenizer
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         for d in self.superglue_validation_set:
+            # record answers
+            # Start from Dataset of superglue from huggingface datasets and build labels
+            # For prediction use majority voting from superglue datasets we made.
+            # Validation fastformer dataset can be used?
             dataset = datadict[d]["validation"]
+            labels = [dataset[i] for i in range(len(dataset))]
 
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
+            dataset.training = False
             data_loader = DataLoader(dataset, sampler=None, batch_size=1, collate_fn=None,
                                      prefetch_factor=8, num_workers=4)
             data_loader = custom_batching_fn(data_loader, size_dicts, collate_fn, False)
+
+
+class LargeValidator:
+    def __init__(self, location, model, config):
+        self.location = location
+        self.model = model
+        self.config = config
+
+    def __call__(self):
+        datadict = DatasetDict.load_from_disk(self.location)
+        tokenizer = self.model.tokenizer
+        collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
+        for k, v in datadict.items():
+            cns = v.column_names
+            labels = [dataset[i] for i in range(len(dataset))]
+            dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
+                                       dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
+                                       dataset)
+            dataset.training = False
+            record_accuracy = False
+            if v.num_columns == 2:
+                dataset.training = True
+                record_accuracy = True
+
 
 
 def cleanup():

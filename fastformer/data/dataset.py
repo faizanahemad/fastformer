@@ -272,9 +272,6 @@ class TokenizerDataset(Dataset):
         pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else None
         pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else None
 
-        labels_seq = item["labels_seq"] if "labels_seq" in item else None
-        labels_seq_prompt = item["labels_seq_prompt"] if "labels_seq_prompt" in item else None
-
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
 
@@ -302,40 +299,43 @@ class TokenizerDataset(Dataset):
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
-        text_len = length
-        max_anchor_len = text_len // (2 * self.n_anchors)
-        min_anchor_len = 32
-        anchor_min_start = 0
-        anchor_max_start = anchor_min_start + max_anchor_len
-        anchors = []
-        positives = []
-        while len(anchors) < self.n_anchors and anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:
-            anchor_len = int(random.betavariate(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
-            anchor_len = int(np.round(anchor_len / 8) * 8)
-            anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
-            anchor_end = min(anchor_start + anchor_len, text_len)
-            anchors.append([anchor_start, anchor_end])
-            positives_for_anchor = []
-            while len(positives_for_anchor) < self.n_positives:
-                positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
-                positive_len = int(np.round(positive_len / 8) * 8)
-                positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
-                positive_end = min(positive_start + positive_len, text_len)
-                positives_for_anchor.append([positive_start, positive_end])
-            positives.append(positives_for_anchor)
-            anchor_min_start = anchor_end + max_anchor_len
-            anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
-        anchors = anchors if min_anchor_len < max_anchor_len else []
-        positives = positives if min_anchor_len < max_anchor_len else [[]]
 
         length = item["length"] if "length" in item else length
         results = dict(labels=label, n_pet_queries=n_queries)
-        wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
-        wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
-        sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
-        wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
 
         if self.training:
+
+            text_len = length
+            max_anchor_len = text_len // (2 * self.n_anchors)
+            min_anchor_len = 32
+            anchor_min_start = 0
+            anchor_max_start = anchor_min_start + max_anchor_len
+            anchors = []
+            positives = []
+            while len(anchors) < self.n_anchors and anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:
+                anchor_len = int(random.betavariate(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+                anchor_len = int(np.round(anchor_len / 8) * 8)
+                anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
+                anchor_end = min(anchor_start + anchor_len, text_len)
+                anchors.append([anchor_start, anchor_end])
+                positives_for_anchor = []
+                while len(positives_for_anchor) < self.n_positives:
+                    positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+                    positive_len = int(np.round(positive_len / 8) * 8)
+                    positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
+                    positive_end = min(positive_start + positive_len, text_len)
+                    positives_for_anchor.append([positive_start, positive_end])
+                positives.append(positives_for_anchor)
+                anchor_min_start = anchor_end + max_anchor_len
+                anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
+            anchors = anchors if min_anchor_len < max_anchor_len else []
+            positives = positives if min_anchor_len < max_anchor_len else [[]]
+
+            wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
+            wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
+            sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
+            wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
+
             alpha, beta = (2, 4) if length > 256 else (1, 5)
             num_segments = int(np.round(self.min_segments + random.betavariate(alpha, beta) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
