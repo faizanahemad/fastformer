@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import torch
 import random
+import re
 
 
 def str2bool(v):
@@ -49,8 +50,23 @@ def get_tokenizer(name):
         tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["question_token_%s" % i]
         tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_token_%s" % i]
         tokenizer.add_special_tokens({"question_token_%s" % i: "[QUESTION_%s]" % i, "answer_token_%s" % i: "[ANSWER_%s]" % i})
-
+    # {k: tokenizer.encode(v, add_special_tokens=False) for k, v in tokenizer.special_tokens_map_extended.items()}
     return tokenizer
+
+
+def answer_decoder(input_ids, tokenizer):
+    input_ids = input_ids.tolist()
+    all_answers = []
+    for one_example in input_ids:
+        answers = tokenizer.decode(one_example)
+        answers = answers.split(tokenizer.answer_end_token)[0]
+        answers = answers.replace(tokenizer.pad_token, '').replace(tokenizer.cls_token, '').strip()
+        count_answers = len(re.findall(r'\[QUESTION_[0-9]+\]', answers))
+        answers = re.split(r'\[QUESTION_[0-9]+\]', answers)
+        all_answers.append(answers)
+    return all_answers
+
+
 
 
 def numel(m: torch.nn.Module, only_trainable: bool = True):

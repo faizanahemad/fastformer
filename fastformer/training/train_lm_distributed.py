@@ -35,6 +35,8 @@ from fastformer.data.dataset import datadict_iterator
 from fastformer.utils import *
 from fastformer.model import *
 from transformers import optimization
+import pandas as pd
+from sklearn.metrics import accuracy_score
 
 
 def training_args():
@@ -143,17 +145,22 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config):
+    def __init__(self, location, model, config, device):
         self.location = location
         self.model = model
         self.config = config
+        self.device = device
 
     def __call__(self):
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.model.tokenizer
+        model = self.model.to(self.device)
+        model = model.eval()
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
-        for k, v in datadict.items():
-            cns = v.column_names
+        results = dict()
+        for k, dataset in datadict.items():
+            cns = dataset.column_names
+            predictions = []
             if 'answer' in cns:
                 labels = [dataset[i] for i in range(len(dataset))]
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
@@ -161,10 +168,50 @@ class LargeValidator:
                                        dataset)
             dataset.training = False
             record_accuracy = False
-            if v.num_columns == 2:
+            if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
+            loader = DataLoader(dataset, sampler=None, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
+            loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
+            for pt_batch in loader:
+                pt_batch["record_accuracy"] = record_accuracy
+                pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
+                if 'answer' in cns:
+                    with autocast():
+                        with torch.no_grad():
+                            funnel_inputs = dict(input_ids=pt_batch["input_ids"],
+                                                 attention_mask=pt_batch["attention_mask"],
+                                                 token_type_ids=pt_batch["token_type_ids"],
+                                                 inputs_embeds=None,
+                                                 char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
+                                                 run_decoder=False,
+                                                 run_answering=True)
+                            output = model.funnel(**funnel_inputs)
+                            answering_predictions = output["answering_logits"].argmax(dim=-1)
+                            answering_predictions = answer_decoder(answering_predictions, tokenizer)
+                            predictions.extend(answering_predictions)
 
+                else:
+                    labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
+                    labels = labels.to(self.device)
+                    with autocast():
+                        with torch.no_grad():
+                            output = model(**pt_batch, labels=labels)["accuracy_hist"]
+                            predictions.append(output)
+            if 'answer' in cns:
+                final_labels, final_predictions = [], []
+                for lbl, prd in zip(labels, predictions):
+                    if len(prd) > len(lbl):
+                        prd = prd[:len(lbl)]
+                    if len(prd) < len(lbl):
+                        prd = prd + ([''] * (len(lbl) - len(prd)))
+                    final_labels.extend(lbl)
+                    final_predictions.extend(prd)
+                score = accuracy_score(final_labels, final_predictions)
+                results[k] = dict(accuracy=score)
+            else:
+                results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
+        return results
 
 
 def cleanup():

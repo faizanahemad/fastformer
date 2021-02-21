@@ -351,13 +351,13 @@ class TokenizerDataset(Dataset):
             mlm_text = " ".join(segments)  # Training Labels for MLM
             labels_pet_text = ""
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
+                q, a = q.strip(), a.strip()
                 if i == 0:
                     mlm_text = mlm_text + " " + tokenizer.sep_token
 
-                mlm_text = mlm_text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
-                mlm_text = mlm_text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + str(len(tokenizer.tokenize(a)))
+                mlm_text = mlm_text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q + " " + str(len(tokenizer.tokenize(a)))
                 assert a is not None
-                labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + a + " " + getattr(tokenizer, "answer_token_%s" % i)
+                labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + a
             labels_pet_text = (labels_pet_text + " " + getattr(tokenizer, "answer_end_token")).strip()
             if n_queries > 0:
                 tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=False, **self.labels_pet_text_tokenizer_args)
@@ -390,11 +390,11 @@ class TokenizerDataset(Dataset):
             text = " ".join(segments)
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
+            q, a = q.strip(), a.strip()
             if i == 0:
                 text = text + " " + tokenizer.sep_token
 
-            text = text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q
-            text = text + " " + getattr(tokenizer, "answer_token_%s" % i) + " " + tokenizer.mask_token
+            text = text + " " + getattr(tokenizer, "question_token_%s" % i) + " " + q + " " + tokenizer.mask_token
 
         inp = char_rnn_tokenize(text, self.tokenizer, self.char_to_id, **self.tokenizer_args)
         results.update(inp)

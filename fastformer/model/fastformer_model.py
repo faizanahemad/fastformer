@@ -2258,7 +2258,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra"] = (torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
-            self.accuracy_hist.append(accuracy_hist)
+            if self.record_accuracy:
+                self.accuracy_hist.append(accuracy_hist)
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
@@ -2390,7 +2391,6 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
         iter_dataloader = iter(dataloader)
         pt_batch = next(iter_dataloader)
-
 
     if "fastformer" in model_name:
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
