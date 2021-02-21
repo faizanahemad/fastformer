@@ -211,6 +211,7 @@ class LargeValidator:
                 results[k] = dict(accuracy=score)
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
+        model = model.train()
         return results
 
 
@@ -275,13 +276,15 @@ def train(local_rank, args):
     model_save_dir = args["model_save_dir"]
     assert os.path.exists(model_save_dir)
     model_save_name = args["model_save_name"]
+    if rank == 0:
+        if not os.path.exists(model_save_dir):
+            os.makedirs(model_save_dir)
+    torch.distributed.barrier()
 
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
         train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
-    val_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
-    test_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
 
     validate_every_steps = optc["validate_every_steps"]
     save_every_steps = optc["save_every_steps"]
@@ -290,19 +293,26 @@ def train(local_rank, args):
     _ = model.train()
 
     for step, batch in enumerate(train_loader):
-        if (step + 1) % save_every_steps == 0 and local_rank == 0:
-            torch.save(model.state_dict(), os.path.join(model_save_dir, model_save_name))
+        if (step + 1) % save_every_steps == 0:
+            if rank == 0:
+                torch.save(ddp_model.state_dict(), os.path.join(model_save_dir, model_save_name))
+            torch.distributed.barrier()
         if (step + 1) % validate_every_steps == 0:
-            pass
+            if rank == 0:
+                val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device)()
+            torch.distributed.barrier()
+
         with autocast():
             output = ddp_model(**batch)
             loss = output["loss"]
+            loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
             scaler.step(optimizer)
             scaler.update()
             scheduler.step()
+            optimizer.zero_grad()
 
 
 

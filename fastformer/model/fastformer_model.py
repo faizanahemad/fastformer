@@ -2301,7 +2301,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
-        results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist = accuracy_hist)
+        results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist)
         # TODO: return pet answer
         # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results
