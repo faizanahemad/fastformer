@@ -2080,7 +2080,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         tokenizer_attn_mask = attention_mask
         tokenizer = self.tokenizer
         funnel_outputs = self.funnel(**funnel_inputs)
-        inputs_embeds = funnel_outputs["funnel_outputs"]
+        inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         et = time.time() - st
         timing_dict.append(("prepare_encoder_input", et))
