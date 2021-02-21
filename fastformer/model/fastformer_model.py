@@ -1503,16 +1503,7 @@ class TransformerDecoder(nn.Module):
         else:
             self.layers = None
 
-        block_channel_size = self.config.block_channel_size
         self.decoder_ln = nn.LayerNorm(block_channel_size[0], config.layer_norm_eps)
-        self.final_hidden_fc = nn.Identity()
-        ffn_groups = self.config.ffn_groups
-        if block_channel_size[0] != block_channel_size[-1]:
-            if ffn_groups > 1:
-                assert block_channel_size[0] % ffn_groups == 0 and block_channel_size[-1] % ffn_groups == 0
-                self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
-            else:
-                self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
 
     def forward(
             self,
@@ -1523,7 +1514,6 @@ class TransformerDecoder(nn.Module):
             output_attentions=False,
             output_hidden_states=False,
     ):
-        final_hidden = self.final_hidden_fc(final_hidden)
 
         if not self.layers:
             hidden = final_hidden
@@ -1638,8 +1628,21 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
         self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.answering_ffn = nn.Sequential(self.decoder.final_hidden_fc, nn.GELU(), nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
-        self.answering_ffn[2].weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+
+        block_channel_size = self.config.block_channel_size
+        ffn_groups = self.config.ffn_groups
+        self.final_hidden_fc = nn.Identity()
+        if block_channel_size[0] != block_channel_size[-1]:
+            if ffn_groups > 1:
+                assert block_channel_size[0] % ffn_groups == 0 and block_channel_size[-1] % ffn_groups == 0
+                self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
+            else:
+                self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
+
+        self.embed_proj_transpose = nn.Identity()
+        if config.embedding_size != config.block_channel_size[0]:
+            self.embed_proj_transpose = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
+            self.embed_proj_transpose.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.init_weights()
 
@@ -1658,17 +1661,12 @@ class FastFormerModel(FastFormerPreTrainedModel):
             attention_mask=None,
             token_type_ids=None,
             inputs_embeds=None,
-            output_attentions=None,
-            output_hidden_states=None,
             char_ids=None, char_offsets=None,
             run_decoder=True,
             run_answering=True,
-            run_auto_regressive=True,
+            bypass_embeddings=False,
+            **kwargs,
     ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
@@ -1690,53 +1688,40 @@ class FastFormerModel(FastFormerPreTrainedModel):
         if self.config.num_highway_cls_tokens > 0:
             attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
 
-        inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
+        if bypass_embeddings:
+            assert inputs_embeds is not None
+            position_embeds = kwargs.pop("position_embeds", None)
+            assert position_embeds is not None
+        else:
+            inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
 
         encoder_outputs = self.encoder(
             inputs_embeds,
             position_embeds,
             attention_mask=attention_mask,
-            output_attentions=output_attentions,
+            output_attentions=False,
             output_hidden_states=True,
         )
-        answering = ()
-        if run_answering and hasattr(self, "answering_ffn"):
-            answering_hidden = self.answering_ffn(encoder_outputs[0][:, self.cls_tokens - 1:])
+        final_hidden = self.final_hidden_fc(encoder_outputs[0])
+        outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
+        if run_answering and hasattr(self, "embed_proj_transpose"):
+            answering_hidden = self.embed_proj_transpose(final_hidden[:, self.cls_tokens:])
             answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
-            answering_predictions = answering_logits.argmax(dim=-1)
-            answering += (answering_logits, answering_predictions,)
+            outputs["answering_logits"] = answering_logits
+            outputs["answering_hidden"] = answering_hidden
 
         if hasattr(self, "decoder") and run_decoder:
 
             decoder_outputs = self.decoder(
-                final_hidden=encoder_outputs[0],
+                final_hidden=final_hidden,
                 first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
                 position_embeds=position_embeds,
                 attention_mask=attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
+                output_attentions=False,
+                output_hidden_states=False,
             )
-            encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
-            encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
-            cls_tokens = decoder_outputs[0][:, :self.cls_tokens]
-            decoder_outputs = (decoder_outputs[0][:, self.cls_tokens - 1:], decoder_outputs[1:])
-            outputs = (decoder_outputs[0],)
-            if output_hidden_states:
-                outputs = outputs + (encoder_outputs[0], encoder_outputs[1] + decoder_outputs[1],)
-            if output_attentions:
-                outputs = outputs + (encoder_outputs[3] + decoder_outputs[2],)
-        else:
-            encoder_cls_tokens = encoder_outputs[0][:, :self.cls_tokens]
-            encoder_outputs = (encoder_outputs[0][:, self.cls_tokens - 1:], encoder_outputs[1:])
-            outputs = (encoder_outputs[0],)
-            cls_tokens = encoder_cls_tokens
-            if output_hidden_states:
-                outputs = outputs + (encoder_outputs[0], encoder_outputs[1],)
-            if output_attentions:
-                outputs = outputs + (encoder_outputs[3],)
+            outputs["decoder_outputs"] = decoder_outputs
 
-        outputs += (encoder_cls_tokens, cls_tokens,)
-        outputs += answering
         return outputs
 
 
@@ -1750,8 +1735,6 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         self.cls_tokens = config.num_highway_cls_tokens + 1
         self.accuracy_hist = defaultdict(list)
         self.loss_ce = CrossEntropyLoss(ignore_index=config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0)
-        if config.embedding_size != config.block_channel_size[0]:
-            self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size)
 
         self.init_weights()
 
@@ -1780,15 +1763,14 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             char_ids=char_ids, char_offsets=char_offsets,
         )
 
-        last_hidden_state = outputs[0]
+        last_hidden_state = outputs["decoder_outputs"][0]
         prediction_logits = None
-        input_shape = input_ids.size()
         active_loss = attention_mask == 1
 
         masked_lm_loss = None
         if labels is not None:
             if self.lm_dim_match:
-                last_hidden_state = self.lm_dim_match(last_hidden_state)
+                last_hidden_state = self.funnel.embed_proj_transpose(last_hidden_state)
             prediction_logits = self.lm_head(last_hidden_state)
             loss_fct = self.loss_ce  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
@@ -1832,7 +1814,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.config = config
         self.tokenizer = tokenizer
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
-        self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
         self.contrastive_ffn = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], config.block_channel_size[0]))
@@ -1845,8 +1826,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
-        self.lm_dim_match = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-        self.lm_dim_match.weight = nn.Parameter(self.funnel.embeddings.embed_proj.weight.transpose(0, 1))
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
             self.sent_predict_fc = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1)))
@@ -1895,7 +1874,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.init_weights()
 
     def get_output_embeddings(self):
-        return self.lm_head
+        return None
 
     def adv_project(self, grad, norm_type='inf', eps=1e-6):
         if norm_type == 'l2':
@@ -1906,21 +1885,21 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             direction = grad / (grad.abs().max(-1, keepdim=True)[0] + eps)
         return direction
 
-    def aitm_loss(self, embed, position_embeds, attention_mask, mlm_predictions, mlm_correct,
+    def aitm_loss(self, funnel_inputs, funnel_outputs, mlm_predictions, mlm_correct,
                   sent_order_predictions, electra_predictions,
-                  labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_predictions=None,
+                  labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
                   contrastive_anchors=None, contrastive_positives=None, contrastive_logits=None,
                   reverse_loss=False):
-        encoder_outputs = self.funnel.encoder(
-            embed,
-            position_embeds,
-            attention_mask=attention_mask,
-            output_attentions=False,
-            output_hidden_states=True,
-        )
+        funnel_inputs = dict(**funnel_inputs)
+        funnel_inputs["input_embeds"] = funnel_outputs["input_embeds"]
+        funnel_inputs["position_embeds"] = funnel_outputs["position_embeds"]
+        funnel_inputs["bypass_embeddings"] = True
+        new_funnel_outputs = self.funnel(funnel_inputs)
+        encoder_outputs = new_funnel_outputs["encoder_outputs"]
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.lm_dim_match(first_block_hidden[:, self.cls_tokens:])
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
+        encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
 
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0
@@ -1944,14 +1923,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             if reverse_loss:
                 sent_order_pre_kl = (sent_order_pre_kl + KL(sent_order_logits.detach(), sent_order_predictions, reduction="batchmean")) / 2.0
 
-        decoder_outputs = self.funnel.decoder(
-            final_hidden=encoder_outputs[0],
-            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
-            position_embeds=position_embeds,
-            attention_mask=attention_mask,
-            output_attentions=False,
-            output_hidden_states=True,
-        )
+        decoder_outputs = new_funnel_outputs["decoder_outputs"]
         discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:]
         electra_logits = self.discriminator_predictions(discriminator_sequence_output)
         electra_pre_kl = KL(electra_logits, electra_predictions.detach(), reduction="batchmean")
@@ -1960,7 +1932,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         contrastive_kl = 0.0
         if contrastive_anchors is not None:
-            contrastive_block_hidden = third_block_hidden[:, (self.cls_tokens + 1):]
+            contrastive_block_hidden = encoder_last_layer_out
 
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
@@ -1993,36 +1965,37 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
 
         answering_lm_loss_kl = 0.0
-        if labels_pet_input_ids is not None:
-            encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
-            alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
+        run_answering = labels_pet_input_ids is not None
+        if run_answering:
             assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
-
-            answering_hidden = self.funnel.answering_ffn(encoder_last_layer_out[:, :alen])
-            answering_lm_loss_kl = KL(answering_hidden, answering_predictions.detach(), reduction="batchmean")
+            answering_hidden = new_funnel_outputs["answering_hidden"]
+            answering_lm_loss_kl = KL(answering_hidden, funnel_outputs["answering_hidden"].detach(), reduction="batchmean")
             if reverse_loss:
-                answering_lm_loss_kl = (answering_lm_loss_kl + KL(answering_hidden.detach(), answering_predictions, reduction="batchmean")) / 2.0
+                answering_lm_loss_kl = (answering_lm_loss_kl + KL(answering_hidden.detach(), funnel_outputs["answering_hidden"], reduction="batchmean")) / 2.0
 
             answering_lm_loss_kl = self.answering_lm_w * answering_lm_loss_kl
 
         return self.lm_loss_w * lm_pre_kl, self.sentence_order_prediction_w * sent_order_pre_kl, self.electra_loss_w * electra_pre_kl, answering_lm_loss_kl, self.contrastive_w * contrastive_kl
 
-    def forward_for_aitm(self, embed, position_embeds, attention_mask,
+    def forward_for_aitm(self, funnel_inputs, funnel_outputs,
                          mlm_predictions, mlm_correct, sent_order_predictions, electra_predictions,
-                         labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None, answering_logits=None,
+                         labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
                          contrastive_anchors=None, contrastive_positives=None, contrastive_logits=None):
         if self.alum_aitm_alternate:
             self.adv_lm_w = -1 * self.adv_lm_w
+        embed = funnel_outputs["input_embeds"]
+        funnel_outputs = dict(**funnel_outputs)
         noise = embed.new(embed.size()).normal_(0, 1) * self.aitm_noise_var
         noise.requires_grad_()
         for _ in range(self.adv_ascent_steps):
             newembed = embed.detach() + noise
-            lm_pre_kl, sent_order_pre_kl, electra_pre_kl, answering_lm_pre_kl, contrastive_pre_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
+            funnel_outputs["input_embeds"] = newembed
+            lm_pre_kl, sent_order_pre_kl, electra_pre_kl, answering_lm_pre_kl, contrastive_pre_kl = self.aitm_loss(funnel_inputs, funnel_outputs,
                                                                                                                    mlm_predictions, mlm_correct,
                                                                                                                    sent_order_predictions, electra_predictions,
                                                                                                                    labels_pet_input_ids,
                                                                                                                    labels_pet_attention_mask,
-                                                                                                                   labels_pet_max_length, answering_logits,
+                                                                                                                   labels_pet_max_length,
                                                                                                                    contrastive_anchors, contrastive_positives, contrastive_logits)
 
             adv_loss = electra_pre_kl + sent_order_pre_kl + lm_pre_kl + answering_lm_pre_kl + contrastive_pre_kl
@@ -2037,12 +2010,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         #
         newembed = embed + noise.detach()
-        lm_post_kl, sent_order_post_kl, electra_post_kl, answering_lm_post_kl, contrastive_post_kl = self.aitm_loss(newembed, position_embeds, attention_mask,
+        funnel_outputs["input_embeds"] = newembed
+        lm_post_kl, sent_order_post_kl, electra_post_kl, answering_lm_post_kl, contrastive_post_kl = self.aitm_loss(funnel_inputs, funnel_outputs,
                                                                                                                     mlm_predictions, mlm_correct,
                                                                                                                     sent_order_predictions, electra_predictions,
                                                                                                                     labels_pet_input_ids,
                                                                                                                     labels_pet_attention_mask,
-                                                                                                                    labels_pet_max_length, answering_logits,
+                                                                                                                    labels_pet_max_length,
                                                                                                                     contrastive_anchors, contrastive_positives,
                                                                                                                     contrastive_logits,
                                                                                                                     reverse_loss=True)
@@ -2095,35 +2069,35 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-        embedding_generation_params = input_ids, token_type_ids, inputs_embeds, char_ids, char_offsets
-        inputs_embeds, position_embeds, input_shape = self.get_emb(embedding_generation_params)
+        run_answering = labels_pet_input_ids is not None
+        funnel_inputs = dict(input_ids=input_ids,
+                             attention_mask=attention_mask,
+                             token_type_ids=token_type_ids,
+                             inputs_embeds=inputs_embeds,
+                             char_ids=char_ids, char_offsets=char_offsets,
+                             run_decoder=True,
+                             run_answering=run_answering, )
+
         et = time.time() - st
         timing_dict.append(("get_emb", et))
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
         tokenizer = self.tokenizer
-        if self.config.num_highway_cls_tokens > 0:
-            attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
+        funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         et = time.time() - st
         timing_dict.append(("prepare_encoder_input", et))
-        encoder_outputs = self.funnel.encoder(
-            inputs_embeds,
-            position_embeds,
-            attention_mask=attention_mask,
-            output_attentions=False,
-            output_hidden_states=True,
-        )
+        encoder_outputs = funnel_outputs["encoder_outputs"]
         et = time.time() - st
         timing_dict.append(("encoder_outputs", et))
         answering_lm_loss = 0.0
         answering_hidden = None
         encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
-        if labels_pet_input_ids is not None:
+        if run_answering:
             alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
             assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
-            answering_hidden = self.funnel.answering_ffn(encoder_last_layer_out[:, :alen])
-            answering_logits = self.funnel.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            answering_hidden = funnel_outputs["answering_hidden"]
+            answering_logits = funnel_outputs["answering_logits"][:, :alen]
             loss_fct = self.loss_ce
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
             if record_accuracy:
@@ -2133,8 +2107,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
-        first_block_hidden = self.lm_dim_match(first_block_hidden[:, self.cls_tokens:])
-        prediction_logits = self.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
+        first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
+        prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
@@ -2265,21 +2239,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
         labels = (active_labels == active_prediction_logits.argmax(dim=-1)).float()
         if record_accuracy:
-            predictions = prediction_logits.argmax(dim=-1)
+            # predictions = prediction_logits.argmax(dim=-1)
             # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
             accuracy_hist["lm"] = (float(labels.float().cpu().numpy().mean()))
 
         et = time.time() - st
         timing_dict.append(("lm_accuracy_loss", et))
 
-        decoder_outputs = self.funnel.decoder(
-            final_hidden=encoder_outputs[0],
-            first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
-            position_embeds=position_embeds,
-            attention_mask=attention_mask,
-            output_attentions=False,
-            output_hidden_states=output_hidden_states,
-        )
+        decoder_outputs = funnel_outputs["decoder_outputs"]
 
         et = time.time() - st
         timing_dict.append(("decoder_outputs", et))
@@ -2316,8 +2283,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         adv_loss = torch.tensor(0.0)
         timing_dict.append(("aitm_alum_start", et))
         if (self.aitm or self.alum) and self.training:
-            adv_loss = self.forward_for_aitm(inputs_embeds, position_embeds, attention_mask, first_block_hidden, labels, sent_order_logits, logits,
-                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length, answering_hidden,
+            adv_loss = self.forward_for_aitm(funnel_inputs, funnel_outputs, first_block_hidden, labels, sent_order_logits, logits,
+                                             labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length,
                                              contrastive_anchors_copy, contrastive_positives_copy, contrastive_block_matrix)
             loss = loss + adv_loss
 

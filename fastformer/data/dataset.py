@@ -287,12 +287,6 @@ class TokenizerDataset(Dataset):
         else:
             n_queries = 0
             pet_query = pet_answer = []
-        if "label" in item:
-            label = item["label"]
-        elif "labels" in item:
-            label = item["labels"]
-        else:
-            label = 0
 
         text = item["text"]
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])

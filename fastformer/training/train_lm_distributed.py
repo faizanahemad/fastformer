@@ -153,7 +153,8 @@ class LargeValidator:
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         for k, v in datadict.items():
             cns = v.column_names
-            labels = [dataset[i] for i in range(len(dataset))]
+            if 'answer' in cns:
+                labels = [dataset[i] for i in range(len(dataset))]
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
