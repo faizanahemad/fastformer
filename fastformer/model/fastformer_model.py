@@ -1503,6 +1503,7 @@ class TransformerDecoder(nn.Module):
         else:
             self.layers = None
 
+        block_channel_size = self.config.block_channel_size
         self.decoder_ln = nn.LayerNorm(block_channel_size[0], config.layer_norm_eps)
 
     def forward(
@@ -2052,8 +2053,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             inputs_embeds=None,
             labels=None,
             labels_segment_index=None,
-            output_attentions=None,
-            output_hidden_states=None,
             char_ids=None, char_offsets=None,
             highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
             labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
@@ -2066,9 +2065,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         accuracy_hist = defaultdict()
         record_accuracy = self.record_accuracy or kwargs.pop("record_accuracy", False)
         st = time.time()
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
         run_answering = labels_pet_input_ids is not None
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
@@ -2084,6 +2080,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         tokenizer_attn_mask = attention_mask
         tokenizer = self.tokenizer
         funnel_outputs = self.funnel(**funnel_inputs)
+        inputs_embeds = funnel_outputs["funnel_outputs"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         et = time.time() - st
         timing_dict.append(("prepare_encoder_input", et))
@@ -2091,12 +2088,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("encoder_outputs", et))
         answering_lm_loss = 0.0
-        answering_hidden = None
         encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
         if run_answering:
             alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
             assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
-            answering_hidden = funnel_outputs["answering_hidden"]
             answering_logits = funnel_outputs["answering_logits"][:, :alen]
             loss_fct = self.loss_ce
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
@@ -2311,7 +2306,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         return results
 
 
-
 if __name__ == "__main__":
     import time
     import argparse
@@ -2320,6 +2314,7 @@ if __name__ == "__main__":
     from torch.optim import AdamW
 
     torch.backends.cudnn.benchmark = True
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
     from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
     from transformers.models.deberta import DebertaModel

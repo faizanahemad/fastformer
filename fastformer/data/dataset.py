@@ -295,7 +295,7 @@ class TokenizerDataset(Dataset):
         length = torch.sum(highway_cls_ar__attention_mask).item()
 
         length = item["length"] if "length" in item else length
-        results = dict(labels=label, n_pet_queries=n_queries)
+        results = dict(n_pet_queries=n_queries)
 
         if self.training:
 
@@ -339,8 +339,7 @@ class TokenizerDataset(Dataset):
             else:
                 seg_idxs = list(range(num_segments))
             labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
-            results = dict(labels=label,
-                           labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
+            results = dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
                            highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
             segments = segments[seg_idxs]

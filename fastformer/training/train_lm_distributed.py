@@ -92,6 +92,7 @@ def training_args():
     args.world_size = args.gpus_per_node * args.nodes
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_PORT
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
     seed = 0
     args.seed = seed
@@ -194,6 +195,7 @@ def train(local_rank, args):
     # Build model with DDP
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_PORT
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args.nr * args.gpus_per_node + local_rank
     dist.init_process_group(args.dist_backend, rank=rank, world_size=args.world_size)
