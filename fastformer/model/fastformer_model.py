@@ -2381,7 +2381,7 @@ if __name__ == "__main__":
                                # sentence_jumble_proba=((1024, 0.1),), word_noise_proba=((1024, 0.1),),
                                max_jumbling_span_length=2,
                                dataset=dataset)
-    dataset.training = False
+    dataset.training = True
     # dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
     # iter_dataloader = iter(dataloader)
     # pt_batch = next(iter_dataloader)
