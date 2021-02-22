@@ -270,6 +270,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
     # Take model to local rank
+
     ddp_model = DDP(model, device_ids=[rank], find_unused_parameters=True)
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
@@ -347,9 +348,11 @@ def train(local_rank, args):
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     args = training_args()
-
-    try:
-        mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
-    finally:
-        cleanup()
+    if args["world_size"] == 1:
+        train(0, args)
+    else:
+        try:
+            mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        finally:
+            cleanup()
 
