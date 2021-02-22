@@ -44,14 +44,33 @@ class ModelConfig:
     model_size: str
     aitm: bool
     alum: bool
-    adv_lm_w: float = 1.0
-    adv_ascent_steps: int = 1
-    aitm_clip_min: float = 0.1
-    aitm_clip_max: float = 0.9
-    adv_step_size: float = 1e-3
-    adv_epsilon: float = 1e-2
-    aitm_noise_var: float = 0.1
-    adv_w: float = 1.0
+    adv_lm_w: float
+    adv_ascent_steps: int
+    aitm_clip_min: float
+    aitm_clip_max: float
+    adv_step_size: float
+    adv_epsilon: float
+    aitm_noise_var: float
+    adv_w: float
+    alum_aitm_alternate: bool
+    input_cls_orthogonal_w: float
+    first_block_cls_orthogonal_w: float
+    electra_loss_w: float
+    lm_loss_w: float
+    sentence_order_prediction_w: float
+    contrastive_w: float
+    contrastive_temperature: float
+    answering_lm_w: float
+    highway_cls_ar_w: float
+    additive_margin_softmax_w: float
+
+
+model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=False,
+                                        adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
+                                        adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
+                                        input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1,
+                                        electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
+                                        answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3)
 
 
 @dataclass_json

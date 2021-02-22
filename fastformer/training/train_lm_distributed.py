@@ -255,10 +255,9 @@ def train(local_rank, args):
     torch.cuda.set_device(device)
 
     set_seeds(args.seed)
-
-    model_config = dict(**args["model_config"])
+    model_config = model_config.to_dict()
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[model_config.pop("model_size")]
-    tokenizer = get_tokenizer(args["model_config"]["tokenizer_name"])
+    tokenizer = get_tokenizer(model_config.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
     config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
