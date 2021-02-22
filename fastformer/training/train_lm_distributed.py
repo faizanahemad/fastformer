@@ -242,7 +242,7 @@ def train(local_rank, args):
     # Build dataset and dataloader with distributed sampler
     # Build model with DDP
     os.environ['MASTER_ADDR'] = args.master_addr
-    os.environ['MASTER_PORT'] = args.master_PORT
+    os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args.nr * args.gpus_per_node + local_rank
