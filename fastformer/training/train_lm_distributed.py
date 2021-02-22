@@ -224,7 +224,7 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, continuous_iter=True):
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True):
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
@@ -287,7 +287,7 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer)
 
     validate_every_steps = args["validate_every_steps"]
     log_every_steps = args["log_every_steps"]
