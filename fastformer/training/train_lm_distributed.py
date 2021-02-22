@@ -266,6 +266,7 @@ def train(local_rank, args):
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+    print("Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
     # Take model to local rank

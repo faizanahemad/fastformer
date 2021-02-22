@@ -7,6 +7,7 @@ import torch
 from ..config import FastFormerConfig, size_dicts
 from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
+import unidecode
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
@@ -269,8 +270,8 @@ class TokenizerDataset(Dataset):
     def __getitem__(self, item):
         tokenizer = self.tokenizer
         item = self.dataset[item]
-        pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else None
-        pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else None
+        pet_query = unidecode.unidecode(item["query"]) if "query" in item and len(item["query"]) > 0 else None
+        pet_answer = unidecode.unidecode(item["answer"]) if "answer" in item and len(item["answer"]) > 0 else None
 
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
@@ -289,6 +290,8 @@ class TokenizerDataset(Dataset):
             pet_query = pet_answer = []
 
         text = item["text"]
+        text = unidecode.unidecode(text)
+
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
