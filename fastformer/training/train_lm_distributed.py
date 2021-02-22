@@ -66,6 +66,9 @@ def training_args():
     parser.add_argument('--shuffle_dataset', required=False, type=str2bool, default=False,
                         help='Shuffle Train')
 
+    parser.add_argument('--cpu', required=True, type=str2bool, default=False,
+                        help='Shuffle Train')
+
     parser.add_argument('--train_dataset', required=False, type=str,
                         help='Train Dataset')
 
@@ -251,8 +254,12 @@ def train(local_rank, args):
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
-    device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
-    torch.cuda.set_device(device)
+    if args["cpu"]:
+        assert args["world_size"] == 1
+        device = torch.device("cpu")
+    else:
+        device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
+        torch.cuda.set_device(device)
 
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
