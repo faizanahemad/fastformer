@@ -87,7 +87,11 @@ def training_args():
     parser.add_argument('--dist_backend', type=str, required=False,
                         default='nccl',
                         help='Distributed Backend')
-    parser.add_argument('--log-interval', type=int, default=200, metavar='N',
+    parser.add_argument('--log_every_steps', type=int, default=200, metavar='N',
+                        help='how many batches to wait before logging training status')
+    parser.add_argument('--validate_every_steps', type=int, default=200, metavar='N',
+                        help='how many batches to wait before logging training status')
+    parser.add_argument('--save_every_steps', type=int, default=200, metavar='N',
                         help='how many batches to wait before logging training status')
 
     args = parser.parse_args()
@@ -286,11 +290,13 @@ def train(local_rank, args):
     if not args["validate_only"] and not args["test_only"]:
         train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn)
 
-    validate_every_steps = optc["validate_every_steps"]
-    save_every_steps = optc["save_every_steps"]
+    validate_every_steps = args["validate_every_steps"]
+    log_every_steps = args["log_every_steps"]
+    save_every_steps = args["save_every_steps"]
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     _ = model.train()
+    torch.distributed.barrier()
 
     for step, batch in enumerate(train_loader):
         if (step + 1) % save_every_steps == 0:
@@ -300,6 +306,7 @@ def train(local_rank, args):
         if (step + 1) % validate_every_steps == 0:
             if rank == 0:
                 val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device)()
+                print("Rank = %s, steps = %s, Val = %s" % (rank, step, val_results))
             torch.distributed.barrier()
 
         with autocast():
@@ -314,7 +321,8 @@ def train(local_rank, args):
             scheduler.step()
             optimizer.zero_grad()
 
-
+        if (step + 1) % log_every_steps == 0:
+            print("Rank = %s, steps = %s, Loss = %s" % (rank, step, loss_dict))
 
 
     # Take inputs to local_rank
