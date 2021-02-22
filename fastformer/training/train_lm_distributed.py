@@ -227,11 +227,11 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True):
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, single_node=False, continuous_iter=True):
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
-        train_loader = DataLoader(train_dataset, sampler=DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
+        train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
         train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
@@ -239,7 +239,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
-        train_loader = {k: DataLoader(v, sampler=DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
@@ -253,11 +253,11 @@ def train(local_rank, args):
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
-    dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
     if args["cpu"]:
         assert args["world_size"] == 1
         device = torch.device("cpu")
     else:
+        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
 
@@ -298,7 +298,7 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer)
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, args["cpu"] and args["world_size"] == 1)
 
     validate_every_steps = args["validate_every_steps"]
     log_every_steps = args["log_every_steps"]
