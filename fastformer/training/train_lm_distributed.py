@@ -93,7 +93,7 @@ def training_args():
     args = parser.parse_args()
     args.world_size = args.gpus_per_node * args.nodes
     os.environ['MASTER_ADDR'] = args.master_addr
-    os.environ['MASTER_PORT'] = args.master_PORT
+    os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
     seed = 0

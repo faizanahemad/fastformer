@@ -37,7 +37,7 @@ class OptimizerConfig:
     datasets: Dict[str, float]  # Dataset name and probability of choice
     sampling_fraction: float
 
-optimizer_config = OptimizerConfig(4e-5, 1e-6, 1e-2, 0.9, 0.98, 8, 8, 2000, 100_000, 10_000, 1.0, True, True, 1_000, None, 0.6)
+optimizer_config = OptimizerConfig(4e-5, 1e-6, 1e-2, 0.9, 0.98, 8, 8, 2000, 1000, 10_000, 1.0, True, True, 1_000, None, 0.6)
 
 
 @dataclass_json
