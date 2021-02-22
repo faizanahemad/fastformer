@@ -212,7 +212,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     offset_mapping[:, -1] -= 1
     offset_mapping = F.relu(offset_mapping)
     char_list = list(text)
-    char_lists = list(map(lambda x: char_to_id.__getitem__(x.lower()), char_list))
+    char_lists = list(map(lambda x: char_to_id.__getitem__(unidecode.unidecode(x.lower())), char_list))
     tokenizer_outputs["char_ids"] = char_lists[:offset_mapping.max().item()]
     tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
     assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
