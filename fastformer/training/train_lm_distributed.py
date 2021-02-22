@@ -104,7 +104,7 @@ def training_args():
     args.seed = seed
     assert hasattr(args, "test_dataset") or not args["test_only"]
     assert hasattr(args, "validation_dataset") or not args["validate_only"]
-    return args
+    return vars(args)
 
 
 class SuperGLUEValidator:
