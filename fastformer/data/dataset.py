@@ -208,7 +208,7 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
 def char_mapper(x):
     ud = list(unidecode.unidecode(x.lower()).lower())
     if len(ud) == 0:
-        return '_'
+        return 1
     return char_to_id.__getitem__(ud[0])
 
 
