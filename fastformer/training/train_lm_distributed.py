@@ -255,9 +255,9 @@ def train(local_rank, args):
     torch.cuda.set_device(device)
 
     set_seeds(args.seed)
-    model_config = model_config.to_dict()
-    config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[model_config.pop("model_size")]
-    tokenizer = get_tokenizer(model_config.pop("tokenizer_name"))
+    mconf = model_config.to_dict()
+    config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
+    tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
     config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
@@ -265,7 +265,7 @@ def train(local_rank, args):
 
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
-    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **model_config).to(device)
+    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     if args["pretrained_model"] is not None:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
     # Take model to local rank
