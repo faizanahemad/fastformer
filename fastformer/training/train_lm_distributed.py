@@ -271,7 +271,7 @@ def train(local_rank, args):
     # Take model to local rank
     ddp_model = DDP(model, device_ids=[rank])
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
-    optc = optimizer_config
+    optc = optimizer_config.to_dict()
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
     scaler = GradScaler()
