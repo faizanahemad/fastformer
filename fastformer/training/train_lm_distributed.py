@@ -322,21 +322,31 @@ def train(local_rank, args):
         if (step + 1) % log_every_steps == 0:
             record_accuracy = True
 
-        with autocast():
-            batch["record_accuracy"] = record_accuracy
-            labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
-            labels = labels.to(device)
-
+        batch["record_accuracy"] = record_accuracy
+        labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
+        labels = labels.to(device)
+        if args["cpu"]:
             output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
+        else:
+            with autocast():
+
+                output = ddp_model(**batch, labels=labels)
+                loss = output["loss"]
+                loss_dict = output["loss_dict"]
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+                optimizer.zero_grad()
 
         if (step + 1) % log_every_steps == 0:
             print("Rank = %s, steps = %s, Loss = %s, Accuracy = %s" % (rank, step, loss_dict, output["accuracy_hist"]))
