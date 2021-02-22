@@ -270,8 +270,8 @@ class TokenizerDataset(Dataset):
     def __getitem__(self, item):
         tokenizer = self.tokenizer
         item = self.dataset[item]
-        pet_query = unidecode.unidecode(item["query"]) if "query" in item and len(item["query"]) > 0 else None
-        pet_answer = unidecode.unidecode(item["answer"]) if "answer" in item and len(item["answer"]) > 0 else None
+        pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else None
+        pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else None
 
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
@@ -281,10 +281,14 @@ class TokenizerDataset(Dataset):
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
+            pet_query = unidecode.unidecode(pet_query)
+            pet_answer = unidecode.unidecode(pet_answer)
             pet_query = [pet_query]
             pet_answer = [pet_answer]
         elif isinstance(pet_query, list):
             n_queries = len(pet_query)
+            pet_query = [unidecode.unidecode(pq) for pq in pet_query]
+            pet_answer = [unidecode.unidecode(pa) for pa in pet_answer]
         else:
             n_queries = 0
             pet_query = pet_answer = []
@@ -1996,7 +2000,14 @@ train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/tr
 validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
 test_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/test_fastformer")
 
-
+train_fastformer_1p = dict()
+for k, v in train_fastformer.items():
+    length = len(v)
+    new_len = length // 100
+    v = Dataset.from_dict(v[0:new_len])
+    train_fastformer_1p[k] = v
+    
+train_fastformer_1p = DatasetDict(**train_fastformer_1p)
 
 """
 
