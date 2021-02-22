@@ -1973,6 +1973,30 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
 ds_length_stats(train_fastformer)
 """
 
+"""
+import datasets
+import re
+import numpy as np
+import random
+from typing import List, Dict
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import nltk.data
+sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+import os
+os.cpu_count()
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
+
+train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/train_fastformer")
+validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
+test_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/test_fastformer")
+
+
+
+"""
+
 
 def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     article: List[Dict[str, List]] = examples["article"]

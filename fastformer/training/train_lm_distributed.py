@@ -307,9 +307,16 @@ def train(local_rank, args):
                 val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device)()
                 print("Rank = %s, steps = %s, Val = %s" % (rank, step, val_results))
             torch.distributed.barrier()
+        record_accuracy = False
+        if (step + 1) % log_every_steps == 0:
+            record_accuracy = True
 
         with autocast():
-            output = ddp_model(**batch)
+            batch["record_accuracy"] = record_accuracy
+            labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
+            labels = labels.to(device)
+
+            output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()
@@ -321,7 +328,7 @@ def train(local_rank, args):
             optimizer.zero_grad()
 
         if (step + 1) % log_every_steps == 0:
-            print("Rank = %s, steps = %s, Loss = %s" % (rank, step, loss_dict))
+            print("Rank = %s, steps = %s, Loss = %s, Accuracy = %s" % (rank, step, loss_dict, output["accuracy_hist"]))
 
 
     # Take inputs to local_rank
