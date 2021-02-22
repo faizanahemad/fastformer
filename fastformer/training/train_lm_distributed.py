@@ -245,16 +245,16 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
 def train(local_rank, args):
     # Build dataset and dataloader with distributed sampler
     # Build model with DDP
-    os.environ['MASTER_ADDR'] = args.master_addr
-    os.environ['MASTER_PORT'] = args.master_port
+    os.environ['MASTER_ADDR'] = args["master_addr"]
+    os.environ['MASTER_PORT'] = args["master_port"]
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
-    rank = args.nr * args.gpus_per_node + local_rank
-    dist.init_process_group(args.dist_backend, rank=rank, world_size=args.world_size)
+    rank = args["nr"] * args["gpus_per_node"] + local_rank
+    dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
     torch.cuda.set_device(device)
 
-    set_seeds(args.seed)
+    set_seeds(args["seed"])
     mconf = model_config.to_dict()
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
@@ -341,7 +341,7 @@ if __name__ == "__main__":
     args = training_args()
 
     try:
-        mp.spawn(train, nprocs=args.gpus_per_node, args=(args,), join=True)
+        mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
     finally:
         cleanup()
 
