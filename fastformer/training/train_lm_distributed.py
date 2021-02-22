@@ -245,6 +245,13 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     return train_loader
 
 
+def get_barrier(activate):
+    def barrier():
+        if activate:
+            torch.distributed.barrier()
+    return barrier
+
+
 def train(local_rank, args):
     # Build dataset and dataloader with distributed sampler
     # Build model with DDP
@@ -256,10 +263,12 @@ def train(local_rank, args):
     if args["cpu"]:
         assert args["world_size"] == 1
         device = torch.device("cpu")
+        barrier = get_barrier(False)
     else:
         dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
+        barrier = get_barrier(True)
 
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
@@ -288,13 +297,12 @@ def train(local_rank, args):
     scaler = GradScaler()
 
     model_save_dir = args["model_save_dir"]
-    assert os.path.exists(model_save_dir)
     model_save_name = args["model_save_name"]
     if rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
-    torch.distributed.barrier()
-
+    assert os.path.exists(model_save_dir)
+    barrier()
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
@@ -306,18 +314,18 @@ def train(local_rank, args):
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     _ = model.train()
-    torch.distributed.barrier()
+    barrier()
 
     for step, batch in enumerate(train_loader):
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.state_dict(), os.path.join(model_save_dir, model_save_name))
-            torch.distributed.barrier()
+            barrier()
         if (step + 1) % validate_every_steps == 0:
             if rank == 0:
                 val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device)()
                 print("Rank = %s, steps = %s, Val = %s" % (rank, step, val_results))
-            torch.distributed.barrier()
+            barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
             record_accuracy = True
