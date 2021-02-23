@@ -328,7 +328,7 @@ def train(local_rank, args):
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
-            record_accuracy = True
+            record_accuracy = False
 
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
