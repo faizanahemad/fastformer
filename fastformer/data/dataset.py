@@ -502,6 +502,12 @@ def datadict_iterator(dict_loader, dict_probas):
             _ = dict_loader.pop(cur_key, None)
             _ = dict_probas.pop(cur_key, None)
             keys, probas = zip(*list(dict_probas.items()))
+        except Exception as e:
+            print(cur_key, e)
+            _ = dict_loader.pop(cur_key, None)
+            _ = dict_probas.pop(cur_key, None)
+            keys, probas = zip(*list(dict_probas.items()))
+
     raise StopIteration()
 
 
