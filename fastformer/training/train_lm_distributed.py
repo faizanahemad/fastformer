@@ -243,7 +243,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
         # for v in train_dataset.values():
         #     v.training = False
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=1, num_workers=1) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=4, num_workers=2) for k, v in train_dataset.items()}
         # train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
@@ -322,6 +322,7 @@ def train(local_rank, args):
     start_time = time.time()
     batch_times = []
     model_times = []
+    full_times = []
     for step, batch in enumerate(train_loader):
         # if step <= 39:
         #     continue
@@ -371,9 +372,14 @@ def train(local_rank, args):
 
         if (step + 1) % log_every_steps == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
-            print("Batch time = %s, Model Time = %s" % (np.mean(batch_times), np.mean(model_times)))
+            print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+            batch_times = []
+            model_times = []
+            full_times = []
             clean_memory()
             barrier()
+        full_time = time.time() - start_time
+        full_times.append(full_time)
         start_time = time.time()
 
 
