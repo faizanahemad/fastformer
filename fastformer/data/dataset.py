@@ -221,8 +221,8 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     # Do padding myself
     tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **tokenizer_args)
     offset_mapping = tokenizer_outputs["offset_mapping"]
-    # offset_mapping[:, -1] -= 1
-    # offset_mapping = F.relu(offset_mapping)
+    offset_mapping -= 1
+    offset_mapping = F.relu(offset_mapping)
     char_list = list(text)
     char_lists = list(map(char_mapper, char_list))
 
