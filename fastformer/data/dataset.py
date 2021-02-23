@@ -460,6 +460,8 @@ def get_collate_fn(num_cls, padding_index):
         for k, v in samples.items():
             if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
                 continue
+            if k == "char_ids":
+                continue
             if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
                 continue
             step_size = 32 if k == "char_ids" else 8

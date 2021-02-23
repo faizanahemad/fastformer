@@ -322,8 +322,8 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     for step, batch in enumerate(train_loader):
-        if step <= 39:
-            continue
+        # if step <= 39:
+        #     continue
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
