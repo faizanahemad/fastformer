@@ -228,17 +228,13 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     char_lists = list(map(char_mapper, char_list))
 
     assert len(char_list) == len(char_lists)
-    try:
-        assert offset_mapping.max().item() < len(char_list)
-    except Exception as e:
-        print(offset_mapping.max().item(), len(char_list))
-        raise e
-    tokenizer_outputs["char_ids"] = char_lists[:offset_mapping.max().item()]
-    assert offset_mapping.max().item() < len(char_lists)
+    mxlen = offset_mapping.max().item()
+    assert mxlen < len(char_list)
+    tokenizer_outputs["char_ids"] = char_lists[:mxlen]
+    assert mxlen < len(char_lists)
     tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
     assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
     tokenizer_outputs["input_ids"] = tokenizer_outputs["input_ids"].squeeze()
-    assert tokenizer_outputs["input_ids"].shape[0] == tokenizer_args["max_length"]
     tokenizer_outputs["attention_mask"] = tokenizer_outputs["attention_mask"].squeeze()
     tokenizer_outputs["token_type_ids"] = tokenizer_outputs["token_type_ids"].squeeze()
     del tokenizer_outputs["offset_mapping"]
