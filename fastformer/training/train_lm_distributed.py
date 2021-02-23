@@ -306,11 +306,13 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
     barrier()
+    print("Optimizer Created for Rank = %s" % rank)
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
         train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, args["world_size"] == 1)
 
+    print("Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
