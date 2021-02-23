@@ -485,6 +485,7 @@ def get_collate_fn(num_cls, padding_index):
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
+        assert samples['char_offsets'].max().item() < samples["char_ids"].shape[1]
         return samples
     return collate_fn
 
