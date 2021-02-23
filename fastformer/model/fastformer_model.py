@@ -1705,13 +1705,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         )
         final_hidden = self.final_hidden_fc(encoder_outputs[0])
         outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
-        if run_answering and hasattr(self, "embed_proj_transpose"):
-            answering_hidden = self.embed_proj_transpose(final_hidden[:, self.cls_tokens:])
-            answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
-            outputs["answering_logits"] = answering_logits
-            outputs["answering_hidden"] = answering_hidden
 
-        if hasattr(self, "decoder") and run_decoder:
+        if hasattr(self, "decoder") and (run_decoder or run_answering):
 
             decoder_outputs = self.decoder(
                 final_hidden=final_hidden,
@@ -1722,6 +1717,14 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 output_hidden_states=False,
             )
             outputs["decoder_outputs"] = decoder_outputs
+
+        if run_answering:
+            assert hasattr(self, "embed_proj_transpose")
+            assert hasattr(self, "decoder")
+            answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens:])
+            answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            outputs["answering_logits"] = answering_logits
+            outputs["answering_hidden"] = answering_hidden
 
         return outputs
 
