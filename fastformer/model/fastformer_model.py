@@ -2090,11 +2090,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         answering_lm_loss = 0.0
         encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
         if run_answering:
-            alen = min(encoder_last_layer_out.size(1), labels_pet_input_ids.size(1))
-            assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
+            alen = labels_pet_input_ids.size(1)
+            assert alen <= encoder_last_layer_out.size(1)
             answering_logits = funnel_outputs["answering_logits"][:, :alen]
             loss_fct = self.loss_ce
-            answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.view(-1, self.config.vocab_size), labels_pet_input_ids[:, :alen].reshape(-1))
+            answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
             if record_accuracy:
                 answering_predictions = answering_logits.argmax(dim=-1)
                 answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]

@@ -66,7 +66,7 @@ def training_args():
     parser.add_argument('--shuffle_dataset', required=False, type=str2bool, default=False,
                         help='Shuffle Train')
 
-    parser.add_argument('--cpu', required=True, type=str2bool, default=False,
+    parser.add_argument('--cpu', required=False, type=str2bool, default=False,
                         help='Shuffle Train')
 
     parser.add_argument('--train_dataset', required=False, type=str,
