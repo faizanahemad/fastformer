@@ -428,15 +428,23 @@ class TokenizerDataset(Dataset):
         return len(self.dataset)
 
 
-def get_collate_fn(num_cls, padding_index):
-    def collate_fn(samples):
+class get_collate_fn:
+    def __init__(self, num_cls, padding_index):
+        self.num_cls = num_cls
+        self.padding_index = padding_index
+
+    def __call__(self, samples):
+        num_cls = self.num_cls
+        padding_index = self.padding_index
         char_ids = None
+        max_chars = 0
         if isinstance(samples, list) and isinstance(samples[0], dict) and "char_ids" in samples[0]:
             char_ids = [s["char_ids"] for s in samples]
             for s in samples:
                 del s["char_ids"]
 
             max_chars = max(list(map(len, char_ids)))
+            max_chars_temp = max_chars
             max_chars = int(32 * np.ceil(max_chars / 32))
             char_ids = [torch.tensor(cid) for cid in char_ids]
             char_ids = torch.nn.utils.rnn.pad_sequence(char_ids, batch_first=True, padding_value=padding_index)
@@ -458,9 +466,7 @@ def get_collate_fn(num_cls, padding_index):
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
         samples = {k: v.squeeze() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         for k, v in samples.items():
-            if k in ["char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
-                continue
-            if k == "char_ids":
+            if k in ["char_ids", "char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
                 continue
             if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
                 continue
@@ -469,8 +475,7 @@ def get_collate_fn(num_cls, padding_index):
                 v = v[:, :-step_size]
             if k not in ["labels_pet_input_ids", "labels_pet_attention_mask"]:
                 required_len = int(step_size * np.ceil(v.shape[1]/step_size))
-                if k != "char_ids":
-                    required_len = required_len - step_size + (step_size - num_cls)
+                required_len = required_len - step_size + (step_size - num_cls)
                 padding = required_len - v.shape[-1]
                 if padding > 0:
                     v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
@@ -485,9 +490,14 @@ def get_collate_fn(num_cls, padding_index):
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
-        assert samples['char_offsets'].max().item() < samples["char_ids"].shape[1]
+        mxoff = samples['char_offsets'].max().item()
+        char_ids_shape = samples["char_ids"].shape[1]
+        try:
+            assert mxoff < char_ids_shape
+        except:
+            print("char_offsets > char_ids, max offset = %s, char_ids max = %s, Max chars before pad = %s" % (mxoff, char_ids_shape, max_chars_temp))
         return samples
-    return collate_fn
+
 
 
 def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
@@ -521,6 +531,7 @@ def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
 
 
 def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
+    # TODO: support batched dataloaders
     batch = []
     size, batch_size = zip(*list(batch_size_dict.items()))
     i = 1
