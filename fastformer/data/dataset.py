@@ -289,20 +289,20 @@ class TokenizerDataset(Dataset):
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
             n_queries = 1
-            # pet_query = unidecode.unidecode(pet_query)
-            # pet_answer = unidecode.unidecode(pet_answer)
+            pet_query = unidecode.unidecode(pet_query)
+            pet_answer = unidecode.unidecode(pet_answer)
             pet_query = [pet_query]
             pet_answer = [pet_answer]
         elif isinstance(pet_query, list):
             n_queries = len(pet_query)
-            # pet_query = [unidecode.unidecode(pq) for pq in pet_query]
-            # pet_answer = [unidecode.unidecode(pa) for pa in pet_answer]
+            pet_query = [unidecode.unidecode(pq) for pq in pet_query]
+            pet_answer = [unidecode.unidecode(pa) for pa in pet_answer]
         else:
             n_queries = 0
             pet_query = pet_answer = []
 
         text = item["text"]
-        # text = unidecode.unidecode(text)
+        text = unidecode.unidecode(text)
 
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
