@@ -206,10 +206,15 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
 
 
 def char_mapper(x):
-    ud = list(unidecode.unidecode(x.lower()).lower())
-    if len(ud) == 0:
+    x = x.lower()
+    # ud = list(unidecode.unidecode(x.lower()).lower())
+    # if len(ud) == 0:
+    #     return 1
+    # return char_to_id.__getitem__(ud[0])
+    if x in char_to_id:
+        return char_to_id[x]
+    else:
         return 1
-    return char_to_id.__getitem__(ud[0])
 
 
 def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
