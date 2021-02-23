@@ -240,7 +240,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=64, num_workers=4) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=128, num_workers=1) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
@@ -254,8 +254,7 @@ def get_barrier(activate):
 
 
 def train(local_rank, args):
-    # Build dataset and dataloader with distributed sampler
-    # Build model with DDP
+    torch.multiprocessing.set_sharing_strategy('file_system')
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -377,6 +376,7 @@ def train(local_rank, args):
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
+    torch.multiprocessing.set_sharing_strategy('file_system')
     args = training_args()
     if args["world_size"] == 1:
         train(0, args)

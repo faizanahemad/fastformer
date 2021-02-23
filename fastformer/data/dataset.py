@@ -494,6 +494,7 @@ def get_collate_fn(num_cls, padding_index):
 def datadict_iterator(dict_loader, dict_probas):
     keys, probas = zip(*list(dict_probas.items()))
     dict_loader = dict(**dict_loader)
+    err_count = defaultdict(int)
     while len(dict_loader) > 0:
         cur_key = random.choices(keys, probas)[0]
         try:
@@ -503,10 +504,13 @@ def datadict_iterator(dict_loader, dict_probas):
             _ = dict_probas.pop(cur_key, None)
             keys, probas = zip(*list(dict_probas.items()))
         except Exception as e:
+            err_count[cur_key] = err_count[cur_key] + 1
             print(cur_key, e)
-            _ = dict_loader.pop(cur_key, None)
-            _ = dict_probas.pop(cur_key, None)
-            keys, probas = zip(*list(dict_probas.items()))
+            if err_count[cur_key] > 100:
+                print("Remove Dataset %s due to errors" % cur_key)
+                _ = dict_loader.pop(cur_key, None)
+                _ = dict_probas.pop(cur_key, None)
+                keys, probas = zip(*list(dict_probas.items()))
 
     raise StopIteration()
 
