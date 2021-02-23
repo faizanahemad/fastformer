@@ -505,7 +505,6 @@ def datadict_iterator(dict_loader, dict_probas):
     raise StopIteration()
 
 
-
 def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
     batch = []
     size, batch_size = zip(*list(batch_size_dict.items()))

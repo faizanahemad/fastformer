@@ -235,6 +235,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
+        train_dataset = {k: v for k, v in train_dataset.items() if len(v) > 0}
         train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_dataset.items()}
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
