@@ -90,11 +90,11 @@ def training_args():
     parser.add_argument('--dist_backend', type=str, required=False,
                         default='nccl',
                         help='Distributed Backend')
-    parser.add_argument('--log_every_steps', type=int, default=200, metavar='N',
+    parser.add_argument('--log_every_steps', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--validate_every_steps', type=int, default=200, metavar='N',
+    parser.add_argument('--validate_every_steps', type=int, default=2_000, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save_every_steps', type=int, default=200, metavar='N',
+    parser.add_argument('--save_every_steps', type=int, default=1_000, metavar='N',
                         help='how many batches to wait before logging training status')
 
     args = parser.parse_args()
