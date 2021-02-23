@@ -323,6 +323,7 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     full_times = []
+    print("Start Training for Rank = %s" % rank)
     for step, batch in enumerate(train_loader):
         # if step <= 39:
         #     continue
