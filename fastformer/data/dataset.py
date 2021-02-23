@@ -225,8 +225,13 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     # offset_mapping = F.relu(offset_mapping)
     char_list = list(text)
     char_lists = list(map(char_mapper, char_list))
+
     assert len(char_list) == len(char_lists)
-    assert offset_mapping.max().item() < len(char_list)
+    try:
+        assert offset_mapping.max().item() < len(char_list)
+    except Exception as e:
+        print(offset_mapping.max().item(), len(char_list))
+        raise e
     tokenizer_outputs["char_ids"] = char_lists[:offset_mapping.max().item()]
     assert offset_mapping.max().item() < len(char_lists)
     tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
