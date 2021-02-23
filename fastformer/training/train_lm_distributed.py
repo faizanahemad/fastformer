@@ -254,7 +254,7 @@ def get_barrier(activate):
 
 
 def train(local_rank, args):
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    # torch.multiprocessing.set_sharing_strategy('file_system')
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -316,7 +316,12 @@ def train(local_rank, args):
     _ = model.train()
     barrier()
 
+    start_time = time.time()
+    batch_times = []
+    model_times = []
     for step, batch in enumerate(train_loader):
+        gen_batch_time = time.time() - start_time
+        batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.state_dict(), os.path.join(model_save_dir, model_save_name))
@@ -333,6 +338,7 @@ def train(local_rank, args):
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
         labels = labels.to(device)
+        model_start_time = time.time()
         if args["cpu"]:
             output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
@@ -355,11 +361,15 @@ def train(local_rank, args):
                 scaler.update()
                 scheduler.step()
                 optimizer.zero_grad()
+        model_end_time = time.time() - model_start_time
+        model_times.append(model_end_time)
 
         if (step + 1) % log_every_steps == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
+            print("Batch time = %s, Model Time = %s" % (np.mean(batch_times), np.mean(model_times)))
             clean_memory()
             barrier()
+        start_time = time.time()
 
 
     # Take inputs to local_rank
@@ -376,7 +386,7 @@ def train(local_rank, args):
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    # torch.multiprocessing.set_sharing_strategy('file_system')
     args = training_args()
     if args["world_size"] == 1:
         train(0, args)
