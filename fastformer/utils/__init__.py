@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import random
 import re
+import gc
 
 
 def str2bool(v):
