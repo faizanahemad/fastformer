@@ -88,3 +88,10 @@ def set_seeds(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.backends.cudnn.benchmark = True
+
+
+def clean_memory():
+    _ = gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    _ = gc.collect()

@@ -359,6 +359,8 @@ def train(local_rank, args):
 
         if (step + 1) % log_every_steps == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
+            clean_memory()
+            barrier()
 
 
     # Take inputs to local_rank
