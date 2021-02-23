@@ -531,20 +531,43 @@ def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
     raise StopIteration()
 
 
+def batch_merge(b1, b2):
+    fb = dict()
+    for (b1k, b1v), (b2k, b2v) in zip(b1.items(), b2.items()):
+        if isinstance(b1v, torch.Tensor):
+            b1vs = b1v.size(1)
+            b2vs = b2v.size(1)
+            if b1vs > b2vs:
+                padding = b1vs - b2vs
+                b2vs = torch.cat([b2vs, b2vs.new(b2vs.shape[0], padding, *b2vs.shape[2:]).fill_(0)], 1)
+            elif b1vs < b2vs:
+                padding = b2vs - b1vs
+                b1vs = torch.cat([b1vs, b1vs.new(b1vs.shape[0], padding, *b1vs.shape[2:]).fill_(0)], 1)
+            fb[b1k] = torch.cat((b1vs, b2vs), 0)
+        elif isinstance(b1v, (list, tuple)):
+            fb[b1k] = b1v + b2v
+        else:
+            raise TypeError
+    return fb
+
+
 def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
     # TODO: support batched dataloaders
     batch = []
     size, batch_size = zip(*list(batch_size_dict.items()))
     i = 1
     while i > 0:
-        for one_example in dataloader:
-            cur_seq_len = one_example["input_ids"].size(-1)
-            batch.append(one_example)
+        for one_batch in dataloader:
+            cur_seq_len = one_batch["input_ids"].size(-1)
+            batch.append(one_batch)
             max_batch_size_possible = batch_size[np.searchsorted(size, cur_seq_len)]
-            cur_batch_size = len(batch)
+            cur_batch_size = sum(map(len, batch["input_ids"]))
             if max_batch_size_possible <= cur_batch_size:
-                give_batch = batch[:max_batch_size_possible]
-                batch = batch[max_batch_size_possible:]
+                give_batch = batch[:-1]
+                # Merge outgoing batch
+                batch = batch[1:]
+
+                batch_merge(batch[0], batch[1])
                 yield collate_fn(give_batch)
         if not continuous_iter:
             i = i - 1

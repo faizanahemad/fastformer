@@ -161,6 +161,7 @@ class LargeValidator:
 
     def __call__(self):
         datadict = DatasetDict.load_from_disk(self.location)
+        print("Loaded Validation Data")
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
         model = model.eval()
@@ -179,8 +180,8 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
-            loader = DataLoader(dataset, sampler=None, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
-            loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
+            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
+            # loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
