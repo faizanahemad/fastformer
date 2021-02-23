@@ -558,17 +558,21 @@ def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=
     i = 1
     while i > 0:
         for one_batch in dataloader:
-            cur_seq_len = one_batch["input_ids"].size(-1)
             batch.append(one_batch)
+
+            cur_seq_len = batch[-1]["input_ids"].size(-1)
+            # Can be combined or cannot be combined
             max_batch_size_possible = batch_size[np.searchsorted(size, cur_seq_len)]
+            if len(batch) > 1:
+                batch = [batch_merge(batch[0], batch[1])]
             cur_batch_size = sum(map(len, batch["input_ids"]))
             if max_batch_size_possible <= cur_batch_size:
-                give_batch = batch[:-1]
+                give_batch = batch[0]
                 # Merge outgoing batch
                 batch = batch[1:]
+                yield give_batch
 
-                batch_merge(batch[0], batch[1])
-                yield collate_fn(give_batch)
+
         if not continuous_iter:
             i = i - 1
 
