@@ -152,15 +152,16 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device):
+    def __init__(self, location, model, config, device, tokenizer):
         self.location = location
         self.model = model
         self.config = config
         self.device = device
+        self.tokenizer = tokenizer
 
     def __call__(self):
         datadict = DatasetDict.load_from_disk(self.location)
-        tokenizer = self.model.tokenizer
+        tokenizer = self.tokenizer
         model = self.model.to(self.device)
         model = model.eval()
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
@@ -240,10 +241,10 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
-        for v in train_dataset.values():
-            v.training = False
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=128, num_workers=1) for k, v in train_dataset.items()}
-        train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
+        # for v in train_dataset.values():
+        #     v.training = False
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=128, num_workers=1) for k, v in train_dataset.items()}
+        # train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
 
@@ -332,7 +333,7 @@ def train(local_rank, args):
             barrier()
         if (step + 1) % validate_every_steps == 0:
             if rank == 0:
-                val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device)()
+                val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer)()
                 print("Rank = %s, steps = %s, Val = %s" % (rank, step, val_results))
             barrier()
         record_accuracy = False

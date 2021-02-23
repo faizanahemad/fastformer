@@ -490,18 +490,24 @@ def get_collate_fn(num_cls, padding_index):
     return collate_fn
 
 
-def datadict_iterator(dict_loader, dict_probas):
+def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
     keys, probas = zip(*list(dict_probas.items()))
     dict_loader = dict(**dict_loader)
+    dict_loader_temp = dict(**dict_loader)
+    dict_loader = {k: iter(v) for k, v in dict_loader.items()}
+
     err_count = defaultdict(int)
     while len(dict_loader) > 0:
         cur_key = random.choices(keys, probas)[0]
         try:
             yield next(dict_loader[cur_key])
         except StopIteration as st:
-            _ = dict_loader.pop(cur_key, None)
-            _ = dict_probas.pop(cur_key, None)
-            keys, probas = zip(*list(dict_probas.items()))
+            if continuous_iter:
+                dict_loader[cur_key] = iter(dict_loader_temp[cur_key])
+            else:
+                _ = dict_loader.pop(cur_key, None)
+                _ = dict_probas.pop(cur_key, None)
+                keys, probas = zip(*list(dict_probas.items()))
         except Exception as e:
             err_count[cur_key] = err_count[cur_key] + 1
             print(cur_key, e)
