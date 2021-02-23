@@ -230,7 +230,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     assert len(char_list) == len(char_lists)
     mxlen = offset_mapping.max().item()
     assert mxlen < len(char_list)
-    tokenizer_outputs["char_ids"] = char_lists[:mxlen]
+    tokenizer_outputs["char_ids"] = char_lists[:(mxlen+1)]
     assert mxlen < len(char_lists)
     assert mxlen < len(tokenizer_outputs["char_ids"])
     tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
