@@ -328,7 +328,7 @@ def train(local_rank, args):
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
-            record_accuracy = False
+            record_accuracy = True
 
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
@@ -357,7 +357,7 @@ def train(local_rank, args):
                 optimizer.zero_grad()
 
         if (step + 1) % log_every_steps == 0:
-            print("Rank = %s, steps = %s, Loss = %s, Accuracy = %s" % (rank, step, loss_dict, output["accuracy_hist"]))
+            print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
 
 
     # Take inputs to local_rank
