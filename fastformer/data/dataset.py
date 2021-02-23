@@ -223,6 +223,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     offset_mapping = tokenizer_outputs["offset_mapping"]
     offset_mapping -= 1
     offset_mapping = F.relu(offset_mapping)
+    offset_mapping[:, -1] += 1
     char_list = list(text)
     char_lists = list(map(char_mapper, char_list))
 
@@ -469,7 +470,9 @@ def get_collate_fn(num_cls, padding_index):
             while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
                 v = v[:, :-step_size]
             if k not in ["labels_pet_input_ids", "labels_pet_attention_mask"]:
-                required_len = int(step_size * np.ceil(v.shape[1]/step_size)) - step_size + (step_size - num_cls)
+                required_len = int(step_size * np.ceil(v.shape[1]/step_size))
+                if k != "char_ids":
+                    required_len = required_len - step_size + (step_size - num_cls)
                 padding = required_len - v.shape[-1]
                 if padding > 0:
                     v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
