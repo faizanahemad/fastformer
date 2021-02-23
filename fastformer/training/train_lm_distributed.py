@@ -240,7 +240,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=1, collate_fn=None, prefetch_factor=64, num_workers=4) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
