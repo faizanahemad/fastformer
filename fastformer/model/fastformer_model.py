@@ -1091,7 +1091,11 @@ class MultiheadAttention(nn.Module):
             else:
                 rnn_out = self.rnn(query, key, value)
 
-        attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
+        try:
+            attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
+        except Exception as e:
+            print("Query Shape = %s, Key shape = %s, Value shape = %s, layer_index = %s, block index = %s" % (query.size(), key.size(), value.size(), layer_index, self.block_index))
+            raise e
 
         if self.sdconv:
             attn_out = torch.cat([sdconv_out, attn_out], dim=-1)
