@@ -229,7 +229,8 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, single_node=False, continuous_iter=True):
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1):
+    single_node = world_size == 1
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
@@ -237,7 +238,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
-        train_dataset = {k: v for k, v in train_dataset.items() if len(v) > 0}
+        train_dataset = {k: v for k, v in train_dataset.items() if len(v) >= world_size}
         train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_dataset.items()}
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
@@ -311,7 +312,7 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, args["world_size"] == 1)
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"])
 
     print("Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
