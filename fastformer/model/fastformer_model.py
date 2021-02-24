@@ -1071,6 +1071,7 @@ class MultiheadAttention(nn.Module):
         return attn_out, attn_prob
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
+        assert query.size(1) > 0
         batch_size, seq_len, _ = query.shape
         query_temp = query
         if self.sdconv:
@@ -1255,6 +1256,7 @@ class TransformerLayer(nn.Module):
         self.is_last_layer_of_block = is_last_layer_of_block
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
+        assert query.size(1) > 0
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
         if self.alternate_ffn and layer_index % 2 == 0:
             h = self.ffn.lin(attn[0])
@@ -1327,6 +1329,7 @@ class TransformerEncoder(nn.Module):
     def forward_one_block(self, block_index, hidden, attention_inputs,
                           all_hidden_states, pre_ffn_states, all_attentions,
                           output_attentions=False, output_hidden_states=False):
+        assert hidden.size(1) > 0
         (block, repeat_block) = self.blocks[block_index], self.repeats[block_index]
         pooling_flag = hidden.size(1) > 2
         pooling_flag = pooling_flag and block_index > 0 and self.config.stride > 1
@@ -1367,6 +1370,7 @@ class TransformerEncoder(nn.Module):
             output_hidden_states=False,
     ):
         # The pooling is not implemented on long tensors, so we convert this mask.
+        assert inputs_embeds.size(1) > 0
         attention_mask = attention_mask.type_as(inputs_embeds)
         attention_inputs = self.attention_structure.init_attention_inputs(
             inputs_embeds,
