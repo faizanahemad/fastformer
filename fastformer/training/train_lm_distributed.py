@@ -236,7 +236,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
-        train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=12, collate_fn=None, prefetch_factor=4 if num_workers > 0 else 0, num_workers=(2*num_workers) if single_node else num_workers)
+        train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=12, collate_fn=None, prefetch_factor=4 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers)
         train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
@@ -247,7 +247,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
         # for v in train_dataset.values():
         #     v.training = False
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=2 if num_workers > 0 else 0, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=2 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
