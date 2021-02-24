@@ -542,23 +542,31 @@ def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
     raise StopIteration()
 
 
+def merge_one(b1v, b2v):
+    if isinstance(b1v, torch.Tensor):
+        b1vs = b1v.size(1)
+        b2vs = b2v.size(1)
+        if b1vs > b2vs:
+            padding = b1vs - b2vs
+            b2vs = torch.cat([b2vs, b2vs.new(b2vs.shape[0], padding, *b2vs.shape[2:]).fill_(0)], 1)
+        elif b1vs < b2vs:
+            padding = b2vs - b1vs
+            b1vs = torch.cat([b1vs, b1vs.new(b1vs.shape[0], padding, *b1vs.shape[2:]).fill_(0)], 1)
+        return torch.cat((b1vs, b2vs), 0)
+    elif isinstance(b1v, (list, tuple)):
+        return b1v + b2v
+    else:
+        raise TypeError
+
+
 def batch_merge(b1, b2):
     fb = dict()
     for (b1k, b1v), (b2k, b2v) in zip(b1.items(), b2.items()):
-        if isinstance(b1v, torch.Tensor):
-            b1vs = b1v.size(1)
-            b2vs = b2v.size(1)
-            if b1vs > b2vs:
-                padding = b1vs - b2vs
-                b2vs = torch.cat([b2vs, b2vs.new(b2vs.shape[0], padding, *b2vs.shape[2:]).fill_(0)], 1)
-            elif b1vs < b2vs:
-                padding = b2vs - b1vs
-                b1vs = torch.cat([b1vs, b1vs.new(b1vs.shape[0], padding, *b1vs.shape[2:]).fill_(0)], 1)
-            fb[b1k] = torch.cat((b1vs, b2vs), 0)
-        elif isinstance(b1v, (list, tuple)):
-            fb[b1k] = b1v + b2v
-        else:
-            raise TypeError
+        try:
+            fb[b1k] = merge_one(b1v, b2v)
+        except Exception as e:
+            print(b1k, b1v, b2k, b2v, e)
+            raise e
     return fb
 
 
