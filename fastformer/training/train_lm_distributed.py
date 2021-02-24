@@ -80,6 +80,8 @@ def training_args():
 
     parser.add_argument('--test_fastformer', required=False, type=str,
                         help='Test Dataset')
+    parser.add_argument('--num_workers', required=False, type=int, default=0,
+                        help='Dataloader workers')
 
     parser.add_argument('--master_addr', type=str, required='MASTER_ADDR' not in os.environ,
                         default=None if 'MASTER_ADDR' not in os.environ else os.environ['MASTER_ADDR'],
@@ -180,7 +182,7 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
-            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=2)
+            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             # loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
@@ -229,12 +231,12 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1):
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1):
     single_node = world_size == 1
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
-        train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=4)
+        train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=(2*num_workers) if single_node else num_workers)
         train_loader = custom_batching_fn(train_loader, size_dicts, collate_fn, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
@@ -245,7 +247,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
         # for v in train_dataset.values():
         #     v.training = False
-        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=4 if single_node else 2, num_workers=2 if single_node else 0) for k, v in train_dataset.items()}
+        train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=4 if single_node else 2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
         # train_loader = {k: custom_batching_fn(dataloader, size_dicts, collate_fn, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
@@ -312,7 +314,7 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"])
 
     print("Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
