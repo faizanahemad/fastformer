@@ -2212,7 +2212,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
-            hshape2 = 32 * (hshape[1] // 32)
+            if hshape[1] <= 32:
+                hshape2 = hshape[1]
+                clip = 0
+            else:
+                hshape2 = 32 * (hshape[1] // 32)
+                clip = 8
             assert hshape2 > 0
             key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
@@ -2226,12 +2231,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
-            highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, 8:])
+            highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, clip:])
             highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
             if hshape2 > 128:
                 highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 8:]
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             if record_accuracy:
                 highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
