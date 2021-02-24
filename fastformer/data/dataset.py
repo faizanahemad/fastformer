@@ -312,7 +312,9 @@ class TokenizerDataset(Dataset):
             pet_query = pet_answer = []
 
         text = item["text"]
+        assert len(text.strip()) > 0
         text = unidecode.unidecode(text)
+        assert len(text.strip()) > 0
 
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
@@ -413,6 +415,7 @@ class TokenizerDataset(Dataset):
                 segments[idx] = seq
 
             text = " ".join(segments)
+        assert len(text.strip()) > 0
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
             q, a = q.strip(), a.strip()
