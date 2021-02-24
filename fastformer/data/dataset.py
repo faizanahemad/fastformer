@@ -570,7 +570,6 @@ def batch_merge(b1, b2):
 
 
 def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
-    # TODO: support batched dataloaders
     size, batch_size = zip(*list(batch_size_dict.items()))
     i = 1
     prev_batch = None
@@ -591,6 +590,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                     prev_batch = batch_merge(prev_batch, cur_batch)
                 else:
                     yield prev_batch
+                    _ = gc.collect()
                     prev_batch = cur_batch
 
         if not continuous_iter:
