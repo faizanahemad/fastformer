@@ -312,7 +312,12 @@ class TokenizerDataset(Dataset):
             pet_query = pet_answer = []
 
         text = item["text"]
+        if len(text.strip()) == 0:
+            text = "empty empty no text empty"
+            n_queries = 0
+            pet_query = pet_answer = []
         assert len(text.strip()) > 0
+
         text = unidecode.unidecode(text)
         assert len(text.strip()) > 0
 
