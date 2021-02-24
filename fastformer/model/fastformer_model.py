@@ -1681,6 +1681,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             input_shape = inputs_embeds.size()[:-1]
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
+        assert input_shape[1] > 0
 
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
@@ -1699,6 +1700,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             assert position_embeds is not None
         else:
             inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets,)
+        assert inputs_embeds.size(1) > 0
 
         encoder_outputs = self.encoder(
             inputs_embeds,
