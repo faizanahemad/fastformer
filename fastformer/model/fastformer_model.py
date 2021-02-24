@@ -2211,7 +2211,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
             hshape = highway_cls_ar_inputs_embeds.size()
+            assert hshape[1] > 0
             hshape2 = 32 * (hshape[1] // 32)
+            assert hshape2 > 0
             key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
