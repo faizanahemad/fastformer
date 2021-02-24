@@ -532,7 +532,6 @@ def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
         except Exception as e:
             err_count[cur_key] = err_count[cur_key] + 1
             print(cur_key, e)
-            raise e
             if err_count[cur_key] > 100:
                 print("Remove Dataset %s due to errors" % cur_key)
                 _ = dict_loader.pop(cur_key, None)
