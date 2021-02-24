@@ -551,7 +551,7 @@ def merge_one(b1v, b2v):
             b2v = torch.cat([b2v, b2v.new(b2v.shape[0], padding, *b2v.shape[2:]).fill_(0)], 1)
         elif b1vs < b2vs:
             padding = b2vs - b1vs
-            b1v = torch.cat([b1v, b1vs.new(b1v.shape[0], padding, *b1v.shape[2:]).fill_(0)], 1)
+            b1v = torch.cat([b1v, b1v.new(b1v.shape[0], padding, *b1v.shape[2:]).fill_(0)], 1)
         return torch.cat((b1v, b2v), 0)
     elif isinstance(b1v, (list, tuple)):
         return b1v + b2v
