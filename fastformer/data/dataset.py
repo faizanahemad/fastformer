@@ -468,8 +468,8 @@ class get_collate_fn:
             _ = s.pop("anchors", None)
             _ = s.pop("positives", None)
             if "labels_pet_input_ids" not in s:
-                s["labels_pet_input_ids"] = s["input_ids"].new(8).fill_(0)
-                s["labels_pet_attention_mask"] = s["input_ids"].new(8).fill_(0)
+                s["labels_pet_input_ids"] = s["input_ids"].new(128).fill_(0)
+                s["labels_pet_attention_mask"] = s["input_ids"].new(128).fill_(0)
 
         samples = default_collate(samples)
         samples["contrastive_anchors"] = anchors
