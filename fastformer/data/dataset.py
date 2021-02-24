@@ -3,6 +3,7 @@ from typing import List, Dict
 from seaborn import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
+import gc
 import torch
 from ..config import FastFormerConfig, size_dicts
 from torch.nn import functional as F
@@ -560,27 +561,29 @@ def batch_merge(b1, b2):
     return fb
 
 
-def custom_batching_fn(dataloader, batch_size_dict, collate_fn, continuous_iter=True):
+def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     # TODO: support batched dataloaders
-    batch = []
     size, batch_size = zip(*list(batch_size_dict.items()))
     i = 1
+    prev_batch = None
     while i > 0:
-        for one_batch in dataloader:
-            batch.append(one_batch)
+        for cur_batch in dataloader:
+            if prev_batch is None:
+                prev_batch = cur_batch
+            else:
+                prev_seq_len = prev_batch["input_ids"].size(-1)
+                cur_seq_len = cur_batch["input_ids"].size(-1)
+                prev_mx_bt_size = batch_size[np.searchsorted(size, prev_seq_len)]
+                cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
 
-            cur_seq_len = batch[-1]["input_ids"].size(-1)
-            # Can be combined or cannot be combined
-            max_batch_size_possible = batch_size[np.searchsorted(size, cur_seq_len)]
-            if len(batch) > 1:
-                batch = [batch_merge(batch[0], batch[1])]
-            cur_batch_size = sum(map(len, batch["input_ids"]))
-            if max_batch_size_possible <= cur_batch_size:
-                give_batch = batch[0]
-                # Merge outgoing batch
-                batch = batch[1:]
-                yield give_batch
-
+                # TODO: can we merge or not, if we merge then dont yield else yield and make prev_batch=cur_batch
+                actual_batch_size_post_merge =  prev_batch["input_ids"].size(0) + cur_batch["input_ids"].size(0)
+                can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
+                if can_we_merge:
+                    prev_batch = batch_merge(prev_batch, cur_batch)
+                else:
+                    yield prev_batch
+                    prev_batch = cur_batch
 
         if not continuous_iter:
             i = i - 1
