@@ -500,6 +500,7 @@ class get_collate_fn:
             assert mxoff < char_ids_shape
         except:
             print("char_offsets > char_ids, max offset = %s, char_ids max = %s, Max chars before pad = %s" % (mxoff, char_ids_shape, max_chars_temp))
+        assert samples["input_ids"].size(1) > 0
         return samples
 
 
