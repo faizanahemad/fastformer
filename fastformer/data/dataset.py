@@ -381,7 +381,7 @@ class TokenizerDataset(Dataset):
             # TODO: remove if blocks of GSP and word ordering. and also the embedding , have only full ar.
             # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
             mlm_text = " ".join(segments)  # Training Labels for MLM
-            labels_pet_text = ""
+            labels_pet_text = "" if len(pet_query) > 0 else tokenizer.no_question_token
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
                 q, a = q.strip(), a.strip()
                 if i == 0:

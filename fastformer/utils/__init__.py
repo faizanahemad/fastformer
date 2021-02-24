@@ -41,6 +41,10 @@ def get_tokenizer(name):
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_option_end_token"]
     tokenizer.add_special_tokens({"answer_option_end_token": "[ANSWER_OPTION_END]"})
 
+    setattr(tokenizer, "_no_question_token", "[NO_QUESTION]")
+    tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["no_question_token"]
+    tokenizer.add_special_tokens({"no_question_token": "[NO_QUESTION]"})
+
     setattr(tokenizer, "_answer_end_token", "[ANSWER_END]")
     tokenizer.SPECIAL_TOKENS_ATTRIBUTES = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + ["answer_end_token"]
     tokenizer.add_special_tokens({"answer_end_token": "[ANSWER_END]"})
