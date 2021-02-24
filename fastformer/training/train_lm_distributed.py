@@ -273,6 +273,7 @@ def get_barrier(activate):
 
 def train(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
+    # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
