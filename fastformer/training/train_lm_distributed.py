@@ -232,6 +232,7 @@ def cleanup():
 
 
 def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1):
+    # TODO: num workers based on dataset size, only top 16 datasets get 2 workers, next 16 get 1 worker and rest are done in main process
     single_node = world_size == 1
     try:
         train_dataset = Dataset.load_from_disk(location)
@@ -388,7 +389,9 @@ def train(local_rank, args):
                 optimizer.zero_grad()
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
-
+        full_time = time.time() - start_time
+        full_times.append(full_time)
+        start_time = time.time()
         if (step + 1) % log_every_steps == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
             print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
@@ -397,9 +400,7 @@ def train(local_rank, args):
             full_times = []
             clean_memory()
             barrier()
-        full_time = time.time() - start_time
-        full_times.append(full_time)
-        start_time = time.time()
+
 
 
     # Take inputs to local_rank

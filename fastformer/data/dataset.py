@@ -584,7 +584,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                 cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
 
                 # TODO: can we merge or not, if we merge then dont yield else yield and make prev_batch=cur_batch
-                actual_batch_size_post_merge =  prev_batch["input_ids"].size(0) + cur_batch["input_ids"].size(0)
+                actual_batch_size_post_merge = prev_batch["input_ids"].size(0) + cur_batch["input_ids"].size(0)
                 can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
                 if can_we_merge:
                     prev_batch = batch_merge(prev_batch, cur_batch)
