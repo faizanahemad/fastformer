@@ -2125,6 +2125,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
         if contrastive_anchors is not None:
+            bs = input_ids.size(0)
+            if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives)/bs == torch.cuda.device_count():
+                did = torch.cuda.current_device()
+                contrastive_positives = contrastive_positives[did*bs: (did+1)*bs]
+                contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
+
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
             contrastive_block_hidden = encoder_last_layer_out
 

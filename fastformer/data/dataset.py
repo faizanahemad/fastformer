@@ -299,18 +299,12 @@ class TokenizerDataset(Dataset):
         # pet_answer = ["eight"] * 4
         assert (pet_query is None and pet_answer is None) or (isinstance(pet_query, str) and isinstance(pet_answer, str)) or (len(pet_query) == len(pet_answer) and isinstance(pet_query, list) and isinstance(pet_answer, list))
         if isinstance(pet_query, str):
-            n_queries = 1
-            pet_query = unidecode.unidecode(pet_query)
-            pet_answer = unidecode.unidecode(pet_answer)
             pet_query = [pet_query]
             pet_answer = [pet_answer]
-        elif isinstance(pet_query, list):
-            n_queries = len(pet_query)
-            pet_query = [unidecode.unidecode(pq) for pq in pet_query]
-            pet_answer = [unidecode.unidecode(pa) for pa in pet_answer]
-        else:
-            n_queries = 0
-            pet_query = pet_answer = []
+
+        pet_query = [unidecode.unidecode(pq.strip()) for pq in pet_query if len(pq.strip()) > 0]
+        pet_answer = [unidecode.unidecode(pa.strip()) for pa in pet_answer if len(pa.strip()) > 0]
+        n_queries = len(pet_query)
 
         text = item["text"]
         if len(text.strip()) == 0:
@@ -2148,9 +2142,13 @@ train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k
 
 def add_query_answer_columns(x):
     if "query" not in x:
-        x["query"] = [[]] * len(x["text"])
+        x["query"] = [[""]] * len(x["text"])
+    else:
+        x["query"] = list(map(lambda y:[""] if isinstance(y, (list, tuple)) and len(y) == 0 else (y if isinstance(y, (list, tuple)) else [str(y)]),x["query"]))
     if "answer" not in x:
-        x["answer"] = [[]] * len(x["text"])
+        x["answer"] = [[""]] * len(x["text"])
+    else:
+        x["answer"] = list(map(lambda y:[""] if isinstance(y, (list, tuple)) and len(y) == 0 else (y if isinstance(y, (list, tuple)) else [str(y)]), x["answer"]))
     return x
 
 
@@ -2159,7 +2157,7 @@ train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resample
 train_fastformer_resampled = train_fastformer_resampled.sort("length")
 
 def batched_reshuffle(x):
-    
+    x.values()
 
 train_fastformer_resampled = train_fastformer_resampled.map(lambda x: , batched=True, num_proc=16, batch_size=8)
 
