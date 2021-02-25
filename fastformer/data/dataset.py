@@ -2138,7 +2138,7 @@ def resample_dataset(ds, sample_size):
         delta = resample_dataset(ds, sample_size - (repeats * len(ds)))
         return concatenate_datasets(([ds]*repeats)+[delta])
         
-train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
+
 
 def add_query_answer_columns(x):
     if "query" not in x:
@@ -2151,15 +2151,26 @@ def add_query_answer_columns(x):
         x["answer"] = list(map(lambda y:[""] if isinstance(y, (list, tuple)) and len(y) == 0 else (y if isinstance(y, (list, tuple)) else [str(y)]), x["answer"]))
     return x
 
-
-train_fastformer_resampled = DatasetDict({k: v.map(add_query_answer_columns, batched=True, batch_size=16_384) for k, v in train_fastformer_resampled.items()})
+train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
+train_fastformer_resampled = DatasetDict({k: v.map(add_query_answer_columns, batched=True, batch_size=16_384, remove_columns=["label"] if "label" in v.column_names else []) for k, v in train_fastformer_resampled.items()})
+dsets = list(train_fastformer_resampled.values())
+for k, dset in zip(keys, dsets):
+    if dset.features.type != dsets[0].features.type:
+        print(k," :: ", dset.features.type, " :: ", dsets[0].features.type, "\n")
+        dset.cast_(dsets[0].features)
 train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
 train_fastformer_resampled = train_fastformer_resampled.sort("length")
+train_fastformer_resampled = train_fastformer_resampled.filter(lambda x: len(x["text"].strip())> 0, batch_size=16_384)
 
 def batched_reshuffle(x):
-    x.values()
+    xv = list(zip(*x.values()))
+    xv = random.sample(xv, len(xv))
+    xv = list(zip(*xv))
+    shuffled = dict(zip(x.keys(), xv)) 
+    return {k: list(v) for k, v in shuffled.items()}
 
-train_fastformer_resampled = train_fastformer_resampled.map(lambda x: , batched=True, num_proc=16, batch_size=8)
+train_fastformer_resampled = train_fastformer_resampled.map(batched_reshuffle, batched=True, num_proc=16, batch_size=16_384)
+
 
 """
 
