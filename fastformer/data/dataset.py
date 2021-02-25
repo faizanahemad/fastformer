@@ -2178,8 +2178,8 @@ def batched_reshuffle(x):
     return {k: list(v) for k, v in shuffled.items()}
 
 train_fastformer_resampled = train_fastformer_resampled.map(batched_reshuffle, batched=True, batch_size=16_384)
-
-train_fastformer_resampled_10M.save_to_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_10M")
+train_fastformer_resampled_100M = train_fastformer_resampled
+train_fastformer_resampled_100M.save_to_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 
 """
 
