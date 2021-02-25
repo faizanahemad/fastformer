@@ -141,7 +141,7 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
-            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
+            loader = DataLoader(dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             # loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
@@ -156,7 +156,7 @@ class LargeValidator:
                                                  char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
                                                  run_decoder=False,
                                                  run_answering=True)
-                            output = model.module.funnel(**funnel_inputs)
+                            output = model.module.module.funnel(**funnel_inputs)
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
                             answering_predictions = answer_decoder(answering_predictions, tokenizer)
                             predictions.extend(answering_predictions)
