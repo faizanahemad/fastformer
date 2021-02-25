@@ -343,6 +343,7 @@ def train(local_rank, args):
     full_times = []
     print("Start Training for Rank = %s" % rank)
     for step, batch in enumerate(train_loader):
+        optimizer.zero_grad()
         if step == 0:
             print("First Batch Training for Rank = %s" % rank)
         # if step <= 39:
