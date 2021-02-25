@@ -289,8 +289,8 @@ class TokenizerDataset(Dataset):
     def __getitem__(self, item):
         tokenizer = self.tokenizer
         item = self.dataset[item]
-        pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else None
-        pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else None
+        pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else []
+        pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else []
 
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
