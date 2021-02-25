@@ -238,9 +238,9 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
         if num_workers > 0:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=12, collate_fn=None, prefetch_factor=4 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers)
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8, collate_fn=None, prefetch_factor=4 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers)
         else:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=12,
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8,
                                       collate_fn=None,
                                       num_workers=(2 * num_workers) if single_node else num_workers)
         train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
@@ -254,10 +254,10 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         # for v in train_dataset.values():
         #     v.training = False
         if num_workers > 0:
-            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
+            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
         else:
             train_loader = {
-                k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=12, collate_fn=collate_fn,
+                k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=8, collate_fn=collate_fn,
                               num_workers=(2 * num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
@@ -343,6 +343,7 @@ def train(local_rank, args):
     full_times = []
     print("Start Training for Rank = %s" % rank)
     for step, batch in enumerate(train_loader):
+        model.zero_grad()
         optimizer.zero_grad()
         if step == 0:
             print("First Batch Training for Rank = %s" % rank)
