@@ -387,7 +387,7 @@ if __name__ == "__main__":
     args = training_args()
 
     try:
-        train(0, args)
+        train(args)
     finally:
         cleanup()
 
