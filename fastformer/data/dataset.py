@@ -462,6 +462,10 @@ class get_collate_fn:
             if "labels_pet_input_ids" not in s:
                 s["labels_pet_input_ids"] = s["input_ids"].new(128).fill_(0)
                 s["labels_pet_attention_mask"] = s["input_ids"].new(128).fill_(0)
+            for k, v in s.items():
+                if isinstance(v, torch.Tensor):
+                    if v.size() != samples[0][k].size():
+                        print("Collate size mismatch Key = %s, size_zero = %s, size_cur = %s" % (k, samples[0][k].size(), v.size()))
 
         samples = default_collate(samples)
         samples["contrastive_anchors"] = anchors
