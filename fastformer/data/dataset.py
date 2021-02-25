@@ -559,7 +559,9 @@ def merge_one(b1v, b2v):
 
 def batch_merge(b1, b2):
     fb = dict()
-    for (b1k, b1v), (b2k, b2v) in zip(b1.items(), b2.items()):
+    for b1k, b1v in b1.items():
+        b2k = b1k
+        b2v = b2[b2k]
         try:
             fb[b1k] = merge_one(b1v, b2v)
         except Exception as e:
