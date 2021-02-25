@@ -315,8 +315,6 @@ class TokenizerDataset(Dataset):
         text = item["text"]
         if len(text.strip()) == 0:
             text = "empty empty no text empty"
-            n_queries = 0
-            pet_query = pet_answer = []
         assert len(text.strip()) > 0
 
         text = unidecode.unidecode(text)
@@ -2147,9 +2145,23 @@ def resample_dataset(ds, sample_size):
         return concatenate_datasets(([ds]*repeats)+[delta])
         
 train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
+
+def add_query_answer_columns(x):
+    if "query" not in x:
+        x["query"] = [[]] * len(x["text"])
+    if "answer" not in x:
+        x["answer"] = [[]] * len(x["text"])
+    return x
+
+
+train_fastformer_resampled = DatasetDict({k: v.map(add_query_answer_columns, batched=True, batch_size=16_384) for k, v in train_fastformer_resampled.items()})
 train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
 train_fastformer_resampled = train_fastformer_resampled.sort("length")
-train_fastformer_resampled = train_fastformer_resampled.map(lambda x: )
+
+def batched_reshuffle(x):
+    
+
+train_fastformer_resampled = train_fastformer_resampled.map(lambda x: , batched=True, num_proc=16, batch_size=8)
 
 """
 

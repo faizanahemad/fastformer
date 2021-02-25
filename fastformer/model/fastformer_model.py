@@ -2131,7 +2131,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
             contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
-            print("Anchors Batch size = %s, Input Batch Size = %s" % (len(anchors), input_ids.size()))
+            print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
             anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
             n_positives_per_anchor = max([len(a) for a in contrastive_positives])
