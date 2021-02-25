@@ -2127,6 +2127,29 @@ tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
 
 train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/train_fastformer")
+sum(map(len, train_fastformer.values()))
+
+sampling_fraction = 0.5
+train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_fastformer.items()}
+lsum = sum(train_dataset_sampling_proba.values())
+train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
+probas = {k: int(v * 10_000_000) for k, v in train_dataset_sampling_proba.items()}
+sum(probas.values())
+probas
+
+def resample_dataset(ds, sample_size):
+    if sample_size < len(ds):
+        select_proba = sample_size / len(ds)
+        return ds.filter(lambda x: random.random() <= select_proba, batch_size=16_000)
+    else:
+        repeats = sample_size // len(ds)
+        delta = resample_dataset(ds, sample_size - (repeats * len(ds)))
+        return concatenate_datasets(([ds]*repeats)+[delta])
+        
+train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
+train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
+train_fastformer_resampled = train_fastformer_resampled.sort("length")
+train_fastformer_resampled = train_fastformer_resampled.map(lambda x: )
 
 """
 
