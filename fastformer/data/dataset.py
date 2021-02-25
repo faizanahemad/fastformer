@@ -2121,7 +2121,7 @@ tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 train_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/train_fastformer")
 sum(map(len, train_fastformer.values()))
 
-sampling_fraction = 0.5
+sampling_fraction = 0.75 # 0.5, 0.65, 0.75
 train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_fastformer.items()}
 lsum = sum(train_dataset_sampling_proba.values())
 train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
@@ -2154,13 +2154,17 @@ def add_query_answer_columns(x):
 train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
 train_fastformer_resampled = DatasetDict({k: v.map(add_query_answer_columns, batched=True, batch_size=16_384, remove_columns=["label"] if "label" in v.column_names else []) for k, v in train_fastformer_resampled.items()})
 dsets = list(train_fastformer_resampled.values())
+keys = list(train_fastformer_resampled.keys()) 
 for k, dset in zip(keys, dsets):
     if dset.features.type != dsets[0].features.type:
         print(k," :: ", dset.features.type, " :: ", dsets[0].features.type, "\n")
         dset.cast_(dsets[0].features)
 train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
+def filter_small_text(x):
+    return len(x["text"].strip()) > 5 and len(x["text"].strip().split()) > 2 and x["length"] < 1024
+train_fastformer_resampled = train_fastformer_resampled.filter(filter_small_text, batch_size=4096)
+
 train_fastformer_resampled = train_fastformer_resampled.sort("length")
-train_fastformer_resampled = train_fastformer_resampled.filter(lambda x: len(x["text"].strip())> 0, batch_size=16_384)
 
 def batched_reshuffle(x):
     xv = list(zip(*x.values()))
@@ -2169,8 +2173,9 @@ def batched_reshuffle(x):
     shuffled = dict(zip(x.keys(), xv)) 
     return {k: list(v) for k, v in shuffled.items()}
 
-train_fastformer_resampled = train_fastformer_resampled.map(batched_reshuffle, batched=True, num_proc=16, batch_size=16_384)
+train_fastformer_resampled = train_fastformer_resampled.map(batched_reshuffle, batched=True, batch_size=16_384)
 
+train_fastformer_resampled_10M.save_to_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_10M")
 
 """
 
