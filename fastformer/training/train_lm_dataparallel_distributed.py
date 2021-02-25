@@ -271,7 +271,7 @@ def train(args):
     else:
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
-        ddp_model = DDP(model, device_ids=None, find_unused_parameters=True)
+        ddp_model = DDP(model, device_ids=[0], find_unused_parameters=True)
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
