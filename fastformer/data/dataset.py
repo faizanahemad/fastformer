@@ -563,7 +563,7 @@ def batch_merge(b1, b2):
         try:
             fb[b1k] = merge_one(b1v, b2v)
         except Exception as e:
-            print(b1k, b1v, b2k, b2v, e)
+            print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
             raise e
     return fb
 
