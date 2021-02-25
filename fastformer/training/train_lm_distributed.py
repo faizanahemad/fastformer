@@ -170,6 +170,7 @@ class LargeValidator:
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         results = dict()
         for k, dataset in datadict.items():
+            clean_memory()
             cns = dataset.column_names
             predictions = []
             if 'answer' in cns:
@@ -242,7 +243,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         else:
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8,
                                       collate_fn=None,
-                                      num_workers=(2 * num_workers) if single_node else num_workers)
+                                      num_workers=0)
         train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
@@ -258,7 +259,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         else:
             train_loader = {
                 k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=8, collate_fn=collate_fn,
-                              num_workers=(2 * num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
+                              num_workers=0) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
     return train_loader
