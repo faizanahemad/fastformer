@@ -1824,7 +1824,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
                 answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
-
+        self.data_parallel = False
         self.config = config
         self.tokenizer = tokenizer
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
@@ -2328,6 +2328,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         # TODO: CLS correction needed
         results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist)
+        if self.data_parallel:
+            results = [results]
         # TODO: return pet answer
         # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
         return results

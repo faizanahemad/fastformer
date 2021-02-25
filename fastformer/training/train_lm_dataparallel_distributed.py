@@ -8,6 +8,7 @@
 # TODO: save model
 # TODO: Resume training from saved checkpoint
 # TODO: Use TQDM and progress bar as well as metrics for speed
+import functools
 
 import numpy as np
 import torch
@@ -265,6 +266,7 @@ def train(args):
     print("Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % 0}))
+    model.data_parallel = True
     # Take model to local rank
     if args["cpu"]:
         ddp_model = model
@@ -333,6 +335,13 @@ def train(args):
         model_start_time = time.time()
         if args["cpu"]:
             output = ddp_model(**batch, labels=labels)
+            output = {key: [item[key] for item in output]
+                      for key in list(functools.reduce(
+                    lambda x, y: x.union(y),
+                    (set(dicts.keys()) for dicts in output)
+                ))
+                      }
+            output = {k: torch.mean(v) for k, v in output.items()}
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             loss.backward()
@@ -344,6 +353,13 @@ def train(args):
             with autocast():
 
                 output = ddp_model(**batch, labels=labels)
+                output = {key: [item[key] for item in output]
+                          for key in list(functools.reduce(
+                        lambda x, y: x.union(y),
+                        (set(dicts.keys()) for dicts in output)
+                    ))
+                          }
+                output = {k: torch.mean(v) for k, v in output.items()}
                 loss = output["loss"]
                 loss_dict = output["loss_dict"]
                 scaler.scale(loss).backward()
