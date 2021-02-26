@@ -245,7 +245,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
         if num_workers > 0:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8, collate_fn=collate_fn, prefetch_factor=4 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers)
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8, collate_fn=collate_fn, prefetch_factor=8 if num_workers > 0 else None, num_workers=(2*num_workers) if single_node else num_workers)
         else:
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8,
                                       collate_fn=collate_fn,
