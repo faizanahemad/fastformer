@@ -10,6 +10,9 @@ class ForkingPickler4(pickle.Pickler):
 
     def __init__(self, file, protocol=pickle.HIGHEST_PROTOCOL, buffer_callback=None):
         print(type(file), type(protocol), file)
+        buf = io.BytesIO()
+        pickle.Pickler(buf, protocol).dump(file)
+        file = buf.getbuffer()
         super().__init__(file, protocol, buffer_callback=buffer_callback)
         self.dispatch_table = self._copyreg_dispatch_table.copy()
         self.dispatch_table.update(self._extra_reducers)
