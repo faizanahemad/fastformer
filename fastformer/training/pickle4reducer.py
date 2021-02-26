@@ -12,6 +12,7 @@ class ForkingPickler4(pickle.Pickler):
         print(type(file), type(protocol), file)
         buf = io.BytesIO()
         pickle.Pickler(buf, protocol).dump(file)
+        file = buf
         assert hasattr(file, "write")
         super().__init__(file, protocol, buffer_callback=buffer_callback)
         self.dispatch_table = self._copyreg_dispatch_table.copy()
