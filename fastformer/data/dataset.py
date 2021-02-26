@@ -537,7 +537,7 @@ def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
 
 
 def merge_one(b1v, b2v):
-    if isinstance(b1v, torch.Tensor):
+    if isinstance(b1v, torch.Tensor) and len(b1v.size()) > 1:
         b1vs = b1v.size(1)
         b2vs = b2v.size(1)
         if b1vs > b2vs:
@@ -546,6 +546,8 @@ def merge_one(b1v, b2v):
         elif b1vs < b2vs:
             padding = b2vs - b1vs
             b1v = torch.cat([b1v, b1v.new(b1v.shape[0], padding, *b1v.shape[2:]).fill_(0)], 1)
+        return torch.cat((b1v, b2v), 0)
+    elif isinstance(b1v, torch.Tensor):
         return torch.cat((b1v, b2v), 0)
     elif isinstance(b1v, (list, tuple)):
         return b1v + b2v
@@ -562,7 +564,7 @@ def batch_merge(b1, b2):
         try:
             fb[b1k] = merge_one(b1v, b2v)
         except Exception as e:
-            print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
+            print((b1k, b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
             raise e
     return fb
 
