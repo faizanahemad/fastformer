@@ -160,22 +160,32 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device, tokenizer):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size):
         self.location = location
         self.model = model
         self.config = config
         self.device = device
         self.tokenizer = tokenizer
+        self.rank = rank
+        self.world_size = world_size
 
     def __call__(self):
+        # TODO: save model if val acc higher than before
+        # TODO: build a full score for val set using scores from all datasets
+        # TODO: save model with step number
+        # TODO: WnB integration from root process
+        # TODO: parallel validation
         datadict = DatasetDict.load_from_disk(self.location)
-        print("Loaded Validation Data %s" % (datadict.keys()))
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
         model = model.eval()
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         results = dict()
-        for k, dataset in datadict.items():
+        for idx, (k, dataset) in enumerate(sorted(datadict.items())):
+            while idx > self.world_size:
+                idx -= self.world_size
+            if idx != self.rank:
+                continue
             clean_memory()
             cns = dataset.column_names
             predictions = []
@@ -231,6 +241,7 @@ class LargeValidator:
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
             print("For Dataset %s, results = %s" % (k, results[k]))
+            clean_memory()
         model = model.train()
         return results
 
@@ -366,13 +377,13 @@ def train(local_rank, args):
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
             barrier()
         if (step + 1) % validate_every_steps == 0:
-            if rank == 0:
-                val_results = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer)()
-                print("Rank = %s, steps = %s, Val = %s" % (rank, step, val_results))
+
+            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
-            record_accuracy = True
+            if rank == 0:
+                record_accuracy = True
 
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
@@ -405,7 +416,7 @@ def train(local_rank, args):
         full_time = time.time() - start_time
         full_times.append(full_time)
         start_time = time.time()
-        if (step + 1) % log_every_steps == 0:
+        if (step + 1) % log_every_steps == 0 and rank == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
             print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
