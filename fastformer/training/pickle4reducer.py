@@ -19,7 +19,7 @@ class ForkingPickler4(ForkingPickler):
 
 
 def dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL):
-    ForkingPickler4(file, protocol).dump(obj)
+    ForkingPickler4(file, pickle.HIGHEST_PROTOCOL).dump(obj)
 
 
 class Pickle4Reducer(AbstractReducer):
