@@ -424,14 +424,15 @@ def train(local_rank, args):
         full_time = time.time() - start_time
         full_times.append(full_time)
         start_time = time.time()
-        if (step + 1) % log_every_steps == 0 and rank == 0:
-            print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
-            print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+        if (step + 1) % log_every_steps == 0:
             wandb.log(dict(mode="train", batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
-            batch_times = []
-            model_times = []
-            full_times = []
+            if rank == 0:
+                print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
+                print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+                batch_times = []
+                model_times = []
+                full_times = []
             clean_memory()
             barrier()
 
