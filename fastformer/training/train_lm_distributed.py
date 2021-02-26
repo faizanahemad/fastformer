@@ -362,7 +362,7 @@ def train(local_rank, args):
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
-                torch.save(ddp_model.state_dict(), os.path.join(model_save_dir, model_save_name))
+                torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
             barrier()
         if (step + 1) % validate_every_steps == 0:
             if rank == 0:
