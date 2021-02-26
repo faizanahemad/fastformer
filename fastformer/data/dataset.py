@@ -490,7 +490,8 @@ class get_collate_fn:
         if "label_mlm_input_ids" in samples:
             samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
         if "token_type_ids" in samples:
-            samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
+            # samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
+            del samples['token_type_ids']
         if "char_offsets" in samples:
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
