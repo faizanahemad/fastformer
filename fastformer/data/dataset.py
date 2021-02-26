@@ -35,14 +35,10 @@ import random
 
 def isnumber(text):
     try:
-        text = int(text)
+        float(text)
         return True
     except:
-        try:
-            t = float(text)
-            return True
-        except:
-            pass
+        pass
     return False
 
 
@@ -228,14 +224,14 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     char_list = list(text)
     char_lists = list(map(char_mapper, char_list))
 
-    assert len(char_list) == len(char_lists)
+    # assert len(char_list) == len(char_lists)
     mxlen = offset_mapping.max().item()
-    assert mxlen < len(char_list)
+    # assert mxlen < len(char_list)
     tokenizer_outputs["char_ids"] = char_lists[:(mxlen+1)]
-    assert mxlen < len(char_lists)
+    # assert mxlen < len(char_lists)
     assert mxlen < len(tokenizer_outputs["char_ids"])
     tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
-    assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
+    # assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
     tokenizer_outputs["input_ids"] = tokenizer_outputs["input_ids"].squeeze()
     tokenizer_outputs["attention_mask"] = tokenizer_outputs["attention_mask"].squeeze()
     tokenizer_outputs["token_type_ids"] = tokenizer_outputs["token_type_ids"].squeeze()
@@ -309,10 +305,10 @@ class TokenizerDataset(Dataset):
         text = item["text"]
         if len(text.strip()) == 0:
             text = "empty empty no text empty"
-        assert len(text.strip()) > 0
+        # assert len(text.strip()) > 0
 
         text = unidecode.unidecode(text)
-        assert len(text.strip()) > 0
+        # assert len(text.strip()) > 0
 
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
@@ -413,7 +409,7 @@ class TokenizerDataset(Dataset):
                 segments[idx] = seq
 
             text = " ".join(segments)
-        assert len(text.strip()) > 0
+        # assert len(text.strip()) > 0
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
             q, a = q.strip(), a.strip()
@@ -501,11 +497,11 @@ class get_collate_fn:
         # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
         mxoff = samples['char_offsets'].max().item()
         char_ids_shape = samples["char_ids"].shape[1]
-        try:
-            assert mxoff < char_ids_shape
-        except:
-            print("char_offsets > char_ids, max offset = %s, char_ids max = %s, Max chars before pad = %s" % (mxoff, char_ids_shape, max_chars_temp))
-        assert samples["input_ids"].size(1) > 0
+        # try:
+        #     assert mxoff < char_ids_shape
+        # except:
+        #     print("char_offsets > char_ids, max offset = %s, char_ids max = %s, Max chars before pad = %s" % (mxoff, char_ids_shape, max_chars_temp))
+        # assert samples["input_ids"].size(1) > 0
         return samples
 
 
@@ -562,11 +558,12 @@ def batch_merge(b1, b2):
     for b1k, b1v in b1.items():
         b2k = b1k
         b2v = b2[b2k]
-        try:
-            fb[b1k] = merge_one(b1v, b2v)
-        except Exception as e:
-            print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
-            raise e
+        fb[b1k] = merge_one(b1v, b2v)
+        # try:
+        #     fb[b1k] = merge_one(b1v, b2v)
+        # except Exception as e:
+        #     print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
+        #     raise e
     return fb
 
 
@@ -1002,7 +999,7 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
             for idx in range(len(one_texts)):
                 aidx = shuffled_idxs.index(idx)
                 atext = query_answers[idx]
-                assert query_answers[shuffled_idxs[aidx]] == atext == query_answers_shuffle[aidx]
+                # assert query_answers[shuffled_idxs[aidx]] == atext == query_answers_shuffle[aidx]
 
                 atext_len = len(atext.split())
                 rnd = random.random()
