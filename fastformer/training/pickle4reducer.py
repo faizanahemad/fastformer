@@ -29,6 +29,7 @@ class ForkingPickler4(pickle.Pickler):
 
 
 def dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL):
+    print(obj, file, type(obj), type(file))
     ForkingPickler4(file, pickle.HIGHEST_PROTOCOL).dump(obj)
 
 
