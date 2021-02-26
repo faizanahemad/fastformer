@@ -190,6 +190,7 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=4, num_workers=4)
+            print("Val for dataset = %s, with columns = %s" % (k, cns))
             loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
