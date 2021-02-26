@@ -4,24 +4,15 @@ import copyreg
 import io
 
 
-class ForkingPickler4(pickle.Pickler):
-    _extra_reducers = {}
-    _copyreg_dispatch_table = copyreg.dispatch_table
+class ForkingPickler4(ForkingPickler):
 
-    def __init__(self, file, protocol=pickle.HIGHEST_PROTOCOL, buffer_callback=None):
-        print(type(file), type(protocol), file)
+    def __init__(self, file, protocol=pickle.HIGHEST_PROTOCOL):
+        # print(type(file), type(protocol), file)
         buf = io.BytesIO()
         pickle.Pickler(buf, protocol).dump(file)
         file = buf
         assert hasattr(file, "write")
-        super().__init__(file, protocol, buffer_callback=buffer_callback)
-        self.dispatch_table = self._copyreg_dispatch_table.copy()
-        self.dispatch_table.update(self._extra_reducers)
-
-    @classmethod
-    def register(cls, type, reduce):
-        '''Register a reduce function for a type.'''
-        cls._extra_reducers[type] = reduce
+        super().__init__(file, protocol)
 
     @classmethod
     def dumps(cls, obj, protocol=pickle.HIGHEST_PROTOCOL):
@@ -29,11 +20,9 @@ class ForkingPickler4(pickle.Pickler):
         cls(buf, protocol).dump(obj)
         return buf.getbuffer()
 
-    loads = pickle.loads
-
 
 def dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL):
-    print(type(obj), type(file), obj, file)
+    # print(type(obj), type(file), obj, file)
     ForkingPickler4(file, pickle.HIGHEST_PROTOCOL).dump(obj)
 
 
