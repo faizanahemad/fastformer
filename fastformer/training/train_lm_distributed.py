@@ -9,10 +9,10 @@
 # TODO: Resume training from saved checkpoint
 # TODO: Use TQDM and progress bar as well as metrics for speed
 
-import pickle4reducer
-import multiprocessing as mp
-ctx = mp.get_context()
-ctx.reducer = pickle4reducer.Pickle4Reducer()
+# import pickle4reducer
+# import multiprocessing as mp
+# ctx = mp.get_context()
+# ctx.reducer = pickle4reducer.Pickle4Reducer()
 
 import numpy as np
 import torch
