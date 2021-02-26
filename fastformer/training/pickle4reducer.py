@@ -4,10 +4,6 @@ import pickle
 
 class ForkingPickler4(ForkingPickler):
     def __init__(self, *args):
-        if len(args) > 1:
-            args[1] = 2
-        else:
-            args.append(2)
         super().__init__(*args)
 
     @classmethod
