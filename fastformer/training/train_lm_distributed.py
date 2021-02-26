@@ -306,7 +306,8 @@ def train(local_rank, args):
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     group_name = args["wandb_group_name"]
-    wandb.init(project="fastformer", name="%s-%s-%s" % (args["nr"], local_rank, rank), group=args["wandb_group_name"], id=f"{group_name}-worker-{rank}")
+    nr = args["nr"]
+    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (args["nr"], local_rank, rank, group_name), group=args["wandb_group_name"], id=f"{group_name}-worker-{rank}-{nr}-{local_rank}")
     if args["cpu"]:
         assert args["world_size"] == 1
         device = torch.device("cpu")
