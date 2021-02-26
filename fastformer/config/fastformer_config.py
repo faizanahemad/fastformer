@@ -12,7 +12,7 @@ from transformers import PretrainedConfig
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
-# size_dicts = {128:112, 256:56, 512: 28, 768: 16, 1024: 12}
+size_dicts_val = {128:108, 256:48, 512: 24, 768: 12, 1024: 12}
 size_dicts = {128:96, 256:48, 512: 24, 768: 16, 1024: 8}
 
 

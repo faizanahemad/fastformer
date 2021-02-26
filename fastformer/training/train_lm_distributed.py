@@ -42,6 +42,7 @@ from fastformer.model import *
 from transformers import optimization
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from tqdm.auto import tqdm
 
 
 def training_args():
@@ -168,7 +169,7 @@ class LargeValidator:
 
     def __call__(self):
         datadict = DatasetDict.load_from_disk(self.location)
-        print("Loaded Validation Data")
+        print("Loaded Validation Data %s" % (datadict.keys()))
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
         model = model.eval()
@@ -188,8 +189,8 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
-            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            # loader = custom_batching_fn(loader, size_dicts, collate_fn, False)
+            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=4, num_workers=4)
+            loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
@@ -228,6 +229,7 @@ class LargeValidator:
                 results[k] = dict(accuracy=score)
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
+            print("For Dataset %s, results = %s" % (k, results[k]))
         model = model.train()
         return results
 
