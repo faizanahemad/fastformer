@@ -1844,6 +1844,7 @@ import numpy as np
 import random
 from typing import List, Dict
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+from datasets import DatasetInfo
 import nltk.data
 sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
@@ -2084,6 +2085,7 @@ import numpy as np
 import random
 from typing import List, Dict
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+from datasets import DatasetInfo
 import nltk.data
 sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
@@ -2115,6 +2117,7 @@ import numpy as np
 import random
 from typing import List, Dict
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+from datasets import DatasetInfo
 import nltk.data
 sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
 import os
@@ -2166,8 +2169,10 @@ for k, dset in zip(keys, dsets):
         print(k," :: ", dset.features.type, " :: ", dsets[0].features.type, "\n")
         dset.cast_(dsets[0].features)
 train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
+
 def filter_small_text(x):
-    return len(x["text"].strip()) > 5 and len(x["text"].strip().split()) > 2 and x["length"] < 1024
+    return len(x["text"].strip()) > 10 and len(x["text"].strip().split()) > 8 and x["length"] < 1024
+    
 train_fastformer_resampled = train_fastformer_resampled.filter(filter_small_text, batch_size=4096)
 
 train_fastformer_resampled = train_fastformer_resampled.sort("length")
@@ -2183,6 +2188,13 @@ train_fastformer_resampled = train_fastformer_resampled.map(batched_reshuffle, b
 train_fastformer_resampled_100M = train_fastformer_resampled
 train_fastformer_resampled_100M.save_to_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 
+di = DatasetInfo.from_directory("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
+print({x: len(getattr(di, x)) if hasattr(getattr(di, x), "__len__") else x for x in dir(di) if not x.startswith('__')})
+di.homepage=''
+di.license='MIT'
+di.citation=''
+di.description=''
+di.write_to_directory("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 """
 
 
