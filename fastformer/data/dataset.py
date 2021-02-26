@@ -558,12 +558,12 @@ def batch_merge(b1, b2):
     for b1k, b1v in b1.items():
         b2k = b1k
         b2v = b2[b2k]
-        fb[b1k] = merge_one(b1v, b2v)
-        # try:
-        #     fb[b1k] = merge_one(b1v, b2v)
-        # except Exception as e:
-        #     print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
-        #     raise e
+        # fb[b1k] = merge_one(b1v, b2v)
+        try:
+            fb[b1k] = merge_one(b1v, b2v)
+        except Exception as e:
+            print((b1k,b2k,), b1v.size(), b2v.size(),  b1v,  b2v, e)
+            raise e
     return fb
 
 
