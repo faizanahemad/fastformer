@@ -1,5 +1,6 @@
 from multiprocessing.reduction import ForkingPickler, AbstractReducer
 import pickle
+import io
 
 
 class ForkingPickler4(ForkingPickler):
@@ -13,13 +14,15 @@ class ForkingPickler4(ForkingPickler):
 
     @classmethod
     def dumps(cls, obj, protocol=pickle.HIGHEST_PROTOCOL):
-        return ForkingPickler.dumps(obj, pickle.HIGHEST_PROTOCOL)
+        buf = io.BytesIO()
+        cls(buf, protocol).dump(obj)
+        return buf.getbuffer()
 
     loads = pickle.loads
 
 
 def dump(obj, file, protocol=pickle.HIGHEST_PROTOCOL):
-    ForkingPickler4(file, pickle.HIGHEST_PROTOCOL).dump(obj)
+    ForkingPickler4(file, protocol).dump(obj)
 
 
 class Pickle4Reducer(AbstractReducer):
