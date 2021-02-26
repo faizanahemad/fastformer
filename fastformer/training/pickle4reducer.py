@@ -9,11 +9,6 @@ class ForkingPickler4(pickle.Pickler):
     _copyreg_dispatch_table = copyreg.dispatch_table
 
     def __init__(self, *args):
-        args = list(args)
-        if len(args) > 1:
-            args[1] = pickle.HIGHEST_PROTOCOL
-        else:
-            args.append(pickle.HIGHEST_PROTOCOL)
         super().__init__(*args)
         self.dispatch_table = self._copyreg_dispatch_table.copy()
         self.dispatch_table.update(self._extra_reducers)
