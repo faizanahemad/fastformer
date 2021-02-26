@@ -43,6 +43,7 @@ from transformers import optimization
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from tqdm.auto import tqdm
+import wandb
 
 
 def training_args():
@@ -54,6 +55,9 @@ def training_args():
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')
     parser.add_argument('--model_config', required=True, type=str,
+                        help='model config')
+
+    parser.add_argument('--wandb_group_name', required=False, type=str, default='',
                         help='model config')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
@@ -241,6 +245,7 @@ class LargeValidator:
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
             print("For Dataset %s, results = %s" % (k, results[k]))
+            wandb.log(dict(mode="val", dataset=k, results=results[k]))
             clean_memory()
         model = model.train()
         return results
@@ -300,6 +305,8 @@ def train(local_rank, args):
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
+    group_name = args["wandb_group_name"]
+    wandb.init(project="fastformer", name="%s-%s-%s" % (args["nr"], local_rank, rank), group=args["wandb_group_name"], id=f"{group_name}-worker-{rank}")
     if args["cpu"]:
         assert args["world_size"] == 1
         device = torch.device("cpu")
@@ -356,6 +363,7 @@ def train(local_rank, args):
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     _ = model.train()
+    wandb.watch(model)
     barrier()
 
     start_time = time.time()
@@ -419,6 +427,8 @@ def train(local_rank, args):
         if (step + 1) % log_every_steps == 0 and rank == 0:
             print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
             print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+            wandb.log(dict(mode="train", batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+                           **loss_dict, **output["accuracy_hist"]))
             batch_times = []
             model_times = []
             full_times = []
