@@ -176,9 +176,9 @@ class LargeValidator:
     def __call__(self):
         # TODO: save model if val acc higher than before
         # TODO: build a full score for val set using scores from all datasets
-        # TODO: save model with step number
         # TODO: WnB integration from root process
         # TODO: parallel validation
+        # TODO: save modelw with epoch number and give ability to save n_models only
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -204,7 +204,7 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=4, num_workers=4)
-            print("Val for dataset = %s, with columns = %s" % (k, cns))
+            print("Time = %s, Val for dataset = %s, with columns = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, cns))
             loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
@@ -244,7 +244,7 @@ class LargeValidator:
                 results[k] = dict(accuracy=score)
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
-            print("For Dataset %s, results = %s" % (k, results[k]))
+            print("Time = %s, For Dataset %s, results = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, results[k]))
             wandb.log(dict(mode="val", dataset=k, results=results[k]))
             clean_memory()
         model = model.train()
@@ -351,7 +351,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
     barrier()
-    print("Optimizer Created for Rank = %s" % rank)
+    print("Time = %s, Optimizer Created for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
@@ -371,18 +371,15 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     full_times = []
-    print("Start Training for Rank = %s" % rank)
     for step, batch in enumerate(train_loader):
         model.zero_grad()
         optimizer.zero_grad()
         if step == 0:
-            print("First Batch Training for Rank = %s" % rank)
-        # if step <= 39:
-        #     continue
+            print("Time = %s, First Batch Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
-            if rank == 0:
+            if local_rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
             barrier()
         if (step + 1) % validate_every_steps == 0:
@@ -391,7 +388,7 @@ def train(local_rank, args):
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
-            if rank == 0:
+            if local_rank == 0:
                 record_accuracy = True
 
         batch["record_accuracy"] = record_accuracy
@@ -428,9 +425,9 @@ def train(local_rank, args):
         if (step + 1) % log_every_steps == 0:
             wandb.log(dict(mode="train", batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
-            if rank == 0:
-                print("Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
-                print("Batch time = %s, Model Time = %s, Full time = %s" % (np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+            if local_rank == 0:
+                print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
+                print("Time = %s, Batch time = %s, Model Time = %s, Full time = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
                 batch_times = []
                 model_times = []
                 full_times = []

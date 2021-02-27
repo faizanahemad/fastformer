@@ -547,9 +547,9 @@ def merge_one(b1v, b2v):
         elif b1vs < b2vs:
             padding = b2vs - b1vs
             b1v = torch.cat([b1v, b1v.new(b1v.shape[0], padding, *b1v.shape[2:]).fill_(0)], 1)
-        return torch.cat((b1v, b2v), 0)
+        return torch.cat((b1v, b2v), 0).contiguous()
     elif isinstance(b1v, torch.Tensor):
-        return torch.cat((b1v, b2v), 0)
+        return torch.cat((b1v, b2v), 0).contiguous()
     elif isinstance(b1v, (list, tuple)):
         return b1v + b2v
     else:
