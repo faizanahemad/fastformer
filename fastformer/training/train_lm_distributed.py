@@ -371,8 +371,8 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     full_times = []
+    model.zero_grad()
     for step, batch in enumerate(train_loader):
-        model.zero_grad()
         optimizer.zero_grad()
         if step == 0:
             print("Time = %s, First Batch Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
@@ -423,7 +423,7 @@ def train(local_rank, args):
         full_times.append(full_time)
         start_time = time.time()
         if (step + 1) % log_every_steps == 0:
-            wandb.log(dict(mode="train", batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+            wandb.log(dict(mode="train", step=step, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
             if local_rank == 0:
                 print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))

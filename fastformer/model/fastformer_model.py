@@ -2111,7 +2111,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             if record_accuracy:
                 answering_predictions = answering_logits.argmax(dim=-1)
                 answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
-                accuracy_hist["answering_lm"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
+                accuracy_hist["answering_lm_accuracy"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
@@ -2161,7 +2161,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
                 loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
                 if record_accuracy:
-                    accuracy_hist["contrastive"] = ((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                    accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 for i in range(n_positives_per_anchor):
@@ -2205,7 +2205,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             if record_accuracy:
                 sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
-                accuracy_hist["sent_order"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
+                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
@@ -2248,7 +2248,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
                 # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
                 highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
-                accuracy_hist["highway_cls_ar_sentence"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
+                accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
@@ -2262,7 +2262,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if record_accuracy:
             # predictions = prediction_logits.argmax(dim=-1)
             # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
-            accuracy_hist["lm"] = (float(labels.float().cpu().numpy().mean()))
+            accuracy_hist["lm_accuracy"] = (float(labels.float().cpu().numpy().mean()))
 
         et = time.time() - st
         timing_dict.append(("lm_accuracy_loss", et))
@@ -2283,7 +2283,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_logits = logits[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
-            accuracy_hist["electra"] = (torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
+            accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
             if self.record_accuracy:
                 self.accuracy_hist.append(accuracy_hist)
 

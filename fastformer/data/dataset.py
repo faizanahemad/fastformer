@@ -21,6 +21,7 @@ import random
 
 from dataclasses import dataclass
 from datasets import load_dataset, concatenate_datasets
+import time
 
 @dataclass
 class TextPretrainingRegularizationConfig:
@@ -509,7 +510,6 @@ class get_collate_fn:
         return samples
 
 
-
 def datadict_iterator(dict_loader, dict_probas, continuous_iter=True):
     keys, probas = zip(*list(dict_probas.items()))
     dict_loader = dict(**dict_loader)
@@ -576,8 +576,10 @@ def batch_merge(b1, b2):
 def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     size, batch_size = zip(*list(batch_size_dict.items()))
     i = 1
+    cur_iter = 1
     prev_batch = None
     while i > 0:
+        print("%s custom_batching_fn:: Start Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
         for cur_batch in dataloader:
             if prev_batch is None:
                 prev_batch = cur_batch
@@ -599,6 +601,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
 
         if not continuous_iter:
             i = i - 1
+        cur_iter += 1
 
 
 def all_datasets():
@@ -2235,9 +2238,10 @@ config.tokenizer_length = 1024
 config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
 config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
 
+train_fastformer_resampled = Dataset.load_from_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_10M")
 collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_fastformer_resampled)
-train_loader = DataLoader(train_dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=16, shuffle=False)
+train_loader = DataLoader(train_dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=64, shuffle=False)
 train_loader = custom_batching_fn(tqdm(train_loader), size_dicts, False)
 
 st = time.time()

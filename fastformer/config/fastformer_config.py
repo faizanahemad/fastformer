@@ -29,13 +29,11 @@ class OptimizerConfig:
     test_batch_size: int
     warmup_steps: int
     gradient_clipping: float
-    reduce_lr_on_plateau: bool
-    reduce_lr_on_plateau_steps: int
-
-    datasets: Dict[str, float]  # Dataset name and probability of choice
     sampling_fraction: float
 
-optimizer_config = OptimizerConfig(4e-5, 1e-6, 1e-2, 0.9, 0.98, 8, 8, 1000, 1.0, True, 1_000, None, 0.5)
+
+optimizer_config = OptimizerConfig(5e-5, 1e-6, 1e-2, 0.9, 0.98,
+                                   8, 8, 1000, 1.0, 0.5)
 
 
 @dataclass_json
