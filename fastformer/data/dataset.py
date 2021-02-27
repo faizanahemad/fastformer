@@ -298,9 +298,12 @@ class TokenizerDataset(Dataset):
             pet_query = [pet_query]
             pet_answer = [pet_answer]
 
-        pet_query = [unidecode.unidecode(pq.strip()) for pq in pet_query if len(pq.strip()) > 0]
-        pet_answer = [unidecode.unidecode(pa.strip()) for pa in pet_answer if len(pa.strip()) > 0]
+        pet_query = [unidecode.unidecode(pq.strip()) for pq in pet_query if len(pq.strip().split()) > 2]
         n_queries = len(pet_query)
+        if n_queries == 0:
+            pet_answer = []
+        else:
+            pet_answer = [unidecode.unidecode(pa.strip()) for pa in pet_answer if len(pa.strip()) > 0]
 
         text = item["text"]
         if len(text.strip()) == 0:
@@ -2197,6 +2200,58 @@ di.description=''
 di.write_to_directory("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 """
 
+"""
+import time
+import datasets
+from tqdm.auto import tqdm, trange
+from torch.utils.data import DataLoader
+import re
+import numpy as np
+import random
+from typing import List, Dict
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+from datasets import DatasetInfo
+import nltk.data
+sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+import os
+os.cpu_count()
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
+
+from fastformer.data import TokenizerDataset, get_collate_fn, custom_batching_fn, char_to_id
+from fastformer.config import md_config, model_config, size_dicts
+from fastformer.utils import get_tokenizer
+
+mconf = model_config.to_dict()
+tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
+mconf = model_config.to_dict()
+config = md_config
+
+tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
+config.vocab_size = len(tokenizer) + 22
+config.tokenizer_length = 1024
+config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
+config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
+
+collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
+train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_fastformer_resampled)
+train_loader = DataLoader(train_dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=16, shuffle=False)
+train_loader = custom_batching_fn(tqdm(train_loader), size_dicts, False)
+
+st = time.time()
+times = []
+for step, batch in enumerate(train_loader):
+    if (step + 1) % 1000 == 0:
+        print("Step = %s, Average Time = %s" % (step, np.mean(times)))
+        times = []
+    et = time.time()
+    st = st
+    times.append(et - st)
+
+"""
+
 
 def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     article: List[Dict[str, List]] = examples["article"]
@@ -2236,5 +2291,6 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
     return aggregate_len_info, len_info, split_info
 
 
-
+# TODO: Run the dataset processor / collator on full dataset first instead of running it with model, with and without shuffle
+# TODO: Run the same for validation datasets.
 

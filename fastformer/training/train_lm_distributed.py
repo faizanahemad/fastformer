@@ -178,7 +178,7 @@ class LargeValidator:
         # TODO: build a full score for val set using scores from all datasets
         # TODO: WnB integration from root process
         # TODO: parallel validation
-        # TODO: save modelw with epoch number and give ability to save n_models only
+        # TODO: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -428,9 +428,9 @@ def train(local_rank, args):
             if local_rank == 0:
                 print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
                 print("Time = %s, Batch time = %s, Model Time = %s, Full time = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
-                batch_times = []
-                model_times = []
-                full_times = []
+            batch_times = []
+            model_times = []
+            full_times = []
             clean_memory()
             barrier()
 
