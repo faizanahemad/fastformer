@@ -372,6 +372,7 @@ def train(local_rank, args):
     model_times = []
     full_times = []
     model.zero_grad()
+    samples_processed = 0
     for step, batch in enumerate(train_loader):
         optimizer.zero_grad()
         if step == 0:
@@ -395,6 +396,7 @@ def train(local_rank, args):
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
         labels = labels.to(device)
         model_start_time = time.time()
+        samples_processed += batch["input_ids"].size(0)
         if args["cpu"]:
             output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
@@ -423,7 +425,7 @@ def train(local_rank, args):
         full_times.append(full_time)
         start_time = time.time()
         if (step + 1) % log_every_steps == 0:
-            wandb.log(dict(mode="train", step=step, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+            wandb.log(dict(mode="train", step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
             if local_rank == 0:
                 print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
