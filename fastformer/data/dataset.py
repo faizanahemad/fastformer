@@ -475,12 +475,7 @@ class get_collate_fn:
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
-        print({k: v.size() for k, v in samples.items() if hasattr(v, "size")})
-        print("#" * 80)
-        print("#" * 80)
-
-        print("#" * 80)
-        print("#" * 80)
+        # print({k: v.size() for k, v in samples.items() if hasattr(v, "size")})
 
         samples = {k: squeeze_after(v, 0) if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         for k, v in samples.items():
@@ -500,7 +495,7 @@ class get_collate_fn:
                 elif padding < 0:
                     v = v[:, :padding]
             samples[k] = v
-        print(type(samples), samples.keys(), {k: v.size() for k, v in samples.items() if hasattr(v, "size")})
+        # print(type(samples), samples.keys(), {k: v.size() for k, v in samples.items() if hasattr(v, "size")})
         if "label_mlm_input_ids" in samples:
             samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
         if "token_type_ids" in samples:
@@ -2270,7 +2265,7 @@ dataset_dict = {"big_patent1024": Dataset.from_dict(validation_fastformer["big_p
 
 for k, v in tqdm(dataset_dict.items()):
     dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v)
-    loader = DataLoader(dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=64, shuffle=False)
+    loader = DataLoader(dataset, sampler=None, batch_size=8, collate_fn=collate_fn, num_workers=0, shuffle=False)
     loader = custom_batching_fn(tqdm(loader), size_dicts, False)
     
     st = time.time()
