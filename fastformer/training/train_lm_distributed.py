@@ -115,7 +115,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 0
+    seed = 7919
     args.seed = seed
     assert hasattr(args, "test_dataset") or not args["test_only"]
     assert hasattr(args, "validation_dataset") or not args["validate_only"]
@@ -412,9 +412,7 @@ def train(local_rank, args):
             scheduler.step()
         else:
             with autocast():
-                print("Time = %s, Call Model output for Rank = %s, Step = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step))
                 output = ddp_model(**batch, labels=labels)
-                print("Time = %s, Obtained Model output for Rank = %s, Step = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step))
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()

@@ -491,6 +491,7 @@ class get_collate_fn:
                 elif padding < 0:
                     v = v[:, :padding]
             samples[k] = v
+        print(type(samples), samples.keys())
         if "label_mlm_input_ids" in samples:
             samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
         if "token_type_ids" in samples:
