@@ -491,7 +491,7 @@ class get_collate_fn:
                 elif padding < 0:
                     v = v[:, :padding]
             samples[k] = v
-        print(type(samples), samples.keys())
+        print(type(samples), samples.keys(), {k: v.size() for k, v in samples.items() if hasattr(v, "size")})
         if "label_mlm_input_ids" in samples:
             samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
         if "token_type_ids" in samples:
@@ -2238,9 +2238,9 @@ config.vocab_size = len(tokenizer) + 22
 config.tokenizer_length = 1024
 config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
 config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
+collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
 train_fastformer_resampled = Dataset.load_from_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_10M")
-collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_fastformer_resampled)
 train_loader = DataLoader(train_dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=64, shuffle=False)
 train_loader = custom_batching_fn(tqdm(train_loader), size_dicts, False)
@@ -2257,6 +2257,8 @@ for step, batch in enumerate(train_loader):
     
 validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
 dataset_dict = validation_fastformer
+dataset_dict = {"big_patent1024": Dataset.from_dict(validation_fastformer["big_patent1024"][328784:])}
+
 for k, v in tqdm(dataset_dict.items()):
     dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v)
     loader = DataLoader(dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=64, shuffle=False)
