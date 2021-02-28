@@ -180,6 +180,8 @@ class LargeValidator:
         # TODO: parallel validation
         # TODO: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
         # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
+        # WanDB control decide if init or not and make shim
+        # Better Batching
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -315,7 +317,7 @@ def train(local_rank, args):
         barrier = get_barrier(False)
     else:
         print("Time = %s, Prepare to init Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
-        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
+        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"]))
         print("Time = %s, Initialized Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
