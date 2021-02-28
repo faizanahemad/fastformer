@@ -2253,6 +2253,23 @@ for step, batch in enumerate(train_loader):
     et = time.time()
     st = st
     times.append(et - st)
+    
+validation_fastformer = DatasetDict.load_from_disk("/home/ahemf/processed_datasets/validation_fastformer")
+for k, v in tqdm(validation_fastformer.items()):
+    dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v)
+    loader = DataLoader(dataset, sampler=None, batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=64, shuffle=False)
+    loader = custom_batching_fn(tqdm(loader), size_dicts, False)
+    
+    st = time.time()
+    times = []
+    for step, batch in enumerate(loader):
+        if (step + 1) % 1000 == 0:
+            print("Step = %s, Average Time = %s" % (step, np.mean(times)))
+            times = []
+        et = time.time()
+        st = st
+        times.append(et - st)
+    
 
 """
 
