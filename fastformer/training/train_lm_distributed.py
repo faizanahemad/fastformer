@@ -179,6 +179,7 @@ class LargeValidator:
         # TODO: WnB integration from root process
         # TODO: parallel validation
         # TODO: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
+        # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -348,12 +349,11 @@ def train(local_rank, args):
 
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
-    if rank == 0:
+    if local_rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
     print("Time = %s, Optimizer Created for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
-    barrier()
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
@@ -367,7 +367,6 @@ def train(local_rank, args):
     gradient_clipping = optc["gradient_clipping"]
     _ = model.train()
     wandb.watch(model)
-    barrier()
 
     start_time = time.time()
     batch_times = []
@@ -375,6 +374,8 @@ def train(local_rank, args):
     full_times = []
     model.zero_grad()
     samples_processed = 0
+    print("Time = %s, Start Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    barrier()
     for step, batch in enumerate(train_loader):
         optimizer.zero_grad()
         if step == 0:
