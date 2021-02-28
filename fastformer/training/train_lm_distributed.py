@@ -331,7 +331,7 @@ def train(local_rank, args):
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("Trainable Params = %s" % (numel(model) / 1_000_000))
-    if args["pretrained_model"] is not None:
+    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
     # Take model to local rank
     if args["cpu"]:
