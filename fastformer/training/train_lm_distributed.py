@@ -407,33 +407,33 @@ def train(local_rank, args):
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
             optimizer.step()
             scheduler.step()
-            optimizer.zero_grad()
         else:
             with autocast():
-
                 output = ddp_model(**batch, labels=labels)
-                loss = output["loss"]
-                loss_dict = output["loss_dict"]
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(all_params, gradient_clipping)
-                scaler.step(optimizer)
-                scaler.update()
+            loss = output["loss"]
+            loss_dict = output["loss_dict"]
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            scaler.step(optimizer)
+            scale = scaler.get_scale()
+            scaler.update()
+            skip_lr_sched = (scale != scaler.get_scale())
+            if not skip_lr_sched:
                 scheduler.step()
-                optimizer.zero_grad()
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
         full_time = time.time() - start_time
         full_times.append(full_time)
         start_time = time.time()
         if (step + 1) % log_every_steps == 0:
-            wandb.log(dict(mode="train", step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+            wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
             if local_rank == 0:
-                print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"]))
+                print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("Time = %s, Batch time = %s, Model Time = %s, Full time = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
             model_times = []
