@@ -475,6 +475,7 @@ class get_collate_fn:
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
+        print({k: v.size() for k, v in samples.items() if hasattr(v, "size")})
         samples = {k: squeeze_after(v, 0) if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         for k, v in samples.items():
             if k in ["char_ids", "char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
