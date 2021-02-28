@@ -105,6 +105,6 @@ def clean_memory():
 def squeeze_after(x: torch.Tensor, dim):
     xs = x.size()
     xsl = len(xs)
-    for i in range(xsl, dim, -1):
+    for i in range(xsl - 1, dim, -1):
         x = x.squeeze(i)
     return x
