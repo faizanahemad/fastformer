@@ -413,6 +413,7 @@ def train(local_rank, args):
         else:
             with autocast():
                 output = ddp_model(**batch, labels=labels)
+                print("Time = %s, Obtained Model output for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()
