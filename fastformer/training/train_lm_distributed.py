@@ -412,8 +412,9 @@ def train(local_rank, args):
             scheduler.step()
         else:
             with autocast():
+                print("Time = %s, Call Model output for Rank = %s, Step = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step))
                 output = ddp_model(**batch, labels=labels)
-                print("Time = %s, Obtained Model output for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+                print("Time = %s, Obtained Model output for Rank = %s, Step = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step))
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()
