@@ -313,7 +313,9 @@ def train(local_rank, args):
         device = torch.device("cpu")
         barrier = get_barrier(False)
     else:
+        print("Time = %s, Prepare to init Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"])
+        print("Time = %s, Initialized Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
         barrier = get_barrier(True)
@@ -350,8 +352,8 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
-    barrier()
     print("Time = %s, Optimizer Created for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    barrier()
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
