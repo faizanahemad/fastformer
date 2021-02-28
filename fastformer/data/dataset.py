@@ -10,6 +10,8 @@ from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
 
+from ..utils import squeeze_after
+
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
 
@@ -473,7 +475,7 @@ class get_collate_fn:
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
-        samples = {k: v.squeeze() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        samples = {k: squeeze_after(v, 0) if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         for k, v in samples.items():
             if k in ["char_ids", "char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
                 continue

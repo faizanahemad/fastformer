@@ -100,3 +100,11 @@ def clean_memory():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     _ = gc.collect()
+
+
+def squeeze_after(x: torch.Tensor, dim):
+    xs = x.size()
+    xsl = len(xs)
+    for i in range(xsl, dim, -1):
+        x = x.squeeze(i)
+    return x
