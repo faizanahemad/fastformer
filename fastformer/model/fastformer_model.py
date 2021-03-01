@@ -2198,7 +2198,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
-        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None and self.training:
+        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
@@ -2211,7 +2211,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
-        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.training and self.config.num_highway_cls_tokens > 0:
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1])
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
@@ -2284,8 +2284,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
-            if self.record_accuracy:
-                self.accuracy_hist.append(accuracy_hist)
+            # if self.record_accuracy:
+            #     self.accuracy_hist.append(accuracy_hist)
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))

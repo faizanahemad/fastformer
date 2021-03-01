@@ -200,7 +200,7 @@ class LargeValidator:
             cns = dataset.column_names
             predictions = []
             if 'answer' in cns:
-                labels = [dataset[i] for i in range(len(dataset))]
+                labels = [dataset[i]["answer"] for i in range(len(dataset))]
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
@@ -250,6 +250,7 @@ class LargeValidator:
                 results[k] = dict(accuracy=score)
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
+                _ = results[k].pop("answering_lm_accuracy", None)
             print("Time = %s, For Dataset %s, results = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, results[k]))
             wandb.log(dict(mode="val", dataset=k, results=results[k]))
             clean_memory()
