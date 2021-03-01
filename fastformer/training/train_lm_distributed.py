@@ -44,6 +44,8 @@ import pandas as pd
 from sklearn.metrics import accuracy_score
 from tqdm.auto import tqdm
 import wandb
+from pytz import timezone
+from datetime import datetime, timedelta
 
 
 def training_args():
@@ -332,7 +334,9 @@ def train(local_rank, args):
         # rnd = torch.randint(0, 1_000_000_000, (1,))
         rnd = torch.tensor(int(time.time())).cuda()
         dist.broadcast(rnd, 0)
-    group = "%s-nodes=%s" % (rnd.cpu().item(), args["nodes"])
+    format = "%Y-%m-%d %H:%M %Z"
+    time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item()))) + timedelta(hours=5, minutes=30)).astimezone(timezone('Asia/Kolkata')).strftime(format)
+    group = "%s-nodes=%s" % (time_string, args["nodes"])
     wandb.init(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}")
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
