@@ -57,9 +57,6 @@ def training_args():
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
 
-    parser.add_argument('--wandb_group_name', required=False, type=str, default='',
-                        help='model config')
-
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
     parser.add_argument('--model_save_dir', required=True, type=str,
@@ -90,6 +87,10 @@ def training_args():
 
     parser.add_argument('--test_fastformer', required=False, type=str,
                         help='Test Dataset')
+
+    parser.add_argument('--init_method', required=False, type=str, default="tcp",
+                        help='init_method')
+
     parser.add_argument('--num_workers', required=False, type=int, default=0,
                         help='Dataloader workers')
 
@@ -178,7 +179,7 @@ class LargeValidator:
         # TODO: build a full score for val set using scores from all datasets
         # TODO: WnB integration from root process
         # TODO: parallel validation
-        # TODO: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
+        # TODO: Resume:: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
         # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
         # WanDB control decide if init or not and make shim
         # Better Batching
@@ -308,21 +309,31 @@ def train(local_rank, args):
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
-    group_name = args["wandb_group_name"]
     nr = args["nr"]
-    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (args["nr"], local_rank, rank, group_name), group=args["wandb_group_name"], id=f"{group_name}-worker-{rank}-{nr}-{local_rank}")
     if args["cpu"]:
         assert args["world_size"] == 1
         device = torch.device("cpu")
         barrier = get_barrier(False)
+        rnd = torch.tensor(int(time.time()))
     else:
         print("Time = %s, Prepare to init Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
-        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"]))
+        if args["init_method"] == "tcp":
+            init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
+        elif args["init_method"] == "file":
+            init_method = 'file://%s/%s' % (args["master_addr"], args["master_port"])
+        else:
+            raise ValueError
+
+        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
         print("Time = %s, Initialized Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
         barrier = get_barrier(True)
-
+        # rnd = torch.randint(0, 1_000_000_000, (1,))
+        rnd = torch.tensor(int(time.time()))
+        dist.broadcast(rnd, 0)
+    group = "%s-nodes=%s" % (rnd.item(), args["nodes"])
+    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}")
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
