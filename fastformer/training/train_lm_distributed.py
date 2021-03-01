@@ -233,7 +233,7 @@ class LargeValidator:
                     labels = labels.to(self.device)
                     with torch.no_grad():
                         with autocast():
-                            output = model(**pt_batch, labels=labels)["accuracy_hist"]
+                            output = model.module(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
