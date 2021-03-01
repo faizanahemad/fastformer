@@ -214,8 +214,8 @@ class LargeValidator:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
                 if 'answer' in cns:
-                    with autocast():
-                        with torch.no_grad():
+                    with torch.no_grad():
+                        with autocast():
                             funnel_inputs = dict(input_ids=pt_batch["input_ids"],
                                                  attention_mask=pt_batch["attention_mask"],
                                                  token_type_ids=pt_batch["token_type_ids"],
@@ -225,16 +225,16 @@ class LargeValidator:
                                                  run_answering=True)
                             output = model.module.funnel(**funnel_inputs)
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
-                            answering_predictions = answer_decoder(answering_predictions, tokenizer)
-                            predictions.extend(answering_predictions)
+                    answering_predictions = answer_decoder(answering_predictions, tokenizer)
+                    predictions.extend(answering_predictions)
 
                 else:
                     labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
                     labels = labels.to(self.device)
-                    with autocast():
-                        with torch.no_grad():
+                    with torch.no_grad():
+                        with autocast():
                             output = model(**pt_batch, labels=labels)["accuracy_hist"]
-                            predictions.append(output)
+                    predictions.append(output)
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
                 for lbl, prd in zip(labels, predictions):
@@ -391,8 +391,6 @@ def train(local_rank, args):
     barrier()
     for step, batch in enumerate(train_loader):
         optimizer.zero_grad()
-        if step == 0:
-            print("Time = %s, First Batch Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
@@ -440,6 +438,8 @@ def train(local_rank, args):
         full_time = time.time() - start_time
         full_times.append(full_time)
         start_time = time.time()
+        if step == 0:
+            print("Time = %s, First Batch Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
         if (step + 1) % log_every_steps == 0:
             wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
