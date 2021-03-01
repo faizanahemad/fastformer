@@ -181,7 +181,8 @@ class LargeValidator:
         # TODO: build a full score for val set using scores from all datasets
         # TODO: WnB integration from root process
         # TODO: parallel validation
-        # TODO: Resume:: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler
+        # TODO: Resume:: save modelw with epoch number and give ability to save n_models only, save optimizer, save scheduler, num_steps already done also needs to be saved
+
         # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
         # WanDB control decide if init or not and make shim
         # Better Batching
@@ -252,7 +253,7 @@ class LargeValidator:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
             print("Time = %s, For Dataset %s, results = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, results[k]))
-            wandb.log(dict(mode="val", dataset=k, results=results[k]))
+            wandb.log(dict(mode="val", dataset=k, k=results[k]))
             clean_memory()
         model = model.train()
         return results
@@ -352,7 +353,7 @@ def train(local_rank, args):
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("Trainable Params = %s" % (numel(model) / 1_000_000))
-    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
+    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
     # Take model to local rank
     if args["cpu"]:
@@ -399,9 +400,8 @@ def train(local_rank, args):
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
-            if local_rank == 0:
+            if rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
-            barrier()
         if (step + 1) % validate_every_steps == 0:
 
             _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
@@ -449,8 +449,8 @@ def train(local_rank, args):
             wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
             if local_rank == 0:
-                print("Time = %s, Rank = %s, steps = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
-                print("Time = %s, Batch time = %s, Model Time = %s, Full time = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+                print("Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
+                print("Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
             model_times = []
             full_times = []
