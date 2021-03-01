@@ -209,7 +209,7 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
-            loader = DataLoader(dataset, sampler=None, batch_size=12, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
+            loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             print("Time = %s, Val for dataset = %s, with columns = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, cns))
             loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
             for pt_batch in loader:
