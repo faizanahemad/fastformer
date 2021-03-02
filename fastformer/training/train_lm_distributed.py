@@ -328,11 +328,12 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     fss = map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*"))
     fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
     fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0]
-    print("Time = %s, Load Checkpoint from %s" % (get_time_string(), fss))
+    print("Time = %s, Loading Checkpoint from %s" % (get_time_string(), fss))
     filename = fss
     assert os.path.isfile(filename)
     loc = 'cuda:{}'.format(device)
     checkpoint = torch.load(filename, map_location=loc)
+    print("Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
     model.load_state_dict(checkpoint['model'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
