@@ -423,12 +423,15 @@ def train(local_rank, args):
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     other_load_details = None
+    print("Optimizer Created for Rank = %s" % rank)
     if "resume" in args:
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
+        print("Resumed from %s for Rank = %s" % (args["resume"], rank))
+    else:
+        print("No Resume for Rank = %s" % rank)
     _ = model.train()
     wandb.watch(model)
-
-    start_time = time.time()
+    print("WandB watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
     full_times = []
@@ -436,6 +439,7 @@ def train(local_rank, args):
     samples_processed = 0
     print("Time = %s, Start Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
     barrier()
+    start_time = time.time()
     for step, batch in enumerate(train_loader):
         if other_load_details is not None and "step" in other_load_details and "world_size" in other_load_details and other_load_details["world_size"] == args["world_size"] and other_load_details["step"] < step:
             continue
