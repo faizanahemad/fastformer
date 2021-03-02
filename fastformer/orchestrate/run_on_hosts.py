@@ -122,7 +122,7 @@ if __name__ == "__main__":
         run_command_v2(hosts, nodes, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
 
     if args["tail"]:
-        tail_cmd = cmd_dir + " && tail -n 100 output.log"
+        tail_cmd = cmd_dir + " && tail -n 20 output.log"
         run_command_v2(hosts, nodes, tail_cmd)
 
 

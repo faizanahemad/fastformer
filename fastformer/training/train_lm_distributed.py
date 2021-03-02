@@ -219,7 +219,7 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            print("Time = %s, Val for dataset = %s, with columns = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, cns))
+            print("Time = %s, Val for dataset = %s, with columns = %s" % (get_time_string(), k, cns))
             loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
@@ -260,7 +260,7 @@ class LargeValidator:
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
-            print("Time = %s, For Dataset %s, results = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), k, results[k]))
+            print("Time = %s, For Dataset %s, results = %s" % (get_time_string(), k, results[k]))
             wandb.log(dict(mode="val", dataset=k, k=results[k]))
             clean_memory()
         model = model.train()
@@ -356,7 +356,7 @@ def train(local_rank, args):
         barrier = get_barrier(False)
         rnd = torch.tensor(int(time.time()))
     else:
-        print("Time = %s, Prepare to init Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+        print("Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
         if args["init_method"] == "tcp":
             init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
         elif args["init_method"] == "file":
@@ -365,7 +365,7 @@ def train(local_rank, args):
             raise ValueError
 
         dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-        print("Time = %s, Initialized Dist Process for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+        print("Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
         barrier = get_barrier(True)
@@ -411,7 +411,7 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
-    print("Time = %s, Optimizer Created for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    print("Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
@@ -440,7 +440,7 @@ def train(local_rank, args):
     full_times = []
     model.zero_grad()
     samples_processed = 0
-    print("Time = %s, Start Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    print("Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
@@ -495,20 +495,20 @@ def train(local_rank, args):
         full_times.append(full_time)
         start_time = time.time()
         if step == 0:
-            print("Time = %s, First Batch Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+            print("Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
             wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **output["accuracy_hist"]))
             if local_rank == 0:
-                print("Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
-                print("Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+                print("Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
+                print("Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
             model_times = []
             full_times = []
             clean_memory()
             barrier()
 
-    print("Time = %s, Finished Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
     if rank == 0:
         torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:

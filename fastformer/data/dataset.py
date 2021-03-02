@@ -10,7 +10,7 @@ from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
 
-from ..utils import squeeze_after
+from ..utils import squeeze_after, get_time_string
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
@@ -584,7 +584,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     cur_iter = 1
     prev_batch = None
     while i > 0:
-        print("%s custom_batching_fn:: Start Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
+        print("%s custom_batching_fn:: Start Epoch = %s" % (get_time_string(), cur_iter))
         for cur_batch in dataloader:
             if prev_batch is None:
                 prev_batch = cur_batch
@@ -606,7 +606,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
 
         if not continuous_iter:
             i = i - 1
-        print("%s custom_batching_fn:: End Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
+        print("%s custom_batching_fn:: End Epoch = %s" % (get_time_string(), cur_iter))
         cur_iter += 1
 
 

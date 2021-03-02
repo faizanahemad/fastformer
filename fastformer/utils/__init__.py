@@ -4,6 +4,10 @@ import torch
 import random
 import re
 import gc
+import datetime
+import time
+from datetime import datetime, timedelta
+from pytz import timezone
 
 
 def str2bool(v):
@@ -110,3 +114,7 @@ def squeeze_after(x: torch.Tensor, dim):
         # print(i, x.size())
         x = x.squeeze(i)
     return x
+
+
+def get_time_string():
+    return (datetime.fromtimestamp(time.mktime(time.gmtime(time.time()))) + timedelta(hours=5, minutes=30)).astimezone(timezone('Asia/Kolkata')).strftime("[%a, %d %b %Y, %H:%M:%S %Z]")
