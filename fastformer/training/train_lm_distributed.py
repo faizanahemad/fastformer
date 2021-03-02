@@ -345,7 +345,7 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
-    os.environ["WANDB_MODE"] = "dryrun"
+    # os.environ["WANDB_MODE"] = "dryrun"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
@@ -452,7 +452,7 @@ def train(local_rank, args):
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
-                if "checkpoint" in args:
+                if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
             _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
@@ -511,7 +511,7 @@ def train(local_rank, args):
     print("Time = %s, Finished Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
     if rank == 0:
         torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
-        if "checkpoint" in args:
+        if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
             save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
                  {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
 
