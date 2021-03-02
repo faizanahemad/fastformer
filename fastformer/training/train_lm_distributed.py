@@ -423,13 +423,14 @@ def train(local_rank, args):
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     other_load_details = None
-    print("Optimizer Created for Rank = %s" % rank)
+    print("Scheduler Created for Rank = %s" % rank)
     if "resume" in args and len(args["resume"]) > 0:
         print("Trying Resume from %s for Rank = %s" % (args["resume"], rank))
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
         print("Resumed from %s for Rank = %s" % (args["resume"], rank))
     else:
         print("No Resume for Rank = %s" % rank)
+    print("Init Wandb watch added over model for Rank = %s" % rank)
     _ = model.train()
     wandb.watch(model)
     print("WandB watch added over model for Rank = %s" % rank)
