@@ -424,7 +424,7 @@ def train(local_rank, args):
     gradient_clipping = optc["gradient_clipping"]
     other_load_details = None
     print("Optimizer Created for Rank = %s" % rank)
-    if "resume" in args:
+    if "resume" in args and len(args["resume"]) > 0:
         print("Trying Resume from %s for Rank = %s" % (args["resume"], rank))
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
         print("Resumed from %s for Rank = %s" % (args["resume"], rank))
