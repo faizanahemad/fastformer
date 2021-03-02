@@ -345,6 +345,7 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
+    os.environ["WANDB_MODE"] = "dryrun"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
