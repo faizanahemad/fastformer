@@ -100,6 +100,7 @@ if __name__ == "__main__":
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --cpu False --num_workers 32 --validate_every_steps 10000 --save_every_steps 500"
+    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
