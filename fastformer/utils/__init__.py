@@ -117,4 +117,5 @@ def squeeze_after(x: torch.Tensor, dim):
 
 
 def get_time_string():
-    return (datetime.fromtimestamp(time.mktime(time.gmtime(time.time()))) + timedelta(hours=5, minutes=30)).astimezone(timezone('Asia/Kolkata')).strftime("[%a, %d %b %Y, %H:%M:%S %Z]")
+    # + timedelta(hours=5, minutes=30)
+    return (datetime.fromtimestamp(time.mktime(time.gmtime(time.time())))).astimezone(timezone('Asia/Kolkata')).strftime("[%a, %d %b %Y, %H:%M:%S %Z]")
