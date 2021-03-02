@@ -334,6 +334,7 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     filename = fss
     assert os.path.isfile(filename)
     loc = 'cuda:{}'.format(device)
+    print("Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))
     checkpoint = torch.load(filename, map_location=loc)
     print("Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
     model.load_state_dict(checkpoint['model'])
