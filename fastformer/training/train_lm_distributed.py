@@ -13,6 +13,7 @@
 # import multiprocessing as mp
 # ctx = mp.get_context()
 # ctx.reducer = pickle4reducer.Pickle4Reducer()
+import shutil
 
 import numpy as np
 import torch
@@ -46,6 +47,7 @@ from tqdm.auto import tqdm
 import wandb
 from pytz import timezone
 from datetime import datetime, timedelta
+from torch.utils.data.dataloader import DataLoader
 
 
 def training_args():
@@ -61,6 +63,12 @@ def training_args():
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
+
+    parser.add_argument('--resume', required=False, type=str,
+                        help='Resume From')
+    parser.add_argument('--checkpoint', required=False, type=str,
+                        help='Checkpoint Location')
+
     parser.add_argument('--model_save_dir', required=True, type=str,
                         help='Save Dir')
     parser.add_argument('--model_save_name', required=True, type=str,
@@ -305,6 +313,33 @@ def get_barrier(activate):
     return barrier
 
 
+def save(filename, model, optimizer, scheduler, scaler, other_info_dict={}, is_best=False):
+    if other_info_dict is not None and "step" in other_info_dict:
+        filename = filename + "-step-%s" % (other_info_dict["step"])
+    filename = filename + ".pth"
+    state = dict(model=model.state_dict(), optimizer=optimizer.state_dict(), scheduler=scheduler.state_dict(), scaler=scaler.state_dict(), other=other_info_dict)
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+
+
+def load(filename, model, optimizer, scheduler, scaler, device):
+    import glob
+    fss = map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*"))
+    fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
+    fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0]
+    filename = fss
+    assert os.path.isfile(filename)
+    loc = 'cuda:{}'.format(device)
+    checkpoint = torch.load(filename, map_location=loc)
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    scheduler.load_state_dict(checkpoint['scheduler'])
+    scaler.load_state_dict(checkpoint['scaler'])
+    other = checkpoint['other']
+    return other
+
+
 def train(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP
@@ -354,21 +389,24 @@ def train(local_rank, args):
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
-        model.load_state_dict(torch.load(args["pretrained_model"], map_location={'cuda:%d' % 0: 'cuda:%d' % local_rank}))
-    # Take model to local rank
+        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
+
     if args["cpu"]:
         ddp_model = model
     else:
         ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
+
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
     scaler = GradScaler()
 
+    # model, optim, gradscaler, scheduler, steps
+
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
-    if local_rank == 0:
+    if rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
@@ -384,6 +422,9 @@ def train(local_rank, args):
     save_every_steps = args["save_every_steps"]
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
+    other_load_details = None
+    if "resume" in args:
+        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
     _ = model.train()
     wandb.watch(model)
 
@@ -396,14 +437,17 @@ def train(local_rank, args):
     print("Time = %s, Start Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
     barrier()
     for step, batch in enumerate(train_loader):
+        if other_load_details is not None and "step" in other_load_details and "world_size" in other_load_details and other_load_details["world_size"] == args["world_size"] and other_load_details["step"] < step:
+            continue
         optimizer.zero_grad()
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+                if "checkpoint" in args:
+                    save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-
             _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
             barrier()
         record_accuracy = False
@@ -457,7 +501,12 @@ def train(local_rank, args):
             clean_memory()
             barrier()
 
-
+    print("Time = %s, Finished Training for Rank = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), rank))
+    if rank == 0:
+        torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+        if "checkpoint" in args:
+            save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
+                 {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
 
     # Take inputs to local_rank
 

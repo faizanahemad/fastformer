@@ -584,7 +584,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     cur_iter = 1
     prev_batch = None
     while i > 0:
-        # print("%s custom_batching_fn:: Start Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
+        print("%s custom_batching_fn:: Start Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
         for cur_batch in dataloader:
             if prev_batch is None:
                 prev_batch = cur_batch
@@ -606,7 +606,35 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
 
         if not continuous_iter:
             i = i - 1
+        print("%s custom_batching_fn:: End Epoch = %s" % (time.strftime("[%a, %d %b %Y %H:%M:%S]"), cur_iter))
         cur_iter += 1
+
+
+class DummyDataset:
+
+    def __init__(self, length):
+        self.length = length
+
+    def __getitem__(self, i):
+        return {"input_ids": torch.randn(512)}
+
+    def __len__(self):
+        return self.length
+
+"""
+
+from torch.utils.data.dataloader import DataLoader
+from fastformer.data import custom_batching_fn
+dd = DummyDataset(128)
+loader = DataLoader(dd, sampler=None, batch_size=8, num_workers=0)
+size_dicts = {128:96, 256:48, 512: 24, 768: 16, 1024: 8}
+train_loader = custom_batching_fn(loader, size_dicts, True)
+samples_done = 0
+for i, b in enumerate(train_loader):
+    samples_done += b["input_ids"].size(1)
+    print(i, samples_done)
+"""
+
 
 
 def all_datasets():
@@ -2208,6 +2236,7 @@ di.description=''
 di.write_to_directory("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 """
 
+# checker
 """
 import time
 import datasets
