@@ -29,6 +29,10 @@ def get_args():
 
     parser.add_argument("--start", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument("--ggl", default=False, action="store_true",
+                        help="Flag to do something")
+    parser.add_argument("--ds", default=False, action="store_true",
+                        help="Flag to do something")
     parser.add_argument("--tail", default=False, action="store_true",
                         help="Flag to do something")
     parser.add_argument("--kill", default=False, action="store_true",
@@ -38,7 +42,7 @@ def get_args():
     return vars(args)
 
 
-def run_command_v2(hosts, nodes, cmd, args=None):
+def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
     hosts = hosts[:nodes]
     if args is not None:
         args = args[:nodes]
@@ -46,8 +50,11 @@ def run_command_v2(hosts, nodes, cmd, args=None):
         args = [None] * len(hosts)
     for host, arg in zip(hosts, args):
         cur_cmd = (cmd % arg) if arg is not None else cmd
+        print(host)
+        print(cur_cmd)
+        if dry_run:
+            continue
         cmd_str = shlex.split("ssh %s '%s'" % (host, cur_cmd))
-        print(host, "::", cur_cmd)
         s = subprocess.run(cmd_str, shell=False, capture_output=True, text=True)
         print(s.stdout, s.stderr.strip())
         print("#" * 80)
@@ -101,24 +108,20 @@ if __name__ == "__main__":
     cmd1 = "pkill -9 -f 'multiprocessing'"
     cmd2 = "rm ~/torch_distributed_init/file-9999"
     clear_log = cmd_dir + " && rm output.log"
-    if args["start"]:
+    if args["kill"]:
+        run_command_v2(hosts, nodes, cmd0)
+        run_command_v2(hosts, nodes, cmd1)
+        run_command_v2(hosts[:1], 1, cmd2)
+        run_command_v2(hosts, nodes, clear_log)
+        time.sleep(10)
+    if args["ggl"]:
         cmd3 = cmd_dir + " && git pull"
-        cmd4 = cmd_dir + " && " + main_cmd
-
-        run_command_v2(hosts, nodes, cmd0)
-        run_command_v2(hosts, nodes, cmd1)
-        run_command_v2(hosts[:1], 1, cmd2)
-        run_command_v2(hosts, nodes, clear_log)
-        time.sleep(10)
         run_command_v2(hosts, nodes, cmd3)
-        run_command_v2(hosts, nodes, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))))
-    elif args["kill"]:
-        run_command_v2(hosts, nodes, cmd0)
-        run_command_v2(hosts, nodes, cmd1)
-        run_command_v2(hosts[:1], 1, cmd2)
-        run_command_v2(hosts, nodes, clear_log)
-        time.sleep(10)
-    elif args["tail"]:
+    if args["start"]:
+        cmd4 = cmd_dir + " && " + main_cmd
+        run_command_v2(hosts, nodes, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
+
+    if args["tail"]:
         tail_cmd = cmd_dir + " && tail -n 100 output.log"
         run_command_v2(hosts, nodes, tail_cmd)
 
