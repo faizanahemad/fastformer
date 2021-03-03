@@ -505,8 +505,9 @@ def train(local_rank, args):
         if step == 0:
             print("Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
+            acc_dict = output["accuracy_hist"]
             wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
-                           **loss_dict, **output["accuracy_hist"]))
+                           **loss_dict, **acc_dict))
             if local_rank == 0:
                 print("Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
@@ -521,7 +522,7 @@ def train(local_rank, args):
         torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
             save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
-                 {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
+                 {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"], "loss": loss_dict, "accuracy_dict": acc_dict})
 
     # Take inputs to local_rank
 
