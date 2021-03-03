@@ -585,7 +585,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     prev_batch = None
     while i > 0:
         print("%s custom_batching_fn:: Start Epoch = %s" % (get_time_string(), cur_iter))
-        for cur_batch in dataloader:
+        for _, cur_batch in enumerate(dataloader):
             if prev_batch is None:
                 prev_batch = cur_batch
             else:
