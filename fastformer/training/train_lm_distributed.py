@@ -285,10 +285,13 @@ class LargeValidator:
             if 'answer' not in cns:
                 dataset.training = True
                 record_accuracy = True
+            length = len(dataset)
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            print("Time = %s, Rank = %s, Val for dataset = %s, with columns = %s" % (get_time_string(),self.rank, k, cns))
+            print("Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(loader), cns))
             loader = custom_batching_fn(loader, size_dicts_val, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
+            samples_prev = 0
+            samples_cur = 0
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
@@ -314,6 +317,11 @@ class LargeValidator:
                         with autocast():
                             output = model.module(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
+                samples_cur += pt_batch["input_ids"].size(0)
+                if samples_cur > samples_prev + (16 * 5):
+                    print("Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
+                    samples_prev = samples_cur
+
             print("Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
