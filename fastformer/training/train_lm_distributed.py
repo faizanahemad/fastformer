@@ -234,19 +234,19 @@ class LargeValidator:
                          'superglue_multirc_v2',
                          'superglue_record_v1',
                          'superglue_record_v2',
-                         'snli_qna_v1',
-                         'race_qna',
-                         'glue_sst2_v2',
-                         'glue_sst2',
-                         'glue_qnli',
-                         'rotten_tomatoes_qna',
-                         'commonsense_qa',
-                         'winogrande_qna',
-                         'scitail_qna',
-                         'hellaswag_qna',
-                         'squad_v2_qna',
-                         'squad_v2_qna_v2',
-                         'swag_qna'
+                         # 'snli_qna_v1',
+                         # 'race_qna',
+                         # 'glue_sst2_v2',
+                         # 'glue_sst2',
+                         # 'glue_qnli',
+                         # 'rotten_tomatoes_qna',
+                         # 'commonsense_qa',
+                         # 'winogrande_qna',
+                         # 'scitail_qna',
+                         # 'hellaswag_qna',
+                         # 'squad_v2_qna',
+                         # 'squad_v2_qna_v2',
+                         # 'swag_qna'
                          ]
 
     def __call__(self):
@@ -286,8 +286,8 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             length = len(dataset)
+            print("Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            print("Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(loader), cns))
             loader = custom_batching_fn(loader, size_dicts_val, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
             samples_prev = 0
@@ -337,7 +337,7 @@ class LargeValidator:
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
-            print("Time = %s, For Dataset %s, results = %s" % (get_time_string(), k, results[k]))
+            print("Time = %s, Rank = %s, For Dataset %s, results = %s" % (get_time_string(), self.rank, k, results[k]))
             wandb.log(dict(mode="val", dataset=k, k=results[k]))
             clean_memory()
         model = model.train()

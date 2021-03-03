@@ -27,7 +27,7 @@ def get_args():
     parser.add_argument('--hosts_file', required=True, type=str,
                         help='Pretrained Model')
     parser.add_argument('-n', '--nodes', default=None,
-                        type=int, metavar='N')
+                        type=str, metavar='N')
 
     parser.add_argument("--start", default=False, action="store_true",
                         help="Flag to do something")
@@ -103,10 +103,9 @@ def justify(words, width):
         yield left_justify(line, width)
 
 
-def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
-    hosts = hosts[:nodes]
+def run_command_v2(hosts, cmd, args=None, dry_run=False):
     if args is not None:
-        args = args[:nodes]
+        args = args[:len(hosts)]
     else:
         args = [None] * len(hosts)
 
@@ -129,27 +128,23 @@ def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
         print(tabulate(dl, headers="keys", tablefmt="grid"))
 
 
-
-def run_command(hosts, nodes, cmd, args=None):
-    if nodes > 1:
-        client = ParallelSSHClient(hosts[:nodes], pkey="~/.ssh/id_rsa", password="")
-    else:
-        client = SSHClient(hosts[0], pkey="~/.ssh/id_rsa", password="")
-    output = client.run_command(cmd, host_args=args[:nodes], shell="zsh")
-    client.join()
-    for host_output in output:
-        hostname = host_output.host
-        stdout = list(host_output.stdout)
-        print("Host %s: exit code %s, output %s" % (
-            hostname, host_output.exit_code, stdout))
-
-
 if __name__ == "__main__":
     args = get_args()
     hosts = list(pd.read_csv(args["hosts_file"], header=None)[0].values)
+    h1 = hosts[:1]
     nodes = args["nodes"]
     if nodes is None:
-        nodes = len(hosts)
+        pass
+    else:
+        if "," in nodes or len(nodes.split(":")) == 1:
+            if not nodes.startswith("["):
+                nodes = "[" + nodes
+            if not nodes.endswith("]"):
+                nodes = nodes + "]"
+        hosts = np.array(hosts)
+        hosts = list(eval("hosts["+nodes+"]"))
+
+
     # test_cmd1 = "pwd"
     # test_cmd2 = "echo $USER"
     # test_cmd3 = "echo $SHELL"
@@ -183,24 +178,24 @@ if __name__ == "__main__":
     cmd2 = "rm ~/torch_distributed_init/file-9999"
     clear_log = cmd_dir + " && rm output.log"
     if args["kill"]:
-        run_command_v2(hosts, nodes, cmd0)
-        run_command_v2(hosts, nodes, cmd1)
-        run_command_v2(hosts[:1], 1, cmd2)
-        run_command_v2(hosts, nodes, clear_log)
+        run_command_v2(hosts, cmd0)
+        run_command_v2(hosts, cmd1)
+        run_command_v2(h1, cmd2)
+        run_command_v2(hosts, clear_log)
         time.sleep(10)
     if args["ggl"]:
         cmd3 = cmd_dir + " && git pull"
-        run_command_v2(hosts, nodes, cmd3)
+        run_command_v2(hosts, cmd3)
     if args["start"]:
         cmd4 = cmd_dir + " && " + main_cmd
-        run_command_v2(hosts, nodes, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
+        run_command_v2(hosts, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
 
     if args["tail"]:
         tail_cmd = cmd_dir + " && tail -n %s output.log" % args["ntail"]
-        run_command_v2(hosts, nodes, tail_cmd)
+        run_command_v2(hosts, tail_cmd)
     if args["gpustat"]:
         gpustat_cmd = cmd_dir + " && gpustat"
-        run_command_v2(hosts, nodes, gpustat_cmd)
+        run_command_v2(hosts, gpustat_cmd)
 
 
 
