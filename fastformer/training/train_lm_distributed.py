@@ -192,7 +192,62 @@ class LargeValidator:
         self.tokenizer = tokenizer
         self.rank = rank
         self.world_size = world_size
-        self.ignore_keys = ["big_patent1024"]
+        self.ignore_keys = ['cnn_dailymail1024',
+                            'wikihow_sep1024',
+                            # 'wikihow_all1024',
+                            'big_patent1024',
+                            'xsum1024',
+                            'scientific_papers_arxiv512',
+                            'scientific_papers_pubmed512',
+                            'kelm1024',
+                            # 'amazon_reviews_multi1024',
+                            'gigaword_qna',
+                            'mrqa_v1',
+                            'mrqa_v2',
+                            'e2e_nlg_cleaned_qna',
+                            'discovery_qna',
+                            'hans_qna_v2',
+                            'hans_qna_v1',
+                            'wikihow_sep_qna_v2',
+                            'wikihow_sep_qna_v3',
+                            'wikihow_sep_qna_v1',
+                            'empathetic_dialogues_qna'
+                            ]
+        self.includes = ['superglue_cb_v2',
+                         'superglue_cb_v1',
+                         'superglue_copa_v1',
+                         'superglue_copa_v2',
+                         'superglue_copa_v3',
+                         'superglue_wsc_fixed_v2',
+                         'superglue_wsc_v1',
+                         'superglue_wsc_fixed_v1',
+                         'superglue_wsc_v2',
+                         'superglue_rte_v2',
+                         'superglue_rte_v1',
+                         'superglue_wic_v1',
+                         'superglue_wic_v2',
+                         'superglue_multirc_v3',
+                         'superglue_boolq',
+                         'superglue_record_v4',
+                         'superglue_record_v3',
+                         'superglue_multirc_v1',
+                         'superglue_multirc_v2',
+                         'superglue_record_v1',
+                         'superglue_record_v2',
+                         'snli_qna_v1',
+                         'race_qna',
+                         'glue_sst2_v2',
+                         'glue_sst2',
+                         'glue_qnli',
+                         'rotten_tomatoes_qna',
+                         'commonsense_qa',
+                         'winogrande_qna',
+                         'scitail_qna',
+                         'hellaswag_qna',
+                         'squad_v2_qna',
+                         'squad_v2_qna_v2',
+                         'swag_qna'
+                         ]
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -211,6 +266,7 @@ class LargeValidator:
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         results = dict()
         _ = [datadict.pop(k, None) for k in self.ignore_keys]
+        datadict = {k: v for k, v in datadict.items() if k in self.includes}
         for idx, (k, dataset) in enumerate(sorted(datadict.items())):
             while idx > self.world_size:
                 idx -= self.world_size

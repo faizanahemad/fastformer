@@ -41,6 +41,8 @@ def get_args():
                         help='Tail Length')
     parser.add_argument("--kill", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument("--gpustat", default=False, action="store_true",
+                        help="Flag to do something")
 
     args = parser.parse_args()
     return vars(args)
@@ -108,10 +110,22 @@ def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
     else:
         args = [None] * len(hosts)
 
-    sep_dict = {"host": [".", 40], "stdout": [" ", 80], "stderr": [" ", 40], "cmd": [" ", 40]}
+    sep_dict = {"host": [".", 40], "stdout": [" ", 120], "stderr": [" ", 40], "cmd": [" ", 40]}
     with ProcessPoolExecutor(8) as executor:
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
-        dl = {key: ["\n".join(list(justify(str(item[key]).split(sep_dict[key][0]), sep_dict[key][1]))) for item in ld] for key in ld[0].keys()}
+    if len(ld) == 1:
+        ld = ld[0]
+        print(ld["host"])
+        print(ld["cmd"])
+        print(ld["stdout"])
+        print(ld["stderr"])
+    else:
+        # split by \n and then by space
+        # "\n".join(["\n".join(list(justify(x.split(sep_dict[key][0]), sep_dict[key][1]))) for x in str(item[key]).split('\n')])
+        fns = lambda string, sep, num_chars: "\n".join(["\n".join(list(justify(x.split(sep), num_chars))) for x in str(string).split('\n')])
+
+        dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
+        # dl = {key: ["\n".join(list(justify(str(item[key]).split(sep_dict[key][0]), sep_dict[key][1]))) for item in ld] for key in ld[0].keys()}
         print(tabulate(dl, headers="keys", tablefmt="grid"))
 
 
@@ -155,7 +169,7 @@ if __name__ == "__main__":
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --cpu False --num_workers 32 --validate_every_steps 10000 --save_every_steps 500"
+    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 10000 --save_every_steps 500"
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
@@ -184,6 +198,9 @@ if __name__ == "__main__":
     if args["tail"]:
         tail_cmd = cmd_dir + " && tail -n %s output.log" % args["ntail"]
         run_command_v2(hosts, nodes, tail_cmd)
+    if args["gpustat"]:
+        gpustat_cmd = cmd_dir + " && gpustat"
+        run_command_v2(hosts, nodes, gpustat_cmd)
 
 
 
