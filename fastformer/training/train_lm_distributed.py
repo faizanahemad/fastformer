@@ -286,8 +286,9 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            print("Time = %s, Val for dataset = %s, with columns = %s" % (get_time_string(), k, cns))
-            loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
+            print("Time = %s, Rank = %s, Val for dataset = %s, with columns = %s" % (get_time_string(),self.rank, k, cns))
+            loader = custom_batching_fn(loader, size_dicts_val, False)
+            # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
@@ -313,6 +314,7 @@ class LargeValidator:
                         with autocast():
                             output = model.module(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
+            print("Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
                 for lbl, prd in zip(labels, predictions):
