@@ -18,6 +18,7 @@ import subprocess
 import shlex
 from distutils.util import strtobool
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from tabulate import tabulate
 
 # TODO: Parallel with multi-thread
 
@@ -54,6 +55,52 @@ def one_run(host, cmd, arg, dry_run=False):
     return {"host": host, "stdout": s.stdout, "stderr": s.stderr, "cmd": cur_cmd}
 
 
+def left_justify(words, width):
+    """Given an iterable of words, return a string consisting of the words
+    left-justified in a line of the given width.
+
+    >>> left_justify(["hello", "world"], 16)
+    'hello world     '
+
+    """
+    return ' '.join(words).ljust(width)
+
+
+def justify(words, width):
+    """Divide words (an iterable of strings) into lines of the given
+    width, and generate them. The lines are fully justified, except
+    for the last line, and lines with a single word, which are
+    left-justified.
+
+    >>> words = "This is an example of text justification.".split()
+    >>> list(justify(words, 16))
+    ['This    is    an', 'example  of text', 'justification.  ']
+
+    """
+    line = []             # List of words in current line.
+    col = 0               # Starting column of next word added to line.
+    for word in words:
+        if line and col + len(word) > width:
+            if len(line) == 1:
+                yield left_justify(line, width)
+            else:
+                # After n + 1 spaces are placed between each pair of
+                # words, there are r spaces left over; these result in
+                # wider spaces at the left.
+                n, r = divmod(width - col + 1, len(line) - 1)
+                narrow = ' ' * (n + 1)
+                if r == 0:
+                    yield narrow.join(line)
+                else:
+                    wide = ' ' * (n + 2)
+                    yield wide.join(line[:r] + [narrow.join(line[r:])])
+            line, col = [], 0
+        line.append(word)
+        col += len(word) + 1
+    if line:
+        yield left_justify(line, width)
+
+
 def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
     hosts = hosts[:nodes]
     if args is not None:
@@ -61,12 +108,12 @@ def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
     else:
         args = [None] * len(hosts)
 
+    sep_dict = {"host": [".", 40], "stdout": [" ", 80], "stderr": [" ", 40], "cmd": [" ", 40]}
     with ProcessPoolExecutor(8) as executor:
-        for results in executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)):
-            print(results["host"])
-            print(results["cmd"])
-            print(results["stdout"], results["stderr"])
-            print("#" * 80)
+        ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
+        dl = {key: ["\n".join(list(justify(str(item[key]).split(sep_dict[key][0]), sep_dict[key][1]))) for item in ld] for key in ld[0].keys()}
+        print(tabulate(dl, headers="keys", tablefmt="grid"))
+
 
 
 def run_command(hosts, nodes, cmd, args=None):
@@ -112,6 +159,7 @@ if __name__ == "__main__":
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    main_cmd += " --validate_on_start"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"

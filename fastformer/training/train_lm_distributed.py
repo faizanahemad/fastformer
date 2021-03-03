@@ -74,6 +74,12 @@ def training_args():
     parser.add_argument('--model_save_name', required=True, type=str,
                         help='Save Name')
 
+    parser.add_argument('--validate_on_start', action="store_true", default=False,
+                        help='Validate before training')
+
+    parser.add_argument('--skip_steps', action="store_true", default=False,
+                        help='Skip already trained steps while continuing training')
+
     parser.add_argument('--wandb_dryrun', action="store_true", default=False,
                         help='WanDB Dryrun Only')
 
@@ -186,6 +192,7 @@ class LargeValidator:
         self.tokenizer = tokenizer
         self.rank = rank
         self.world_size = world_size
+        self.ignore_keys = ["big_patent1024"]
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -203,6 +210,7 @@ class LargeValidator:
         model = model.eval()
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
         results = dict()
+        _ = [datadict.pop(k, None) for k in self.ignore_keys]
         for idx, (k, dataset) in enumerate(sorted(datadict.items())):
             while idx > self.world_size:
                 idx -= self.world_size
@@ -223,7 +231,7 @@ class LargeValidator:
                 record_accuracy = True
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             print("Time = %s, Val for dataset = %s, with columns = %s" % (get_time_string(), k, cns))
-            loader = custom_batching_fn(tqdm(loader, desc=k), size_dicts_val, False)
+            loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
@@ -441,8 +449,10 @@ def train(local_rank, args):
         print("Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
     else:
         print("No Resume for Rank = %s" % rank)
-    print("Init Wandb watch added over model for Rank = %s" % rank)
     _ = model.train()
+    if args["validate_on_start"]:
+        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
+    print("Init Wandb watch added over model for Rank = %s" % rank)
     wandb.watch(model)
     print("WandB watch added over model for Rank = %s" % rank)
     batch_times = []
@@ -454,10 +464,14 @@ def train(local_rank, args):
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
-        if other_load_details is not None and "step" in other_load_details and "world_size" in other_load_details and other_load_details["world_size"] == args["world_size"] and step < other_load_details["step"]:
-            if (step + 1) % log_every_steps == 0 or step == 0:
-                print("Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
-            continue
+        if other_load_details is not None:
+            if step < other_load_details["step"] and args["skip_steps"]:
+                if (step + 1) % log_every_steps == 0 or step == 0:
+                    print("Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
+                continue
+            else:
+                step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
+
         optimizer.zero_grad()
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
