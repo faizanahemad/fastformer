@@ -506,8 +506,10 @@ def train(local_rank, args):
     else:
         print("No Resume for Rank = %s" % rank)
     _ = model.train()
-    if args["validate_on_start"]:
+    if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
+        if args["validate_only"]:
+            return
     print("Init Wandb watch added over model for Rank = %s" % rank)
     wandb.watch(model)
     print("WandB watch added over model for Rank = %s" % rank)
