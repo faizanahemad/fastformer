@@ -434,7 +434,7 @@ def train(local_rank, args):
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("Trying Resume from %s for Rank = %s" % (args["resume"], rank))
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
-        print("Resumed from %s for Rank = %s" % (args["resume"], rank))
+        print("Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
     else:
         print("No Resume for Rank = %s" % rank)
     print("Init Wandb watch added over model for Rank = %s" % rank)
@@ -450,7 +450,9 @@ def train(local_rank, args):
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
-        if other_load_details is not None and "step" in other_load_details and "world_size" in other_load_details and other_load_details["world_size"] == args["world_size"] and other_load_details["step"] < step:
+        if other_load_details is not None and "step" in other_load_details and "world_size" in other_load_details and other_load_details["world_size"] == args["world_size"] and step < other_load_details["step"]:
+            if (step + 1) % log_every_steps == 0 or step == 0:
+                print("Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
             continue
         optimizer.zero_grad()
         gen_batch_time = time.time() - start_time
