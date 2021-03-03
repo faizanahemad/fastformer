@@ -17,6 +17,7 @@ from pssh.clients import ParallelSSHClient, SSHClient
 import subprocess
 import shlex
 from distutils.util import strtobool
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 # TODO: Parallel with multi-thread
 
@@ -35,11 +36,22 @@ def get_args():
                         help="Flag to do something")
     parser.add_argument("--tail", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument('--ntail', required=False, type=int, default=20,
+                        help='Tail Length')
     parser.add_argument("--kill", default=False, action="store_true",
                         help="Flag to do something")
 
     args = parser.parse_args()
     return vars(args)
+
+
+def one_run(host, cmd, arg, dry_run=False):
+    cur_cmd = (cmd % arg) if arg is not None else cmd
+    if dry_run:
+        return {"host": host, "cmd": cur_cmd, "stdout": "", "stderr": ""}
+    cmd_str = shlex.split("ssh %s '%s'" % (host, cur_cmd))
+    s = subprocess.run(cmd_str, shell=False, capture_output=True, text=True)
+    return {"host": host, "stdout": s.stdout, "stderr": s.stderr, "cmd": cur_cmd}
 
 
 def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
@@ -48,16 +60,13 @@ def run_command_v2(hosts, nodes, cmd, args=None, dry_run=False):
         args = args[:nodes]
     else:
         args = [None] * len(hosts)
-    for host, arg in zip(hosts, args):
-        cur_cmd = (cmd % arg) if arg is not None else cmd
-        print(host)
-        print(cur_cmd)
-        if dry_run:
-            continue
-        cmd_str = shlex.split("ssh %s '%s'" % (host, cur_cmd))
-        s = subprocess.run(cmd_str, shell=False, capture_output=True, text=True)
-        print(s.stdout, s.stderr.strip())
-        print("#" * 80)
+
+    with ProcessPoolExecutor(8) as executor:
+        for results in executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)):
+            print(results["host"])
+            print(results["cmd"])
+            print(results["stdout"], results["stderr"])
+            print("#" * 80)
 
 
 def run_command(hosts, nodes, cmd, args=None):
@@ -100,8 +109,10 @@ if __name__ == "__main__":
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --cpu False --num_workers 32 --validate_every_steps 10000 --save_every_steps 500"
+    main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
+    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
     # cmd1 = "kill -2 $(ps aux | grep multiprocessing | grep -v grep | awk \'{print $2}\')"
@@ -123,7 +134,7 @@ if __name__ == "__main__":
         run_command_v2(hosts, nodes, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
 
     if args["tail"]:
-        tail_cmd = cmd_dir + " && tail -n 100 output.log"
+        tail_cmd = cmd_dir + " && tail -n %s output.log" % args["ntail"]
         run_command_v2(hosts, nodes, tail_cmd)
 
 

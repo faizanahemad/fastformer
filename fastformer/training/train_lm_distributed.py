@@ -74,16 +74,19 @@ def training_args():
     parser.add_argument('--model_save_name', required=True, type=str,
                         help='Save Name')
 
-    parser.add_argument('--validate_only', required=False, type=str2bool, default=False,
+    parser.add_argument('--wandb_dryrun', action="store_true", default=False,
+                        help='WanDB Dryrun Only')
+
+    parser.add_argument('--validate_only', action="store_true", default=False,
                         help='Validate Only')
 
-    parser.add_argument('--test_only', required=False, type=str2bool, default=False,
+    parser.add_argument('--test_only', action="store_true", default=False,
                         help='Test Only')
 
-    parser.add_argument('--shuffle_dataset', required=False, type=str2bool, default=False,
+    parser.add_argument('--shuffle_dataset', action="store_true", default=False,
                         help='Shuffle Train')
 
-    parser.add_argument('--cpu', required=False, type=str2bool, default=False,
+    parser.add_argument('--cpu', action="store_true", default=False,
                         help='Shuffle Train')
 
     parser.add_argument('--train_dataset', required=False, type=str,
@@ -350,7 +353,8 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
-    os.environ["WANDB_MODE"] = "dryrun"
+    if args["wandb_dryrun"]:
+        os.environ["WANDB_MODE"] = "dryrun"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
