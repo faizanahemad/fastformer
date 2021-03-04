@@ -267,6 +267,7 @@ class LargeValidator:
         results = dict()
         _ = [datadict.pop(k, None) for k in self.ignore_keys]
         datadict = {k: v for k, v in datadict.items() if k in self.includes}
+        print("[Validation]: Time = %s, Rank = %s, Total Datasets for Val = %s" % (get_time_string(), self.rank, len(datadict)))
         for idx, (k, dataset) in enumerate(sorted(datadict.items())):
             while idx > self.world_size:
                 idx -= self.world_size
@@ -286,7 +287,7 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             length = len(dataset)
-            print("Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
+            print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             loader = custom_batching_fn(loader, size_dicts_val, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
@@ -295,7 +296,7 @@ class LargeValidator:
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
-                print("Time = %s, Rank = %s, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
+                print("[Validation]: Time = %s, Rank = %s, Start-Validation, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
                 if 'answer' in cns:
                     with torch.no_grad():
                         with autocast():
@@ -320,10 +321,10 @@ class LargeValidator:
                     predictions.append(output)
                 samples_cur += pt_batch["input_ids"].size(0)
                 if samples_cur > samples_prev + (16 * 5):
-                    print("Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
+                    print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
                     samples_prev = samples_cur
 
-            print("Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
+            print("[Validation]: Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
                 for lbl, prd in zip(labels, predictions):
@@ -338,7 +339,7 @@ class LargeValidator:
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
-            print("Time = %s, Rank = %s, For Dataset %s, results = %s" % (get_time_string(), self.rank, k, results[k]))
+            print("[Validation]: Time = %s, Rank = %s, Finished-Validation, For Dataset %s, results = %s" % (get_time_string(), self.rank, k, results[k]))
             wandb.log(dict(mode="val", dataset=k, k=results[k]))
             clean_memory()
         model = model.train()
@@ -403,20 +404,20 @@ def save(filename, model, optimizer, scheduler, scaler, other_info_dict={}, is_b
 
 def load(filename, model, optimizer, scheduler, scaler, device):
     import glob
-    print("Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
+    print("[Load]: Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
     fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
-    print("Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
+    print("[Load]: Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
     if len(fss) == 0:
         return None
     fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
     fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
-    print("Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
+    print("[Load]: Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
     filename = fss
     assert os.path.isfile(filename)
     loc = 'cuda:{}'.format(device)
-    print("Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))
+    print("[Load]: Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))
     checkpoint = torch.load(filename, map_location=loc)
-    print("Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
+    print("[Load]: Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
     model.load_state_dict(checkpoint['model'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
@@ -442,7 +443,7 @@ def train(local_rank, args):
         barrier = get_barrier(False)
         rnd = torch.tensor(int(time.time()))
     else:
-        print("Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
+        print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
         if args["init_method"] == "tcp":
             init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
         elif args["init_method"] == "file":
@@ -451,7 +452,7 @@ def train(local_rank, args):
             raise ValueError
 
         dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-        print("Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
+        print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
         barrier = get_barrier(True)
@@ -475,7 +476,7 @@ def train(local_rank, args):
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-    print("Trainable Params = %s" % (numel(model) / 1_000_000))
+    print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
 
@@ -498,53 +499,53 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
     assert os.path.exists(model_save_dir)
-    print("Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
+    print("[Train]: Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
         train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"])
 
-    print("Data Loaded for Rank = %s" % rank)
+    print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
     other_load_details = None
-    print("Scheduler Created for Rank = %s" % rank)
+    print("[Train]: Scheduler Created for Rank = %s" % rank)
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
-        print("Trying Resume from %s for Rank = %s" % (args["resume"], rank))
+        print("[Train]: Trying Resume from %s for Rank = %s" % (args["resume"], rank))
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
 
         if other_load_details is None:
-            print("No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
+            print("[Train]: No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
             args["resume"] = None
         else:
-            print("Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
+            print("[Train]: Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
 
     else:
-        print("No Resume for Rank = %s" % rank)
+        print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
         if args["validate_only"]:
             return
-    print("Init Wandb watch added over model for Rank = %s" % rank)
+    print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
     wandb.watch(model)
-    print("WandB watch added over model for Rank = %s" % rank)
+    print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
     full_times = []
     model.zero_grad()
     samples_processed = 0
-    print("Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
+    print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
                 if (step + 1) % log_every_steps == 0 or step == 0:
-                    print("Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
+                    print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
                 continue
             else:
                 step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
@@ -598,14 +599,14 @@ def train(local_rank, args):
         full_times.append(full_time)
         start_time = time.time()
         if step == 0:
-            print("Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
+            print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
             acc_dict = output["accuracy_hist"]
             wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
-                print("Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
-                print("Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
+                print("[Train]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
             model_times = []
             full_times = []

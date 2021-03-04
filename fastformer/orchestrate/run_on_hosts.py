@@ -43,6 +43,8 @@ def get_args():
                         help="Flag to do something")
     parser.add_argument("--gpustat", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument('--custom', required=False, type=str, default=None,
+                        help='Custom cmd')
 
     args = parser.parse_args()
     return vars(args)
@@ -197,7 +199,9 @@ if __name__ == "__main__":
     if args["gpustat"]:
         gpustat_cmd = cmd_dir + " && gpustat"
         run_command_v2(hosts, gpustat_cmd)
-
+    if args["custom"] is not None:
+        custom_cmd = cmd_dir + " && " + args["custom"]
+        run_command_v2(hosts, custom_cmd)
 
 
 
