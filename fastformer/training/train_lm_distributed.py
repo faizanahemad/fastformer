@@ -406,6 +406,8 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     print("Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
     fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
     print("Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
+    if len(fss) == 0:
+        return None
     fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
     fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
     print("Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
@@ -513,7 +515,13 @@ def train(local_rank, args):
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("Trying Resume from %s for Rank = %s" % (args["resume"], rank))
         other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
-        print("Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
+
+        if other_load_details is None:
+            print("No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
+            args["resume"] = None
+        else:
+            print("Resumed from %s for Rank = %s, other details = %s" % (args["resume"], rank, other_load_details))
+
     else:
         print("No Resume for Rank = %s" % rank)
     _ = model.train()
