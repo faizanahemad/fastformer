@@ -302,7 +302,7 @@ class LargeValidator:
                         with autocast():
                             funnel_inputs = dict(input_ids=pt_batch["input_ids"],
                                                  attention_mask=pt_batch["attention_mask"],
-                                                 token_type_ids=pt_batch["token_type_ids"],
+                                                 token_type_ids=pt_batch["token_type_ids"] if "token_type_ids" in pt_batch else None,
                                                  inputs_embeds=None,
                                                  char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
                                                  run_decoder=False,
