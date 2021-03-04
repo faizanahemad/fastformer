@@ -1098,8 +1098,8 @@ class MultiheadAttention(nn.Module):
             attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
         except Exception as e:
             print("Query Shape = %s, Key shape = %s, Value shape = %s, layer_index = %s, block index = %s" % (query.size(), key.size(), value.size(), layer_index, self.block_index))
-            traceback.print_exc()
-            traceback.print_exception(*sys.exc_info())
+            # traceback.print_exc()
+            # traceback.print_exception(*sys.exc_info())
             raise e
 
         if self.sdconv:

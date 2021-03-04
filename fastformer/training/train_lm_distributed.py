@@ -291,7 +291,7 @@ class LargeValidator:
             length = len(dataset)
             print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            loader = custom_batching_fn(loader, size_dicts_val, False)
+            loader = custom_batching_fn(loader, size_dicts, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
             samples_prev = 0
             samples_cur = 0
@@ -436,9 +436,9 @@ def train_catch_exception(local_rank, args):
     try:
         train(local_rank, args)
     except Exception as e:
-        print("[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, e.__traceback__))
-        traceback.print_tb(e.__traceback__)
-        traceback.print_exception(*sys.exc_info())
+        print("[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
+        # traceback.print_tb(e.__traceback__)
+        # traceback.print_exception(*sys.exc_info())
         traceback.print_exc()
         raise e
 
