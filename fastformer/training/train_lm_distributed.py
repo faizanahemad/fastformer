@@ -431,9 +431,12 @@ def load(filename, model, optimizer, scheduler, scaler, device):
 
 
 def train_catch_exception(local_rank, args):
+    rank = args["nr"] * args["gpus_per_node"] + local_rank
+    nr = args["nr"]
     try:
         train(local_rank, args)
     except Exception as e:
+        print("[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, e.__traceback__))
         traceback.print_tb(e.__traceback__)
         traceback.print_exception(*sys.exc_info())
         traceback.print_exc()
