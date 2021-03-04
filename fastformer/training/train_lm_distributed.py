@@ -308,8 +308,7 @@ class LargeValidator:
                                                  run_decoder=False,
                                                  run_answering=True)
                             output = model.module.funnel(**funnel_inputs)
-                            print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (
-                            get_time_string(), self.rank, k))
+                            # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
                     predictions.extend(answering_predictions)
@@ -323,7 +322,7 @@ class LargeValidator:
                             output = model.module(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
                 samples_cur += pt_batch["input_ids"].size(0)
-                if samples_cur > samples_prev + (16 * 5):
+                if samples_cur > samples_prev + (16 * 50):
                     # print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
                     samples_prev = samples_cur
 
