@@ -215,25 +215,25 @@ class LargeValidator:
                             ]
         self.includes = ['superglue_cb_v2',
                          'superglue_cb_v1',
-                         'superglue_copa_v1',
-                         'superglue_copa_v2',
-                         'superglue_copa_v3',
-                         'superglue_wsc_fixed_v2',
-                         'superglue_wsc_v1',
-                         'superglue_wsc_fixed_v1',
-                         'superglue_wsc_v2',
-                         'superglue_rte_v2',
-                         'superglue_rte_v1',
-                         'superglue_wic_v1',
-                         'superglue_wic_v2',
-                         'superglue_multirc_v3',
-                         'superglue_boolq',
-                         'superglue_record_v4',
-                         'superglue_record_v3',
-                         'superglue_multirc_v1',
-                         'superglue_multirc_v2',
-                         'superglue_record_v1',
-                         'superglue_record_v2',
+                         # 'superglue_copa_v1',
+                         # 'superglue_copa_v2',
+                         # 'superglue_copa_v3',
+                         # 'superglue_wsc_fixed_v2',
+                         # 'superglue_wsc_v1',
+                         # 'superglue_wsc_fixed_v1',
+                         # 'superglue_wsc_v2',
+                         # 'superglue_rte_v2',
+                         # 'superglue_rte_v1',
+                         # 'superglue_wic_v1',
+                         # 'superglue_wic_v2',
+                         # 'superglue_multirc_v3',
+                         # 'superglue_boolq',
+                         # 'superglue_record_v4',
+                         # 'superglue_record_v3',
+                         # 'superglue_multirc_v1',
+                         # 'superglue_multirc_v2',
+                         # 'superglue_record_v1',
+                         # 'superglue_record_v2',
                          # 'snli_qna_v1',
                          # 'race_qna',
                          # 'glue_sst2_v2',
@@ -287,7 +287,7 @@ class LargeValidator:
                 dataset.training = True
                 record_accuracy = True
             length = len(dataset)
-            print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
+            print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
             loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             loader = custom_batching_fn(loader, size_dicts_val, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
