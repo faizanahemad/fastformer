@@ -15,7 +15,6 @@ import random
 import os
 import argparse
 from tqdm.auto import tqdm
-from pssh.clients import ParallelSSHClient, SSHClient
 import subprocess
 import shlex
 from distutils.util import strtobool

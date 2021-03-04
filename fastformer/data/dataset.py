@@ -10,7 +10,7 @@ from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
 
-from ..utils import squeeze_after, get_time_string
+from fastformer.utils import squeeze_after, get_time_string
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
