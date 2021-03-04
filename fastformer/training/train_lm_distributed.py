@@ -311,6 +311,8 @@ class LargeValidator:
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
                     predictions.extend(answering_predictions)
+                    print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, first batch predicted = %s" % (
+                        get_time_string(), self.rank, k, answering_predictions[:8]))
 
                 else:
                     labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
