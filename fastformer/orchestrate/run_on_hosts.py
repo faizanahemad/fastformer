@@ -164,12 +164,13 @@ if __name__ == "__main__":
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 10000 --save_every_steps 500"
+    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 500"
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
-    main_cmd += " --validate_on_start"
+    # main_cmd += " --validate_on_start"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
+
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
     # cmd1 = "kill -2 $(ps aux | grep multiprocessing | grep -v grep | awk \'{print $2}\')"
@@ -188,7 +189,7 @@ if __name__ == "__main__":
         run_command_v2(hosts, cmd3)
     if args["start"]:
         cmd4 = cmd_dir + " && " + main_cmd
-        run_command_v2(hosts, cmd4, list(zip([nodes] * len(hosts), list(map(str, list(range(nodes)))))), args["ds"])
+        run_command_v2(hosts, cmd4, list(zip([len(hosts)] * len(hosts), list(map(str, list(range(len(hosts))))))), args["ds"])
 
     if args["tail"]:
         tail_cmd = cmd_dir + " && tail -n %s output.log" % args["ntail"]

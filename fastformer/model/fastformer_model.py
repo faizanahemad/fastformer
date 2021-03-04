@@ -1830,7 +1830,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], config.block_channel_size[0]))
+        self.contrastive_ffn = nn.Linear(config.block_channel_size[-1], 256)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -1842,19 +1842,17 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.loss_bce = BCELossFocal()
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.sent_predict_fc = nn.Sequential(nn.GELU(), nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1)))
+            self.sent_predict_fc = nn.Sequential(self.contrastive_ffn, nn.GELU(), nn.Linear(256, (self.cls_tokens + 1)))
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.ar_fc = nn.Sequential(Conv1d(self.config.block_channel_size[2], self.config.block_channel_size[0], kernel_size=1, groups=8),
-                                       nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps))
+            self.ar_fc = nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps)
             self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
-        self.register_buffer("diag_mat", 1 - torch.eye(self.cls_tokens + 1, self.cls_tokens + 1, device=next(self.parameters()).device))
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
         self.accuracy_hist = list()
@@ -2184,13 +2182,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if self.input_cls_orthogonal_w > 0 and self.training:
             inputs_embeds_cls = inputs_embeds_cls/inputs_embeds_cls.norm(2, -1, True)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
-            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls * self.diag_mat) ** 2).mean()
+            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
             cls_orthogonal_loss += input_cls_orthogonal_loss
 
         if self.first_block_cls_orthogonal_w > 0 and self.training:
             first_block_cls = first_block_cls/first_block_cls.norm(2, -1, True)
             first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
-            first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * ((first_block_cls * self.diag_mat) ** 2).mean()
+            first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * (first_block_cls ** 2).mean()
             cls_orthogonal_loss += first_block_cls_orthogonal_loss
 
         et = time.time() - st
@@ -2212,7 +2210,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("sentence_order_loss", et))
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-            highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1])
+            highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1, :self.config.block_channel_size[0]])
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
