@@ -14,6 +14,8 @@
 # ctx = mp.get_context()
 # ctx.reducer = pickle4reducer.Pickle4Reducer()
 import shutil
+import sys
+import traceback
 
 import numpy as np
 import torch
@@ -428,6 +430,16 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     return other
 
 
+def train_catch_exception(local_rank, args):
+    try:
+        train(local_rank, args)
+    except Exception as e:
+        traceback.print_tb(e.__traceback__)
+        traceback.print_exception(*sys.exc_info())
+        traceback.print_exc()
+        raise e
+
+
 def train(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP
@@ -435,6 +447,7 @@ def train(local_rank, args):
     os.environ['MASTER_PORT'] = args["master_port"]
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
+        os.environ["WANDB_SILENT"] = "true"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] * args["gpus_per_node"] + local_rank
@@ -465,7 +478,6 @@ def train(local_rank, args):
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
     group = "%s-nodes=%s" % (time_string, args["nodes"])
-    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}")
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
@@ -487,12 +499,15 @@ def train(local_rank, args):
     else:
         ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)  # find_unused_parameters=True
 
+
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
     scaler = GradScaler()
 
+    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
+               config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc})
     # model, optim, gradscaler, scheduler, steps
 
     model_save_dir = args["model_save_dir"]
@@ -631,7 +646,6 @@ def train(local_rank, args):
     # TODO: Check if all initialised model weights are same??
     # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
-    pass
 
 
 if __name__ == "__main__":
@@ -639,10 +653,10 @@ if __name__ == "__main__":
     # torch.multiprocessing.set_sharing_strategy('file_system')
     args = training_args()
     if args["world_size"] == 1:
-        train(0, args)
+        train_catch_exception(0, args)
     else:
         try:
-            mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
+            mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
         finally:
             cleanup()
 

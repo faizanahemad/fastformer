@@ -244,7 +244,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
-                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (256, 0.25), (512, 0.5), (1024, 0.5)),
+                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.0), (128, 0.1), (256, 0.25), (512, 0.5), (1024, 0.5)),
                  word_jumble_proba=((0, 0.0), (256, 0.1), (512, 0.15), (1024, 0.2)),
                  word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=True,
                  word_mask_proba: list = ((0, 0.0), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
@@ -325,7 +325,7 @@ class TokenizerDataset(Dataset):
         results = dict(n_pet_queries=n_queries)
 
         if self.training:
-
+            seg_sep_token = f" {tokenizer.seg_sep_token} "
             text_len = length
             max_anchor_len = text_len // (2 * self.n_anchors)
             min_anchor_len = 32
@@ -363,9 +363,15 @@ class TokenizerDataset(Dataset):
             count_pad_tokens = sum(segments == tokenizer.pad_token)
             if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1:
                 seg_idxs = random.sample(range(num_segments), num_segments)
+                labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
             else:
                 seg_idxs = list(range(num_segments))
-            labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
+                if random.random() < 0.5:
+                    seg_sep_token = " "
+                    labels_segment_index = torch.tensor([1] + [0] * (self.cls_tokens - 1))
+                else:
+                    labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
+
             results = dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
                            highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
 
@@ -375,7 +381,7 @@ class TokenizerDataset(Dataset):
             # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.
             # TODO: remove if blocks of GSP and word ordering. and also the embedding , have only full ar.
             # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
-            mlm_text = " ".join(segments)  # Training Labels for MLM
+            mlm_text = seg_sep_token.join(segments)  # Training Labels for MLM
             labels_pet_text = "" if len(pet_query) > 0 else tokenizer.no_question_token
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
                 q, a = q.strip(), a.strip()
@@ -414,7 +420,7 @@ class TokenizerDataset(Dataset):
                     seq = word_level_noising(seq, self.tokenizer, wn)
                 segments[idx] = seq
 
-            text = " ".join(segments)
+            text = seg_sep_token.join(segments)
         # assert len(text.strip()) > 0
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):

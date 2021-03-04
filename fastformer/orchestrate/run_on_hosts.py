@@ -115,7 +115,7 @@ if __name__ == "__main__":
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
-    main_cmd += " --validate_on_start"
+    # main_cmd += " --validate_on_start"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
 
     # > my.log 2>&1 &
