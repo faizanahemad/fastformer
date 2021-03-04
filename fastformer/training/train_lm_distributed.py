@@ -500,7 +500,7 @@ def train(local_rank, args):
     if args["cpu"]:
         ddp_model = model
     else:
-        ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)  # find_unused_parameters=True
+        ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
 
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
