@@ -167,7 +167,7 @@ if __name__ == "__main__":
     main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 500"
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
     # main_cmd += " --validate_on_start"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
 

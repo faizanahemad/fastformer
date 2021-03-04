@@ -295,6 +295,7 @@ class LargeValidator:
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
+                print("Time = %s, Rank = %s, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
                 if 'answer' in cns:
                     with torch.no_grad():
                         with autocast():
@@ -479,7 +480,7 @@ def train(local_rank, args):
     if args["cpu"]:
         ddp_model = model
     else:
-        ddp_model = DDP(model, device_ids=[local_rank]) # find_unused_parameters=True
+        ddp_model = DDP(model, device_ids=[local_rank])  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
