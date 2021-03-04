@@ -214,39 +214,39 @@ class LargeValidator:
                             'empathetic_dialogues_qna'
                             ]
         self.includes = ['superglue_cb_v2',
-                         # 'superglue_cb_v1',
-                         # 'superglue_copa_v1',
-                         # 'superglue_copa_v2',
-                         # 'superglue_copa_v3',
-                         # 'superglue_wsc_fixed_v2',
-                         # 'superglue_wsc_v1',
-                         # 'superglue_wsc_fixed_v1',
-                         # 'superglue_wsc_v2',
-                         # 'superglue_rte_v2',
-                         # 'superglue_rte_v1',
-                         # 'superglue_wic_v1',
-                         # 'superglue_wic_v2',
-                         # 'superglue_multirc_v3',
-                         # 'superglue_boolq',
-                         # 'superglue_record_v4',
-                         # 'superglue_record_v3',
-                         # 'superglue_multirc_v1',
-                         # 'superglue_multirc_v2',
-                         # 'superglue_record_v1',
-                         # 'superglue_record_v2',
-                         # 'snli_qna_v1',
-                         # 'race_qna',
-                         # 'glue_sst2_v2',
-                         # 'glue_sst2',
-                         # 'glue_qnli',
-                         # 'rotten_tomatoes_qna',
-                         # 'commonsense_qa',
-                         # 'winogrande_qna',
-                         # 'scitail_qna',
-                         # 'hellaswag_qna',
-                         # 'squad_v2_qna',
-                         # 'squad_v2_qna_v2',
-                         # 'swag_qna'
+                         'superglue_cb_v1',
+                         'superglue_copa_v1',
+                         'superglue_copa_v2',
+                         'superglue_copa_v3',
+                         'superglue_wsc_fixed_v2',
+                         'superglue_wsc_v1',
+                         'superglue_wsc_fixed_v1',
+                         'superglue_wsc_v2',
+                         'superglue_rte_v2',
+                         'superglue_rte_v1',
+                         'superglue_wic_v1',
+                         'superglue_wic_v2',
+                         'superglue_multirc_v3',
+                         'superglue_boolq',
+                         'superglue_record_v4',
+                         'superglue_record_v3',
+                         'superglue_multirc_v1',
+                         'superglue_multirc_v2',
+                         'superglue_record_v1',
+                         'superglue_record_v2',
+                         'snli_qna_v1',
+                         'race_qna',
+                         'glue_sst2_v2',
+                         'glue_sst2',
+                         'glue_qnli',
+                         'rotten_tomatoes_qna',
+                         'commonsense_qa',
+                         'winogrande_qna',
+                         'scitail_qna',
+                         'hellaswag_qna',
+                         'squad_v2_qna',
+                         'squad_v2_qna_v2',
+                         'swag_qna'
                          ]
 
     def __call__(self):
@@ -296,7 +296,7 @@ class LargeValidator:
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
-                print("[Validation]: Time = %s, Rank = %s, Start-Validation, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
+                # print("[Validation]: Time = %s, Rank = %s, Start-Validation, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
                 if 'answer' in cns:
                     with torch.no_grad():
                         with autocast():
@@ -313,8 +313,7 @@ class LargeValidator:
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
                     predictions.extend(answering_predictions)
-                    print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, first batch predicted = %s" % (
-                        get_time_string(), self.rank, k, answering_predictions[:8]))
+                    # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, first batch predicted = %s" % (get_time_string(), self.rank, k, answering_predictions[:4]))
 
                 else:
                     labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
@@ -325,7 +324,7 @@ class LargeValidator:
                     predictions.append(output)
                 samples_cur += pt_batch["input_ids"].size(0)
                 if samples_cur > samples_prev + (16 * 5):
-                    print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
+                    # print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
                     samples_prev = samples_cur
 
             print("[Validation]: Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
@@ -487,7 +486,7 @@ def train(local_rank, args):
     if args["cpu"]:
         ddp_model = model
     else:
-        ddp_model = DDP(model, device_ids=[local_rank])  # find_unused_parameters=True
+        ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
