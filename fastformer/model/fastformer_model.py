@@ -2,6 +2,7 @@ import copy
 import os
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
+import traceback
 
 import numpy as np
 import math
@@ -1096,6 +1097,7 @@ class MultiheadAttention(nn.Module):
             attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
         except Exception as e:
             print("Query Shape = %s, Key shape = %s, Value shape = %s, layer_index = %s, block index = %s" % (query.size(), key.size(), value.size(), layer_index, self.block_index))
+            print(traceback.print_exc())
             raise e
 
         if self.sdconv:
