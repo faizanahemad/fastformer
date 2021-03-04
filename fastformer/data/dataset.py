@@ -187,6 +187,10 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
     new_tokens = []
     skip_next_n_words = 0
     for idx, token in enumerate(tokens):
+        if token in tokenizer.all_special_tokens_extended:
+            skip_next_n_words = 0
+            new_tokens.append(token)
+            continue
         if skip_next_n_words > 0:
             skip_next_n_words -= 1
             continue
