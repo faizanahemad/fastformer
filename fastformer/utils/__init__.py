@@ -8,6 +8,18 @@ import datetime
 import time
 from datetime import datetime, timedelta
 from pytz import timezone
+import time
+
+import pandas as pd
+import random
+import os
+import argparse
+from tqdm.auto import tqdm
+from pssh.clients import ParallelSSHClient, SSHClient
+import subprocess
+import shlex
+from distutils.util import strtobool
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 
 def str2bool(v):
@@ -119,3 +131,58 @@ def squeeze_after(x: torch.Tensor, dim):
 def get_time_string():
     # + timedelta(hours=5, minutes=30)
     return (datetime.fromtimestamp(time.mktime(time.gmtime(time.time())))).astimezone(timezone('Asia/Kolkata')).strftime("[%a, %d %b %Y, %H:%M:%S %Z]")
+
+
+def one_run(host, cmd, arg, dry_run=False):
+    cur_cmd = (cmd % arg) if arg is not None else cmd
+    if dry_run:
+        return {"host": host, "cmd": cur_cmd, "stdout": "", "stderr": ""}
+    cmd_str = shlex.split("ssh %s '%s'" % (host, cur_cmd))
+    s = subprocess.run(cmd_str, shell=False, capture_output=True, text=True)
+    return {"host": host, "stdout": s.stdout, "stderr": s.stderr, "cmd": cur_cmd}
+
+
+def left_justify(words, width):
+    """Given an iterable of words, return a string consisting of the words
+    left-justified in a line of the given width.
+
+    >>> left_justify(["hello", "world"], 16)
+    'hello world     '
+
+    """
+    return ' '.join(words).ljust(width)
+
+
+def justify(words, width):
+    """Divide words (an iterable of strings) into lines of the given
+    width, and generate them. The lines are fully justified, except
+    for the last line, and lines with a single word, which are
+    left-justified.
+
+    >>> words = "This is an example of text justification.".split()
+    >>> list(justify(words, 16))
+    ['This    is    an', 'example  of text', 'justification.  ']
+
+    """
+    line = []             # List of words in current line.
+    col = 0               # Starting column of next word added to line.
+    for word in words:
+        if line and col + len(word) > width:
+            if len(line) == 1:
+                yield left_justify(line, width)
+            else:
+                # After n + 1 spaces are placed between each pair of
+                # words, there are r spaces left over; these result in
+                # wider spaces at the left.
+                n, r = divmod(width - col + 1, len(line) - 1)
+                narrow = ' ' * (n + 1)
+                if r == 0:
+                    yield narrow.join(line)
+                else:
+                    wide = ' ' * (n + 2)
+                    yield wide.join(line[:r] + [narrow.join(line[r:])])
+            line, col = [], 0
+        line.append(word)
+        col += len(word) + 1
+    if line:
+        yield left_justify(line, width)
