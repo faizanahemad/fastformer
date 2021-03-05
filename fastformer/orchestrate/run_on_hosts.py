@@ -116,7 +116,8 @@ if __name__ == "__main__":
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
     # main_cmd += " --validate_on_start"
-    main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown" # --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint
+    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
+    main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown"
 
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
@@ -146,6 +147,7 @@ if __name__ == "__main__":
         run_command_v2(hosts, gpustat_cmd)
     if args["custom"] is not None:
         custom_cmd = cmd_dir + " && " + args["custom"]
+        # custom_cmd = args["custom"]
         run_command_v2(hosts, custom_cmd)
 
 
