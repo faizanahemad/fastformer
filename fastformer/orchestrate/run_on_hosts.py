@@ -59,7 +59,7 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         args = [None] * len(hosts)
 
     sep_dict = {"host": [".", 40], "stdout": [" ", 120], "stderr": [" ", 40], "cmd": [" ", 40]}
-    with ProcessPoolExecutor(8) as executor:
+    with ProcessPoolExecutor(32) as executor:
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
     if len(ld) == 1:
         ld = ld[0]
@@ -67,6 +67,8 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         print(ld["cmd"])
         print(ld["stdout"])
         print(ld["stderr"])
+    elif dry_run:
+        _ = [print(ll["cmd"]) for ll in ld]
     else:
         # split by \n and then by space
         # "\n".join(["\n".join(list(justify(x.split(sep_dict[key][0]), sep_dict[key][1]))) for x in str(item[key]).split('\n')])
@@ -149,6 +151,7 @@ if __name__ == "__main__":
         run_command_v2(hosts, gpustat_cmd)
     if args["custom"] is not None:
         custom_cmd = cmd_dir + " && " + args["custom"]
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && mkdir processed_datasets' --nodes 0:32
         custom_cmd = args["custom"]
         run_command_v2(hosts, custom_cmd)
     if args["scp"] is not None:
@@ -159,6 +162,8 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'ls -ltrah setup-3.sh' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && chmod 777 setup-3.sh && ./setup-3.sh' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import torch; print(torch.cuda.is_available())"' --nodes 0:32
+
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "ssh dev-dsk-ahemf-datasets-i3-8x-623502bc.us-west-2.amazon.com 'scp -qrC -o StrictHostKeyChecking=no /local/processed_datasets/train_fastformer_resampled_50M ahemf@%s:/home/ahemf/processed_datasets >> output.log 2>&1 & disown'" --nodes 0:32
         run_command_v2(hosts, args["scp"])
 
 

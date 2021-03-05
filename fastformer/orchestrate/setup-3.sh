@@ -110,3 +110,4 @@ cd fairseq/modules/dynamicconv_layer
 python cuda_function_gen.py
 python setup.py install
 cd ~/mygit/fastformer
+exit

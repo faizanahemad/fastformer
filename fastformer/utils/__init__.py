@@ -144,12 +144,13 @@ def get_time_string():
 
 def one_run(host, cmd, arg, dry_run=False):
     if "scp" in cmd:
+        cur_cmd = cmd % (host)
         cmd_str = shlex.split(cmd % (host))
     else:
         cur_cmd = (cmd % arg) if arg is not None else cmd
         cmd_str = shlex.split("ssh %s '%s'" % (host, cur_cmd))
     if dry_run:
-        return {"host": host, "cmd": cmd, "stdout": "", "stderr": ""}
+        return {"host": host, "cmd": cur_cmd, "stdout": "", "stderr": ""}
     s = subprocess.run(cmd_str, shell=False, capture_output=True, text=True)
     return {"host": host, "stdout": s.stdout, "stderr": s.stderr, "cmd": " ".join(cmd_str)}
 

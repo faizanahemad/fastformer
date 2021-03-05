@@ -864,3 +864,5 @@ facebook_hateful_memes_detector/utils/detectron_model.yaml
 notebooks/cache/
 fastformer/data/train_fastformer_1p/
 /fastformer/orchestrate/hosts-small.txt
+/fastformer/orchestrate/hosts-medium.txt
+/fastformer/orchestrate/hosts-storage.txt
