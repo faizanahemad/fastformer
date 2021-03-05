@@ -328,7 +328,7 @@ class LargeValidator:
                     # print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
                     samples_prev = samples_cur
 
-            print("[Validation]: Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, predictions[:4]))
+            print("[Validation]: Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, list(zip(labels, predictions))[:4]))
             if 'answer' in cns:
                 final_labels, final_predictions = [], []
                 for lbl, prd in zip(labels, predictions):

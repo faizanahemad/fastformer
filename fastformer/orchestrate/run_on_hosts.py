@@ -45,6 +45,8 @@ def get_args():
                         help="Flag to do something")
     parser.add_argument('--custom', required=False, type=str, default=None,
                         help='Custom cmd')
+    parser.add_argument('--scp', required=False, type=str, default=None,
+                        help='scp cmd in format `scp -rC <from> <uname>@%s:<to>`')
 
     args = parser.parse_args()
     return vars(args)
@@ -115,7 +117,7 @@ if __name__ == "__main__":
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
-    # main_cmd += " --validate_on_start"
+    main_cmd += " --validate_on_start --validate_only"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown"
 
@@ -147,8 +149,17 @@ if __name__ == "__main__":
         run_command_v2(hosts, gpustat_cmd)
     if args["custom"] is not None:
         custom_cmd = cmd_dir + " && " + args["custom"]
-        # custom_cmd = args["custom"]
+        custom_cmd = args["custom"]
         run_command_v2(hosts, custom_cmd)
+    if args["scp"] is not None:
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "scp -rC ./setup-2.sh ahemf@%s:/home/ahemf" --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "scp -rC ./setup-3.sh ahemf@%s:/home/ahemf" --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'chmod 777 setup-2.sh && ./setup-2.sh' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'echo $SHELL && pwd && source ~/.zshrc && which python' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'ls -ltrah setup-3.sh' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && chmod 777 setup-3.sh && ./setup-3.sh' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import torch; print(torch.cuda.is_available())"' --nodes 0:32
+        run_command_v2(hosts, args["scp"])
 
 
 
