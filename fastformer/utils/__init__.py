@@ -81,8 +81,7 @@ def get_tokenizer(name):
 def answer_decoder(input_ids, tokenizer):
     input_ids = input_ids.tolist()
     all_answers = []
-    for one_example in input_ids:
-        answers = tokenizer.decode(one_example)
+    for answers in tokenizer.batch_decode(input_ids):
         answers = answers.split(tokenizer.answer_end_token)[0]
         answers = answers.replace(tokenizer.pad_token, '').replace(tokenizer.cls_token, '').strip()
         count_answers = len(re.findall(r'\[QUESTION_[0-9]+\]', answers))
@@ -91,6 +90,13 @@ def answer_decoder(input_ids, tokenizer):
     return all_answers
 
 
+def answer_decoder_debug(input_ids, tokenizer):
+    input_ids = input_ids[:, :8].tolist()
+    all_answers = []
+    for answers in tokenizer.batch_decode(input_ids):
+        answers = answers.replace(tokenizer.pad_token, '').replace(tokenizer.cls_token, '').strip()
+        all_answers.append(answers)
+    return all_answers
 
 
 def numel(m: torch.nn.Module, only_trainable: bool = True):
