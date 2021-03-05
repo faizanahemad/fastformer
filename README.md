@@ -13,3 +13,8 @@ export CPPFLAGS="-I/usr/local/opt/openssl@1.1/include"
 export LIBS=-L/usr/local/opt/openssl@1.1/lib
 pip install parallel-ssh
 ```
+
+# TODO
+- 32 instances
+- fix validator
+- Finetuned and Non-Finetuned validator
