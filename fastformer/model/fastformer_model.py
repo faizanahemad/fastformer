@@ -2112,7 +2112,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
             if record_accuracy:
                 answering_predictions = answering_logits.argmax(dim=-1)
-                answering_lm_correct = answering_predictions == labels_pet_input_ids[:, :alen]
+                non_pad_idx = labels_pet_input_ids != self.pad_token_id
+                answering_lm_correct = answering_predictions[non_pad_idx] == labels_pet_input_ids[non_pad_idx]
+                answering_lm_correct = answering_lm_correct.contiguous()
                 accuracy_hist["answering_lm_accuracy"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
