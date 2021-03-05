@@ -271,7 +271,7 @@ class LargeValidator:
         datadict = {k: v for k, v in datadict.items() if k in self.includes}
         print("[Validation]: Time = %s, Rank = %s, Total Datasets for Val = %s" % (get_time_string(), self.rank, len(datadict)))
         for idx, (k, dataset) in enumerate(sorted(datadict.items())):
-            while idx > self.world_size:
+            while idx >= self.world_size:
                 idx -= self.world_size
             if idx != self.rank:
                 continue
@@ -315,7 +315,7 @@ class LargeValidator:
                     debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
                     predictions.extend(answering_predictions)
-                    print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, first batch predicted = %s" % (get_time_string(), self.rank, k, debug_answering_predictions))
+                    print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s" % (get_time_string(), self.rank, k, debug_answering_predictions))
 
                 else:
                     labels = pt_batch["label_mlm_input_ids"] if "label_mlm_input_ids" in pt_batch else pt_batch["input_ids"]
