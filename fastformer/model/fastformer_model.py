@@ -2111,7 +2111,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             loss_fct = self.loss_ce
             answering_lm_loss = self.answering_lm_w * loss_fct(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
             if record_accuracy:
-                answering_predictions = answering_logits.argmax(dim=-1)
+                answering_predictions = answering_logits.detach().argmax(dim=-1)
                 non_pad_idx = labels_pet_input_ids != self.pad_token_id
                 answering_lm_correct = answering_predictions[non_pad_idx] == labels_pet_input_ids[non_pad_idx]
                 answering_lm_correct = answering_lm_correct.contiguous()
@@ -2207,7 +2207,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
             if record_accuracy:
-                sent_order_out = sent_order_logits.argmax(dim=-1) == labels_segment_index
+                sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
                 accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
 
@@ -2249,7 +2249,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out.reshape(-1, self.config.vocab_size), highway_cls_ar_input_ids.reshape(-1))
             if record_accuracy:
-                highway_cls_ar_out = highway_cls_ar_out.argmax(dim=-1)
+                highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
                 # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
                 highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
                 accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
@@ -2262,7 +2262,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss].reshape(-1)
         active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
-        labels = (active_labels == active_prediction_logits.argmax(dim=-1)).float()
+        labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).float()
         if record_accuracy:
             # predictions = prediction_logits.argmax(dim=-1)
             # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
@@ -2287,7 +2287,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_logits = logits[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
-            accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
+            accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
             # if self.record_accuracy:
             #     self.accuracy_hist.append(accuracy_hist)
 
