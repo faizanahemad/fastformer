@@ -1792,7 +1792,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
             prediction_logits = self.lm_head(last_hidden_state)
             loss_fct = self.loss_ce  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
-            predictions = prediction_logits.argmax(dim=-1)
+            predictions = prediction_logits.detach().argmax(dim=-1)
             labels = (labels == predictions).float()
             self.accuracy_hist["lm"].append(float(labels[active_loss].float().mean()))
             self.accuracy_hist['lm_loss'].append(float(masked_lm_loss))
@@ -2165,7 +2165,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
                 loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
                 if record_accuracy:
-                    accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                    accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 for i in range(n_positives_per_anchor):
@@ -2262,7 +2262,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss].reshape(-1)
         active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         masked_lm_loss = self.lm_loss_w * loss_fct(active_prediction_logits, active_labels)
-        labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).float()
+        labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
         if record_accuracy:
             # predictions = prediction_logits.argmax(dim=-1)
             # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
