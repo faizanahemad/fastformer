@@ -114,13 +114,23 @@ if __name__ == "__main__":
     cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/training"
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
+
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
+
+    main_cmd += " --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
     main_cmd += " --wandb_dryrun"
-    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-8999.pth"
+
+    # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
+    main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
+
+    # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-999.pth"
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
     # main_cmd += " --validate_on_start --validate_only"
-    main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown"
+
+    # main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
+    main_cmd += " > output.log 2>&1 & disown"
+
 
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
@@ -160,7 +170,7 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'echo $SHELL && pwd && source ~/.zshrc && which python' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'ls -ltrah setup-3.sh' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && chmod 777 setup-3.sh && ./setup-3.sh' --nodes 0:32
-        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import torch; print(torch.cuda.is_available())"' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:32
 
         # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "ssh dev-dsk-ahemf-datasets-i3-8x-623502bc.us-west-2.amazon.com 'scp -qrC -o StrictHostKeyChecking=no /local/processed_datasets/train_fastformer_resampled_50M ahemf@%s:/home/ahemf/processed_datasets >> output.log 2>&1 & disown'" --nodes 0:32
         run_command_v2(hosts, args["scp"])
