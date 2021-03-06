@@ -410,14 +410,15 @@ def save(filename, model, optimizer, scheduler, scaler, other_info_dict={}, is_b
 def load(filename, model, optimizer, scheduler, scaler, device):
     import glob
     print("[Load]: Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
-    fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
-    print("[Load]: Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
-    if len(fss) == 0:
-        return None
-    fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
-    fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
-    print("[Load]: Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
-    filename = fss
+    if not os.path.isfile(filename):
+        fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
+        print("[Load]: Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
+        if len(fss) == 0:
+            return None
+        fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
+        fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
+        print("[Load]: Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
+        filename = fss
     assert os.path.isfile(filename)
     loc = 'cuda:{}'.format(device)
     print("[Load]: Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))

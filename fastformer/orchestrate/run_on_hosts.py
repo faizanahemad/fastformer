@@ -112,15 +112,14 @@ if __name__ == "__main__":
     #
 
     cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/training"
-    main_cmd = """python train_lm_distributed.py -n %s -g 1 --nr %s --model_config md_config"""
+    main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 500"
+    main_cmd += " --master_addr /home/ahemf/torch_distributed_init --master_port file-9999 --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
     main_cmd += " --wandb_dryrun"
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
-    main_cmd += " --validate_on_start --validate_only"
-    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
+    # main_cmd += " --validate_on_start --validate_only"
     main_cmd += " --init_method=file --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint > output.log 2>&1 & disown"
 
     # > my.log 2>&1 &
