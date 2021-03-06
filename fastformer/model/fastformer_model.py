@@ -602,7 +602,7 @@ class SDConv(nn.Module):
         else:
             self.conv_attn_point = Conv1d(hidden_size, hidden_size, 1, groups=heads)
         self.use_cuda_conv = config.use_cuda_conv
-        if not self.use_cuda_conv:
+        if not self.use_cuda_conv or self.stride != 1:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
         else:
             self.padding_l = (self.kernel_size - 1) // 2
