@@ -34,7 +34,7 @@ class OptimizerConfig:
 
 
 optimizer_config = OptimizerConfig(1e-5, 1e-7, 1e-2, 0.9, 0.98,
-                                   8, 8, 10000, 1.0, 0.5)
+                                   8, 8, 10000, 0.1, 0.5)
 
 
 @dataclass_json
@@ -70,7 +70,7 @@ model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=Fa
                                         adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                                         input_cls_orthogonal_w=0.2, first_block_cls_orthogonal_w=0.1,
                                         electra_loss_w=0.5, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=0.5, contrastive_temperature=5e-2,
-                                        answering_lm_w=2.0, highway_cls_ar_w=0.5, additive_margin_softmax_w=0.1)
+                                        answering_lm_w=2.0, highway_cls_ar_w=0.5, additive_margin_softmax_w=0.)
 
 
 @dataclass_json

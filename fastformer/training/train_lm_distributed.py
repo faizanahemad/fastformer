@@ -553,7 +553,7 @@ def train(local_rank, args):
         if args["validate_only"]:
             return
     print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
-    wandb.watch(model)
+    wandb.watch(model, log="all", log_freq=log_every_steps)
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
@@ -564,6 +564,8 @@ def train(local_rank, args):
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
+        electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
+        ddp_model.module.electra_loss_w = electra_loss_w
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
                 if (step + 1) % log_every_steps == 0 or step == 0:
@@ -606,6 +608,11 @@ def train(local_rank, args):
                 output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
+            # if np.isnan(loss_dict["loss"]):
+            #     optimizer.zero_grad()
+            #     model.zero_grad()
+            #     print("[Train]: Time = %s, Skipped Step for Rank = %s" % (get_time_string(), rank))
+            #     continue
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
