@@ -413,9 +413,10 @@ def train(local_rank, args):
         os.environ["WANDB_SILENT"] = "true"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
-    rank = args["nr"] * args["gpus_per_node"] + local_rank
+    rank = args["nr"] if args["cpu"] else (args["nr"] * args["gpus_per_node"] + local_rank)
     nr = args["nr"]
     if args["cpu"]:
+        assert local_rank == 0
         device = torch.device("cpu")
         args["dist_backend"] = "gloo"
         # init_method = "tcp://%s:%s" % ("127.0.0.1", "9999")
