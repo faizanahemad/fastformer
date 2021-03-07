@@ -124,13 +124,13 @@ if __name__ == "__main__":
     main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
     # main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
 
-    # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-999.pth"
+    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-999.pth"
 
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
-    main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
+    # main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
     main_cmd += " > output.log 2>&1 & disown"
 

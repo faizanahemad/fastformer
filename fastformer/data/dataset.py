@@ -594,7 +594,8 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     cur_iter = 1
     prev_batch = None
     while i > 0:
-        print("%s custom_batching_fn:: Start Epoch = %s" % (get_time_string(), cur_iter))
+        print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
+        start_time = time.time()
         for _, cur_batch in enumerate(dataloader):
             if prev_batch is None:
                 prev_batch = cur_batch
@@ -616,7 +617,8 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
 
         if not continuous_iter:
             i = i - 1
-        print("%s custom_batching_fn:: End Epoch = %s" % (get_time_string(), cur_iter))
+        tot_time = time.time() - start_time
+        print("%s [custom_batching_fn]: End Epoch = %s, Time Taken = %.0f" % (get_time_string(), cur_iter, tot_time))
         cur_iter += 1
 
 

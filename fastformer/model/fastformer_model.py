@@ -2093,7 +2093,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("get_emb", et))
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
-        tokenizer = self.tokenizer
         funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
@@ -2206,6 +2205,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
+            print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1)))[:8]))
             if record_accuracy:
                 sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
@@ -2285,6 +2285,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("electra_discriminator_logits", et))
 
         active_logits = logits[active_loss]
+        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits, labels))[:8]))
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
