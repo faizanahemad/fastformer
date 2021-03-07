@@ -2096,6 +2096,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
+        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, input_ids = %s, attention_mask = %s" % (get_time_string(), random.sample(input_ids.reshape(-1).tolist(), 8), random.sample(attention_mask.reshape(-1).tolist(), 8)))
+        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, char_ids = %s, char_offsets = %s" % (
+        get_time_string(), random.sample(char_ids.reshape(-1).tolist(), 8), random.sample(char_offsets.reshape(-1).tolist(), 8)))
         print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Input embeds = %s, Input embeds CLS = %s" % (get_time_string(), random.sample(inputs_embeds.reshape(-1).tolist(), 8), random.sample(inputs_embeds_cls.reshape(-1).tolist(), 8)))
         et = time.time() - st
         timing_dict.append(("prepare_encoder_input", et))
@@ -2119,10 +2122,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
-        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, first_block_cls CLS = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(first_block_cls.reshape(-1).tolist(), 8)))
+        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, first_block_cls CLS = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(first_block_cls.reshape(-1).tolist(), 8)))
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
         prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
-        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, prediction_logits = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(prediction_logits.reshape(-1).tolist(), 8)))
+        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, prediction_logits = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(prediction_logits.reshape(-1).tolist(), 8)))
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
@@ -2208,8 +2211,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_loss = self.loss_ce(sent_order_logits.view(-1, (self.cls_tokens + 1)), labels_segment_index.view(-1))
-            print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
-            print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
             if record_accuracy:
                 sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
@@ -2284,13 +2287,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
         discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:]
         logits = self.discriminator_predictions(discriminator_sequence_output)
-        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, discriminator_sequence_output = %s, logits = %s" % (get_time_string(), random.sample(discriminator_sequence_output.reshape(-1).tolist(), 8), random.sample(logits.reshape(-1).tolist(), 8)))
+        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, discriminator_sequence_output = %s, logits = %s" % (get_time_string(), random.sample(discriminator_sequence_output.reshape(-1).tolist(), 8), random.sample(logits.reshape(-1).tolist(), 8)))
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_logits", et))
 
         active_logits = logits[active_loss]
-        print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
+        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
