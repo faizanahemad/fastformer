@@ -516,7 +516,7 @@ def train(local_rank, args):
         if args["validate_only"]:
             return
     print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
-    wandb.watch(model, log="all", log_freq=log_every_steps)
+    # wandb.watch(model, log="all", log_freq=log_every_steps)
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
