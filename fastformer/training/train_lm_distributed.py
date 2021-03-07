@@ -563,8 +563,8 @@ def train(local_rank, args):
             loss_dict = output["loss_dict"]
 
             if np.isnan(loss_dict["loss"]):
-                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s" % (get_time_string(), step, rank, loss_dict))
-                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s" % (get_time_string(), step, rank, loss_dict))
+                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
@@ -611,12 +611,11 @@ def train(local_rank, args):
     # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
 
-
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     # torch.multiprocessing.set_sharing_strategy('file_system')
     args = training_args()
-    if args["world_size"] == 1:
+    if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
     else:
         try:
