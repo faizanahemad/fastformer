@@ -473,7 +473,7 @@ def train(local_rank, args):
     if rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
-    assert os.path.exists(model_save_dir)
+        assert os.path.exists(model_save_dir)
     print("[Train]: Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
