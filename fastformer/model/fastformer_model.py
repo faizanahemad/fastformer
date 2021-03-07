@@ -1652,11 +1652,12 @@ class FastFormerModel(FastFormerPreTrainedModel):
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
 
-        self.embed_proj_transpose = nn.Identity()
+        self.embed_proj_transpose = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
             self.embed_proj_transpose = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
             self.embed_proj_transpose.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
-        self.lm_head = nn.Linear(config.embedding_size, config.vocab_size)
+            self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps), self.embed_proj_transpose)
+        self.lm_head = nn.Sequential(nn.Linear(config.embedding_size, config.vocab_size), nn.LayerNorm(config.vocab_size, eps=config.layer_norm_eps))
         self.init_weights()
 
     def get_input_embeddings(self):
@@ -1666,7 +1667,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def get_output_embeddings(self):
-        return self.lm_head
+        return self.lm_head[0]
 
     def forward(
             self,
