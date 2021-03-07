@@ -515,8 +515,8 @@ class get_collate_fn:
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
-        mxoff = samples['char_offsets'].max().item()
-        char_ids_shape = samples["char_ids"].shape[1]
+        # mxoff = samples['char_offsets'].max().item()
+        # char_ids_shape = samples["char_ids"].shape[1]
         # try:
         #     assert mxoff < char_ids_shape
         # except:

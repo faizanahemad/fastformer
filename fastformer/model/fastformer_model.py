@@ -2407,12 +2407,11 @@ if __name__ == "__main__":
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = length
     config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
-    collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
     if model_name not in ["fastformer_mlm", "fastformer_electra", "fastformer_fused_electra", "fastformer"]:
-        collate_fn = get_collate_fn(0, tokenizer.pad_token_id)
         config.tokenizer_length = min(config.tokenizer_length, 512)
         config.max_position_embeddings = min(config.tokenizer_length, 512)
         config.num_highway_cls_tokens = 0
+    collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
     if batch_size > len(texts):
         for _ in range(8):
             texts += texts
@@ -2426,8 +2425,9 @@ if __name__ == "__main__":
     dataset.training = True
 
     if "fastformer" in model_name:
-        dataloader = DataLoader(dataset, batch_size=1, collate_fn=None, prefetch_factor=8, num_workers=2)
-        pt_batch = next(custom_batching_fn(dataloader, size_dicts, collate_fn))
+        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=8, num_workers=2)
+        size_dicts_t = {128: batch_size, 256: batch_size, 512: batch_size, 768: batch_size, 1024: batch_size}
+        pt_batch = next(custom_batching_fn(dataloader, size_dicts_t, True))
     else:
         dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
         iter_dataloader = iter(dataloader)
@@ -2544,6 +2544,14 @@ if __name__ == "__main__":
     device = torch.device(device)
     # torch.autograd.set_detect_anomaly(True)
 
+    checkpoint = torch.load("model/fastformer_checkpoint-step-3999.pth", map_location=str(device))
+    import torch.distributed as dist
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    dist.init_process_group("gloo", rank=0, world_size=1, init_method="tcp://%s:%s" % ("127.0.0.1", "9999"))
+    ddp_model = DDP(model, device_ids=None, find_unused_parameters=True, bucket_cap_mb=5)
+    ddp_model.load_state_dict(checkpoint['model'])
+    model = ddp_model
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
 

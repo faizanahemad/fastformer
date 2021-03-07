@@ -17,6 +17,8 @@ import argparse
 from tqdm.auto import tqdm
 import subprocess
 import shlex
+import shutil
+import sys
 from distutils.util import strtobool
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
@@ -199,3 +201,48 @@ def justify(words, width):
         col += len(word) + 1
     if line:
         yield left_justify(line, width)
+
+
+def get_barrier(activate):
+    def barrier():
+        if activate:
+            torch.distributed.barrier()
+    return barrier
+
+
+def save(filename, model, optimizer, scheduler, scaler, other_info_dict={}, is_best=False):
+    if other_info_dict is not None and "step" in other_info_dict:
+        filename = filename + "-step-%s" % (other_info_dict["step"])
+    filename = filename + ".pth"
+    state = dict(model=model.state_dict(), optimizer=optimizer.state_dict(), scheduler=scheduler.state_dict(), scaler=scaler.state_dict(), other=other_info_dict)
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+
+
+def load(filename, model, optimizer, scheduler, scaler, device):
+    import glob
+    print("[Load]: Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
+    if not os.path.isfile(filename):
+        fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
+        print("[Load]: Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
+        if len(fss) == 0:
+            return None
+        fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
+        fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
+        print("[Load]: Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
+        filename = fss
+    assert os.path.isfile(filename)
+    if torch.cuda.is_available():
+        loc = 'cuda:{}'.format(device)
+    else:
+        loc = "cpu"
+    print("[Load]: Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))
+    checkpoint = torch.load(filename, map_location=loc)
+    print("[Load]: Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    scheduler.load_state_dict(checkpoint['scheduler'])
+    scaler.load_state_dict(checkpoint['scaler'])
+    other = checkpoint['other']
+    return other

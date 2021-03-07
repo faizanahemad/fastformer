@@ -390,48 +390,6 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     return train_loader
 
 
-def get_barrier(activate):
-    def barrier():
-        if activate:
-            torch.distributed.barrier()
-    return barrier
-
-
-def save(filename, model, optimizer, scheduler, scaler, other_info_dict={}, is_best=False):
-    if other_info_dict is not None and "step" in other_info_dict:
-        filename = filename + "-step-%s" % (other_info_dict["step"])
-    filename = filename + ".pth"
-    state = dict(model=model.state_dict(), optimizer=optimizer.state_dict(), scheduler=scheduler.state_dict(), scaler=scaler.state_dict(), other=other_info_dict)
-    torch.save(state, filename)
-    if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
-
-
-def load(filename, model, optimizer, scheduler, scaler, device):
-    import glob
-    print("[Load]: Time = %s, Loading Checkpoint from %s, cwd = %s" % (get_time_string(), filename, os.getcwd()))
-    if not os.path.isfile(filename):
-        fss = list(map(lambda x: (x, ''.join(filter(str.isdigit, x))), glob.glob(filename + "*")))
-        print("[Load]: Time = %s, Loading Checkpoint options %s" % (get_time_string(), fss))
-        if len(fss) == 0:
-            return None
-        fss = map(lambda x: (x[0], -1 if len(x[1]) == 0 else int(x[1])), fss)
-        fss = sorted(list(fss), key=lambda x: x[1], reverse=True)[0][0]
-        print("[Load]: Time = %s, Loading Checkpoint from %s, exists = %s" % (get_time_string(), fss, os.path.isfile(fss)))
-        filename = fss
-    assert os.path.isfile(filename)
-    loc = 'cuda:{}'.format(device)
-    print("[Load]: Time = %s, Prepare Read Checkpoint from %s" % (get_time_string(), filename))
-    checkpoint = torch.load(filename, map_location=loc)
-    print("[Load]: Time = %s, Read Checkpoint from %s" % (get_time_string(), filename))
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    scheduler.load_state_dict(checkpoint['scheduler'])
-    scaler.load_state_dict(checkpoint['scaler'])
-    other = checkpoint['other']
-    return other
-
-
 def train_catch_exception(local_rank, args):
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     nr = args["nr"]
@@ -458,27 +416,25 @@ def train(local_rank, args):
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     nr = args["nr"]
     if args["cpu"]:
-        assert args["world_size"] == 1
         device = torch.device("cpu")
-        barrier = get_barrier(False)
-        rnd = torch.tensor(int(time.time()))
+        args["dist_backend"] = "gloo"
+        # init_method = "tcp://%s:%s" % ("127.0.0.1", "9999")
     else:
-        print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
-        if args["init_method"] == "tcp":
-            init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
-        elif args["init_method"] == "file":
-            init_method = 'file://%s/%s' % (args["master_addr"], args["master_port"])
-        else:
-            raise ValueError
-
-        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-        print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
         device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
         torch.cuda.set_device(device)
-        barrier = get_barrier(True)
-        # rnd = torch.randint(0, 1_000_000_000, (1,))
-        rnd = torch.tensor(int(time.time())).cuda()
-        dist.broadcast(rnd, 0)
+    print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
+    if args["init_method"] == "tcp":
+        init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
+    elif args["init_method"] == "file":
+        init_method = 'file://%s/%s' % (args["master_addr"], args["master_port"])
+    else:
+        raise ValueError
+
+    dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
+    print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
+    barrier = get_barrier(True)
+    rnd = torch.tensor(int(time.time())).to(device)
+    dist.broadcast(rnd, 0)
     format = "%Y-%m-%d %H-%M %Z"
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
@@ -499,10 +455,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
 
-    if args["cpu"]:
-        ddp_model = model
-    else:
-        ddp_model = DDP(model, device_ids=[local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
 
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
@@ -608,11 +561,10 @@ def train(local_rank, args):
                 output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
-            # if np.isnan(loss_dict["loss"]):
-            #     optimizer.zero_grad()
-            #     model.zero_grad()
-            #     print("[Train]: Time = %s, Skipped Step for Rank = %s" % (get_time_string(), rank))
-            #     continue
+
+            if np.isnan(loss_dict["loss"]):
+                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s" % (get_time_string(), step, rank, loss_dict))
+                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s" % (get_time_string(), step, rank, loss_dict))
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
