@@ -95,7 +95,10 @@ def training_args():
                         help='Shuffle Train')
 
     parser.add_argument('--cpu', action="store_true", default=False,
-                        help='Shuffle Train')
+                        help='Train on CPU')
+
+    parser.add_argument('--no_autocast', action="store_true", default=False,
+                        help='Avoid Autocast')
 
     parser.add_argument('--train_dataset', required=False, type=str,
                         help='Train Dataset')
@@ -186,7 +189,7 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, no_autocast=False):
         self.location = location
         self.model = model
         self.config = config
@@ -250,6 +253,7 @@ class LargeValidator:
                          'squad_v2_qna_v2',
                          'swag_qna'
                          ]
+        self.no_autocast = no_autocast
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -290,7 +294,10 @@ class LargeValidator:
                 record_accuracy = True
             length = len(dataset)
             print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
-            loader = DataLoader(dataset, sampler=None, batch_size=16, collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
+            global size_dicts
+            if self.no_autocast:
+                size_dicts = {k: v // 2 for k, v in size_dicts.items()}
+            loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             loader = custom_batching_fn(loader, size_dicts, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
             samples_prev = 0
@@ -356,17 +363,19 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1):
-    # TODO: num workers based on dataset size, only top 16 datasets get 2 workers, next 16 get 1 worker and rest are done in main process
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1, no_autocast=False):
+    global size_dicts
+    if no_autocast:
+        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
         if num_workers > 0:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers)
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers)
         else:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=8,
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min(size_dicts.values()),
                                       collate_fn=collate_fn,
                                       num_workers=0)
         train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
@@ -380,10 +389,10 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         # for v in train_dataset.values():
         #     v.training = False
         if num_workers > 0:
-            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=8, collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
+            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
         else:
             train_loader = {
-                k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=8, collate_fn=collate_fn,
+                k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=min(size_dicts.values()), collate_fn=collate_fn,
                               num_workers=0) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
@@ -503,7 +512,7 @@ def train(local_rank, args):
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
-        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
+        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
         if args["validate_only"]:
             return
     print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
@@ -537,7 +546,7 @@ def train(local_rank, args):
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"])()
+            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
@@ -549,10 +558,13 @@ def train(local_rank, args):
         labels = labels.to(device)
         model_start_time = time.time()
         samples_processed += batch["input_ids"].size(0)
-        if args["cpu"]:
+        if args["cpu"] or args["no_autocast"]:
             output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
+            if np.isnan(loss_dict["loss"]):
+                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
             optimizer.step()
