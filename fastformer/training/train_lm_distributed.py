@@ -132,7 +132,7 @@ def training_args():
                         help='how many batches to wait before logging training status')
 
     args = parser.parse_args()
-    args.world_size = args.nodes if args["cpu"] else (args.gpus_per_node * args.nodes)
+    args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"

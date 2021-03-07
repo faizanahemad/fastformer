@@ -116,7 +116,7 @@ if __name__ == "__main__":
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
 
     main_cmd += " --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
     main_cmd += " --wandb_dryrun"
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
     # main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
 
-    main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-3999.pth"
+    # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint-step-3999.pth"
 
     # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    main_cmd += " --cpu"
+    # main_cmd += " --cpu"
 
     main_cmd += " > output.log 2>&1 & disown"
 
