@@ -188,6 +188,7 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'cat /proc/mounts | grep torch_distributed_init' --nodes 1:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "ssh dev-dsk-ahemf-datasets-i3-8x-623502bc.us-west-2.amazon.com 'scp -qrC -o StrictHostKeyChecking=no /local/processed_datasets/train_fastformer_resampled_50M ahemf@%s:/home/ahemf/processed_datasets >> output.log 2>&1 & disown'" --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip install torch torchvision torchaudio && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:16
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'cat /proc/mounts | grep torch_distributed_init' --nodes 10:16
         run_command_v2(hosts, args["scp"])
 
 

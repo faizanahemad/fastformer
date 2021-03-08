@@ -2177,19 +2177,23 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                const = 1e3
                 for i in range(n_positives_per_anchor):
-                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = 0
+                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
                 vertical_lc = 0.0
                 for i in range(n_positives_per_anchor):
 
                     labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
                     mask_c = mask2.clone()
-                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = 1
+                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = const + 1
                     mask_c = mask1 + mask_c
                     l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
                     vertical_lc += l2
                 vertical_lc /= n_positives_per_anchor
                 loss_contrastive += vertical_lc
+                if np.isnan(float(loss_contrastive)):
+                    print("[FastFormerForFusedELECTRAPretraining]: Time = %s, n_anchors = %s, n_positives = %s, contrastive_block_matrix = %s" % (
+                    get_time_string(), n_anchors, n_positives, contrastive_block_matrix.tolist()))
             loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))

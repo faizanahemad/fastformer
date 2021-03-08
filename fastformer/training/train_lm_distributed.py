@@ -564,6 +564,7 @@ def train(local_rank, args):
             loss_dict = output["loss_dict"]
             if np.isnan(loss_dict["loss"]):
                 print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                 raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
@@ -577,6 +578,7 @@ def train(local_rank, args):
 
             if np.isnan(loss_dict["loss"]):
                 print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                 raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
