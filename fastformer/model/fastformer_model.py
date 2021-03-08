@@ -185,7 +185,7 @@ class Embeddings(nn.Module):
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
 
         self.embed_proj = nn.Identity()
-        self.char_embed_proj = nn.Linear(self.embedding_size // 4, hidden_size, bias = False)
+        self.char_embed_proj = nn.Linear(self.embedding_size // 4, hidden_size, bias=False)
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
 
@@ -1654,11 +1654,13 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
         self.embed_proj_transpose = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            self.embed_proj_transpose = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-            self.embed_proj_transpose.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
-            self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps), self.embed_proj_transpose)
+            # ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
+            # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+            # self.embed_proj_transpose = ep
+            self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps), self.nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
         self.lm_head = nn.Sequential(nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens),
-                                     nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps))
+                                     # nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps)
+                                     )
         self.init_weights()
 
     def get_input_embeddings(self):

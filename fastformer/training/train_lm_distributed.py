@@ -527,7 +527,6 @@ def train(local_rank, args):
     barrier()
     start_time = time.time()
     for step, batch in enumerate(train_loader):
-        electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
         ddp_model.module.electra_loss_w = electra_loss_w
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
@@ -537,6 +536,7 @@ def train(local_rank, args):
             else:
                 step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
 
+        electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
         optimizer.zero_grad()
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
@@ -596,7 +596,7 @@ def train(local_rank, args):
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
             acc_dict = output["accuracy_hist"]
-            wandb.log(dict(mode="train", lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))

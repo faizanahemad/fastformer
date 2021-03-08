@@ -14,7 +14,7 @@ from dataclasses_json import dataclass_json
 
 # size_dicts_val = {128:112, 256:64, 512: 32, 768: 16, 1024: 16}
 # size_dicts = {128:96, 256:48, 512: 24, 768: 16, 1024: 8}
-size_dicts = {128:72, 256:24, 512: 16, 768: 8, 1024: 8}
+size_dicts = {128: 64, 256:24, 512: 16, 768: 8, 1024: 8}
 
 
 @dataclass_json
