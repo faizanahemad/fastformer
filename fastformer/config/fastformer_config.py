@@ -33,7 +33,7 @@ class OptimizerConfig:
     sampling_fraction: float
 
 
-optimizer_config = OptimizerConfig(5e-5, 1e-7, 1e-2, 0.9, 0.98,
+optimizer_config = OptimizerConfig(5e-5, 1e-5, 1e-2, 0.9, 0.98,
                                    8, 8, 10000, 1.0, 0.5)
 
 
@@ -96,7 +96,7 @@ class FastFormerConfig(PretrainedConfig):
             type_vocab_size=0,
             initializer_range=0.1,
             initializer_std=None,
-            layer_norm_eps=1e-9,
+            layer_norm_eps=1e-5,
             pooling_type="mean",  # learn, #learn_sdconv
             pooling_kernel_size=5,
             stride=2,

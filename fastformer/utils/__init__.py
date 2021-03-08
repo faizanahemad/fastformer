@@ -144,7 +144,7 @@ def get_time_string():
     return (datetime.fromtimestamp(time.mktime(time.gmtime(time.time())))).astimezone(timezone('Asia/Kolkata')).strftime("[%a, %d %b %Y, %H:%M:%S %Z]")
 
 
-def one_run(host, cmd, arg, dry_run=False):
+def one_run(host, cmd, arg=None, dry_run=False):
     if "scp" in cmd:
         cur_cmd = cmd % (host)
         cmd_str = shlex.split(cmd % (host))

@@ -1839,7 +1839,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = nn.Linear(config.block_channel_size[-1], 256)
+        self.contrastive_ffn = nn.Linear(config.block_channel_size[-1], 128)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -1851,7 +1851,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.loss_bce = BCELossFocal()
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.sent_predict_fc = nn.Sequential(self.contrastive_ffn, nn.GELU(), nn.Linear(256, (self.cls_tokens + 1)))
+            self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1))
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
@@ -1897,7 +1897,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def get_output_embeddings(self):
         return None
 
-    def adv_project(self, grad, norm_type='inf', eps=1e-6):
+    def adv_project(self, grad, norm_type='inf', eps=1e-5):
         if norm_type == 'l2':
             direction = grad / (torch.norm(grad, dim=-1, keepdim=True) + eps)
         elif norm_type == 'l1':

@@ -129,8 +129,8 @@ if __name__ == "__main__":
     main_cmd += " --log_every_steps 20 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
     main_cmd += " --wandb_dryrun"
 
-    main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
-    # main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
+    # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
+    main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
 
     main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
@@ -164,6 +164,15 @@ if __name__ == "__main__":
         run_command_v2(hosts, cmd3)
     if args["start"]:
         cmd4 = cmd_dir + " && " + main_cmd
+        if "tcp" in main_cmd:
+            ip_address_cmd = "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
+            part0, part1 = cmd4.split("--master_addr")
+            part1 = part1.strip().split()[1:]
+            part1[1] = "9999"
+            part1 = ["--master_addr" + " " + ipaddr] + part1
+            part1 = " ".join(part1)
+            cmd4 = part0 + " " + part1
         run_command_v2(hosts, cmd4, list(zip([len(hosts)] * len(hosts), list(map(str, list(range(len(hosts))))))), args["ds"])
 
     if args["tail"]:
@@ -175,7 +184,7 @@ if __name__ == "__main__":
     if args["custom"] is not None:
         custom_cmd = cmd_dir + " && " + args["custom"]
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && mkdir processed_datasets' --nodes 0:32
-        custom_cmd = args["custom"]
+        # custom_cmd = args["custom"]
         run_command_v2(hosts, custom_cmd)
     if args["scp"] is not None:
         # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "scp -rC ./setup-2.sh ahemf@%s:/home/ahemf" --nodes 0:32
@@ -189,6 +198,7 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "ssh dev-dsk-ahemf-datasets-i3-8x-623502bc.us-west-2.amazon.com 'scp -qrC -o StrictHostKeyChecking=no /local/processed_datasets/train_fastformer_resampled_50M ahemf@%s:/home/ahemf/processed_datasets >> output.log 2>&1 & disown'" --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip install torch torchvision torchaudio && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:16
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'cat /proc/mounts | grep torch_distributed_init' --nodes 10:16
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip install -U torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:32
         run_command_v2(hosts, args["scp"])
 
 
