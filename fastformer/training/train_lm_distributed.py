@@ -434,6 +434,8 @@ def train(local_rank, args):
         torch.cuda.set_device(device)
     print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
     if args["init_method"] == "tcp":
+        if args["nr"] == 0:
+            args["master_addr"] = "0.0.0.0"
         init_method="tcp://%s:%s" % (args["master_addr"], args["master_port"])
     elif args["init_method"] == "file":
         init_method = 'file://%s/%s' % (args["master_addr"], args["master_port"])
@@ -563,10 +565,11 @@ def train(local_rank, args):
             loss = output["loss"]
             loss_dict = output["loss_dict"]
             if np.isnan(loss_dict["loss"]):
-                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+                print(es)
                 torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                 torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
-                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                raise ValueError(es)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
             optimizer.step()
@@ -578,10 +581,11 @@ def train(local_rank, args):
             loss_dict = output["loss_dict"]
 
             if np.isnan(loss_dict["loss"]):
-                print("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, scaler.get_scale(), loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+                print(es)
                 torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                 torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
-                raise ValueError("[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size()))
+                raise ValueError(es)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
