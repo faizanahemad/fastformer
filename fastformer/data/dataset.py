@@ -10,7 +10,7 @@ from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
 
-from fastformer.utils import squeeze_after, get_time_string
+from fastformer.utils import squeeze_after, get_time_string, recursive_op
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
@@ -324,8 +324,6 @@ class TokenizerDataset(Dataset):
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
-
-        length = item["length"] if "length" in item else length
         results = dict(n_pet_queries=n_queries)
 
         if self.training:
@@ -436,6 +434,10 @@ class TokenizerDataset(Dataset):
 
         inp = char_rnn_tokenize(text, self.tokenizer, self.char_to_id, **self.tokenizer_args)
         results.update(inp)
+        length = torch.sum(results["attention_mask"]).item()
+        if "positives" in results:
+            results["positives"] = recursive_op(results["positives"], lambda x: min(x, length))
+            results["anchors"] = recursive_op(results["anchors"], lambda x: min(x, length))
         return results
 
     def __len__(self):

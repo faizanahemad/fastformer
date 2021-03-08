@@ -246,3 +246,11 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     scaler.load_state_dict(checkpoint['scaler'])
     other = checkpoint['other']
     return other
+
+
+def recursive_op(arr, op):
+    if isinstance(arr, (list, tuple)):
+        arr = list(map(lambda x: recursive_op(x, op), arr))
+    else:
+        arr = op(arr)
+    return arr

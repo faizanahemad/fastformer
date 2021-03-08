@@ -1817,14 +1817,6 @@ def KL(input, target, reduction="sum"):
     return loss
 
 
-def recursive_op(arr, op):
-    if isinstance(arr, (list, tuple)):
-        arr = list(map(lambda x: recursive_op(x, op), arr))
-    else:
-        arr = op(arr)
-    return arr
-
-
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
@@ -2571,14 +2563,20 @@ if __name__ == "__main__":
     device = torch.device(device)
     # torch.autograd.set_detect_anomaly(True)
 
-    checkpoint = torch.load("model/fastformer_checkpoint-step-3999.pth", map_location=str(device))
-    import torch.distributed as dist
-    from torch.nn.parallel import DistributedDataParallel as DDP
+    # checkpoint = torch.load("model/fastformer_checkpoint-step-3999.pth", map_location=str(device))
+    # import torch.distributed as dist
+    # from torch.nn.parallel import DistributedDataParallel as DDP
+    #
+    # dist.init_process_group("gloo", rank=0, world_size=1, init_method="tcp://%s:%s" % ("127.0.0.1", "9999"))
+    # ddp_model = DDP(model, device_ids=None, find_unused_parameters=True, bucket_cap_mb=5)
+    # ddp_model.load_state_dict(checkpoint['model'])
+    # model = ddp_model
 
-    dist.init_process_group("gloo", rank=0, world_size=1, init_method="tcp://%s:%s" % ("127.0.0.1", "9999"))
-    ddp_model = DDP(model, device_ids=None, find_unused_parameters=True, bucket_cap_mb=5)
-    ddp_model.load_state_dict(checkpoint['model'])
-    model = ddp_model
+    checkpoint = torch.load("model/error-model.pth", map_location=str(device))
+    model.load_state_dict(checkpoint)
+    pt_batch = torch.load("model/error-input.pth", map_location=str(device))
+    labels = pt_batch.pop("labels", None)
+
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
 
