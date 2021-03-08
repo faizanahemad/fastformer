@@ -53,26 +53,33 @@ def get_args():
 
 
 def run_command_v2(hosts, cmd, args=None, dry_run=False):
+    import re
+    import shutil
     if args is not None:
         args = args[:len(hosts)]
     else:
         args = [None] * len(hosts)
 
-    sep_dict = {"host": [".", 40], "stdout": [" ", 120], "stderr": [" ", 40], "cmd": [" ", 40]}
+    tsize = shutil.get_terminal_size()[0]
+    sep_dict = {"host": [".", int(0.2 * tsize)], "stdout": [" ", int(0.5 * tsize)], "stderr": [" ", int(0.1 * tsize)], "cmd": [" ", int(0.2 * tsize)]}
     with ProcessPoolExecutor(min(32, len(hosts))) as executor:
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
-    if len(ld) == 1:
-        ld = ld[0]
-        print(ld["host"])
-        print(ld["cmd"])
-        print(ld["stdout"])
-        print(ld["stderr"])
+    if len(ld) <= 2:
+        for ll in ld:
+
+            print(ll["host"])
+            print(ll["cmd"])
+            if len(ll["stdout"].strip()) > 0:
+                print(ll["stdout"])
+            if len(ll["stderr"].strip()) > 0:
+                print(ll["stderr"])
+            print("-" * (tsize - 10))
     elif dry_run:
         _ = [print(ll["cmd"]) for ll in ld]
     else:
         # split by \n and then by space
         # "\n".join(["\n".join(list(justify(x.split(sep_dict[key][0]), sep_dict[key][1]))) for x in str(item[key]).split('\n')])
-        fns = lambda string, sep, num_chars: "\n".join(["\n".join(list(justify(x.split(sep), num_chars))) for x in str(string).split('\n')])
+        fns = lambda string, sep, num_chars: "\n".join(["\n".join(list(justify(list(x), num_chars))) for x in str(string).split('\n')])
 
         dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
         # dl = {key: ["\n".join(list(justify(str(item[key]).split(sep_dict[key][0]), sep_dict[key][1]))) for item in ld] for key in ld[0].keys()}
@@ -178,8 +185,9 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'ls -ltrah setup-3.sh' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && chmod 777 setup-3.sh && ./setup-3.sh' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:32
-
+        # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'cat /proc/mounts | grep torch_distributed_init' --nodes 1:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --scp "ssh dev-dsk-ahemf-datasets-i3-8x-623502bc.us-west-2.amazon.com 'scp -qrC -o StrictHostKeyChecking=no /local/processed_datasets/train_fastformer_resampled_50M ahemf@%s:/home/ahemf/processed_datasets >> output.log 2>&1 & disown'" --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip install torch torchvision torchaudio && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:16
         run_command_v2(hosts, args["scp"])
 
 
