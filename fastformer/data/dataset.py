@@ -436,8 +436,8 @@ class TokenizerDataset(Dataset):
         results.update(inp)
         length = torch.sum(results["attention_mask"]).item()
         if "positives" in results:
-            results["positives"] = recursive_op(results["positives"], lambda x: min(x, length))
-            results["anchors"] = recursive_op(results["anchors"], lambda x: min(x, length))
+            results["positives"] = recursive_op(results["positives"], lambda x: min(x, length - 1))
+            results["anchors"] = recursive_op(results["anchors"], lambda x: min(x, length - 1))
         return results
 
     def __len__(self):
