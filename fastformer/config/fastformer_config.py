@@ -33,7 +33,7 @@ class OptimizerConfig:
     sampling_fraction: float
 
 
-optimizer_config = OptimizerConfig(5e-5, 1e-5, 1e-2, 0.9, 0.98,
+optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-2, 0.9, 0.98,
                                    8, 8, 10000, 1.0, 0.5)
 
 
