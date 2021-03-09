@@ -248,9 +248,11 @@ def load(filename, model, optimizer, scheduler, scaler, device):
     return other
 
 
-def recursive_op(arr, op):
-    if isinstance(arr, (list, tuple)):
-        arr = list(map(lambda x: recursive_op(x, op), arr))
+def recursive_op(arr, op, depth_limit=None, depth=0,):
+    if depth_limit is not None and depth >= depth_limit:
+        return arr
+    elif isinstance(arr, (list, tuple)):
+        arr = list(map(lambda x: recursive_op(x, op, depth_limit, depth+1), arr))
     else:
         arr = op(arr)
     return arr
