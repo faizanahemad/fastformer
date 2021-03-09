@@ -591,7 +591,7 @@ def train(local_rank, args):
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-            torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1e3)
+            torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1e2)
             scaler.step(optimizer)
             scale = scaler.get_scale()
             scaler.update()

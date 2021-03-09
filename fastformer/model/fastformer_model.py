@@ -495,7 +495,7 @@ class ShortSeqRNN(nn.Module):
                                    nonlinearity="tanh",
                                    bias=False, batch_first=True, dropout=0.0, bidirectional=True))
         for p in self.parameters():
-            p.register_hook(lambda grad: torch.clamp(grad, -1e3, 1e3))
+            p.register_hook(lambda grad: torch.clamp(grad, -1e1, 1e1))
         # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
