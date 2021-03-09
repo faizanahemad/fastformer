@@ -189,7 +189,7 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, no_autocast=False):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, local_rank, wandb_init_args, no_autocast=False):
         self.location = location
         self.model = model
         self.config = config
@@ -254,6 +254,8 @@ class LargeValidator:
                          'swag_qna'
                          ]
         self.no_autocast = no_autocast
+        self.local_rank = local_rank
+        self.wandb_init_args = wandb_init_args
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -352,7 +354,7 @@ class LargeValidator:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
             print("[Validation]: Time = %s, Rank = %s, Finished-Validation, For Dataset %s, results = %s" % (get_time_string(), self.rank, k, results[k]))
-            wandb.log(dict(mode="val", dataset=k, k=results[k]))
+            wandb.log(dict(k=results[k]), commit=False)
             clean_memory()
         model = model.train()
         return results
@@ -475,9 +477,9 @@ def train(local_rank, args):
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
     scaler = GradScaler()
-
-    wandb.init(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
+    wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc})
+    wandb.init(**wandb_init_args)
     # model, optim, gradscaler, scheduler, steps
 
     model_save_dir = args["model_save_dir"]
@@ -514,7 +516,7 @@ def train(local_rank, args):
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
-        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], local_rank, wandb_init_args, args["no_autocast"])()
         if args["validate_only"]:
             return
     print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
@@ -548,7 +550,7 @@ def train(local_rank, args):
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], local_rank, wandb_init_args, args["no_autocast"])()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
@@ -589,6 +591,7 @@ def train(local_rank, args):
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1e3)
             scaler.step(optimizer)
             scale = scaler.get_scale()
             scaler.update()
@@ -604,10 +607,11 @@ def train(local_rank, args):
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
             acc_dict = output["accuracy_hist"]
-            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+            time.sleep(random.random() + 0.1)
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
-                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
+                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, scaler.get_scale(), batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
             batch_times = []
             model_times = []

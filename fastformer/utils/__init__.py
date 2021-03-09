@@ -256,3 +256,13 @@ def recursive_op(arr, op, depth_limit=None, depth=0,):
     else:
         arr = op(arr)
     return arr
+
+
+class ValidationError(Exception):
+    def __init__(self, message, errors):
+
+        # Call the base class constructor with the parameters it needs
+        super().__init__(message)
+
+        # Now for your custom code...
+        self.errors = errors

@@ -494,6 +494,8 @@ class ShortSeqRNN(nn.Module):
             self.gru.append(nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
                                    nonlinearity="tanh",
                                    bias=False, batch_first=True, dropout=0.0, bidirectional=True))
+        for p in self.parameters():
+            p.register_hook(lambda grad: torch.clamp(grad, -1e3, 1e3))
         # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
@@ -2072,6 +2074,17 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             **kwargs
 
     ):
+        all_inputs = dict(input_ids=input_ids,
+                          attention_mask=attention_mask,
+                          token_type_ids=token_type_ids,
+                          inputs_embeds=inputs_embeds,
+                          labels=labels,
+                          labels_segment_index=labels_segment_index,
+                          char_ids=char_ids, char_offsets=char_offsets,
+                          highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask,
+                          labels_pet_input_ids=labels_pet_input_ids, labels_pet_attention_mask=labels_pet_attention_mask, labels_pet_max_length=labels_pet_max_length,
+                          contrastive_anchors=contrastive_anchors, contrastive_positives=contrastive_positives,
+                          **kwargs)
 
         timing_dict = list()
         accuracy_hist = defaultdict()
@@ -2202,8 +2215,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 vertical_lc /= n_positives_per_anchor
                 loss_contrastive += vertical_lc
                 if np.isnan(float(loss_contrastive)):
-                    print("[FastFormerForFusedELECTRAPretraining]: loss_contrastive nan, Time = %s, n_anchors = %s, n_positives = %s, contrastive_block_matrix = %s" % (
-                    get_time_string(), n_anchors, n_positives, contrastive_block_matrix.tolist()))
+                    msg = "[FastFormerForFusedELECTRAPretraining]: loss_contrastive nan, Time = %s, n_anchors = %s, n_positives = %s, contrastive_block_matrix = %s" % (
+                    get_time_string(), n_anchors, n_positives, contrastive_block_matrix.tolist())
+                    print(msg)
+                    raise ValidationError(msg, all_inputs)
             loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))
@@ -2232,8 +2247,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             with torch.cuda.amp.autocast(enabled=False):
                 sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
             if np.isnan(float(sent_order_loss)):
-                print("[FastFormerForFusedELECTRAPretraining]: sent_order_loss nan, Time = %s, labels_segment_index = %s, sent_order_logits = %s" % (
-                    get_time_string(), labels_segment_index.tolist(), sent_order_logits.tolist()))
+                msg = "[FastFormerForFusedELECTRAPretraining]: sent_order_loss nan, Time = %s, labels_segment_index = %s, sent_order_logits = %s" % (
+                    get_time_string(), labels_segment_index.tolist(), sent_order_logits.tolist())
+                print(msg)
+                raise ValidationError(msg, all_inputs)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
             if record_accuracy:
@@ -2282,8 +2299,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             with torch.cuda.amp.autocast(enabled=False):
                 highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
             if np.isnan(float(highway_cls_ar_loss)):
-                print("[FastFormerForFusedELECTRAPretraining]: highway_cls_ar_loss nan, Time = %s, highway_cls_ar_input_ids = %s, highway_cls_ar_out = %s" % (
-                    get_time_string(), highway_cls_ar_input_ids.tolist(), highway_cls_ar_out.tolist()))
+                msg = "[FastFormerForFusedELECTRAPretraining]: highway_cls_ar_loss nan, Time = %s, highway_cls_ar_input_ids = %s, highway_cls_ar_out = %s" % (
+                    get_time_string(), highway_cls_ar_input_ids.tolist(), highway_cls_ar_out.tolist())
+                print(msg)
+                raise ValidationError(msg, all_inputs)
+
             if record_accuracy:
                 highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
                 # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
@@ -2299,8 +2319,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         with torch.cuda.amp.autocast(enabled=False):
             masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
         if np.isnan(float(masked_lm_loss)):
-            print("[FastFormerForFusedELECTRAPretraining]: masked_lm_loss nan, Time = %s, active_labels = %s, active_prediction_logits = %s" % (
-                get_time_string(), active_labels.tolist(), active_prediction_logits.tolist()))
+            msg = "[FastFormerForFusedELECTRAPretraining]: masked_lm_loss nan, Time = %s, active_labels = %s, active_prediction_logits = %s" % (
+                get_time_string(), active_labels.tolist(), active_prediction_logits.tolist())
+            print(msg)
+            raise ValidationError(msg, all_inputs)
         labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
         if record_accuracy:
             # predictions = prediction_logits.argmax(dim=-1)
@@ -2331,6 +2353,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if np.isnan(float(loss)):
             print("[FastFormerForFusedELECTRAPretraining]: electra_loss nan, Time = %s, labels = %s, active_logits = %s" % (
                 get_time_string(), labels.tolist(), active_logits.tolist()))
+            raise ValidationError(msg, all_inputs)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
             # if self.record_accuracy:
