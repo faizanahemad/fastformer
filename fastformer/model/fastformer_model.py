@@ -2138,10 +2138,27 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
             contrastive_block_hidden = encoder_last_layer_out
-
+            contrastive_len = contrastive_block_hidden.size(1)
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
             contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
+            for batch_positive in contrastive_positives:
+                for positives_for_anchor in batch_positive:
+                    for positive in positives_for_anchor:
+                        if positive[0]==positive[1]:
+                            if positive[1] < contrastive_len:
+                                positive[1] = positive[1] + 1
+                            elif positive[0] > 0:
+                                positive[0] = positive[0] - 1
+
+                        positive[0] = min(positive[0], positive[1] - 1)
+            for batch_anchor in contrastive_anchors:
+                for anch in batch_anchor:
+                    if anch[0] == anch[1]:
+                        if anch[1] < contrastive_len:
+                            anch[1] = anch[1] + 1
+                        elif anch[0] > 0:
+                            anch[0] = anch[0] - 1
             # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
             anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
