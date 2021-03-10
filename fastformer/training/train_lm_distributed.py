@@ -100,6 +100,9 @@ def training_args():
     parser.add_argument('--no_autocast', action="store_true", default=False,
                         help='Avoid Autocast')
 
+    parser.add_argument('--detect_anomaly', action="store_true", default=False,
+                        help='AutoGrad Anomaly detection')
+
     parser.add_argument('--train_dataset', required=False, type=str,
                         help='Train Dataset')
 
@@ -530,6 +533,8 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
     barrier()
     start_time = time.time()
+    if args["detect_anomaly"]:
+        torch.autograd.set_detect_anomaly(True)
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
@@ -608,7 +613,8 @@ def train(local_rank, args):
         if (step + 1) % log_every_steps == 0:
             acc_dict = output["accuracy_hist"]
             time.sleep(random.random() + 0.1)
-            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed,
+                           batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, scaler.get_scale(), batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
