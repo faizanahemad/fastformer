@@ -2317,7 +2317,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_labels = labels[active_loss].reshape(-1)
         active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         with torch.cuda.amp.autocast(enabled=False):
-            active_prediction_logits = active_prediction_logits.float().clamp(min=1e-5, max=1e5)
+            active_prediction_logits = active_prediction_logits.float()
+            active_prediction_logits = active_prediction_logits / active_prediction_logits.norm(2, -1, True)
+            active_prediction_logits = active_prediction_logits.clamp(min=1e-5, max=1e5)
             masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
         if np.isnan(float(masked_lm_loss)):
             msg = "[FastFormerForFusedELECTRAPretraining]: masked_lm_loss nan, Time = %s, active_labels = %s, active_prediction_logits = %s" % (
