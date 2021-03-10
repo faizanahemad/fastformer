@@ -538,17 +538,20 @@ def train(local_rank, args):
     start_time = time.time()
     if args["detect_anomaly"]:
         torch.autograd.set_detect_anomaly(True)
+
         def get_hook(name_of_param):
             def hook(grad):
                 if torch.isnan(grad).sum() > 0:
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isnan(grad), torch.zeros_like(grad), grad)
+                    grad = F.normalize(grad, 2, -1, eps=mconf.layer_norm_eps)
                 if torch.isinf(grad).sum() > 0:
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isinf(grad), torch.zeros_like(grad), grad)
+                    grad = F.normalize(grad, 2, -1, eps=mconf.layer_norm_eps)
 
                 # grad = grad / grad.norm(2, -1, True)
-                return torch.clamp(grad, -1e3, 1e3)
+                return torch.clamp(grad, -1e2, 1e2)
             return hook
         for name, param in ddp_model.named_parameters():
             param.register_hook(get_hook(name))
