@@ -1662,7 +1662,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
                                                       nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
         self.lm_head = nn.Sequential(nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens),
-                                     nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps)
+                                     # nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps)
                                      )
         self.init_weights()
 
