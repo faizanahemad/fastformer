@@ -2638,7 +2638,7 @@ if __name__ == "__main__":
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
-
+    torch.autograd.set_detect_anomaly(True)
 
     def run():
         if not forward_only:
