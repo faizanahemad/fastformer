@@ -2133,8 +2133,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, first_block_cls CLS = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(first_block_cls.reshape(-1).tolist(), 8)))
-        first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
-        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, prediction_logits = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(prediction_logits.reshape(-1).tolist(), 8)))
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
@@ -2316,6 +2314,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_loss = tokenizer_attn_mask.bool()
 
         with torch.cuda.amp.autocast(enabled=False):
+            first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
             prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
             active_labels = labels[active_loss].reshape(-1)
             active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
