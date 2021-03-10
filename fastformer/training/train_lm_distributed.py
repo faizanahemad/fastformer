@@ -545,11 +545,11 @@ def train(local_rank, args):
                 if torch.isnan(grad).sum() > 0:
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isnan(grad), torch.zeros_like(grad), grad)
-                    grad = F.normalize(grad, 2, -1, eps=mconf["layer_norm_eps"])
+                    grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
                 if torch.isinf(grad).sum() > 0:
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isinf(grad), torch.zeros_like(grad), grad)
-                    grad = F.normalize(grad, 2, -1, eps=mconf["layer_norm_eps"])
+                    grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
 
                 # grad = grad / grad.norm(2, -1, True)
                 return torch.clamp(grad, -1e1, 1e1)
