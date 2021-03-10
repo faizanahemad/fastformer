@@ -543,11 +543,11 @@ def train(local_rank, args):
         def get_hook(name_of_param):
             def hook(grad):
                 if torch.isnan(grad).sum() > 0:
-                    print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
+                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isnan(grad), torch.zeros_like(grad), grad)
                     grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
                 if torch.isinf(grad).sum() > 0:
-                    print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
+                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isinf(grad), torch.zeros_like(grad), grad)
                     grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
 
