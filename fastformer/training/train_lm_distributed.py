@@ -467,6 +467,9 @@ def train(local_rank, args):
 
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
+    if args["no_autocast"]:
+        optimizer_config.eps = 1e-7
+        config.layer_norm_eps = 1e-7
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
@@ -495,7 +498,7 @@ def train(local_rank, args):
     shuffle_dataset = args["shuffle_dataset"]
     sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
 
     print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]

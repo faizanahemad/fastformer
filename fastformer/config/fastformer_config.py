@@ -97,7 +97,7 @@ class FastFormerConfig(PretrainedConfig):
             type_vocab_size=0,
             initializer_range=0.1,
             initializer_std=None,
-            layer_norm_eps=1e-5,
+            layer_norm_eps=1e-4,
             pooling_type="mean",  # learn, #learn_sdconv
             pooling_kernel_size=5,
             stride=2,
