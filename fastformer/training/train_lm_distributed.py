@@ -612,6 +612,7 @@ def train(local_rank, args):
             except Exception as e:
                 torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                 torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
+                time.sleep(random.random() * 10 + 0.1)
                 raise e
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
