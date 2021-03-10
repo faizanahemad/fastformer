@@ -546,6 +546,7 @@ def train(local_rank, args):
 
             # grad = grad / grad.norm(2, -1, True)
             return torch.clamp(grad, -1e3, 1e3)
+        return hook
     for name, param in ddp_model.named_parameters():
         param.register_hook(get_hook(name))
     for step, batch in enumerate(train_loader):
