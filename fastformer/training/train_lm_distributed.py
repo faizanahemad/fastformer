@@ -539,6 +539,7 @@ def train(local_rank, args):
     if args["detect_anomaly"]:
         torch.autograd.set_detect_anomaly(True)
 
+    if args["detect_anomaly"] or not args["no_autocast"]:
         def get_hook(name_of_param):
             def hook(grad):
                 if torch.isnan(grad).sum() > 0:
@@ -551,7 +552,7 @@ def train(local_rank, args):
                     grad = F.normalize(grad, 2, -1, eps=mconf.layer_norm_eps)
 
                 # grad = grad / grad.norm(2, -1, True)
-                return torch.clamp(grad, -1e2, 1e2)
+                return torch.clamp(grad, -1e1, 1e1)
             return hook
         for name, param in ddp_model.named_parameters():
             param.register_hook(get_hook(name))
