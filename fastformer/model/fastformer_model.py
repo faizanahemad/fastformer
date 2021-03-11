@@ -1513,7 +1513,6 @@ class TransformerDecoder(nn.Module):
             self.layers = None
 
         block_channel_size = self.config.block_channel_size
-        self.decoder_ln = nn.LayerNorm(block_channel_size[0], config.layer_norm_eps)
 
     def forward(
             self,
@@ -1539,7 +1538,6 @@ class TransformerDecoder(nn.Module):
         )
 
         hidden = upsampled_hidden + first_block_hidden
-        hidden = self.decoder_ln(hidden)
 
         all_hidden_states = (hidden,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
@@ -1649,7 +1647,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
 
-        self.embed_proj_transpose = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
+        self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
         if config.embedding_size != config.block_channel_size[0]:
             ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
             ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
@@ -1719,7 +1717,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
-        final_hidden = self.final_hidden_fc(encoder_outputs[0])
+        final_hidden = self.embed_proj_transpose[0](self.final_hidden_fc(encoder_outputs[0]))
         outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
 
         if hasattr(self, "decoder") and (run_decoder or run_answering):
@@ -1844,7 +1842,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.ar_fc = nn.LayerNorm(self.config.block_channel_size[0], config.layer_norm_eps)
             self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
 
         self.alum_aitm_alternate = alum_aitm_alternate
@@ -2116,8 +2113,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             alen = labels_pet_input_ids.size(1)
             assert alen <= funnel_outputs["answering_logits"].size(1)
             answering_logits = funnel_outputs["answering_logits"][:, :alen]
-            with torch.cuda.amp.autocast(enabled=False):
-                answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
+            answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
             if record_accuracy:
                 answering_predictions = answering_logits.detach().argmax(dim=-1)
                 non_pad_idx = labels_pet_input_ids != self.pad_token_id
@@ -2244,7 +2240,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("sentence_order_loss", et))
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-            highway_block_hidden = self.ar_fc(third_block_hidden[:, :self.cls_tokens + 1, :self.config.block_channel_size[0]])
+            highway_block_hidden = funnel_outputs["final_hidden"][:, :self.cls_tokens + 1]
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
