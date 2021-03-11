@@ -126,7 +126,7 @@ if __name__ == "__main__":
     main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --log_every_steps 50 --num_workers 32 --validate_every_steps 40000 --save_every_steps 1000"
+    main_cmd += " --log_every_steps 20 --num_workers 32 --validate_every_steps 80000 --save_every_steps 1000"
     # main_cmd += " --wandb_dryrun"
 
     # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"

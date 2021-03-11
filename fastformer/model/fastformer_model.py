@@ -180,12 +180,11 @@ class Embeddings(nn.Module):
         if config.char_rnn:
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
-            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // 4, padding_idx=pad_token_id)
-            self.char_rnn = ShortSeqRNN(config, self.embedding_size // 4, 1, self.embedding_size // 4,
-                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers)
+            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // 2, padding_idx=pad_token_id)
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size // 2, 1, self.embedding_size // 2,
+                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=False)
 
         self.embed_proj = nn.Identity()
-        self.char_embed_proj = nn.Linear(self.embedding_size // 4, hidden_size, bias=False)
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
 
@@ -201,7 +200,7 @@ class Embeddings(nn.Module):
         if config.num_highway_cls_tokens > 0:
             self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
 
-    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None, use_position_embeddings=True):
+    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None):
         if input_embeds is None:
             input_shape = input_ids.size()
             input_shape = list(input_shape)
@@ -213,14 +212,7 @@ class Embeddings(nn.Module):
             if self.config.num_highway_cls_tokens > 0:
                 highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
                 inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
-            char_embeds = None
-            if self.config.char_rnn and char_ids is not None:
-                char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size // 4)
-                char_embeds = self.char_rnn(self.char_embeddings(char_ids))
-                char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // 4).mean(2)
-                if self.config.num_highway_cls_tokens > 0:
-                    char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
-                char_embeds = self.char_embed_proj(char_embeds)
+
 
 
         else:
@@ -228,18 +220,29 @@ class Embeddings(nn.Module):
         seq_length = input_shape[1]
 
         embeddings = inputs_embeds
-        position_embeddings = None
-        if use_position_embeddings:
-            if position_ids is None:
-                position_ids = self.position_ids[:, :seq_length]
-            else:
-                position_ids = torch.cat((self.highway_position_ids.expand((position_ids.size(0), -1)), position_ids + self.config.num_highway_cls_tokens), dim=1)
 
-            position_embeddings = self.position_embeddings(position_ids.long())
+        if self.embed_proj:
+            embeddings = self.embed_proj(embeddings)
 
-            if self.position_biased_input:
-                # print("Seq len = ", seq_length, "embeddings dim = ", embeddings.size(), position_embeddings.size(), self.position_ids.size())
-                embeddings += position_embeddings
+        if self.config.char_rnn and char_ids is not None:
+            char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
+            char_embeds = self.char_rnn(self.char_embeddings(char_ids))
+            char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
+            if self.config.num_highway_cls_tokens > 0:
+                char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
+            char_embeds = self.embed_proj(char_embeds)
+            embeddings = embeddings + char_embeds
+
+        if position_ids is None:
+            position_ids = self.position_ids[:, :seq_length]
+        else:
+            position_ids = torch.cat((self.highway_position_ids.expand((position_ids.size(0), -1)), position_ids + self.config.num_highway_cls_tokens),
+                                     dim=1)
+
+        position_embeddings = self.position_embeddings(position_ids.long())
+        if self.position_biased_input:
+            embeddings += self.embed_proj(position_embeddings)
+
         if self.config.type_vocab_size > 0:
             if token_type_ids is None:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
@@ -248,12 +251,7 @@ class Embeddings(nn.Module):
                     (torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids),
                     dim=1)
             token_type_embeddings = self.token_type_embeddings(token_type_ids)
-            embeddings += token_type_embeddings
-
-        if self.embed_proj:
-            embeddings = self.embed_proj(embeddings)
-        if char_embeds is not None:
-            embeddings = embeddings + char_embeds
+            embeddings += self.embed_proj(token_type_embeddings)
 
         embeddings = self.LayerNorm(embeddings)
 
@@ -370,7 +368,7 @@ class AttentionStructure(nn.Module):
         # We need to create and return all the possible vectors R for all blocks and shifts.
 
         pos = torch.arange(0, seq_len, dtype=dtype, device=device)
-        pooled_pos = pos
+
         position_embeds_list = []
         for block_index in range(0, self.config.num_blocks):
             # For each block with block_index > 0, we need two types position embeddings:
@@ -476,7 +474,7 @@ class SequenceDependentPositionTransform(nn.Module):
 
 
 class ShortSeqRNN(nn.Module):
-    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1):
+    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
         super().__init__()
         self.config = config
         self.cls_tokens = config.num_highway_cls_tokens + 1
@@ -491,23 +489,20 @@ class ShortSeqRNN(nn.Module):
         self.overlap = overlap
         self.gru = nn.ModuleList()
         for i in range(heads):
-            self.gru.append(nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+            self.gru.append(nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
                                    nonlinearity="tanh",
                                    bias=False, batch_first=True, dropout=0.0, bidirectional=True))
-        for p in self.parameters():
-            p.register_hook(lambda grad: torch.clamp(grad, -1, 1))
-        # TODO: should we try to also put a linear layer after rnn and make rnn hidden size larger?
 
     def forward(self, query, key=None, value=None):
-        st = time.time()
+        # st = time.time()
         if key is None:
             key = query
         if value is None:
             value = key
 
-        bs, seqlen, dim = query.shape
+        bs, seqlen, _ = query.shape
         context_len = key.shape[1]
-        assert self.hidden_size == dim
+        # assert self.hidden_size == dim
 
         upsampled = False
         if seqlen < context_len:
@@ -533,24 +528,24 @@ class ShortSeqRNN(nn.Module):
 
         query = query.permute(2, 0, 1, 3)
         processed_query = []
-        stg = time.time()
+        # stg = time.time()
         for i in range(query.size(0)):
             # print("Short Seq RNN sizes = ", query[i].size(), query.size())
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
-        query = query.permute(1, 2, 0, 3).reshape(-1, query.shape[2], dim)
+        query = query.permute(1, 2, 0, 3).reshape(-1, query.shape[2], query.size(-1))
 
         # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
         # query = self.gru(query)[0]
         # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
         query = query[:, self.overlap:-self.overlap]
-        query = query.reshape(bs, -1, dim)[:, :seqlen]
+        query = query.reshape(bs, -1, query.size(-1))[:, :seqlen]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
 
-        et = time.time()
+        # et = time.time()
         # print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg), query.size())
         return query
 
@@ -719,11 +714,11 @@ class CompressSeqMeanPooling(nn.Module):
             self.expansion_factor = 1
 
     def forward(self, query):
-        st = time.time()
+        # st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
         query = self.expand(query)
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
-        ext = time.time()
+        # ext = time.time()
         # print("Mean pooling = %.5f" % (ext - st))
         return qskip + query
 
@@ -748,14 +743,14 @@ class CompressSeqShortSeqRNN(nn.Module):
         self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, 1, d_model * self.expansion_factor, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
     def forward(self, query):
-        st = time.time()
+        # st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
         query = self.expand(query)
-        rnnst = time.time()
+        # rnnst = time.time()
         query = self.rnn(query)
-        rnnet = time.time()
+        # rnnet = time.time()
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
-        ext = time.time()
+        # ext = time.time()
         # print("RNN pooling Total = %.5f" % (ext - st), "Only RNN in pooling = %.5f" % (rnnet - rnnst), "RNN Extra = %.5f" % ((ext - st) - (rnnet - rnnst)))
         return query + qskip
 
@@ -1229,7 +1224,7 @@ class LightLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
         self.activation_function = ACT2FN[config.hidden_act]
         self.cls_tokens = config.num_highway_cls_tokens + 1
-        d_head = config.d_head[block_index]
+        # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
         self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
@@ -1656,11 +1651,11 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
         self.embed_proj_transpose = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            # ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-            # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
+            ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             # self.embed_proj_transpose = ep
             self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
-                                                      nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False))
+                                                      ep)
         self.lm_head = nn.Sequential(nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens),
                                      # nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps)
                                      )
@@ -2191,8 +2186,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
                 labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
-                with torch.cuda.amp.autocast(enabled=False):
-                    loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
                 if record_accuracy:
                     accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
@@ -2207,16 +2201,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     mask_c = mask2.clone()
                     mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = const + 1
                     mask_c = mask1 + mask_c
-                    with torch.cuda.amp.autocast(enabled=False):
-                        l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
                     vertical_lc += l2
                 vertical_lc /= n_positives_per_anchor
                 loss_contrastive += vertical_lc
-                if np.isnan(float(loss_contrastive)):
-                    msg = "[FastFormerForFusedELECTRAPretraining]: loss_contrastive nan, Time = %s, n_anchors = %s, n_positives = %s, contrastive_block_matrix = %s" % (
-                    get_time_string(), n_anchors, n_positives, random.sample(contrastive_block_matrix.tolist(), 2))
-                    print(msg)
-                    raise ValidationError(msg, all_inputs)
             loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))
@@ -2243,13 +2231,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             labels_segment_index = labels_segment_index.view(-1)
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
-            with torch.cuda.amp.autocast(enabled=False):
-                sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
-            if np.isnan(float(sent_order_loss)):
-                msg = "[FastFormerForFusedELECTRAPretraining]: sent_order_loss nan, Time = %s, labels_segment_index = %s, sent_order_logits = %s" % (
-                    get_time_string(), labels_segment_index.tolist(), random.sample(sent_order_logits.tolist(), 2))
-                print(msg)
-                raise ValidationError(msg, all_inputs)
+            sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
             if record_accuracy:
@@ -2295,13 +2277,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
             highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
-            with torch.cuda.amp.autocast(enabled=False):
-                highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
-            if np.isnan(float(highway_cls_ar_loss)):
-                msg = "[FastFormerForFusedELECTRAPretraining]: highway_cls_ar_loss nan, Time = %s, highway_cls_ar_input_ids = %s, highway_cls_ar_out = %s" % (
-                    get_time_string(), random.sample(highway_cls_ar_input_ids.tolist(), 4), random.sample(highway_cls_ar_out.tolist(), 4))
-                print(msg)
-                raise ValidationError(msg, all_inputs)
+            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
 
             if record_accuracy:
                 highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
@@ -2314,19 +2290,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_loss = tokenizer_attn_mask.bool()
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
         prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
-        with torch.cuda.amp.autocast(enabled=False):
-
-            active_labels = labels[active_loss].reshape(-1)
-            active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
-            active_prediction_logits = active_prediction_logits.float()
-            # active_prediction_logits = F.normalize(active_prediction_logits, 2, -1, eps=self.config.layer_norm_eps)
-            # active_prediction_logits = active_prediction_logits.clamp(min=1e-5, max=1e5)
-            masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
-        if np.isnan(float(masked_lm_loss)):
-            msg = "[FastFormerForFusedELECTRAPretraining]: masked_lm_loss nan, Time = %s, active_labels = %s, active_prediction_logits = %s" % (
-                get_time_string(), random.sample(active_labels.tolist(), 4), random.sample(active_prediction_logits.tolist(), 4))
-            print(msg)
-            raise ValidationError(msg, all_inputs)
+        active_labels = labels[active_loss].reshape(-1)
+        active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
+        masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
         labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
         if record_accuracy:
             # predictions = prediction_logits.argmax(dim=-1)
@@ -2352,13 +2318,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         active_logits = logits[active_loss]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
-        with torch.cuda.amp.autocast(enabled=False):
-            loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
-        if np.isnan(float(loss)):
-            msg = "[FastFormerForFusedELECTRAPretraining]: electra_loss nan, Time = %s, labels = %s, active_logits = %s" % (
-                get_time_string(), random.sample(labels.tolist(), 8), random.sample(active_logits.tolist(), 8))
-            print(msg)
-            raise ValidationError(msg, all_inputs)
+        loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
             # if self.record_accuracy:
@@ -2617,10 +2577,10 @@ if __name__ == "__main__":
     # ddp_model.load_state_dict(checkpoint['model'])
     # model = ddp_model
 
-    checkpoint = torch.load("model/error-model.pth", map_location=str(device))
-    model.load_state_dict(checkpoint)
-    pt_batch = torch.load("model/error-input.pth", map_location=str(device))
-    labels = pt_batch.pop("labels", None)
+    # checkpoint = torch.load("model/error-model.pth", map_location=str(device))
+    # model.load_state_dict(checkpoint)
+    # pt_batch = torch.load("model/error-input.pth", map_location=str(device))
+    # labels = pt_batch.pop("labels", None)
 
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}

@@ -545,17 +545,19 @@ def train(local_rank, args):
                 if torch.isnan(grad).sum() > 0:
                     # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
                     grad = torch.where(torch.isnan(grad), torch.zeros_like(grad), grad)
-                    grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
                 if torch.isinf(grad).sum() > 0:
                     # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
-                    grad = torch.where(torch.isinf(grad), torch.zeros_like(grad), grad)
-                    grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+                    grad = torch.where(torch.isinf(grad), torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
+                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
 
                 # grad = grad / grad.norm(2, -1, True)
-                return torch.clamp(grad, -1e1, 1e1)
+                grad = torch.clamp(grad, -1e1, 1e1)
+                return grad
             return hook
         for name, param in ddp_model.named_parameters():
-            param.register_hook(get_hook(name))
+            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "lm_head" in name or "contrastive_ffn" in name:
+                param.register_hook(get_hook(name))
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
@@ -614,13 +616,7 @@ def train(local_rank, args):
                 torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                 torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                 raise ValueError(es)
-            try:
-                scaler.scale(loss).backward()
-            except Exception as e:
-                torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
-                torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
-                time.sleep(random.random() * 10 + 0.1)
-                raise e
+            scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
             # torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1)
