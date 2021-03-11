@@ -543,22 +543,20 @@ def train(local_rank, args):
     if args["detect_anomaly"] or not args["no_autocast"]:
         def get_hook(name_of_param):
             def hook(grad):
-                if torch.isnan(grad).sum() > 0:
-                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected NaN" % (get_time_string(), name_of_param))
-                    grad = torch.where(torch.isnan(grad), torch.zeros_like(grad), grad)
-                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
-                if torch.isinf(grad).sum() > 0:
+                is_nan_inf = torch.logical_or(torch.isnan(grad), torch.isinf(grad))
+                if is_nan_inf.any():
                     # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
-                    grad = torch.where(torch.isinf(grad), torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
+                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
                     # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
 
                 # grad = grad / grad.norm(2, -1, True)
-                grad = torch.clamp(grad, -1e1, 1e1)
+                # grad = torch.clamp(grad, -1e1, 1e1)
                 return grad
             return hook
         for name, param in ddp_model.named_parameters():
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name:
                 param.register_hook(get_hook(name))
+    unregistered = True
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
@@ -627,6 +625,11 @@ def train(local_rank, args):
             skip_lr_sched = (scale != scaler.get_scale())
             if not skip_lr_sched:
                 scheduler.step()
+            if scaler.get_scale() < 128 and unregistered:
+                unregistered = False
+                for name, param in ddp_model.named_parameters():
+                    if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
+                        param.register_hook(get_hook(name))
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
         full_time = time.time() - start_time
