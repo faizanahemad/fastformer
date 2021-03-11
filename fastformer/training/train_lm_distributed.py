@@ -485,7 +485,7 @@ def train(local_rank, args):
     optimizer.zero_grad()
     scaler = GradScaler()
     wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
-               config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc})
+                           config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc})
     wandb.init(**wandb_init_args)
     # model, optim, gradscaler, scheduler, steps
 
@@ -540,19 +540,19 @@ def train(local_rank, args):
     if args["detect_anomaly"]:
         torch.autograd.set_detect_anomaly(True)
 
-    if args["detect_anomaly"] or not args["no_autocast"]:
-        def get_hook(name_of_param):
-            def hook(grad):
-                is_nan_inf = torch.logical_or(torch.isnan(grad), torch.isinf(grad))
-                if is_nan_inf.any():
-                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
-                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
-                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+    def get_hook(name_of_param):
+        def hook(grad):
+            is_nan_inf = torch.logical_or(torch.isnan(grad), torch.isinf(grad))
+            if is_nan_inf.any():
+                # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
+                grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
+                # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
 
-                # grad = grad / grad.norm(2, -1, True)
-                # grad = torch.clamp(grad, -1e1, 1e1)
-                return grad
-            return hook
+            # grad = grad / grad.norm(2, -1, True)
+            # grad = torch.clamp(grad, -1e1, 1e1)
+            return grad
+        return hook
+    if args["detect_anomaly"] or not args["no_autocast"]:
         for name, param in ddp_model.named_parameters():
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name:
                 param.register_hook(get_hook(name))
@@ -625,7 +625,7 @@ def train(local_rank, args):
             skip_lr_sched = (scale != scaler.get_scale())
             if not skip_lr_sched:
                 scheduler.step()
-            if scaler.get_scale() < 128 and unregistered:
+            if scaler.get_scale() <= 4096 and unregistered:
                 unregistered = False
                 for name, param in ddp_model.named_parameters():
                     if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):

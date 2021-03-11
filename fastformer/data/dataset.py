@@ -2328,6 +2328,17 @@ for k, v in tqdm(dataset_dict.items()):
 
 """
 
+"""
+
+nplen = train_fastformer_resampled._data['length'].to_pylist()
+nplen = np.array(nplen)
+train_fastformer_resampled._data = train_fastformer_resampled._data.filter(mask=nplen>12)
+
+
+
+setattr(train_fastformer_resampled, "_num_rows", len(train_fastformer_resampled._data))
+"""
+
 
 def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     article: List[Dict[str, List]] = examples["article"]
