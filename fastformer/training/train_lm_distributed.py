@@ -486,6 +486,8 @@ def train(local_rank, args):
     scaler = GradScaler()
     wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                            config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc})
+    
+    time.sleep(random.random() * 5)
     wandb.init(**wandb_init_args)
     # model, optim, gradscaler, scheduler, steps
 

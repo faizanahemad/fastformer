@@ -2330,13 +2330,12 @@ for k, v in tqdm(dataset_dict.items()):
 
 """
 
-nplen = train_fastformer_resampled._data['length'].to_pylist()
-nplen = np.array(nplen)
+nplen = np.array(train_fastformer_resampled._data['length'].to_pylist())
 train_fastformer_resampled._data = train_fastformer_resampled._data.filter(mask=nplen>12)
-
-
-
 setattr(train_fastformer_resampled, "_num_rows", len(train_fastformer_resampled._data))
+np.min(train_fastformer_resampled._data['length'].to_pylist())
+
+train_fastformer_resampled.save_to_disk("/home/ahemf/processed_datasets/train_fastformer_resampled_100M")
 """
 
 
