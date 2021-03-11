@@ -556,7 +556,7 @@ def train(local_rank, args):
                 return grad
             return hook
         for name, param in ddp_model.named_parameters():
-            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "lm_head" in name or "contrastive_ffn" in name:
+            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name:
                 param.register_hook(get_hook(name))
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
