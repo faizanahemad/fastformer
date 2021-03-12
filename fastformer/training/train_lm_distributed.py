@@ -544,22 +544,37 @@ def train(local_rank, args):
     if args["detect_anomaly"]:
         torch.autograd.set_detect_anomaly(True)
 
-    def get_hook(name_of_param):
-        def hook(grad):
-            is_nan_inf = torch.logical_not(torch.isfinite(grad))
-            if is_nan_inf.any():
-                # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
-                grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(config.layer_norm_eps * 10), grad)
-                # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
-
-            # grad = grad / grad.norm(2, -1, True)
-            grad = torch.clamp(grad, -1e1, 1e1)
-            return grad
-        return hook
+    def get_hook(name_of_param=None):
+        if name_of_param is None:
+            def hook(grad):
+                is_nan_inf = torch.logical_not(torch.isfinite(grad))
+                if is_nan_inf.any():
+                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
+                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-2), grad)
+                    grad = torch.clamp_(grad, -1e1, 1e1)
+                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+                    # grad = grad / grad.norm(2, -1, True)
+                    return grad
+                else:
+                    return None
+            return hook
+        else:
+            def named_hook(grad):
+                is_nan_inf = torch.logical_not(torch.isfinite(grad))
+                if is_nan_inf.any():
+                    print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Nan/Inf" % (get_time_string(), name_of_param))
+                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-2), grad)
+                    grad = torch.clamp_(grad, -1e1, 1e1)
+                    # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+                    # grad = grad / grad.norm(2, -1, True)
+                    return grad
+                else:
+                    return None
+            return named_hook
     if args["detect_anomaly"] or not args["no_autocast"]:
         for name, param in ddp_model.named_parameters():
-            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "gru" in name: #
-                param.register_hook(get_hook(name))
+            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name: #
+                param.register_hook(get_hook())
     unregistered = True
     start_time = time.time()
     for step, batch in enumerate(train_loader):
@@ -631,11 +646,11 @@ def train(local_rank, args):
             skip_lr_sched = (scale != scaler.get_scale())
             if not skip_lr_sched:
                 scheduler.step()
-            # if scaler.get_scale() <= 4096 and unregistered:
-            #     unregistered = False
-            #     for name, param in ddp_model.named_parameters():
-            #         if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
-            #             param.register_hook(get_hook(name))
+            if scaler.get_scale() <= 1024 and unregistered:
+                unregistered = False
+                for name, param in ddp_model.named_parameters():
+                    if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
+                        param.register_hook(get_hook(name))
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
         full_time = time.time() - start_time
