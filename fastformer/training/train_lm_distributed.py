@@ -631,11 +631,11 @@ def train(local_rank, args):
             skip_lr_sched = (scale != scaler.get_scale())
             if not skip_lr_sched:
                 scheduler.step()
-            if scaler.get_scale() <= 4096 and unregistered:
-                unregistered = False
-                for name, param in ddp_model.named_parameters():
-                    if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
-                        param.register_hook(get_hook(name))
+            # if scaler.get_scale() <= 4096 and unregistered:
+            #     unregistered = False
+            #     for name, param in ddp_model.named_parameters():
+            #         if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
+            #             param.register_hook(get_hook(name))
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
         full_time = time.time() - start_time
