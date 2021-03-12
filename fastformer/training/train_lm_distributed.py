@@ -576,7 +576,7 @@ def train(local_rank, args):
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "encoder.blocks.0" in name: #
                 param.register_hook(get_hook())
             else:
-                param.register_hook(get_hook(name))
+                param.register_hook(get_hook())
 
     start_time = time.time()
     for step, batch in enumerate(train_loader):
