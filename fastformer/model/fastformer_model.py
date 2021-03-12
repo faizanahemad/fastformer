@@ -1822,6 +1822,19 @@ def KL(input, target, reduction="sum"):
     return loss
 
 
+def hook(grad):
+    is_nan_inf = torch.logical_not(torch.isfinite(grad))
+    if is_nan_inf.any():
+        # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
+        grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-2), grad)
+        grad = torch.clamp_(grad, -1e1, 1e1)
+        # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+        # grad = grad / grad.norm(2, -1, True)
+        return grad
+    else:
+        return None
+
+
 class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
@@ -2378,6 +2391,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
                          highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
                          loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
+        loss.register_hook(hook)
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
