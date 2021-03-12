@@ -537,9 +537,10 @@ def train(local_rank, args):
     full_times = []
     model.zero_grad()
     samples_processed = 0
+    samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
     barrier()
-    start_time = time.time()
+
     if args["detect_anomaly"]:
         torch.autograd.set_detect_anomaly(True)
 
@@ -560,6 +561,7 @@ def train(local_rank, args):
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name:
                 param.register_hook(get_hook(name))
     unregistered = True
+    start_time = time.time()
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
@@ -592,6 +594,7 @@ def train(local_rank, args):
         labels = labels.to(device)
         model_start_time = time.time()
         samples_processed += batch["input_ids"].size(0)
+        samples_processed_this_log_iter += batch["input_ids"].size(0)
         if args["cpu"] or args["no_autocast"]:
             output = ddp_model(**batch, labels=labels)
             loss = output["loss"]
@@ -637,23 +640,25 @@ def train(local_rank, args):
         model_times.append(model_end_time)
         full_time = time.time() - start_time
         full_times.append(full_time)
-        start_time = time.time()
         if step == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
+            samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
             acc_dict = output["accuracy_hist"]
             time.sleep(random.random() + 0.1)
-            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed,
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
                            batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" % (get_time_string(), rank, step, samples_processed, scaler.get_scale(), batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
-                print("[Train]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times)))
+                print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
             batch_times = []
             model_times = []
             full_times = []
+            samples_processed_this_log_iter = 0
             clean_memory()
             barrier()
+        start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
     if rank == 0:
