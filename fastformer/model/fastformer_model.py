@@ -497,6 +497,10 @@ class ShortSeqRNN(nn.Module):
             rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
             rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
             rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0', )
+            rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0_reverse', )
+            rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0_reverse', )
+            rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0_reverse', )
+            rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0_reverse', )
             self.gru.append(rnn)
 
     def forward(self, query, key=None, value=None):
