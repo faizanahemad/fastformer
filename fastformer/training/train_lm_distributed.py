@@ -571,11 +571,13 @@ def train(local_rank, args):
                 else:
                     return None
             return named_hook
-    if args["detect_anomaly"] or not args["no_autocast"]:
+    if not args["no_autocast"]:
         for name, param in ddp_model.named_parameters():
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name: #
                 param.register_hook(get_hook())
-    unregistered = True
+            else:
+                param.register_hook(get_hook(name))
+    
     start_time = time.time()
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
@@ -646,11 +648,7 @@ def train(local_rank, args):
             skip_lr_sched = (scale != scaler.get_scale())
             if not skip_lr_sched:
                 scheduler.step()
-            if scaler.get_scale() <= 1024 and unregistered:
-                unregistered = False
-                for name, param in ddp_model.named_parameters():
-                    if not ("embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name):
-                        param.register_hook(get_hook(name))
+
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
         full_time = time.time() - start_time
