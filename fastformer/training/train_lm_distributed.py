@@ -573,11 +573,11 @@ def train(local_rank, args):
             return named_hook
     if not args["no_autocast"]:
         for name, param in ddp_model.named_parameters():
-            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name: #
+            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "encoder.blocks.0" in name: #
                 param.register_hook(get_hook())
             else:
                 param.register_hook(get_hook(name))
-    
+
     start_time = time.time()
     for step, batch in enumerate(train_loader):
         if other_load_details is not None:
@@ -659,7 +659,7 @@ def train(local_rank, args):
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
             acc_dict = output["accuracy_hist"]
             time.sleep(random.random() + 0.1)
-            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(batch["input_ids"].shape[:2]),
                            batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
