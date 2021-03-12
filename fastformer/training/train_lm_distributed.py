@@ -558,7 +558,7 @@ def train(local_rank, args):
         return hook
     if args["detect_anomaly"] or not args["no_autocast"]:
         for name, param in ddp_model.named_parameters():
-            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name: # or "gru" in name
+            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "gru" in name: #
                 param.register_hook(get_hook(name))
     unregistered = True
     start_time = time.time()
