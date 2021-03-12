@@ -2096,7 +2096,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("get_emb", et))
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
-        funnel_outputs = self.funnel(**funnel_inputs)
+        autocast = kwargs.pop("autocast", False)
+        with autocast(enabled=autocast):
+            funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, input_ids = %s, attention_mask = %s" % (get_time_string(), random.sample(input_ids.reshape(-1).tolist(), 8), random.sample(attention_mask.reshape(-1).tolist(), 8)))
@@ -2575,8 +2577,8 @@ if __name__ == "__main__":
 
     # checkpoint = torch.load("model/error-model.pth", map_location=str(device))
     # model.load_state_dict(checkpoint)
-    # pt_batch = torch.load("model/error-input.pth", map_location=str(device))
-    # labels = pt_batch.pop("labels", None)
+    pt_batch = torch.load("model/error-input.pth", map_location=str(device))
+    labels = pt_batch.pop("labels", None)
 
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}

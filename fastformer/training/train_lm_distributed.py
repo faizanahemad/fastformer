@@ -610,8 +610,8 @@ def train(local_rank, args):
             optimizer.step()
             scheduler.step()
         else:
-            with autocast():
-                output = ddp_model(**batch, labels=labels)
+
+            output = ddp_model(**batch, labels=labels, autocast=True)
             loss = output["loss"]
             loss_dict = output["loss_dict"]
 
