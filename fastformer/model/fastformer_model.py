@@ -2096,8 +2096,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("get_emb", et))
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
-        autocast = kwargs.pop("autocast", False)
-        with autocast(enabled=autocast):
+        with autocast(enabled=kwargs.pop("autocast", False)):
             funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
