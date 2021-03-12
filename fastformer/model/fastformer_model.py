@@ -490,9 +490,14 @@ class ShortSeqRNN(nn.Module):
         self.overlap = overlap
         self.gru = nn.ModuleList()
         for i in range(heads):
-            self.gru.append(nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                                   nonlinearity="tanh",
-                                   bias=False, batch_first=True, dropout=0.0, bidirectional=True))
+            rnn = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                         nonlinearity="tanh",
+                         bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+            rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0',)
+            rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
+            rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
+            rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0', )
+            self.gru.append(rnn)
 
     def forward(self, query, key=None, value=None):
         # st = time.time()
@@ -2053,6 +2058,25 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
         return inputs_embeds, position_embeds, input_shape
 
+
+    def objective(
+            self,
+                        funnel_inputs,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            inputs_embeds=None,
+            labels=None,
+            labels_segment_index=None,
+            char_ids=None, char_offsets=None,
+            highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
+            labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
+            contrastive_anchors=None, contrastive_positives=None,
+            **kwargs
+    ):
+        pass
+
+
     def forward(
             self,
             input_ids=None,
@@ -2093,12 +2117,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                              run_decoder=True,
                              run_answering=run_answering, )
 
-        et = time.time() - st
-        timing_dict.append(("get_emb", et))
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
-        with autocast(enabled=kwargs.pop("autocast", False)):
-            funnel_outputs = self.funnel(**funnel_inputs)
+        # with autocast(enabled=kwargs.pop("autocast", False)):
+        funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, input_ids = %s, attention_mask = %s" % (get_time_string(), random.sample(input_ids.reshape(-1).tolist(), 8), random.sample(attention_mask.reshape(-1).tolist(), 8)))
