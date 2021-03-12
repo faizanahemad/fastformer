@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
+from torch.cuda.amp import GradScaler, autocast
 
 import numpy as np
 import math
