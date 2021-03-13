@@ -489,18 +489,100 @@ class ShortSeqRNN(nn.Module):
         self.head_size = head_size
         self.overlap = overlap
         self.gru = nn.ModuleList()
+        self.gru_global = nn.ModuleList()
         for i in range(heads):
             rnn = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
                          nonlinearity="tanh",
                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0',)
-            rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
-            rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
-            rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0', )
-            rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0_reverse', )
-            rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0_reverse', )
-            rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0_reverse', )
-            rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0_reverse', )
+            rnn2 = nn.RNN((hidden_size * (1 if maintain_dim else 2)) // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                          nonlinearity="tanh",
+                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            self.gru.append(rnn)
+            self.gru_global.append(rnn2)
+
+    def forward(self, query, key=None, value=None):
+        # st = time.time()
+        if key is None:
+            key = query
+        if value is None:
+            value = key
+
+        bs, seqlen, _ = query.shape
+        context_len = key.shape[1]
+        # assert self.hidden_size == dim
+
+        upsampled = False
+        if seqlen < context_len:
+            upsampled = True
+            query = value + upsample(query, self.config.stride, context_len, self.cls_tokens)
+            seqlen = context_len
+
+        num_segments = int(np.ceil(seqlen / self.kernel_size))
+        target_len = num_segments * self.kernel_size
+        query = nn.functional.pad(query, (0, 0, 0, target_len - seqlen, 0, 0))
+        query = query.view(-1, self.kernel_size, query.shape[2])
+        query = query.view(query.shape[0], self.kernel_size, self.heads, -1)
+
+        query = query.permute(2, 0, 1, 3)
+        processed_query = []
+        # stg = time.time()
+        for i in range(query.size(0)):
+            # print("Short Seq RNN sizes = ", query[i].size(), query.size())
+            qp = self.gru[i](query[i])[0]
+            processed_query.append(qp)
+        query = torch.stack(processed_query, 0)
+        query = query.reshape(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
+
+        processed_query = []
+        query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
+        for i in range(query_global.size(0)):
+            qp = self.gru_global[i](query_global[i])[0]
+            processed_query.append(qp)
+        query_global = torch.stack(processed_query, 0).unsqueeze(-2)
+        query = query + query_global
+        query = query.reshape(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
+        query = query.permute(1, 2, 0, 3).reshape(-1, self.kernel_size, query.size(-1))
+
+        # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
+        # query = self.gru(query)[0]
+        # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
+        query = query.reshape(bs, -1, query.size(-1))[:, :seqlen]
+
+        if upsampled:
+            query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
+
+        # et = time.time()
+        # print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg), query.size())
+        return query
+
+
+class ShortSeqRNNOld(nn.Module):
+    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
+        super().__init__()
+        self.config = config
+        self.cls_tokens = config.num_highway_cls_tokens + 1
+        self.heads = heads
+        self.kernel_size = kernel_size
+        self.all_head_size = heads * head_size
+        self.hidden_size = hidden_size
+        act = config.hidden_act
+        self.act = ACT2FN[act]
+        assert hidden_size % (2 * heads) == 0
+        self.head_size = head_size
+        self.overlap = overlap
+        self.gru = nn.ModuleList()
+        for i in range(heads):
+            rnn = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                         nonlinearity="tanh",
+                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0',)
+            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
+            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
+            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0', )
+            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0_reverse', )
+            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0_reverse', )
+            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0_reverse', )
+            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0_reverse', )
             self.gru.append(rnn)
 
     def forward(self, query, key=None, value=None):
