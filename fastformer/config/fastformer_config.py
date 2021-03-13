@@ -16,6 +16,7 @@ from dataclasses_json import dataclass_json
 # size_dicts = {128:96, 256:48, 512: 24, 768: 16, 1024: 8}
 size_dicts = {128: 36, 192: 24, 256:16, 512: 12, 768: 8, 1024: 4}
 # size_dicts = {128: 48, 256:24, 512: 16, 768: 8, 1024: 8}
+autocast_factor = 1
 
 
 @dataclass_json

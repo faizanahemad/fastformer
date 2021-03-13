@@ -371,7 +371,7 @@ def cleanup():
 def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1, no_autocast=False):
     global size_dicts
     if no_autocast:
-        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
+        size_dicts = {k: v // autocast_factor for k, v in size_dicts.items()}
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     try:
