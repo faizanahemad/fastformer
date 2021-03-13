@@ -2489,7 +2489,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
                          highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
                          loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
-        loss.register_hook(hook)
+        if at_cast:
+            loss.register_hook(hook)
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
@@ -2500,6 +2501,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
+        accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
+        loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
         results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist)
         if self.data_parallel:
             results = [results]
