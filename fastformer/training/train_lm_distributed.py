@@ -650,7 +650,7 @@ def train(local_rank, args):
             print(es)
             torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
             torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
-            raise e
+            reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
 
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)

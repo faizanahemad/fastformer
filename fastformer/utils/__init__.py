@@ -267,3 +267,19 @@ class ValidationError(Exception):
         # Now for your custom code...
         self.contents = contents
         self.diagnostic = diagnostic
+
+
+def reraise(e, *args):
+  '''re-raise an exception with extra arguments
+  :param e: The exception to reraise
+  :param args: Extra args to add to the exception
+  '''
+
+  # e.args is a tuple of arguments that the exception with instantiated with.
+  #
+  e.args = args + e.args
+
+  # Recreate the expection and preserve the traceback info so thta we can see
+  # where this exception originated.
+  #
+  raise e.with_traceback(e.__traceback__)
