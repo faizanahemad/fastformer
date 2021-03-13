@@ -383,7 +383,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min(size_dicts.values()),
                                       collate_fn=collate_fn,
                                       num_workers=0)
-        train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
+        # train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
     except:
         train_dataset = DatasetDict.load_from_disk(location)
         train_dataset = {k: v for k, v in train_dataset.items() if len(v) >= world_size}
