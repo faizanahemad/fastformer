@@ -629,6 +629,12 @@ def train(local_rank, args):
             else:
                 with autocast():
                     output = ddp_model(**batch, labels=labels)
+                    clean_memory()
+                    print("Step = %s, Pre-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+                          (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
+                           torch.cuda.max_memory_allocated() / 1e6,
+                           torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
+
                     loss = output["loss"]
                     loss_dict = output["loss_dict"]
 
@@ -638,12 +644,8 @@ def train(local_rank, args):
                         torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                         torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                         raise ValueError(es)
-                    clean_memory()
-                    print("Step = %s, Pre-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
-                          (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
-                           torch.cuda.max_memory_allocated() / 1e6,
-                           torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
+                    clean_memory()
                     scaler.scale(loss).backward()
                     clean_memory()
                     print("Step = %s, Post-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
