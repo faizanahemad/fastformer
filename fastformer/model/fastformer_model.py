@@ -2140,6 +2140,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
+        at_cast = kwargs.pop("autocast", False)
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, input_ids = %s, attention_mask = %s" % (get_time_string(), random.sample(input_ids.reshape(-1).tolist(), 8), random.sample(attention_mask.reshape(-1).tolist(), 8)))
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, char_ids = %s, char_offsets = %s" % (get_time_string(), random.sample(char_ids.reshape(-1).tolist(), 8), random.sample(char_offsets.reshape(-1).tolist(), 8)))
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Input embeds = %s, Input embeds CLS = %s" % (get_time_string(), random.sample(inputs_embeds.reshape(-1).tolist(), 8), random.sample(inputs_embeds_cls.reshape(-1).tolist(), 8)))
@@ -2154,6 +2155,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             alen = labels_pet_input_ids.size(1)
             assert alen <= funnel_outputs["answering_logits"].size(1)
             answering_logits = funnel_outputs["answering_logits"][:, :alen]
+            if at_cast:
+                answering_logits.register_hook(hook)
             answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
             if record_accuracy:
                 answering_predictions = answering_logits.detach().argmax(dim=-1)
@@ -2219,6 +2222,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             else:
                 contrastive_block_hidden = torch.stack(anchors + positives)
                 contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden.unsqueeze(1)).squeeze()
+                if at_cast:
+                    contrastive_block_hidden.register_hook(hook)
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
@@ -2247,14 +2252,17 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("contrastive_loss", et))
         cls_orthogonal_loss = 0.0
         if self.input_cls_orthogonal_w > 0 and self.training:
-
             inputs_embeds_cls = inputs_embeds_cls/(inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
+            if at_cast:
+                inputs_embeds_cls.register_hook(hook)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
             cls_orthogonal_loss += input_cls_orthogonal_loss
 
         if self.first_block_cls_orthogonal_w > 0 and self.training:
             first_block_cls = first_block_cls/(first_block_cls.norm(2, -1, True) + self.config.layer_norm_eps)
+            if at_cast:
+                first_block_cls.register_hook(hook)
             first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
             first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * (first_block_cls ** 2).mean()
             cls_orthogonal_loss += first_block_cls_orthogonal_loss
@@ -2268,6 +2276,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             labels_segment_index = labels_segment_index.view(-1)
             sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
+            if at_cast:
+                sent_order_logits.register_hook(hook)
             sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
@@ -2308,6 +2318,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
             highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, clip:])
             highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            if at_cast:
+                highway_cls_ar_out.register_hook(hook)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
             if hshape2 > 128:
                 highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
@@ -2327,6 +2339,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_loss = tokenizer_attn_mask.bool()
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
         prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :, :self.config.vocab_size]
+        if at_cast:
+            prediction_logits.register_hook(hook)
         active_labels = labels[active_loss].reshape(-1)
         active_prediction_logits = prediction_logits[active_loss].reshape(-1, self.config.vocab_size)
         masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
@@ -2353,8 +2367,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("electra_discriminator_logits", et))
 
-        active_logits = logits[active_loss]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
+        if at_cast:
+            logits.register_hook(hook)
+        active_logits = logits[active_loss]
         loss = self.electra_loss_w * self.loss_bce(active_logits, labels)
         if record_accuracy:
             accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(active_logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
