@@ -566,12 +566,12 @@ def train(local_rank, args):
                 else:
                     return None
             return named_hook
-    if not args["no_autocast"]:
-        for name, param in ddp_model.named_parameters():
-            if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "encoder.blocks.0" in name: #
-                param.register_hook(get_hook())
-            else:
-                param.register_hook(get_hook())
+    # if not args["no_autocast"]:
+    #     for name, param in ddp_model.named_parameters():
+    #         if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "encoder.blocks.0" in name: #
+    #             param.register_hook(get_hook())
+    #         else:
+    #             param.register_hook(get_hook())
 
     start_time = time.time()
     for step, batch in enumerate(train_loader):
