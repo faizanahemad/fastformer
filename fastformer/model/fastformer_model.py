@@ -210,9 +210,9 @@ class Embeddings(nn.Module):
             input_shape = tuple(input_shape)
 
             inputs_embeds = self.word_embeddings(input_ids)
-            if self.config.num_highway_cls_tokens > 0:
-                highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
-                inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
+        if self.config.num_highway_cls_tokens > 0:
+            highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
+            inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
 
 
 
