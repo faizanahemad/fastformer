@@ -607,8 +607,10 @@ def train(local_rank, args):
         model_start_time = time.time()
         samples_processed += batch["input_ids"].size(0)
         samples_processed_this_log_iter += batch["input_ids"].size(0)
-        print("Time = %s, Step = %s for Rank = %s, input_size = %s, Allocated = %s, Max Allocated = %s, Percent = %s" %
-              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated(), torch.cuda.max_memory_allocated(), torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))
+        clean_memory()
+        print("Time = %s, Step = %s for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s, Summary = %s" %
+              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated(), torch.cuda.memory_summary()))
+
         try:
             if args["cpu"] or args["no_autocast"]:
                 output = ddp_model(**batch, labels=labels)
