@@ -649,8 +649,8 @@ def train(local_rank, args):
                     if not skip_lr_sched:
                         scheduler.step()
         except Exception as e:
-            es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (
-            get_time_string(), step, rank, scaler.get_scale(), loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+            es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
+            get_time_string(), step, rank, scaler.get_scale(), batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
             print(es)
             torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
             torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
