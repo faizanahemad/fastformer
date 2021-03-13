@@ -608,8 +608,8 @@ def train(local_rank, args):
         samples_processed += batch["input_ids"].size(0)
         samples_processed_this_log_iter += batch["input_ids"].size(0)
         clean_memory()
-        print("Time = %s, Step = %s, Before =, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
-              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
+        print("Step = %s, Before:, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+              (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
             if args["cpu"] or args["no_autocast"]:
@@ -638,7 +638,19 @@ def train(local_rank, args):
                         torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
                         torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                         raise ValueError(es)
+                    clean_memory()
+                    print("Step = %s, Pre-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+                          (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
+                           torch.cuda.max_memory_allocated() / 1e6,
+                           torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
+
                     scaler.scale(loss).backward()
+                    clean_memory()
+                    print("Step = %s, Post-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+                          (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
+                           torch.cuda.max_memory_allocated() / 1e6,
+                           torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
+
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
                     # torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1)
@@ -657,8 +669,8 @@ def train(local_rank, args):
             reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
 
         clean_memory()
-        print("Time = %s, Step = %s, After =, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
-              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() / 1e6,
+        print("Step = %s, After: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+              (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() / 1e6,
                torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         model_end_time = time.time() - model_start_time
