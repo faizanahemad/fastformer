@@ -608,8 +608,8 @@ def train(local_rank, args):
         samples_processed += batch["input_ids"].size(0)
         samples_processed_this_log_iter += batch["input_ids"].size(0)
         clean_memory()
-        print("Time = %s, Step = %s for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s, Summary = %s" %
-              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated(), torch.cuda.memory_summary()))
+        print("Time = %s, Step = %s, Before =, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
             if args["cpu"] or args["no_autocast"]:
@@ -655,6 +655,11 @@ def train(local_rank, args):
             torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
             torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
             reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
+
+        clean_memory()
+        print("Time = %s, Step = %s, After =, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
+              (get_time_string(), step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() / 1e6,
+               torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         model_end_time = time.time() - model_start_time
         model_times.append(model_end_time)
