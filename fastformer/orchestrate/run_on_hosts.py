@@ -141,7 +141,7 @@ if __name__ == "__main__":
     main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
     # main_cmd += " --cpu"
-    # main_cmd += " --no_autocast"
+    main_cmd += " --no_autocast"
     # main_cmd += " --detect_anomaly"
     main_cmd += " --shuffle_dataset"
 
