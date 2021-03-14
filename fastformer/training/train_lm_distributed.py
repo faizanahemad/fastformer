@@ -478,7 +478,7 @@ def train(local_rank, args):
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
 
     ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
-
+    ddp_model.register_comm_hook(state=None, hook=torch.distributed.algorithms.ddp_comm_hooks.default_hooks.fp16_compress_hook)
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
