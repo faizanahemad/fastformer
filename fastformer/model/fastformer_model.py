@@ -178,12 +178,16 @@ class Embeddings(nn.Module):
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
 
+
         if config.char_rnn:
+            char_div = 2
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
-            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // 2, padding_idx=pad_token_id)
-            self.char_rnn = ShortSeqRNN(config, self.embedding_size // 2, 1, self.embedding_size // 2,
-                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=False)
+            self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size // (2 * char_div), 1, self.embedding_size // (2 * char_div),
+                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=True)
+            self.char_proj = nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size)
+            self.char_div = char_div
 
         self.embed_proj = nn.Identity()
         if self.embedding_size != hidden_size:
@@ -226,12 +230,12 @@ class Embeddings(nn.Module):
             embeddings = self.embed_proj(embeddings)
 
         if self.config.char_rnn and char_ids is not None:
-            char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size)
+            char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size // (2 * self.char_div))
             char_embeds = self.char_rnn(self.char_embeddings(char_ids))
-            char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size).mean(2)
+            char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // (2 * self.char_div)).mean(2)
             if self.config.num_highway_cls_tokens > 0:
                 char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
-            char_embeds = self.embed_proj(char_embeds)
+            char_embeds = self.char_proj(char_embeds)
             embeddings = embeddings + char_embeds
 
         if position_ids is None:
@@ -491,11 +495,11 @@ class ShortSeqRNN(nn.Module):
         self.gru = nn.ModuleList()
         self.gru_global = nn.ModuleList()
         for i in range(heads):
-            rnn = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                         nonlinearity="tanh",
+            rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+                         nonlinearity="relu",
                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            rnn2 = nn.RNN((hidden_size * (1 if maintain_dim else 2)) // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                          nonlinearity="tanh",
+            rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                          nonlinearity="relu",
                           bias=True, batch_first=True, dropout=0.0, bidirectional=True)
             self.gru.append(rnn)
             self.gru_global.append(rnn2)
@@ -519,7 +523,8 @@ class ShortSeqRNN(nn.Module):
 
         num_segments = int(np.ceil(seqlen / self.kernel_size))
         target_len = num_segments * self.kernel_size
-        query = nn.functional.pad(query, (0, 0, 0, target_len - seqlen, 0, 0))
+        if target_len - seqlen > 0:
+            query = nn.functional.pad(query, (0, 0, 0, target_len - seqlen, 0, 0))
         query = query.view(-1, self.kernel_size, query.shape[2])
         query = query.view(query.shape[0], self.kernel_size, self.heads, -1)
 
@@ -531,7 +536,7 @@ class ShortSeqRNN(nn.Module):
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
-        query = query.reshape(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
+        query = query.view(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
 
         processed_query = []
         query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
@@ -540,13 +545,13 @@ class ShortSeqRNN(nn.Module):
             processed_query.append(qp)
         query_global = torch.stack(processed_query, 0).unsqueeze(-2)
         query = query + query_global
-        query = query.reshape(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
+        query = query.view(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
         query = query.permute(1, 2, 0, 3).reshape(-1, self.kernel_size, query.size(-1))
 
         # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
         # query = self.gru(query)[0]
         # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        query = query.reshape(bs, -1, query.size(-1))[:, :seqlen]
+        query = query.view(bs, -1, query.size(-1))[:, :seqlen]
 
         if upsampled:
             query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
