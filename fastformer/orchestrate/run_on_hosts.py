@@ -122,12 +122,12 @@ if __name__ == "__main__":
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
-    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --log_every_steps 50 --num_workers 32 --validate_every_steps 80000 --save_every_steps 1000"
-    # main_cmd += " --wandb_dryrun"
+    main_cmd += " --wandb_dryrun"
 
     # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
     main_cmd += " --init_method=tcp --master_addr 172.19.171.55 --master_port 9999"
@@ -203,6 +203,7 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip install -U torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import wandb; wandb.login(\"never\", \"7fcf597a1a07dcb2e98622a96838a7eb41b1245d\")"' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip install -U protobuf wandb' --nodes 0:32
+        # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py && python collect_env.py' --nodes 0:16
         run_command_v2(hosts, args["scp"])
 
 
