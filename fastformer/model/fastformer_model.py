@@ -1530,9 +1530,9 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.n_head[block_index] = (total_heads,) + config.n_head[block_index][1:]
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
-        self.self_attn_lin = nn.Sequential(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index]), nn.ReLU())
+        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index])
+        self.relu = nn.LeakyReLU()
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
-        self.cross_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
 
     def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
         bs, seq_len, dim = query.shape
@@ -1546,13 +1546,9 @@ class TransformerCrossAttentionDecoder(nn.Module):
             key_mask = key_padding_mask
 
         (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
-        query = self.self_attn_ln(self.self_attn_lin(query))
-        query = query_temp + query
-        query_temp = query
-        (query,) = self.cross_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
-        query = self.self_attn_ln(self.self_attn_lin(query))
-        query = query_temp + query
-        return query
+        query = self.self_attn_lin(self.relu(query))
+        (query,) = self.self_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
+        return self.self_attn_ln(query)
 
 
 def upsample(x, stride, target_len, cls_tokens):
@@ -1658,10 +1654,10 @@ class TransformerDecoder(nn.Module):
 class DiscriminatorPredictions(nn.Module):
     """Prediction module for the discriminator, made up of two dense layers."""
 
-    def __init__(self, config):
+    def __init__(self, config: FastFormerConfig):
         super().__init__()
         self.config = config
-        self.dense = nn.Linear(config.block_channel_size[0], config.block_channel_size[0])
+        self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0], 1, config.ffn_groups)
         self.dense_prediction = nn.Linear(config.block_channel_size[0], 1)
 
     def forward(self, discriminator_hidden_states):
@@ -1931,7 +1927,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = nn.Linear(config.block_channel_size[-1], 128)
+        self.contrastive_ffn = Conv1d(config.block_channel_size[-1], 128, 1, config.ffn_groups)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
