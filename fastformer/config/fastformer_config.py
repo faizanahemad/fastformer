@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from dataclasses_json import dataclass_json
 
 # size_dicts = {128: 16, 192: 8, 256:8, 512: 4, 768: 2, 1024: 2}
-size_dicts = {128: 24, 192: 16, 256: 12, 384: 8, 512: 6, 768: 4, 1024: 4}
+size_dicts = {128: 24, 192: 16, 256: 12, 384: 8, 512: 8, 768: 4, 1024: 4}
 autocast_factor = 1
 
 

@@ -587,6 +587,7 @@ def train(local_rank, args):
         electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
         ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
+        model.zero_grad()
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
