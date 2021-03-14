@@ -303,7 +303,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               ],
                              n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
                              block_channel_size=[384, 768, 1280], no_v_head=True, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
-                             char_rnn_window_size=64,
+                             char_rnn_window_size=128,
                              short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
