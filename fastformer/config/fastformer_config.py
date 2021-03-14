@@ -15,7 +15,7 @@ from dataclasses_json import dataclass_json
 # size_dicts_val = {128:112, 256:64, 512: 32, 768: 16, 1024: 16}
 # size_dicts = {128:96, 256:48, 512: 24, 768: 16, 1024: 8}
 # size_dicts = {128: 8, 192: 8, 256:8, 512: 8, 768: 4, 1024: 4}
-size_dicts = {256: 2, 512: 2, 1024: 2}
+size_dicts = {256: 4, 512: 4, 1024: 4}
 # size_dicts = {128: 48, 256:24, 512: 16, 768: 8, 1024: 8}
 autocast_factor = 1
 
@@ -265,7 +265,7 @@ vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block
                                        untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1,
                                        block_repeats=True)
 
-sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=True,
+sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, block_sizes=[4, 4, 4],
                              approximate_attention=[False, False, False], max_position_embeddings=1152, d_head=[48, 64, 64], alternate_ffn=True,
                              separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
@@ -309,7 +309,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              )
 
 
-lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=3, use_cuda_conv=True,
+lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=8, ffn_groups=8,
                              approximate_attention=[False, False, False], max_position_embeddings=1152, d_head=[64, 64, 80], alternate_ffn=False,
                              separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
