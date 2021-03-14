@@ -1530,7 +1530,7 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.n_head[block_index] = (total_heads,) + config.n_head[block_index][1:]
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
-        self.self_attn_lin = nn.Sequential(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index]), nn.GELU())
+        self.self_attn_lin = nn.Sequential(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index]), nn.ReLU())
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
         self.cross_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
 
