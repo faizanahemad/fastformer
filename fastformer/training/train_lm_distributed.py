@@ -706,7 +706,7 @@ def train(local_rank, args):
             clean_memory()
             barrier()
         del batch
-        del label
+        del labels
         del output
         del loss_dict
         start_time = time.time()
