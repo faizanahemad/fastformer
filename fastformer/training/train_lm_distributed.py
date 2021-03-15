@@ -585,6 +585,8 @@ def train(local_rank, args):
     start_time = time.time()
     for step, batch in enumerate(train_loader):
         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+        bs = batch["input_ids"].shape
+        bs_size = batch["input_ids"].size()
         if other_load_details is not None:
             if step < other_load_details["step"] and args["skip_steps"]:
                 if (step + 1) % log_every_steps == 0 or step == 0:
@@ -628,7 +630,7 @@ def train(local_rank, args):
                 loss = output["loss"]
                 loss_dict = output["loss_dict"]
                 if np.isnan(loss_dict["loss"]):
-                    es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+                    es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, loss_dict, bs_size, optimizer.param_groups[0]['lr'])
                     raise ValueError(es)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
@@ -647,7 +649,7 @@ def train(local_rank, args):
                     loss_dict = output["loss_dict"]
 
                     if np.isnan(loss_dict["loss"]):
-                        es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, scaler.get_scale(), loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+                        es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, scaler.get_scale(), loss_dict, bs_size, optimizer.param_groups[0]['lr'])
                         raise ValueError(es)
 
                     # clean_memory()
@@ -669,7 +671,7 @@ def train(local_rank, args):
                         scheduler.step()
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
-            get_time_string(), step, rank, scaler.get_scale(), batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
+            get_time_string(), step, rank, scaler.get_scale(), bs_size, optimizer.param_groups[0]['lr'])
             print(es)
             torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
             torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
@@ -690,13 +692,13 @@ def train(local_rank, args):
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
             acc_dict = output["accuracy_hist"]
             time.sleep(random.random() + 0.1)
-            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(batch["input_ids"].shape[:2]),
+            wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs[:2]),
                            batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                            **loss_dict, **acc_dict))
             if local_rank == 0:
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
                       (get_time_string(), rank, step, samples_processed, scaler.get_scale(),
-                       batch["input_ids"].size(), loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
+                       bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
             batch_times = []
             model_times = []
@@ -709,6 +711,7 @@ def train(local_rank, args):
         del labels
         del output
         del loss_dict
+        del bs_size
         start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
