@@ -481,7 +481,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=25)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -585,16 +585,16 @@ def train(local_rank, args):
     start_time = time.time()
     for step, batch in enumerate(train_loader):
         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-        # if other_load_details is not None:
-        #     if step < other_load_details["step"] and args["skip_steps"]:
-        #         if (step + 1) % log_every_steps == 0 or step == 0:
-        #             print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
-        #         continue
-        #     else:
-        #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
+        if other_load_details is not None:
+            if step < other_load_details["step"] and args["skip_steps"]:
+                if (step + 1) % log_every_steps == 0 or step == 0:
+                    print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
+                continue
+            else:
+                step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
 
-        # electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
-        # ddp_model.module.electra_loss_w = electra_loss_w
+        electra_loss_w = float(((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"])
+        ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         model.zero_grad()
         gen_batch_time = time.time() - start_time
@@ -629,9 +629,6 @@ def train(local_rank, args):
                 loss_dict = output["loss_dict"]
                 if np.isnan(loss_dict["loss"]):
                     es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
-                    print(es)
-                    torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
-                    torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                     raise ValueError(es)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
@@ -651,9 +648,6 @@ def train(local_rank, args):
 
                     if np.isnan(loss_dict["loss"]):
                         es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, scaler.get_scale(), loss_dict, batch["input_ids"].size(), optimizer.param_groups[0]['lr'])
-                        print(es)
-                        torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
-                        torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
                         raise ValueError(es)
 
                     # clean_memory()
@@ -708,8 +702,13 @@ def train(local_rank, args):
             model_times = []
             full_times = []
             samples_processed_this_log_iter = 0
+            del acc_dict
             clean_memory()
             barrier()
+        del batch
+        del label
+        del output
+        del loss_dict
         start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
