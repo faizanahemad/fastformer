@@ -1951,7 +1951,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
         self.electra_loss_w = electra_loss_w
         self.loss_hist = defaultdict(list)
-        self.accuracy_hist = list()
         self.reccord_loss = False
         self.record_accuracy = False
         self.timing_hist = list()
