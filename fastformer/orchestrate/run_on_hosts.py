@@ -61,7 +61,6 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         args = [None] * len(hosts)
 
     tsize = shutil.get_terminal_size()[0]
-    sep_dict = {"host": [".", int(0.2 * tsize)], "stdout": [" ", int(0.5 * tsize)], "stderr": [" ", int(0.1 * tsize)], "cmd": [" ", int(0.2 * tsize)]}
     with ProcessPoolExecutor(min(32, len(hosts))) as executor:
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
     if len(ld) <= 2:
@@ -81,8 +80,20 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         # "\n".join(["\n".join(list(justify(x.split(sep_dict[key][0]), sep_dict[key][1]))) for x in str(item[key]).split('\n')])
         fns = lambda string, sep, num_chars: "\n".join(["\n".join(list(justify(list(x), num_chars))) for x in str(string).split('\n')])
 
+        tsize = shutil.get_terminal_size()[0]
+        _ = [out.pop("cmd", None) for out in ld]
+        if sum([len(out["stderr"].strip()) for out in ld]) == 0:
+            _ = [out.pop("stderr", None) for out in ld]
+            stderr_size = 0.0
+            stdout_size = 0.7
+        else:
+            stderr_size = 0.3
+            stdout_size = 0.4
+        sep_dict = {"host": [".", int(0.3 * tsize)], "stdout": [" ", int(stdout_size * tsize)], "stderr": [" ", int(stderr_size * tsize)]}
+
         dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
         # dl = {key: ["\n".join(list(justify(str(item[key]).split(sep_dict[key][0]), sep_dict[key][1]))) for item in ld] for key in ld[0].keys()}
+
         print(tabulate(dl, headers="keys", tablefmt="grid"))
 
 
