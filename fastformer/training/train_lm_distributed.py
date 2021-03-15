@@ -584,16 +584,17 @@ def train(local_rank, args):
 
     start_time = time.time()
     for step, batch in enumerate(train_loader):
-        if other_load_details is not None:
-            if step < other_load_details["step"] and args["skip_steps"]:
-                if (step + 1) % log_every_steps == 0 or step == 0:
-                    print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
-                continue
-            else:
-                step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
+        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+        # if other_load_details is not None:
+        #     if step < other_load_details["step"] and args["skip_steps"]:
+        #         if (step + 1) % log_every_steps == 0 or step == 0:
+        #             print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
+        #         continue
+        #     else:
+        #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
 
-        electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
-        ddp_model.module.electra_loss_w = electra_loss_w
+        # electra_loss_w = ((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"]
+        # ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         model.zero_grad()
         gen_batch_time = time.time() - start_time
@@ -613,7 +614,7 @@ def train(local_rank, args):
 
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
-        labels = labels.to(device)
+        labels = labels.to(device, non_blocking=True)
         model_start_time = time.time()
         samples_processed += batch["input_ids"].size(0)
         samples_processed_this_log_iter += batch["input_ids"].size(0)
