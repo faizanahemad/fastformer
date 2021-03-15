@@ -426,7 +426,7 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"

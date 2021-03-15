@@ -178,7 +178,7 @@ if __name__ == "__main__":
     if args["start"]:
         cmd4 = cmd_dir + " && " + main_cmd
         if "tcp" in main_cmd:
-            ip_address_cmd = "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            ip_address_cmd = "ifconfig eth0 | grep inet | cut -d: -f2"
             ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
             part0, part1 = cmd4.split("--master_addr")
             part1 = part1.strip().split()[1:]
