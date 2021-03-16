@@ -180,7 +180,7 @@ class Embeddings(nn.Module):
 
 
         if config.char_rnn:
-            char_div = 2
+            char_div = 4
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
