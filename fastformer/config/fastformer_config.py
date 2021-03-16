@@ -16,7 +16,7 @@ from dataclasses_json import dataclass_json
 # size_dicts = {128: 24, 192: 16, 256: 12, 384: 8, 512: 8, 768: 4, 1024: 4}
 # size_dicts = {128: 32, 192: 32, 256: 24, 384: 16, 512: 16, 768: 8, 1024: 8}
 # size_dicts = {128: 16, 192: 8, 256: 8, 384: 4, 512: 4, 768: 2, 1024: 2}
-size_dicts = {128: 16, 192: 12, 256: 12, 384: 8, 512: 8, 768: 4, 1024: 4}
+size_dicts = {128: 24, 192: 20, 256: 16, 384: 12, 512: 8, 768: 4, 1024: 4}
 autocast_factor = 1
 
 
@@ -303,7 +303,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               # (2, 1), (2, 2), (2, 3), (2, 4)
                                                               ],
                              n_head=[(8, 0, 0), (10, 0, 0), (16, 0, 0)],
-                             block_channel_size=[384, 640, 1024], no_v_head=True, expand_dim_before_pooling=False, char_rnn=False, char_rnn_window_overlap=64,
+                             block_channel_size=[384, 640, 1024], no_v_head=True, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=64,
                              short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
