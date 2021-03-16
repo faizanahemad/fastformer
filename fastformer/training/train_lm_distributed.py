@@ -466,7 +466,7 @@ def train(local_rank, args):
     os.environ['MASTER_PORT'] = args["master_port"]
     os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     gpu_device = 0
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
