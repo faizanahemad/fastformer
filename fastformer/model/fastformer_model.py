@@ -1927,7 +1927,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = Conv1d(config.block_channel_size[-1], 128, 1, config.ffn_groups)
+        self.contrastive_ffn = nn.Sequential(nn.LeakyReLU(), Conv1d(config.block_channel_size[0], 128, 1, config.ffn_groups))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -2007,7 +2007,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
         third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
-        encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
 
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0
@@ -2040,7 +2039,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         contrastive_kl = 0.0
         if contrastive_anchors is not None:
-            contrastive_block_hidden = encoder_last_layer_out
+            contrastive_block_hidden = new_funnel_outputs["final_hidden"][:, self.cls_tokens + 1:]
 
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
@@ -2076,7 +2075,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         answering_lm_loss_kl = 0.0
         run_answering = labels_pet_input_ids is not None
         if run_answering:
-            assert labels_pet_input_ids.size(1) <= encoder_last_layer_out.size(1)
             answering_hidden = new_funnel_outputs["answering_hidden"]
             answering_lm_loss_kl = KL(answering_hidden, funnel_outputs["answering_hidden"].detach(), reduction="batchmean")
             if reverse_loss:
@@ -2228,7 +2226,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("encoder_outputs", et))
         answering_lm_loss = 0.0
-        encoder_last_layer_out = encoder_outputs[0][:, self.cls_tokens + 1:]
         if run_answering:
             alen = labels_pet_input_ids.size(1)
             assert alen <= funnel_outputs["answering_logits"].size(1)
@@ -2261,7 +2258,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
 
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = encoder_last_layer_out
+            contrastive_block_hidden = funnel_outputs["final_hidden"][:, self.cls_tokens + 1:]
             contrastive_len = contrastive_block_hidden.size(1)
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
