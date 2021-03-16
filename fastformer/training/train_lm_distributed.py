@@ -464,7 +464,9 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
-    # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
+    gpu_device = 0
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
@@ -478,7 +480,7 @@ def train(local_rank, args):
         args["dist_backend"] = "gloo"
         # init_method = "tcp://%s:%s" % ("127.0.0.1", "9999")
     else:
-        device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
+        device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
     print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
     if args["init_method"] == "tcp":
@@ -517,9 +519,9 @@ def train(local_rank, args):
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
-        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
+        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % gpu_device))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -562,7 +564,7 @@ def train(local_rank, args):
     print("[Train]: Scheduler Created for Rank = %s" % rank)
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("[Train]: Trying Resume from %s for Rank = %s" % (args["resume"], rank))
-        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, local_rank)
+        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, gpu_device)
 
         if other_load_details is None:
             print("[Train]: No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
