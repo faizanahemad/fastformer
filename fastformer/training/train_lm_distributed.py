@@ -384,8 +384,8 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         if num_workers > 0:
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset),
                                       batch_size=min(size_dicts.values()), collate_fn=collate_fn,
-                                      prefetch_factor=max(size_dicts.values()) // min(size_dicts.values()),
-                                      num_workers=(2*num_workers) if single_node else num_workers, pin_memory=True)
+                                      prefetch_factor=2 * max(size_dicts.values()) // min(size_dicts.values()),
+                                      num_workers=num_workers, pin_memory=True)
         else:
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min(size_dicts.values()),
                                       collate_fn=collate_fn,
@@ -401,7 +401,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         # for v in train_dataset.values():
         #     v.training = False
         if num_workers > 0:
-            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=(2*num_workers) if single_node else num_workers) for k, v in train_dataset.items()}
+            train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2 * max(size_dicts.values()) // min(size_dicts.values()), num_workers=num_workers) for k, v in train_dataset.items()}
         else:
             train_loader = {
                 k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), batch_size=min(size_dicts.values()), collate_fn=collate_fn,
