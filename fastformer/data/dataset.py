@@ -634,7 +634,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                     # if prev is small but cur is big then keep prev and yield cur
                     yield cur_batch
                 else:
-                    if prev_batch_size >= cur_batch_size:
+                    if prev_batch_size > cur_batch_size or (prev_batch_size == cur_batch_size and prev_seq_len >= cur_seq_len):
                         yield prev_batch
                         prev_batch = cur_batch
                     else:
