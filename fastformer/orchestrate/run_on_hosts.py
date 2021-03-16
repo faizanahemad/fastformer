@@ -219,7 +219,13 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip uninstall torch -y && pip install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu111/torch_nightly.html' --nodes 0:32
         run_command_v2(hosts, args["scp"])
 
+# python run_on_hosts.py --hosts_file hosts-large.txt --custom 'sudo mkdir /home/ahemf && sudo chown -R ahemf /home/ahemf' --nodes 0:64
+# python run_on_hosts.py --hosts_file hosts-large.txt --scp "scp -rC ./setup-1.sh ahemf@%s:/home/ahemf" --nodes 0:64
+# python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'chmod 777 setup-1.sh && ./setup-1.sh > /dev/null' --nodes 0:32
 
+# python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'chmod 777 setup-2.sh && ./setup-2.sh > /dev/null' --nodes 0:32
+
+# python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && mkdir /home/ahemf/torch_distributed_init && sudo mount -t nfs -o nolock dev-dsk-ahemf-p3-us-east-1a-1-f698d178.us-east-1.amazon.com:/home/ahemf/torch_distributed_init /home/ahemf/torch_distributed_init' --nodes 1:32
 
 
 

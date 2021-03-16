@@ -481,7 +481,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % local_rank))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=1)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [local_rank], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -587,16 +587,16 @@ def train(local_rank, args):
         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
         bs = batch["input_ids"].shape
         bs_size = batch["input_ids"].size()
-        if other_load_details is not None:
-            if step < other_load_details["step"] and args["skip_steps"]:
-                if (step + 1) % log_every_steps == 0 or step == 0:
-                    print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
-                continue
-            else:
-                step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
-
-        electra_loss_w = float(((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"])
-        ddp_model.module.electra_loss_w = electra_loss_w
+        # if other_load_details is not None:
+        #     if step < other_load_details["step"] and args["skip_steps"]:
+        #         if (step + 1) % log_every_steps == 0 or step == 0:
+        #             print("[Train]: Time = %s, Skipping step = %s, due to checkpoint with details = %s, Rank = %s" % (get_time_string(), step, other_load_details, rank))
+        #         continue
+        #     else:
+        #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
+        #
+        # electra_loss_w = float(((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"])
+        # ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         model.zero_grad()
         gen_batch_time = time.time() - start_time
@@ -639,11 +639,6 @@ def train(local_rank, args):
             else:
                 with autocast():
                     output = ddp_model(**batch, labels=labels)
-                    # clean_memory()
-                    # print("Step = %s, Pre-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
-                    #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
-                    #        torch.cuda.max_memory_allocated() / 1e6,
-                    #        torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
                     loss = output["loss"]
                     loss_dict = output["loss_dict"]
@@ -654,11 +649,6 @@ def train(local_rank, args):
 
                     # clean_memory()
                     scaler.scale(loss).backward()
-                    # clean_memory()
-                    # print("Step = %s, Post-Backward: , for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
-                    #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6,
-                    #        torch.cuda.max_memory_allocated() / 1e6,
-                    #        torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
