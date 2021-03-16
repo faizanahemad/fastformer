@@ -596,6 +596,7 @@ def batch_merge(b1, b2):
 
 def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     size, batch_size = zip(*list(batch_size_dict.items()))
+    min_batch_size = min(batch_size)
     i = 1
     cur_iter = 1
     prev_batch = None
@@ -617,27 +618,27 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                 cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
 
                 # TODO: can we merge or not, if we merge then dont yield else yield and make prev_batch=cur_batch
-                actual_batch_size_post_merge = prev_batch["input_ids"].size(0) + cur_batch["input_ids"].size(0)
+                prev_batch_size = prev_batch["input_ids"].size(0)
+                cur_batch_size = cur_batch["input_ids"].size(0)
+                actual_batch_size_post_merge = prev_batch_size + cur_batch_size
                 can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
                 if can_we_merge:
                     # if prev is small and cur is small then merge
                     prev_batch = batch_merge(prev_batch, cur_batch)
-                elif actual_batch_size_post_merge > prev_mx_bt_size and actual_batch_size_post_merge > cur_mx_bt_size:
-                    # if prev is big and cur is big then yield prev and cur
-                    yield prev_batch
-                    yield cur_batch
-                    prev_batch = None
 
-                elif actual_batch_size_post_merge > prev_mx_bt_size:
+                elif actual_batch_size_post_merge > prev_mx_bt_size and prev_batch_size >= (prev_mx_bt_size - min_batch_size):
                     # if prev is big and cur is small then yield prev keep cur
                     yield prev_batch
                     prev_batch = cur_batch
-                elif actual_batch_size_post_merge > cur_mx_bt_size:
+                elif actual_batch_size_post_merge > cur_mx_bt_size and cur_batch_size >= (cur_mx_bt_size - min_batch_size):
                     # if prev is small but cur is big then keep prev and yield cur
                     yield cur_batch
                 else:
-                    yield prev_batch
-                    prev_batch = cur_batch
+                    if prev_batch_size >= cur_batch_size:
+                        yield prev_batch
+                        prev_batch = cur_batch
+                    else:
+                        yield cur_batch
 
         if not continuous_iter:
             i = i - 1
