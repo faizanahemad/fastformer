@@ -630,9 +630,8 @@ def train(local_rank, args):
     for step, batch in enumerate(train_loader):
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
+        bs_size = list(batch["input_ids"].size())
         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-        bs = batch["input_ids"].shape
-        bs_size = batch["input_ids"].size()
         # if other_load_details is not None:
         #     if step < other_load_details["step"] and args["skip_steps"]:
         #         if (step + 1) % log_every_steps == 0 or step == 0:
@@ -644,7 +643,6 @@ def train(local_rank, args):
         # electra_loss_w = float(((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"])
         # ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
-        model.zero_grad()
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
@@ -662,8 +660,8 @@ def train(local_rank, args):
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
         labels = labels.to(device, non_blocking=True)
         model_start_time = time.time()
-        samples_processed += batch["input_ids"].size(0)
-        samples_processed_this_log_iter += batch["input_ids"].size(0)
+        samples_processed += int(batch["input_ids"].size(0))
+        samples_processed_this_log_iter += int(batch["input_ids"].size(0))
         # clean_memory()
         # print("Step = %s, Before:, for Rank = %s, input_size = %s, Allocated = %.3f, Max Allocated = %.3f, Percent = %s" %
         #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
@@ -701,7 +699,7 @@ def train(local_rank, args):
                 acc_dict = output["accuracy_hist"]
                 loss_dict = output["loss_dict"]
                 time.sleep(random.random() + 0.1)
-                wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs[:2]),
+                wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
                                batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                                **loss_dict, **acc_dict))
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
