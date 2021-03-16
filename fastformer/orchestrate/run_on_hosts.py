@@ -228,6 +228,7 @@ if __name__ == "__main__":
 
 # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && mkdir /home/ahemf/torch_distributed_init && sudo mount -t nfs -o nolock dev-dsk-ahemf-p3-us-east-1a-1-f698d178.us-east-1.amazon.com:/home/ahemf/torch_distributed_init /home/ahemf/torch_distributed_init' --nodes 1:32
 
+# python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip uninstall torch -y && pip install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html > /dev/null' --nodes 0:16
 
 
 
