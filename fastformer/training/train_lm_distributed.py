@@ -63,6 +63,9 @@ def training_args():
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
 
+    parser.add_argument('--accumulation_steps', default=1, type=int,
+                        help='Gradient Accumulation')
+
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
 
@@ -421,6 +424,41 @@ def train_catch_exception(local_rank, args):
         raise e
 
 
+def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False):
+    # It seems to me like the first accumulated gradients might get clipped several times hence giving more weight to last accumulated gradients :
+
+    if args["cpu"] or args["no_autocast"]:
+        output = ddp_model(**batch, labels=labels)
+        loss = output["loss"] / iter_size
+        loss_dict = output["loss_dict"]
+        loss.backward()
+
+        if not no_sync:
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            optimizer.step()
+            scheduler.step()
+    else:
+        with autocast():
+            output = ddp_model(**batch, labels=labels)
+            loss = output["loss"] / iter_size
+            loss_dict = output["loss_dict"]
+            scaler.scale(loss).backward()
+        if not no_sync:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            scaler.step(optimizer)
+            scale = scaler.get_scale()
+            scaler.update()
+            skip_lr_sched = (scale != scaler.get_scale())
+            if not skip_lr_sched:
+                scheduler.step()
+    if np.isnan(loss_dict["loss"]):
+        es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
+            get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
+        raise ValueError(es)
+    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
+
+
 def train(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP
@@ -583,8 +621,13 @@ def train(local_rank, args):
             else:
                 param.register_hook(get_hook())
 
+    no_sync = args["accumulation_steps"] > 1
+    iter_size = args["accumulation_steps"]
+
     start_time = time.time()
     for step, batch in enumerate(train_loader):
+        gen_batch_time = time.time() - start_time
+        batch_times.append(gen_batch_time)
         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
         bs = batch["input_ids"].shape
         bs_size = batch["input_ids"].size()
@@ -600,8 +643,6 @@ def train(local_rank, args):
         # ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         model.zero_grad()
-        gen_batch_time = time.time() - start_time
-        batch_times.append(gen_batch_time)
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
@@ -626,40 +667,13 @@ def train(local_rank, args):
         #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
-            if args["cpu"] or args["no_autocast"]:
-                output = ddp_model(**batch, labels=labels)
-                loss = output["loss"]
-                loss_dict = output["loss_dict"]
-                if np.isnan(loss_dict["loss"]):
-                    es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, loss_dict, bs_size, optimizer.param_groups[0]['lr'])
-                    raise ValueError(es)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-                optimizer.step()
-                scheduler.step()
+            if no_sync and (step + 1) % iter_size != 0:
+                with ddp_model.no_sync():
+                    output = train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                                              no_sync=True)
             else:
-                with autocast():
-                    output = ddp_model(**batch, labels=labels)
+                output = train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size, no_sync=False)
 
-                    loss = output["loss"]
-                    loss_dict = output["loss_dict"]
-
-                    if np.isnan(loss_dict["loss"]):
-                        es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, loss_dict = %s, input_size = %s, lr = %s" % (get_time_string(), step, rank, scaler.get_scale(), loss_dict, bs_size, optimizer.param_groups[0]['lr'])
-                        raise ValueError(es)
-
-                    # clean_memory()
-                    scaler.scale(loss).backward()
-
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-                    # torch.nn.utils.clip_grad_value_(ddp_model.parameters(), 1)
-                    scaler.step(optimizer)
-                    scale = scaler.get_scale()
-                    scaler.update()
-                    skip_lr_sched = (scale != scaler.get_scale())
-                    if not skip_lr_sched:
-                        scheduler.step()
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
             get_time_string(), step, rank, scaler.get_scale(), bs_size, optimizer.param_groups[0]['lr'])
@@ -680,10 +694,11 @@ def train(local_rank, args):
         if step == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0:
-            samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-            acc_dict = output["accuracy_hist"]
-            time.sleep(random.random() + 0.1)
             if local_rank == 0:
+                samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
+                acc_dict = output["accuracy_hist"]
+                loss_dict = output["loss_dict"]
+                time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs[:2]),
                                batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
                                **loss_dict, **acc_dict))
@@ -691,17 +706,19 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed, scaler.get_scale(),
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
+                del acc_dict
+                del loss_dict
+
             batch_times = []
             model_times = []
             full_times = []
             samples_processed_this_log_iter = 0
-            del acc_dict
+
             clean_memory()
             barrier()
         del batch
         del labels
         del output
-        del loss_dict
         del bs_size
         start_time = time.time()
 
