@@ -599,6 +599,11 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     i = 1
     cur_iter = 1
     prev_batch = None
+    # if prev is small but cur is big then keep prev and yield cur
+    # if prev is big and cur is big then yield prev and cur
+
+    # if prev is big and cur is small then yield prev keep cur
+    # if prev is small and cur is small then merge
     while i > 0:
         print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
         start_time = time.time()
@@ -615,10 +620,23 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                 actual_batch_size_post_merge = prev_batch["input_ids"].size(0) + cur_batch["input_ids"].size(0)
                 can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
                 if can_we_merge:
+                    # if prev is small and cur is small then merge
                     prev_batch = batch_merge(prev_batch, cur_batch)
+                elif actual_batch_size_post_merge > prev_mx_bt_size and actual_batch_size_post_merge > cur_mx_bt_size:
+                    # if prev is big and cur is big then yield prev and cur
+                    yield prev_batch
+                    yield cur_batch
+                    prev_batch = None
+
+                elif actual_batch_size_post_merge > prev_mx_bt_size:
+                    # if prev is big and cur is small then yield prev keep cur
+                    yield prev_batch
+                    prev_batch = cur_batch
+                elif actual_batch_size_post_merge > cur_mx_bt_size:
+                    # if prev is small but cur is big then keep prev and yield cur
+                    yield cur_batch
                 else:
                     yield prev_batch
-                    _ = gc.collect()
                     prev_batch = cur_batch
 
         if not continuous_iter:
