@@ -655,7 +655,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     cur_iter = 1
     batch_cache = list()
     batch_age = list()
-    maxlen = 100
+    maxlen = 1000
     # If it can't be merged and can't be yielded then store.
     while i > 0:
         print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
@@ -665,21 +665,10 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
             cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
             cur_batch_size = cur_batch["input_ids"].size(0)
             batch_cache.sort(key=lambda x: x["input_ids"].size(0) * x["input_ids"].size(-1))
-            can_we_merge = False
-            for idx, prev_batch in enumerate(batch_cache):
-                prev_seq_len = prev_batch["input_ids"].size(-1)
-                prev_batch_size = prev_batch["input_ids"].size(0)
-                prev_mx_bt_size = batch_size[np.searchsorted(size, prev_seq_len)]
-                actual_batch_size_post_merge = prev_batch_size + cur_batch_size
-                can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
-                if can_we_merge:
-                    # if prev is small and cur is small then merge
-                    prev_batch = batch_merge(prev_batch, cur_batch)
-                    batch_cache[idx] = prev_batch
-                    break
 
             temp = []
             age_temp = []
+            can_we_merge = False
             while batch_cache:
                 prev_batch = batch_cache.pop()
                 prev_age = batch_age.pop()
@@ -689,12 +678,17 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                 if prev_batch_size > (prev_mx_bt_size - min_batch_size) or prev_age > maxlen * 10:
                     yield prev_batch
                 else:
+                    actual_batch_size_post_merge = prev_batch_size + cur_batch_size
+                    can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
+                    if can_we_merge and cur_batch is not None:
+                        prev_batch = batch_merge(prev_batch, cur_batch)
+                        cur_batch = None
                     temp.append(prev_batch)
                     age_temp.append(prev_age + 1)
 
             batch_cache = temp
             batch_age = age_temp
-            if not can_we_merge and len(batch_cache) < maxlen and cur_batch_size <= (cur_mx_bt_size - min_batch_size):
+            if not can_we_merge and len(batch_cache) < maxlen and cur_batch_size <= (cur_mx_bt_size - min_batch_size) and cur_batch is not None:
                 batch_cache.append(cur_batch)
                 batch_age.append(1)
             else:
