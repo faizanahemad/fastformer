@@ -535,13 +535,7 @@ def train(local_rank, args):
     optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
     scaler = GradScaler()
-    if local_rank == 0:
-        wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
-                               config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc},
-                               settings=wandb.Settings(start_method="fork"))
 
-        time.sleep(random.random() * 5)
-        wandb.init(**wandb_init_args)
     # model, optim, gradscaler, scheduler, steps
 
     model_save_dir = args["model_save_dir"]
@@ -581,7 +575,7 @@ def train(local_rank, args):
         _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
         if args["validate_only"]:
             return
-    print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
+    # print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
     # wandb.watch(model, log="all", log_freq=log_every_steps)
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
@@ -591,6 +585,13 @@ def train(local_rank, args):
     samples_processed = 0
     samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
+    if local_rank == 0:
+        wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
+                               config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc},
+                               settings=wandb.Settings(start_method="fork"))
+
+        time.sleep(random.random() * 5)
+        wandb.init(**wandb_init_args)
     barrier()
 
     if args["detect_anomaly"]:
