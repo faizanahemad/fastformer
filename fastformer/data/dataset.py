@@ -595,13 +595,12 @@ def batch_merge(b1, b2):
     return fb
 
 
-def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
+def custom_batching_fn_old(dataloader, batch_size_dict, continuous_iter=True):
     size, batch_size = zip(*list(batch_size_dict.items()))
     min_batch_size = min(batch_size)
     i = 1
     cur_iter = 1
     prev_batch = None
-    batch_cache = deque([], maxlen=10)
     # if prev is small but cur is big then keep prev and yield cur
     # if prev is big and cur is big then yield prev and cur
 
@@ -641,6 +640,75 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                         prev_batch = cur_batch
                     else:
                         yield cur_batch
+
+        if not continuous_iter:
+            i = i - 1
+        tot_time = time.time() - start_time
+        print("%s [custom_batching_fn]: End Epoch = %s, Time Taken = %.0f" % (get_time_string(), cur_iter, tot_time))
+        cur_iter += 1
+
+
+
+def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
+    size, batch_size = zip(*list(batch_size_dict.items()))
+    min_batch_size = min(batch_size)
+    i = 1
+    cur_iter = 1
+    batch_cache = list()
+    batch_age = list()
+    maxlen = 100
+    # if prev is small but cur is big then keep prev and yield cur
+    # if prev is big and cur is big then yield prev and cur
+
+    # if prev is big and cur is small then yield prev keep cur
+    # if prev is small and cur is small then merge
+    while i > 0:
+        print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
+        start_time = time.time()
+        for _, cur_batch in enumerate(dataloader):
+            if len(batch_cache) < maxlen // 2:
+                batch_cache.append(cur_batch)
+                batch_age.append(1)
+            else:
+
+                cur_seq_len = cur_batch["input_ids"].size(-1)
+                cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
+                cur_batch_size = cur_batch["input_ids"].size(0)
+                batch_cache.sort(key=lambda x: x.size(0) * x.size(-1))
+                can_we_merge = False
+                for idx, prev_batch in enumerate(batch_cache):
+                    prev_seq_len = prev_batch["input_ids"].size(-1)
+                    prev_batch_size = prev_batch["input_ids"].size(0)
+                    prev_mx_bt_size = batch_size[np.searchsorted(size, prev_seq_len)]
+                    actual_batch_size_post_merge = prev_batch_size + cur_batch_size
+                    can_we_merge = actual_batch_size_post_merge <= prev_mx_bt_size and actual_batch_size_post_merge <= cur_mx_bt_size
+                    if can_we_merge:
+                        # if prev is small and cur is small then merge
+                        prev_batch = batch_merge(prev_batch, cur_batch)
+                        batch_cache[idx] = prev_batch
+                        break
+
+                temp = []
+                age_temp = []
+                while batch_cache:
+                    prev_batch = batch_cache.pop()
+                    prev_age = batch_age.pop()
+                    prev_seq_len = prev_batch["input_ids"].size(-1)
+                    prev_batch_size = prev_batch["input_ids"].size(0)
+                    prev_mx_bt_size = batch_size[np.searchsorted(size, prev_seq_len)]
+                    if prev_batch_size > (prev_mx_bt_size - min_batch_size) or prev_age > 100:
+                        yield prev_batch
+                    else:
+                        temp.append(prev_batch)
+                        age_temp.append(prev_age + 1)
+
+                batch_cache = temp
+                batch_age = age_temp
+                if not can_we_merge and len(batch_cache) < maxlen and cur_batch_size <= (cur_mx_bt_size - min_batch_size):
+                    batch_cache.append(cur_batch)
+                    batch_age.append(1)
+                else:
+                    yield cur_batch
 
         if not continuous_iter:
             i = i - 1
