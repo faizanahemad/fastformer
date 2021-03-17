@@ -866,3 +866,4 @@ fastformer/data/train_fastformer_1p/
 /fastformer/orchestrate/hosts-small.txt
 /fastformer/orchestrate/hosts-medium.txt
 /fastformer/orchestrate/hosts-storage.txt
+/fastformer/orchestrate/hosts-large.txt

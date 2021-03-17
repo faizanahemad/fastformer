@@ -1,3 +1,6 @@
+mkdir /home/ahemf/processed_datasets
+mkdir /home/ahemf/model_save_dir
+mkdir /home/ahemf/torch_distributed_init
 cat > ~/.zshrc << "EOF"
 
 export ZSH=/home/$USER/.oh-my-zsh

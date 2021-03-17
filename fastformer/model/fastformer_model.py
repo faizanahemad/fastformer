@@ -644,7 +644,7 @@ class ShortSeqRNNOld(nn.Module):
 
 class SeparableConv1d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
-                 bias=True, stride=1, padding=None):
+                 bias=False, stride=1, padding=None):
         super().__init__()
         if padding is None:
             padding = (kernel_size - 1) // 2
@@ -1212,13 +1212,17 @@ class ConvFFN(nn.Module):
         d_out = d_model if d_out is None else d_out
         cin, cout = d_model, d_out
         act = config.hidden_act
-        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups)
+        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups, bias=False)
+        self.conv1d_in.post_permute = False
         self.activation_dropout = Dropout(config.activation_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
-            self.layers.append(Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups))
+            cnn = Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups)
+            cnn.pre_permute=False
+            cnn.post_permute=False
+            self.layers.append(cnn)
         self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
-
+        self.conv1d_out.pre_permute = False
         self.dropout = Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
@@ -1657,7 +1661,7 @@ class DiscriminatorPredictions(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
         self.config = config
-        self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups)
+        self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False)
         self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
 
     def forward(self, discriminator_hidden_states):
