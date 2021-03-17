@@ -154,7 +154,7 @@ if __name__ == "__main__":
     # main_cmd += " --cpu"
     # main_cmd += " --no_autocast"
     # main_cmd += " --detect_anomaly"
-    main_cmd += " --accumulation_steps 4"
+    main_cmd += " --accumulation_steps 2"
     main_cmd += " --shuffle_dataset"
 
     main_cmd += " > output.log 2>&1 & disown"
@@ -169,8 +169,8 @@ if __name__ == "__main__":
     cmd3 = cmd_dir + " && git pull"
     clear_log = cmd_dir + " && rm output.log"
     if args["kill"]:
-        run_command_v2(hosts, cmd0)
         run_command_v2(hosts, cmd1)
+        run_command_v2(hosts, cmd0)
         run_command_v2(h1, cmd2)
         run_command_v2(hosts, clear_log)
         time.sleep(10)
