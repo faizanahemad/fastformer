@@ -648,7 +648,6 @@ def custom_batching_fn_old(dataloader, batch_size_dict, continuous_iter=True):
         cur_iter += 1
 
 
-
 def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     size, batch_size = zip(*list(batch_size_dict.items()))
     min_batch_size = min(batch_size)
@@ -674,7 +673,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
                 cur_seq_len = cur_batch["input_ids"].size(-1)
                 cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
                 cur_batch_size = cur_batch["input_ids"].size(0)
-                batch_cache.sort(key=lambda x: x.size(0) * x.size(-1))
+                batch_cache.sort(key=lambda x: x["input_ids"].size(0) * x["input_ids"].size(-1))
                 can_we_merge = False
                 for idx, prev_batch in enumerate(batch_cache):
                     prev_seq_len = prev_batch["input_ids"].size(-1)
