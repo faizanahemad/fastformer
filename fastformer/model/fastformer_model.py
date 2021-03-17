@@ -1931,7 +1931,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
-        self.contrastive_ffn = nn.Sequential(nn.LeakyReLU(), nn.Linear(config.block_channel_size[0], 128)) # Straight take first 128 dims from final hidden
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -2066,7 +2065,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 pass
             else:
                 contrastive_block_hidden = torch.stack(anchors + positives)
-                contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden)
+                if len(contrastive_block_hidden.size()) == 2:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :128]
+                elif len(contrastive_block_hidden.size()) == 3:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
+
 
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
@@ -2206,6 +2209,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         record_accuracy = self.record_accuracy or kwargs.pop("record_accuracy", False)
         st = time.time()
         run_answering = labels_pet_input_ids is not None
+        assert run_answering
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
                              token_type_ids=token_type_ids,
@@ -2300,7 +2304,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 pass
             else:
                 contrastive_block_hidden = torch.stack(anchors + positives)
-                contrastive_block_hidden = self.contrastive_ffn(contrastive_block_hidden)
+                if len(contrastive_block_hidden.size()) == 2:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :128]
+                elif len(contrastive_block_hidden.size()) == 3:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
                 if at_cast:
                     contrastive_block_hidden.register_hook(hook)
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
