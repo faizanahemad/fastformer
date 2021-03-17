@@ -691,7 +691,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
             if not can_we_merge and len(batch_cache) < maxlen and cur_batch_size <= (cur_mx_bt_size - min_batch_size) and cur_batch is not None:
                 batch_cache.append(cur_batch)
                 batch_age.append(1)
-            else:
+            elif cur_batch is not None:
                 yield cur_batch
 
         if not continuous_iter:
