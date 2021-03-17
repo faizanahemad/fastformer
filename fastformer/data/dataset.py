@@ -655,7 +655,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     cur_iter = 1
     batch_cache = list()
     batch_age = list()
-    maxlen = 1000
+    maxlen = 100
     # If it can't be merged and can't be yielded then store.
     while i > 0:
         print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
