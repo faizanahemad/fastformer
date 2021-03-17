@@ -11,6 +11,7 @@ import nlpaug.augmenter.char as nac
 import unidecode
 
 from fastformer.utils import squeeze_after, get_time_string, recursive_op
+from collections import deque
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
 char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
@@ -600,6 +601,7 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     i = 1
     cur_iter = 1
     prev_batch = None
+    batch_cache = deque([], maxlen=10)
     # if prev is small but cur is big then keep prev and yield cur
     # if prev is big and cur is big then yield prev and cur
 
