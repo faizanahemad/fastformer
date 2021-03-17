@@ -661,6 +661,10 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
         print("%s [custom_batching_fn]: Start Epoch = %s" % (get_time_string(), cur_iter))
         start_time = time.time()
         for _, cur_batch in enumerate(dataloader):
+
+            if cur_batch["contrastive_anchors"] is None or len(cur_batch["contrastive_anchors"]) == 0:
+                continue
+
             cur_seq_len = cur_batch["input_ids"].size(-1)
             cur_mx_bt_size = batch_size[np.searchsorted(size, cur_seq_len)]
             cur_batch_size = cur_batch["input_ids"].size(0)
