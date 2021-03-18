@@ -457,8 +457,10 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
     for name, param in ddp_model.named_parameters():
-        if param.grad is None or torch.sum(param.grad) == 0:
-            print(name)
+        if param.grad is None:
+            print(name, " None Grad")
+        if torch.sum(param.grad) == 0:
+            print(name, " Zero Grad")
     return dict(loss_dict=loss_dict, accuracy_hist=dict())
 
 
