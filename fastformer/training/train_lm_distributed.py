@@ -359,7 +359,7 @@ class LargeValidator:
                 _ = results[k].pop("answering_lm_accuracy", None)
             print("[Validation]: Time = %s, Rank = %s, Finished-Validation, For Dataset %s, results = %s" % (get_time_string(), self.rank, k, results[k]))
             with open('validation.txt', 'a') as f:
-                print(str(dict(k=results[k])) + os.linesep, file=f)
+                print(str({k: results[k]}) + os.linesep, file=f)
 
             clean_memory()
         model = model.train()
@@ -525,7 +525,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % gpu_device))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=5)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=25)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
