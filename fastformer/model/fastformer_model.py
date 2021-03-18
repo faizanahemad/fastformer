@@ -1578,6 +1578,8 @@ def upsample(x, stride, target_len, cls_tokens):
 class TransformerDecoder(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
+        config = copy.deepcopy(config)
+        config.alternate_ffn = False
         self.config = config
         self.attention_structure = AttentionStructure(config)
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
