@@ -297,3 +297,16 @@ class SkipDatasetWrapper(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset) - self.skip_last - self.skip_first
+
+
+def gcd(a,b):
+    if a == 0:
+        return b
+    return gcd(b % a, a)
+
+
+def gcd_array(x):
+    gcv = 1e8
+    for a, b in zip(x[1:], x[:-1]):
+        gcv = min(gcv, gcd(a, b))
+    return gcv

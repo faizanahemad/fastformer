@@ -378,16 +378,18 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     assert max(size_dicts.values()) % min(size_dicts.values()) == 0
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    min_size = gcd_array(size_dicts.values())
+    prefetch_factor = 2 * (max(size_dicts.values()) // min_size)
     try:
         train_dataset = Dataset.load_from_disk(location)
         train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
         if num_workers > 0:
             train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset),
-                                      batch_size=min(size_dicts.values()), collate_fn=collate_fn, shuffle=shuffle_dataset and single_node,
-                                      prefetch_factor=2 * max(size_dicts.values()) // min(size_dicts.values()),
+                                      batch_size=min_size, collate_fn=collate_fn, shuffle=shuffle_dataset and single_node,
+                                      prefetch_factor=prefetch_factor,
                                       num_workers=num_workers, pin_memory=True)
         else:
-            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min(size_dicts.values()),
+            train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset), batch_size=min_size,
                                       collate_fn=collate_fn, shuffle=shuffle_dataset and single_node,
                                       num_workers=0, pin_memory=True)
         train_loader = custom_batching_fn(train_loader, size_dicts, continuous_iter)
@@ -402,11 +404,11 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         #     v.training = False
         if num_workers > 0:
             train_loader = {k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), shuffle=shuffle_dataset and single_node,
-                                          batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2 * max(size_dicts.values()) // min(size_dicts.values()), num_workers=num_workers) for k, v in train_dataset.items()}
+                                          batch_size=min_size, collate_fn=collate_fn, prefetch_factor=prefetch_factor, num_workers=num_workers) for k, v in train_dataset.items()}
         else:
             train_loader = {
                 k: DataLoader(v, sampler=None if single_node else DistributedSampler(v, shuffle=shuffle_dataset, ), shuffle=shuffle_dataset and single_node,
-                              batch_size=min(size_dicts.values()), collate_fn=collate_fn,
+                              batch_size=min_size, collate_fn=collate_fn,
                               num_workers=0) for k, v in train_dataset.items()}
         train_loader = {k: custom_batching_fn(dataloader, size_dicts, continuous_iter) for k, dataloader in train_loader.items()}
         train_loader = datadict_iterator(train_loader, train_dataset_sampling_proba)
