@@ -1758,7 +1758,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def get_output_embeddings(self):
-        return self.lm_head[0]
+        return None
 
     def forward(
             self,
