@@ -10,7 +10,7 @@ from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
 
-from fastformer.utils import squeeze_after, get_time_string, recursive_op
+from fastformer.utils import squeeze_after, get_time_string, recursive_op, gcd_array
 from collections import deque
 
 char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
