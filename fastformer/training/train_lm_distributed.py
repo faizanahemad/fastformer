@@ -466,7 +466,7 @@ def train(local_rank, args):
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
-    os.environ["NCCL_DEBUG"] = "INFO"
+    os.environ["NCCL_DEBUG"] = "WARN"
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     # gpu_device = 0
     gpu_device = local_rank
