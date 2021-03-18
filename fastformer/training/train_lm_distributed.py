@@ -429,8 +429,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
 
     if args["cpu"] or args["no_autocast"]:
         output = ddp_model(**batch, labels=labels)
-        loss = output / iter_size
-        loss_dict = dict(loss=float(loss))
+        loss = output["loss"] / iter_size
+        loss_dict = output["loss_dict"]
         loss.backward()
 
         if not no_sync:
@@ -440,8 +440,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
     else:
         with autocast():
             output = ddp_model(**batch, labels=labels)
-            loss = output / iter_size
-            loss_dict = dict(loss=float(loss))
+            loss = output["loss"] / iter_size
+            loss_dict = output["loss_dict"]
             scaler.scale(loss).backward()
         if not no_sync:
             scaler.unscale_(optimizer)
@@ -456,12 +456,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
-    for name, param in ddp_model.named_parameters():
-        if param.grad is None:
-            print(name, " None Grad")
-        if torch.sum(param.grad) == 0:
-            print(name, " Zero Grad")
-    return dict(loss_dict=loss_dict, accuracy_hist=dict())
+    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
 
 
 def train(local_rank, args):
@@ -528,7 +523,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % gpu_device))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=5)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=5)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)

@@ -1578,8 +1578,6 @@ def upsample(x, stride, target_len, cls_tokens):
 class TransformerDecoder(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
-        config = copy.deepcopy(config)
-        config.alternate_ffn = False
         self.config = config
         self.attention_structure = AttentionStructure(config)
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
@@ -1744,7 +1742,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
         if config.embedding_size != config.block_channel_size[0]:
             ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-            # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+            ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             # self.embed_proj_transpose = ep
             self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
                                                       ep)
@@ -1760,7 +1758,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def get_output_embeddings(self):
-        return None
+        return self.lm_head[0]
 
     def forward(
             self,
@@ -1826,13 +1824,13 @@ class FastFormerModel(FastFormerPreTrainedModel):
             )
             outputs["decoder_outputs"] = decoder_outputs
 
-        # if run_answering:
-        #     assert hasattr(self, "embed_proj_transpose")
-        #     assert hasattr(self, "decoder")
-        #     answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens:]) # Only embed_proj_transpose[1] is needed here.
-        #     answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
-        #     outputs["answering_logits"] = answering_logits
-        #     outputs["answering_hidden"] = answering_hidden
+        if run_answering:
+            assert hasattr(self, "embed_proj_transpose")
+            assert hasattr(self, "decoder")
+            answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens:])
+            answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            outputs["answering_logits"] = answering_logits
+            outputs["answering_hidden"] = answering_hidden
 
         return outputs
 
@@ -1942,13 +1940,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
-        # if sentence_order_prediction_w > 0:
-        #     self.sentence_order_prediction_w = sentence_order_prediction_w
-        #     self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1))
-        #
-        # if highway_cls_ar_w > 0:
-        #     assert config.position_biased_input
-        #     self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
+        if sentence_order_prediction_w > 0:
+            self.sentence_order_prediction_w = sentence_order_prediction_w
+            self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1))
+
+        if highway_cls_ar_w > 0:
+            assert config.position_biased_input
+            self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
@@ -2236,19 +2234,19 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("encoder_outputs", et))
         answering_lm_loss = 0.0
-        # if run_answering:
-        #     alen = labels_pet_input_ids.size(1)
-        #     assert alen <= funnel_outputs["answering_logits"].size(1)
-        #     answering_logits = funnel_outputs["answering_logits"][:, :alen]
-        #     if at_cast:
-        #         answering_logits.register_hook(hook)
-        #     answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
-        #     if record_accuracy:
-        #         answering_predictions = answering_logits.detach().argmax(dim=-1)
-        #         non_pad_idx = labels_pet_input_ids != self.pad_token_id
-        #         answering_lm_correct = answering_predictions[non_pad_idx] == labels_pet_input_ids[non_pad_idx]
-        #         answering_lm_correct = answering_lm_correct.contiguous()
-        #         accuracy_hist["answering_lm_accuracy"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
+        if run_answering:
+            alen = labels_pet_input_ids.size(1)
+            assert alen <= funnel_outputs["answering_logits"].size(1)
+            answering_logits = funnel_outputs["answering_logits"][:, :alen]
+            if at_cast:
+                answering_logits.register_hook(hook)
+            answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
+            if record_accuracy:
+                answering_predictions = answering_logits.detach().argmax(dim=-1)
+                non_pad_idx = labels_pet_input_ids != self.pad_token_id
+                answering_lm_correct = answering_predictions[non_pad_idx] == labels_pet_input_ids[non_pad_idx]
+                answering_lm_correct = answering_lm_correct.contiguous()
+                accuracy_hist["answering_lm_accuracy"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
@@ -2256,86 +2254,86 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
-        # third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
+        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
         loss_contrastive = 0.0
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
-        # if contrastive_anchors is not None:
-        #     bs = input_ids.size(0)
-        #     if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives)/bs == torch.cuda.device_count():
-        #         did = torch.cuda.current_device()
-        #         contrastive_positives = contrastive_positives[did*bs: (did+1)*bs]
-        #         contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
-        #
-        #     contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-        #     contrastive_block_hidden = funnel_outputs["final_hidden"][:, self.cls_tokens + 1:]
-        #     contrastive_len = contrastive_block_hidden.size(1)
-        #     dpow = self.config.stride ** 2
-        #     contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
-        #     contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
-        #     for batch_positive in contrastive_positives:
-        #         for positives_for_anchor in batch_positive:
-        #             for positive in positives_for_anchor:
-        #                 if positive[0]==positive[1]:
-        #                     if positive[1] < contrastive_len:
-        #                         positive[1] = positive[1] + 1
-        #                     elif positive[0] > 0:
-        #                         positive[0] = positive[0] - 1
-        #
-        #                 positive[0] = min(positive[0], positive[1] - 1)
-        #     for batch_anchor in contrastive_anchors:
-        #         for anch in batch_anchor:
-        #             if anch[0] == anch[1]:
-        #                 if anch[1] < contrastive_len:
-        #                     anch[1] = anch[1] + 1
-        #                 elif anch[0] > 0:
-        #                     anch[0] = anch[0] - 1
-        #     # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
-        #     anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
-        #     contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
-        #     n_positives_per_anchor = max([len(a) for a in contrastive_positives])
-        #     contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
-        #     # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
-        #
-        #     positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
-        #     n_anchors = len(anchors)
-        #     n_positives = len(positives)
-        #     assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
-        #     assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
-        #     if n_positives == 0 or n_anchors == 0:
-        #         pass
-        #     else:
-        #         contrastive_block_hidden = torch.stack(anchors + positives)
-        #         if len(contrastive_block_hidden.size()) == 2:
-        #             contrastive_block_hidden = contrastive_block_hidden[:, :128]
-        #         elif len(contrastive_block_hidden.size()) == 3:
-        #             contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-        #         if at_cast:
-        #             contrastive_block_hidden.register_hook(hook)
-        #         contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
-        #         contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-        #         contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-        #         labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
-        #         loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
-        #         if record_accuracy:
-        #             accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
-        #         mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-        #         mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-        #         const = 1e3
-        #         for i in range(n_positives_per_anchor):
-        #             mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
-        #         vertical_lc = 0.0
-        #         for i in range(n_positives_per_anchor):
-        #
-        #             labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
-        #             mask_c = mask2.clone()
-        #             mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = const + 1
-        #             mask_c = mask1 + mask_c
-        #             l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
-        #             vertical_lc += l2
-        #         vertical_lc /= n_positives_per_anchor
-        #         loss_contrastive += vertical_lc
-        #     loss_contrastive = self.contrastive_w * loss_contrastive
+        if contrastive_anchors is not None:
+            bs = input_ids.size(0)
+            if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives)/bs == torch.cuda.device_count():
+                did = torch.cuda.current_device()
+                contrastive_positives = contrastive_positives[did*bs: (did+1)*bs]
+                contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
+
+            contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
+            contrastive_block_hidden = funnel_outputs["final_hidden"][:, self.cls_tokens + 1:]
+            contrastive_len = contrastive_block_hidden.size(1)
+            dpow = self.config.stride ** 2
+            contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
+            contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
+            for batch_positive in contrastive_positives:
+                for positives_for_anchor in batch_positive:
+                    for positive in positives_for_anchor:
+                        if positive[0]==positive[1]:
+                            if positive[1] < contrastive_len:
+                                positive[1] = positive[1] + 1
+                            elif positive[0] > 0:
+                                positive[0] = positive[0] - 1
+
+                        positive[0] = min(positive[0], positive[1] - 1)
+            for batch_anchor in contrastive_anchors:
+                for anch in batch_anchor:
+                    if anch[0] == anch[1]:
+                        if anch[1] < contrastive_len:
+                            anch[1] = anch[1] + 1
+                        elif anch[0] > 0:
+                            anch[0] = anch[0] - 1
+            # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
+            anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
+            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
+            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
+            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
+            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+
+            positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
+            n_anchors = len(anchors)
+            n_positives = len(positives)
+            assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
+            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
+            if n_positives == 0 or n_anchors == 0:
+                pass
+            else:
+                contrastive_block_hidden = torch.stack(anchors + positives)
+                if len(contrastive_block_hidden.size()) == 2:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :128]
+                elif len(contrastive_block_hidden.size()) == 3:
+                    contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
+                if at_cast:
+                    contrastive_block_hidden.register_hook(hook)
+                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
+                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
+                labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
+                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+                if record_accuracy:
+                    accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                const = 1e3
+                for i in range(n_positives_per_anchor):
+                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
+                vertical_lc = 0.0
+                for i in range(n_positives_per_anchor):
+
+                    labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
+                    mask_c = mask2.clone()
+                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = const + 1
+                    mask_c = mask1 + mask_c
+                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                    vertical_lc += l2
+                vertical_lc /= n_positives_per_anchor
+                loss_contrastive += vertical_lc
+            loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))
         cls_orthogonal_loss = 0.0
@@ -2360,67 +2358,67 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
-        # if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
-        #     labels_segment_index = labels_segment_index.view(-1)
-        #     sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
-        #     sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
-        #     if at_cast:
-        #         sent_order_logits.register_hook(hook)
-        #     sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
-        #     # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
-        #     # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
-        #     if record_accuracy:
-        #         sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
-        #         # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
-        #         accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
-        #
-        #     sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
+        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
+            labels_segment_index = labels_segment_index.view(-1)
+            sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
+            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
+            if at_cast:
+                sent_order_logits.register_hook(hook)
+            sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
+            if record_accuracy:
+                sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
+                # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
+                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
+
+            sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
-        # if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-        #     highway_block_hidden = funnel_outputs["final_hidden"][:, :self.cls_tokens + 1]
-        #     highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-        #     highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
-        #     highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
-        #     hshape = highway_cls_ar_inputs_embeds.size()
-        #     assert hshape[1] > 0
-        #     if hshape[1] <= 32:
-        #         hshape2 = hshape[1]
-        #         clip = 0
-        #     else:
-        #         hshape2 = 32 * (hshape[1] // 32)
-        #         clip = 8
-        #     assert hshape2 > 0
-        #     key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
-        #     highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
-        #     highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
-        #     if hshape2 > 128:
-        #         highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds.reshape(-1, hshape2 // 4, hshape[2])
-        #         highway_cls_ar__attention_mask = highway_cls_ar__attention_mask.reshape(-1, hshape2 // 4)
-        #         highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
-        #         key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
-        #
-        #     highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-        #     # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-        #
-        #     highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, clip:])
-        #     highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
-        #     if at_cast:
-        #         highway_cls_ar_out.register_hook(hook)
-        #     highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
-        #     if hshape2 > 128:
-        #         highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
-        #     highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
-        #     highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
-        #     highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
-        #     highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
-        #
-        #     if record_accuracy:
-        #         highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
-        #         # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
-        #         highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
-        #         accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
+        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
+            highway_block_hidden = funnel_outputs["final_hidden"][:, :self.cls_tokens + 1]
+            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
+            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
+            hshape = highway_cls_ar_inputs_embeds.size()
+            assert hshape[1] > 0
+            if hshape[1] <= 32:
+                hshape2 = hshape[1]
+                clip = 0
+            else:
+                hshape2 = 32 * (hshape[1] // 32)
+                clip = 8
+            assert hshape2 > 0
+            key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
+            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
+            if hshape2 > 128:
+                highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds.reshape(-1, hshape2 // 4, hshape[2])
+                highway_cls_ar__attention_mask = highway_cls_ar__attention_mask.reshape(-1, hshape2 // 4)
+                highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
+                key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
+
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
+            # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
+
+            highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, clip:])
+            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            if at_cast:
+                highway_cls_ar_out.register_hook(hook)
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
+            if hshape2 > 128:
+                highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
+            highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
+            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
+
+            if record_accuracy:
+                highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
+                # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
+                highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
+                accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
@@ -2514,7 +2512,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             results = [results]
         # TODO: return pet answer
         # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
-        return loss
+        return results
 
 
 if __name__ == "__main__":
