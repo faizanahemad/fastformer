@@ -1280,7 +1280,7 @@ class PositionwiseFFN(nn.Module):
         self.activation_function = ACT2FN[config.hidden_act]
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
-            self.dlayer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
+            self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
             self.dlin = Conv1d(d_model, self.diff, 1, 8) if d_model % 8 == 0 and self.diff % 8 == 0 else nn.Linear(d_model, self.diff)
         if groups > 1:
             assert d_model % groups == 0
