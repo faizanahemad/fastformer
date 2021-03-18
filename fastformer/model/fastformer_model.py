@@ -1742,7 +1742,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
         if config.embedding_size != config.block_channel_size[0]:
             ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-            ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+            # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             # self.embed_proj_transpose = ep
             self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
                                                       ep)
