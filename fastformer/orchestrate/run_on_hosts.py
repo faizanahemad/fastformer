@@ -214,7 +214,9 @@ if __name__ == "__main__":
         # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip install torch torchvision torchaudio && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:16
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'cat /proc/mounts | grep torch_distributed_init' --nodes 10:16
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip install -U torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null && python -c "import torch; print(torch.cuda.is_available()); print(torch.__version__)"' --nodes 0:32
+
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && python -c "import wandb; wandb.login(\"never\", \"7fcf597a1a07dcb2e98622a96838a7eb41b1245d\")"' --nodes 0:32
+
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip install -U protobuf wandb' --nodes 0:32
         # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py && python collect_env.py' --nodes 0:16
         # python run_on_hosts.py --hosts_file hosts-medium.txt --custom 'source ~/.zshrc && pip uninstall torch -y && pip install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu111/torch_nightly.html' --nodes 0:32
@@ -231,6 +233,6 @@ if __name__ == "__main__":
 # python run_on_hosts.py --hosts_file hosts-small.txt --custom 'source ~/.zshrc && pip uninstall torch -y && pip install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html > /dev/null' --nodes 0:16
 
 
-
+# python run_on_hosts.py --hosts_file hosts-large.txt --custom 'source ~/.zshrc && python -c "import wandb; wandb.login(\"never\", \"7fcf597a1a07dcb2e98622a96838a7eb41b1245d\")"' --nodes 0:64
 
 

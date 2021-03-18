@@ -284,3 +284,16 @@ def reraise(e, *args):
   # where this exception originated.
   #
   raise e.with_traceback(e.__traceback__)
+
+
+class SkipDatasetWrapper(torch.utils.data.Dataset):
+    def __init__(self, dataset, skip_first, skip_last):
+        self.dataset = dataset
+        self.skip_first = skip_first
+        self.skip_last = skip_last
+
+    def __getitem__(self, item):
+        return self.dataset[item + self.skip_first]
+
+    def __len__(self):
+        return len(self.dataset) - self.skip_last - self.skip_first
