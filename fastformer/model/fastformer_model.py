@@ -1940,9 +1940,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
-        if sentence_order_prediction_w > 0:
-            self.sentence_order_prediction_w = sentence_order_prediction_w
-            self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1))
+        # if sentence_order_prediction_w > 0:
+        #     self.sentence_order_prediction_w = sentence_order_prediction_w
+        #     self.sent_predict_fc = nn.Linear(config.block_channel_size[-1], (self.cls_tokens + 1))
         #
         # if highway_cls_ar_w > 0:
         #     assert config.position_biased_input
@@ -2254,7 +2254,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
-        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
+        # third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
         loss_contrastive = 0.0
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
@@ -2358,21 +2358,21 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
-        if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
-            labels_segment_index = labels_segment_index.view(-1)
-            sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
-            sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
-            if at_cast:
-                sent_order_logits.register_hook(hook)
-            sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
-            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
-            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
-            if record_accuracy:
-                sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
-                # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
-                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
-
-            sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
+        # if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
+        #     labels_segment_index = labels_segment_index.view(-1)
+        #     sent_order_block_hidden_cls = third_block_hidden[:, 1:self.cls_tokens + 1] + third_block_hidden[:, 0].unsqueeze(1)
+        #     sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
+        #     if at_cast:
+        #         sent_order_logits.register_hook(hook)
+        #     sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index)
+        #     # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
+        #     # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
+        #     if record_accuracy:
+        #         sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
+        #         # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
+        #         accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
+        #
+        #     sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
