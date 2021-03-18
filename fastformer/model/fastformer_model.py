@@ -2512,7 +2512,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             results = [results]
         # TODO: return pet answer
         # decoder_output=decoder_outputs[0], decoder_cls=cls_tokens, encoder_output=encoder_outputs[0][:, self.cls_tokens + 1:], encoder_cls=encoder_outputs[0][:, :self.cls_tokens + 1], encoder_hidden_states=encoder_outputs[1])
-        return results
+        return loss
 
 
 if __name__ == "__main__":

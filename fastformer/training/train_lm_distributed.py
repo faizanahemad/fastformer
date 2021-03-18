@@ -429,8 +429,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
 
     if args["cpu"] or args["no_autocast"]:
         output = ddp_model(**batch, labels=labels)
-        loss = output["loss"] / iter_size
-        loss_dict = output["loss_dict"]
+        loss = output / iter_size
+        loss_dict = dict(float(loss))
         loss.backward()
 
         if not no_sync:
@@ -440,8 +440,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
     else:
         with autocast():
             output = ddp_model(**batch, labels=labels)
-            loss = output["loss"] / iter_size
-            loss_dict = output["loss_dict"]
+            loss = output / iter_size
+            loss_dict = dict(float(loss))
             scaler.scale(loss).backward()
         if not no_sync:
             scaler.unscale_(optimizer)
@@ -456,7 +456,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
-    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
+    return dict(loss_dict=loss_dict, accuracy_hist=dict())
 
 
 def train(local_rank, args):
