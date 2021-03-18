@@ -306,6 +306,7 @@ def gcd(a,b):
 
 
 def gcd_array(x):
+    x = list(x)
     gcv = 1e8
     for a, b in zip(x[1:], x[:-1]):
         gcv = min(gcv, gcd(a, b))
