@@ -106,6 +106,9 @@ def training_args():
     parser.add_argument('--detect_anomaly', action="store_true", default=False,
                         help='AutoGrad Anomaly detection')
 
+    parser.add_argument('--backward_hook', action="store_true", default=False,
+                        help='Backward Hook for gradients')
+
     parser.add_argument('--train_dataset', required=False, type=str,
                         help='Train Dataset')
 
@@ -623,7 +626,7 @@ def train(local_rank, args):
                 else:
                     return None
             return named_hook
-    if not args["no_autocast"]:
+    if not args["no_autocast"] and args["backward_hook"]:
         for name, param in ddp_model.named_parameters():
             if "embeddings" in name or "sent_predict_fc" in name or "embed_proj_transpose" in name or "embed_proj" in name or "lm_head" in name or "contrastive_ffn" in name or "encoder.blocks.0" in name: #
                 param.register_hook(get_hook())

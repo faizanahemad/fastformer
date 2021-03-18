@@ -156,6 +156,7 @@ if __name__ == "__main__":
     # main_cmd += " --detect_anomaly"
     main_cmd += " --accumulation_steps 4"
     main_cmd += " --shuffle_dataset"
+    main_cmd += " --backward_hook"
 
     main_cmd += " > output.log 2>&1 & disown"
 
