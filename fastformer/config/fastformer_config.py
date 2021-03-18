@@ -147,6 +147,7 @@ class FastFormerConfig(PretrainedConfig):
             use_cuda_conv = False
         self.vocab_size = vocab_size
         self.tokenizer_length = max_position_embeddings - num_highway_cls_tokens
+        assert all([bsz % 2 == 0 for bsz in block_sizes])
         self.block_sizes = block_sizes
         self.block_repeats = block_repeats
         self.separate_compressiion_layer = separate_compressiion_layer

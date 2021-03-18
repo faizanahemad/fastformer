@@ -1276,6 +1276,7 @@ class PositionwiseFFN(nn.Module):
         self.n_blocks = config.block_sizes[block_index] - 1
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
+        self.d_model = d_model
         self.activation_function = ACT2FN[config.hidden_act]
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
@@ -1293,18 +1294,25 @@ class PositionwiseFFN(nn.Module):
         dim_match = self.need_dim_match and layer_index == self.n_blocks
         h = self.lin(hidden)
         h = self.ffn(h)
-        pre_ffn = h
         if dim_match:
-            hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
-            h = torch.cat((h, self.dlin(h)), 2)
             if self.config.identity_preserving_norm:
-                h = hidden + self.dlayer_norm(h)
+                h = self.layer_norm(h)
+                pre_ffn = h
+                dh = self.dlayer_norm(self.dlin(h))
+                h = torch.cat((h, dh), 2)
+                hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
+                h = hidden + h
             else:
-                h = self.dlayer_norm(hidden + h)
+                dh = self.dlin(h)
+                pre_ffn = h
+                h = torch.cat((self.layer_norm(h + hidden), self.dlayer_norm(dh)), 2)
         else:
             if self.config.identity_preserving_norm:
-                h = hidden + self.layer_norm(h)
+                h = self.layer_norm(h)
+                pre_ffn = h
+                h = hidden + h
             else:
+                pre_ffn = h
                 h = self.layer_norm(hidden + h)
         return pre_ffn, h
 
@@ -1740,17 +1748,19 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
+            self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
 
-        self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
+
+        self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
             ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
             ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
-            # self.embed_proj_transpose = ep
-            self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
-                                                      ep)
-        self.lm_head = nn.Sequential(nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens),
-                                     # nn.LayerNorm(config.vocab_size + config.num_highway_cls_tokens, eps=config.layer_norm_eps)
-                                     )
+            if self.config.identity_preserving_norm:
+                self.embed_proj_transpose = ep
+            else:
+                self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
+                                                          ep)
+        self.lm_head = nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens)
         self.init_weights()
 
     def get_input_embeddings(self):
@@ -1760,7 +1770,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.embeddings.word_embeddings = new_embeddings
 
     def get_output_embeddings(self):
-        return self.lm_head[0]
+        return self.lm_head
 
     def forward(
             self,
@@ -1811,7 +1821,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             output_attentions=False,
             output_hidden_states=True,
         )
-        final_hidden = self.embed_proj_transpose[0](self.final_hidden_fc(encoder_outputs[0]))
+        final_hidden = self.final_hidden_fc(encoder_outputs[0])
         outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
 
         if hasattr(self, "decoder") and (run_decoder or run_answering):
