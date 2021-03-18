@@ -650,7 +650,7 @@ def custom_batching_fn_old(dataloader, batch_size_dict, continuous_iter=True):
 
 def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     size, batch_size = zip(*list(batch_size_dict.items()))
-    min_batch_size = min(batch_size)
+    min_batch_size = gcd_array(batch_size)
     i = 1
     cur_iter = 1
     batch_cache = list()
