@@ -453,6 +453,10 @@ class get_collate_fn:
     def __init__(self, num_cls, padding_index):
         self.num_cls = num_cls
         self.padding_index = padding_index
+        self.non_reduced_keys = ["char_ids", "char_offsets", "token_type_ids",
+                                 "contrastive_anchors", "contrastive_positives", 'labels_segment_index',
+                                 'highway_cls_ar__attention_mask', 'attention_mask',
+                                 "labels_pet_attention_mask", 'label_mlm_input_ids']
 
     def __call__(self, samples):
         num_cls = self.num_cls
@@ -465,7 +469,6 @@ class get_collate_fn:
                 del s["char_ids"]
 
             max_chars = max(list(map(len, char_ids)))
-            max_chars_temp = max_chars
             max_chars = int(32 * np.ceil(max_chars / 32))
             char_ids = [torch.tensor(cid) for cid in char_ids]
             char_ids = torch.nn.utils.rnn.pad_sequence(char_ids, batch_first=True, padding_value=padding_index)
@@ -493,17 +496,21 @@ class get_collate_fn:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
         # print({k: v.size() for k, v in samples.items() if hasattr(v, "size")})
-
+        # ['labels_segment_index', 'highway_cls_ar_input_ids', 'highway_cls_ar__attention_mask', 'label_mlm_input_ids', 'input_ids',
+        # 'token_type_ids', 'attention_mask', 'char_offsets', 'labels_pet_input_ids', 'labels_pet_attention_mask', 'contrastive_anchors', 'contrastive_positives', 'char_ids']
         samples = {k: squeeze_after(v, 0) if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        input_reduce_key = "label_mlm_input_ids" if "label_mlm_input_ids" in samples else 'input_ids'
+        other_non_reduced_pair = "label_mlm_input_ids" if "label_mlm_input_ids" not in samples else 'input_ids'
+        reduced_keys = ['highway_cls_ar_input_ids', input_reduce_key, 'labels_pet_input_ids']
+
         for k, v in samples.items():
-            if k in ["char_ids", "char_offsets", "token_type_ids", "contrastive_anchors", "contrastive_positives"] or len(v.size()) < 2:
+            if k in self.non_reduced_keys or len(v.size()) < 2 or k not in reduced_keys:
                 continue
-            if "label" in k and (k not in ["labels_pet_input_ids", "labels_pet_attention_mask",]):
-                continue
-            step_size = 32 if k == "char_ids" else 8
+
+            step_size = 8
             while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
                 v = v[:, :-step_size]
-            if k not in ["labels_pet_input_ids", "labels_pet_attention_mask"]:
+            if k != "labels_pet_input_ids":  # Because this don't get highway_cls tokens added.
                 required_len = int(step_size * np.ceil(v.shape[1]/step_size))
                 required_len = required_len - step_size + (step_size - num_cls)
                 padding = required_len - v.shape[-1]
@@ -513,8 +520,11 @@ class get_collate_fn:
                     v = v[:, :padding]
             samples[k] = v
         # print(type(samples), samples.keys(), {k: v.size() for k, v in samples.items() if hasattr(v, "size")})
-        if "label_mlm_input_ids" in samples:
-            samples['label_mlm_input_ids'] = samples['label_mlm_input_ids'][:, :samples['input_ids'].shape[1]]
+        if other_non_reduced_pair in samples:
+            samples[other_non_reduced_pair] = samples[other_non_reduced_pair][:, :samples[input_reduce_key].shape[1]]
+        samples['attention_mask'] = samples['attention_mask'][:, :samples['input_ids'].shape[1]]
+        samples['highway_cls_ar__attention_mask'] = samples['highway_cls_ar__attention_mask'][:, :samples['highway_cls_ar_input_ids'].shape[1]]
+        samples['labels_pet_attention_mask'] = samples['labels_pet_attention_mask'][:, :samples['labels_pet_input_ids'].shape[1]]
         if "token_type_ids" in samples:
             # samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
             del samples['token_type_ids']
