@@ -1351,23 +1351,25 @@ class LightLayer(nn.Module):
 
 
 class TransformerLayer(nn.Module):
-    def __init__(self, config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
+    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
         self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
                                             last_layer_index)
         self.ffn = PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
         self.alternate_ffn = config.alternate_ffn if hasattr(config, "alternate_ffn") else True
         self.block_index = block_index
+        self.block_size = config.block_sizes[block_index]
         self.is_last_layer_of_block = is_last_layer_of_block
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         assert query.size(1) > 0
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
         if self.alternate_ffn and layer_index % 2 == 0:
-            h = self.ffn.lin(attn[0])
-            pre_ffn, output = h, h
+            h = self.ffn.layer_norm(self.ffn.lin(attn[0]))
+            pre_ffn, output = None, h + attn[0]
         else:
             pre_ffn, output = self.ffn(attn[0], layer_index)
+        pre_ffn = pre_ffn if self.block_size - 1 == layer_index else None
         return (output, pre_ffn, attn[1]) if output_attentions else (output, pre_ffn)
 
 
@@ -2021,7 +2023,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         encoder_outputs = new_funnel_outputs["encoder_outputs"]
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
-        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0

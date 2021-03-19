@@ -294,7 +294,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64], alternate_ffn=True,
                              separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                              sdconv=[True, True, False], full_channel_separation=True,
-                             sdconv_kernel_size=[5, 7, 9],
+                             sdconv_kernel_size=[5, 3, 3],
                              compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                              compressed_query_attention_layers=[(0, 3), (0, 4),
                                                                 # (1, 2), (1, 3), (1, 4),
