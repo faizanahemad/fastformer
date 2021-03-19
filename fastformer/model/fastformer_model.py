@@ -1535,8 +1535,13 @@ class TransformerCrossAttentionDecoder(nn.Module):
         self.config = config
         block_index = 0
         all_head = config.n_head[block_index]
-        total_heads = sum(all_head)
-        config.n_head[block_index] = (total_heads,) + config.n_head[block_index][1:]
+
+        total_heads = sum(all_head) // 2
+        assert sum(all_head) % 2 == 0
+        config.block_channel_size[block_index] = config.embedding_size
+        config.block_channel_size[block_index] % total_heads == 0
+        config.n_head[block_index] = (total_heads,) + tuple([0] * len(config.n_head[block_index][1:]))
+        config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
         self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index])
@@ -1747,11 +1752,10 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
             self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
 
-
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
             ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
-            ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
+            # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
             else:
@@ -2166,25 +2170,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
         return inputs_embeds, position_embeds, input_shape
 
-
-    def objective(
-            self,
-                        funnel_inputs,
-            input_ids=None,
-            attention_mask=None,
-            token_type_ids=None,
-            inputs_embeds=None,
-            labels=None,
-            labels_segment_index=None,
-            char_ids=None, char_offsets=None,
-            highway_cls_ar_input_ids=None, highway_cls_ar__attention_mask=None,
-            labels_pet_input_ids=None, labels_pet_attention_mask=None, labels_pet_max_length=None,
-            contrastive_anchors=None, contrastive_positives=None,
-            **kwargs
-    ):
-        pass
-
-
     def forward(
             self,
             input_ids=None,
@@ -2378,18 +2363,16 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("sentence_order_loss", et))
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-            highway_block_hidden = final_hidden[:, :self.cls_tokens + 1]
+            highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden[:, :self.cls_tokens + 1])
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
+            highway_cls_ar_inputs_embeds = self.funnel.embed_proj_transpose(highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:])
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
             if hshape[1] <= 32:
                 hshape2 = hshape[1]
-                clip = 0
             else:
                 hshape2 = 32 * (hshape[1] // 32)
-                clip = 8
             assert hshape2 > 0
             key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
@@ -2403,12 +2386,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
             # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
-            highway_cls_ar_out = self.funnel.embed_proj_transpose(highway_cls_ar_out[:, clip:])
             highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
             if hshape2 > 128:
                 highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, clip:]
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids
             highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
