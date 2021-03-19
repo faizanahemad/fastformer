@@ -1839,7 +1839,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         if run_answering:
             assert hasattr(self, "embed_proj_transpose")
             assert hasattr(self, "decoder")
-            answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens:])
+            answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens: self.cls_tokens + 128])
             answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
             outputs["answering_logits"] = answering_logits
             outputs["answering_hidden"] = answering_hidden
