@@ -173,7 +173,7 @@ if __name__ == "__main__":
     if args["kill"]:
         run_command_v2(hosts, cmd1)
         run_command_v2(hosts, cmd0)
-        run_command_v2(h1, cmd2)
+        # run_command_v2(h1, cmd2)
         run_command_v2(hosts, clear_log)
         time.sleep(10)
     if args["ggl"]:
