@@ -650,8 +650,8 @@ def train(local_rank, args):
         #     else:
         #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
         #
-        # electra_loss_w = float(((step + 1) / optc["warmup_steps"]) * mconf["electra_loss_w"])
-        # ddp_model.module.electra_loss_w = electra_loss_w
+        electra_loss_w = float(((step + 1) / (2 * optc["warmup_steps"])) * mconf["electra_loss_w"])
+        ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         if (step + 1) % save_every_steps == 0:
             if rank == 0:
