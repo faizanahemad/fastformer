@@ -970,17 +970,13 @@ class MultiheadAttention(nn.Module):
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
         self.sequence_dependent_position_transform = self.config.sequence_dependent_position_transform
         self.approximate_attention = self.config.approximate_attention[block_index]
-        qkv_squeeze = self.config.qkv_squeeze_fraction > 1
-        sq_frac = self.config.qkv_squeeze_fraction
-        if qkv_squeeze:
-            assert d_model % sq_frac == 0
 
         qkv_transform_groups = self.config.qkv_transform_groups
         if qkv_transform_groups > 1:
             # assert n_head % qkv_transform_groups == 0 and n_head >= qkv_transform_groups
-            self.q_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+            self.q_head = Conv1d(
                 in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=True)
-            self.k_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+            self.k_head = Conv1d(
                 in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
             if compress_query:
@@ -993,13 +989,13 @@ class MultiheadAttention(nn.Module):
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
-                self.v_head = ConvFFN(config, d_model, d_model // sq_frac, d_out=d_model, groups=qkv_transform_groups) if qkv_squeeze else Conv1d(
+                self.v_head = Conv1d(
                     in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
-            self.q_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head,
+            self.q_head = nn.Linear(d_model, n_head * d_head,
                                                                                                                             bias=True)
-            self.k_head = BertFFN(config, d_model, d_model // sq_frac, d_out=n_head * d_head) if qkv_squeeze else nn.Linear(d_model, n_head * d_head, bias=False)
+            self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
 
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
@@ -1010,7 +1006,7 @@ class MultiheadAttention(nn.Module):
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
-                self.v_head = BertFFN(config, d_model, d_model // sq_frac, d_out=d_model) if qkv_squeeze else nn.Linear(d_model, d_model)
+                self.v_head = nn.Linear(d_model, d_model)
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
@@ -1214,7 +1210,7 @@ class ConvFFN(nn.Module):
         act = config.hidden_act
         self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups, bias=False)
         self.conv1d_in.post_permute = False
-        self.activation_dropout = Dropout(config.activation_dropout)
+        self.activation_dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
             cnn = Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups)
@@ -1223,7 +1219,6 @@ class ConvFFN(nn.Module):
             self.layers.append(cnn)
         self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
         self.conv1d_out.pre_permute = False
-        self.dropout = Dropout(config.hidden_dropout)
         self.act = ACT2FN[act]
 
     def forward(self, x):
@@ -1246,7 +1241,7 @@ class BertFFN(nn.Module):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner)
         self.activation_function = ACT2FN[config.hidden_act]
-        self.activation_dropout = Dropout(config.activation_dropout)
+        self.activation_dropout = Dropout(config.hidden_dropout)
         d_out = d_model if d_out is None else d_out
         self.linear_2 = nn.Linear(d_inner, d_out)
         self.layers = nn.ModuleList() if layers > 0 else None

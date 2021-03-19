@@ -93,9 +93,8 @@ class FastFormerConfig(PretrainedConfig):
             use_cuda_conv=True,
             d_head=[72, 64, 80],  # 32
             hidden_act="gelu",
-            hidden_dropout=0.0,
-            attention_dropout=0.0,
-            activation_dropout=0.0,
+            hidden_dropout=0.1,
+            attention_dropout=0.1,
             max_position_embeddings=512,
             type_vocab_size=0,
             initializer_range=0.1,
@@ -115,7 +114,6 @@ class FastFormerConfig(PretrainedConfig):
             separate_content_and_position_attention=False,
             approximate_attention=[False, False, False],
             sequence_dependent_position_transform=False,
-            qkv_squeeze_fraction=1,
             light_first_layer=False,
             light_last_layer=False,
             compress_query_method=None,
@@ -167,7 +165,6 @@ class FastFormerConfig(PretrainedConfig):
         self.hidden_act = hidden_act
         self.hidden_dropout = hidden_dropout
         self.attention_dropout = attention_dropout
-        self.activation_dropout = activation_dropout
         self.max_position_embeddings = max_position_embeddings
         self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
@@ -199,8 +196,6 @@ class FastFormerConfig(PretrainedConfig):
         self.embedding_size = embedding_size
         self.position_biased_input = position_biased_input
         self.num_highway_cls_tokens = num_highway_cls_tokens
-        assert qkv_squeeze_fraction == 1 or qkv_squeeze_fraction > 2
-        self.qkv_squeeze_fraction = qkv_squeeze_fraction
         self.approximate_attention = approximate_attention
         self.light_first_layer = light_first_layer
         self.light_last_layer = light_last_layer
@@ -270,7 +265,7 @@ vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block
 sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, block_sizes=[4, 4, 4],
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64], alternate_ffn=True,
-                             separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
+                             separate_compressiion_layer=False, light_last_layer=False, light_first_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
                              compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
@@ -292,7 +287,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5, use_cuda_conv=True,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, 
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64], alternate_ffn=True,
-                             separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
+                             separate_compressiion_layer=False, light_last_layer=False, light_first_layer=False,
                              sdconv=[True, True, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 3, 3],
                              compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
@@ -314,7 +309,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=8, ffn_groups=8,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 80], alternate_ffn=False,
-                             separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
+                             separate_compressiion_layer=True, light_last_layer=False, light_first_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
                              compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
