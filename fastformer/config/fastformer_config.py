@@ -17,7 +17,7 @@ from dataclasses_json import dataclass_json
 # size_dicts = {128: 32, 192: 32, 256: 24, 384: 16, 512: 16, 768: 8, 1024: 8}
 # size_dicts = {128: 16, 192: 8, 256: 8, 384: 4, 512: 4, 768: 2, 1024: 2}
 # size_dicts = {128: 36, 192: 32, 256: 28, 384: 20, 512: 16, 640: 12, 768: 8, 896: 6, 1024: 4}
-size_dicts = {128: 32, 192: 28, 256: 24, 384: 16, 512: 12, 640: 10, 768: 6, 896: 4, 960: 4, 1024: 4}
+size_dicts = {128: 28, 192: 24, 256: 20, 384: 16, 512: 12, 640: 8, 768: 6, 896: 4, 960: 4, 1024: 4}
 autocast_factor = 1
 
 
@@ -269,7 +269,7 @@ vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block
 
 sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, block_sizes=[4, 4, 4],
-                             approximate_attention=[False, False, False], max_position_embeddings=1056, d_head=[24, 32, 64], alternate_ffn=True,
+                             approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64], alternate_ffn=True,
                              separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
@@ -291,7 +291,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 # Fasttest
 md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, 
-                             approximate_attention=[False, False, False], max_position_embeddings=1056, d_head=[24, 32, 64], alternate_ffn=True,
+                             approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64], alternate_ffn=True,
                              separate_compressiion_layer=False, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=False,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
@@ -313,7 +313,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=5, use_cuda_conv=False,
                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=8, ffn_groups=8,
-                             approximate_attention=[False, False, False], max_position_embeddings=1056, d_head=[64, 64, 80], alternate_ffn=False,
+                             approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 80], alternate_ffn=False,
                              separate_compressiion_layer=True, qkv_squeeze_fraction=1, light_last_layer=False, light_first_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
