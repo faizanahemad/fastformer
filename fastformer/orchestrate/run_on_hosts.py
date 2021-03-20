@@ -133,9 +133,9 @@ if __name__ == "__main__":
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
-    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --log_every_steps 50 --num_workers 8 --validate_every_steps 100000 --save_every_steps 5000"
@@ -153,11 +153,11 @@ if __name__ == "__main__":
     # main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
     # main_cmd += " --cpu"
-    # main_cmd += " --no_autocast"
+    main_cmd += " --no_autocast"
     # main_cmd += " --detect_anomaly"
-    main_cmd += " --accumulation_steps 4"
+    main_cmd += " --accumulation_steps 4" #  4096/(16*8*8)
     main_cmd += " --shuffle_dataset"
-    main_cmd += " --backward_hook"
+    # main_cmd += " --backward_hook"
 
     main_cmd += " > output.log 2>&1 & disown"
 
