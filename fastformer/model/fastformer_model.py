@@ -1346,12 +1346,13 @@ class LightLayer(nn.Module):
 
 
 class TransformerLayer(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index, last_layer_index=None):
+    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block,
+                 is_encoder_layer, layer_index, last_layer_index=None, alternate_ffn=True):
         super().__init__()
         self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
                                             last_layer_index)
         self.ffn = PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
-        self.alternate_ffn = config.alternate_ffn if hasattr(config, "alternate_ffn") else True
+        self.alternate_ffn = alternate_ffn and (config.alternate_ffn if hasattr(config, "alternate_ffn") else True)
         self.block_index = block_index
         self.block_size = config.block_sizes[block_index]
         self.is_last_layer_of_block = is_last_layer_of_block
@@ -1388,7 +1389,7 @@ class TransformerEncoder(nn.Module):
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
                         inext = i + 1
-                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False))
                         self.repeats[block_index].append(1)
                         i = inext
                     elif i < block_size:
@@ -2719,6 +2720,11 @@ if __name__ == "__main__":
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
     torch.autograd.set_detect_anomaly(True)
 
+    def get_unused_params(model):
+        for name, params in model.named_parameters():
+            if params.grad is None:
+                print(name)
+
     def run():
         if not forward_only:
             if fp16:
@@ -2730,6 +2736,7 @@ if __name__ == "__main__":
                         output = model(**pt_batch, labels=labels)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
+                    get_unused_params(model)
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                     scaler.step(optimizer)
@@ -2743,6 +2750,7 @@ if __name__ == "__main__":
                     output = model(**pt_batch, labels=labels)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
+                get_unused_params(model)
                 torch.nn.utils.clip_grad_norm_(all_params, 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
