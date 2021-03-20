@@ -538,7 +538,7 @@ def train(local_rank, args):
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
-        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cuda:%d' % gpu_device))
+        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
     ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
     try:
@@ -591,8 +591,6 @@ def train(local_rank, args):
         _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
         if args["validate_only"]:
             return
-    # print("[Train]: Init Wandb-watch added over model for Rank = %s" % rank)
-    # wandb.watch(model, log="all", log_freq=log_every_steps)
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
@@ -608,6 +606,7 @@ def train(local_rank, args):
 
         time.sleep(random.random() * 5)
         wandb.init(**wandb_init_args)
+        wandb.watch(model, log="all", log_freq=log_every_steps * 4)
     barrier()
 
     if args["detect_anomaly"]:
