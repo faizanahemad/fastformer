@@ -523,8 +523,10 @@ class get_collate_fn:
         if other_non_reduced_pair in samples:
             samples[other_non_reduced_pair] = samples[other_non_reduced_pair][:, :samples[input_reduce_key].shape[1]]
         samples['attention_mask'] = samples['attention_mask'][:, :samples['input_ids'].shape[1]]
-        samples['highway_cls_ar__attention_mask'] = samples['highway_cls_ar__attention_mask'][:, :samples['highway_cls_ar_input_ids'].shape[1]]
-        samples['labels_pet_attention_mask'] = samples['labels_pet_attention_mask'][:, :samples['labels_pet_input_ids'].shape[1]]
+        if "highway_cls_ar_input_ids" in samples:
+            samples['highway_cls_ar__attention_mask'] = samples['highway_cls_ar__attention_mask'][:, :samples['highway_cls_ar_input_ids'].shape[1]]
+        if "labels_pet_input_ids" in samples:
+            samples['labels_pet_attention_mask'] = samples['labels_pet_attention_mask'][:, :samples['labels_pet_input_ids'].shape[1]]
         if "token_type_ids" in samples:
             # samples['token_type_ids'] = samples['token_type_ids'][:, :samples['input_ids'].shape[1]]
             del samples['token_type_ids']

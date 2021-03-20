@@ -1275,7 +1275,7 @@ class PositionwiseFFN(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 8) if d_model % 8 == 0 and self.diff % 8 == 0 else nn.Linear(d_model, self.diff)
+            self.dlin = Conv1d(d_model, self.diff, 1, 8) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
@@ -1673,7 +1673,7 @@ class DiscriminatorPredictions(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
         self.config = config
-        self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False)
+        self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
         self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
 
     def forward(self, discriminator_hidden_states):

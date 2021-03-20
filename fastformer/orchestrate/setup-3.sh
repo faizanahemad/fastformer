@@ -89,29 +89,39 @@ cat ~/.ssh/id_rsa.pub
 
 pip install tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer
 pip install dataclasses-json einops nlpaug pytorch-fast-transformers
+pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json deepspeed
+
 
 cd ~ && mkdir mygit && cd mygit && git clone https://github.com/faizanahemad/fastformer.git && cd fastformer && pip install -e .
-#cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
-#cd ~/mygit/fairseq
-#cd fairseq/modules/lightconv_layer
-#python cuda_function_gen.py
-#python setup.py install
-#cd ~/mygit/fairseq
-#cd fairseq/modules/dynamicconv_layer
-#python cuda_function_gen.py
-#python setup.py install
-#cd ~/mygit/fairseq
-#pip install -e .
-#cd ~/mygit/fairseq
-#cd fairseq/modules/lightconv_layer
-#python cuda_function_gen.py
-#python setup.py install
-#cd ~/mygit/fairseq
-#cd fairseq/modules/dynamicconv_layer
-#python cuda_function_gen.py
-#python setup.py install
-#cd ~/mygit/fastformer
 
-pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json
+cd ~/mygit && git clone https://github.com/NVIDIA/apex
+cd ~/mygit/apex
+pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+
+cd ~/mygit
+DS_BUILD_OPS=1 pip install deepspeed
+
+cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
+cd ~/mygit/fairseq
+cd fairseq/modules/lightconv_layer
+python cuda_function_gen.py
+python setup.py install
+cd ~/mygit/fairseq
+cd fairseq/modules/dynamicconv_layer
+python cuda_function_gen.py
+python setup.py install
+cd ~/mygit/fairseq
+pip install -e .
+cd ~/mygit/fairseq
+cd fairseq/modules/lightconv_layer
+python cuda_function_gen.py
+python setup.py install
+cd ~/mygit/fairseq
+cd fairseq/modules/dynamicconv_layer
+python cuda_function_gen.py
+python setup.py install
+cd ~/mygit/fastformer
+
+
 
 exit
