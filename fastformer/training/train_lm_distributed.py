@@ -684,7 +684,8 @@ def train(local_rank, args):
                     output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
                                               no_sync=True)
             else:
-                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size, no_sync=False)
+                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                                          no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and rank == 0)
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
