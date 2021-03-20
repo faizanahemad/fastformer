@@ -463,8 +463,14 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
     if zero_grad_check:
-        print([name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()])
-        print([name for name, params in ddp_model.named_parameters() if params.grad is None])
+        zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
+        if len(zgradders):
+            print("Zero Grads: ", zgradders)
+        inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
+        if len(inf_gradders):
+            print("INF/NAN Grads: ", inf_gradders)
+
+        # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
 
 
