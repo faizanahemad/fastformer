@@ -563,9 +563,8 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
     print("[Train]: Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
     shuffle_dataset = args["shuffle_dataset"]
-    sampling_fraction = optc["sampling_fraction"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
 
     print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
