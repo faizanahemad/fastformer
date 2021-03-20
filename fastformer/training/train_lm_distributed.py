@@ -380,7 +380,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     assert max(size_dicts.values()) % min(size_dicts.values()) == 0
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
-    min_size = gcd_array(size_dicts.values())
+    min_size = gcd_array(list(size_dicts.values()) + list(size_dicts.values()))
     prefetch_factor = 2 * (max(size_dicts.values()) // min_size)
     try:
         train_dataset = Dataset.load_from_disk(location)
