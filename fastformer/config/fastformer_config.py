@@ -73,9 +73,9 @@ class ModelConfig:
 model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=False,
                                         adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                                         adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
-                                        input_cls_orthogonal_w=0.0, first_block_cls_orthogonal_w=0.1,
-                                        electra_loss_w=0.5, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=0.5, contrastive_temperature=5e-2,
-                                        answering_lm_w=2.0, highway_cls_ar_w=0.5, additive_margin_softmax_w=0.2)
+                                        input_cls_orthogonal_w=0.1, first_block_cls_orthogonal_w=0.0,
+                                        electra_loss_w=0.5, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
+                                        answering_lm_w=2.0, highway_cls_ar_w=0.5, additive_margin_softmax_w=0.3)
 
 
 @dataclass_json
@@ -300,8 +300,8 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               # (1, 1), (1, 2), (1, 3), (1, 4),
                                                               # (2, 1), (2, 2), (2, 3), (2, 4)
                                                               ],
-                             n_head=[(4, 4, 0), (5, 5, 0), (16, 0, 0)],
-                             block_channel_size=[384, 640, 1024], no_v_head=True, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
+                             n_head=[(4, 4, 0), (5, 5, 0), (12, 0, 0)],
+                             block_channel_size=[384, 640, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
                              short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
