@@ -606,7 +606,7 @@ def train(local_rank, args):
 
         time.sleep(random.random() * 5)
         wandb.init(**wandb_init_args)
-        wandb.watch(model, log="all", log_freq=log_every_steps * 4)
+        # wandb.watch(model, log="all", log_freq=log_every_steps * 4)
     barrier()
 
     if args["detect_anomaly"]:
