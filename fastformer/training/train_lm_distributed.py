@@ -462,6 +462,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
+    zgradders = []
+    inf_gradders = []
     if zero_grad_check:
         zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
         if len(zgradders):
@@ -471,7 +473,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
             print("INF/NAN Grads: ", inf_gradders)
 
         # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
-    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
+    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"], zero_grad=len(zgradders), inf_grad=len(inf_gradders))
 
 
 def train(local_rank, args):
@@ -688,10 +690,10 @@ def train(local_rank, args):
             if no_sync and (step + 1) % iter_size != 0:
                 with ddp_model.no_sync():
                     output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and rank == 0)
+                                              no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
             else:
                 output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
-                                          no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and rank == 0)
+                                          no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
@@ -720,7 +722,7 @@ def train(local_rank, args):
                 time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
                                batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
-                               **loss_dict, **acc_dict))
+                               **loss_dict, **acc_dict, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
                       (get_time_string(), rank, step, samples_processed, scaler.get_scale(),
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
