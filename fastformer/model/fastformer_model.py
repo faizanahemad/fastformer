@@ -178,9 +178,8 @@ class Embeddings(nn.Module):
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
 
-
         if config.char_rnn:
-            char_div = 4
+            char_div = 1
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
