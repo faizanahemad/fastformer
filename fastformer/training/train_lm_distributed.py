@@ -368,7 +368,6 @@ class LargeValidator:
         model = model.train()
         return results
 
-
 def cleanup():
 
     dist.destroy_process_group()
@@ -465,6 +464,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         raise ValueError(es)
     if zero_grad_check:
         print([name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()])
+        print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
 
 
