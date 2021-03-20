@@ -55,17 +55,7 @@ import deepspeed
 
 def training_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', '--nodes', default=1,
-                        type=int, metavar='N')
-    parser.add_argument('-g', '--gpus_per_node', default=1, type=int,
-                        help='number of gpus per node')
-    parser.add_argument('-nr', '--nr', default=0, type=int,
-                        help='ranking within the nodes')
-    parser.add_argument('--model_config', required=True, type=str,
-                        help='model config')
 
-    parser.add_argument('--accumulation_steps', default=1, type=int,
-                        help='Gradient Accumulation')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
@@ -143,6 +133,8 @@ def training_args():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--save_every_steps', type=int, default=1_000, metavar='N',
                         help='how many batches to wait before logging training status')
+
+    parser = deepspeed.add_config_arguments(parser)
 
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)

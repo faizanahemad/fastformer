@@ -431,7 +431,7 @@ def train_catch_exception(local_rank, args):
         raise e
 
 
-def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False):
+def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
     # It seems to me like the first accumulated gradients might get clipped several times hence giving more weight to last accumulated gradients :
 
     if args["cpu"] or args["no_autocast"]:
@@ -463,6 +463,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
+    if no_sync and zero_grad_check:
+        print([name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()])
     return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"])
 
 
