@@ -87,7 +87,7 @@ def answer_decoder(input_ids, tokenizer):
         answers = answers.split(tokenizer.answer_end_token)[0]
         answers = answers.replace(tokenizer.pad_token, '').replace(tokenizer.cls_token, '').strip()
         count_answers = len(re.findall(r'\[QUESTION_[0-9]+\]', answers))
-        answers = re.split(r'\[QUESTION_[0-9]+\]', answers)
+        answers = list(filter(lambda x: len(x.strip()), re.split(r'\[QUESTION_[0-9]+\]', answers)))
         all_answers.append(answers)
     return all_answers
 
