@@ -495,7 +495,7 @@ class ShortSeqRNN(nn.Module):
         for i in range(heads):
             rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
                          nonlinearity="tanh",
-                         bias=True, batch_first=True, dropout=config.hidden_dropout, bidirectional=True)
+                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
             rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
                           nonlinearity="tanh",
                           bias=True, batch_first=True, dropout=0.0, bidirectional=True)
