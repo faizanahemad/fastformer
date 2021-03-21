@@ -529,13 +529,8 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = FSDP(model, fp32_reduce_scatter=True, mixed_precision=False, cpu_offload=True, move_grads_to_cpu=True,
+    ddp_model = FSDP(model, mixed_precision=False, cpu_offload=True, move_grads_to_cpu=True,
                      bucket_cap_mb=10)  # find_unused_parameters=True
-    try:
-        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
-        ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
-    except:
-        print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
