@@ -529,14 +529,13 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=False,  # move_grads_to_cpu=True,
+    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=True,  move_grads_to_cpu=True,
                      bucket_cap_mb=10)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
-    optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
+    optimizer = torch.optim.Adam(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
-    scaler = GradScaler()
 
     # model, optim, gradscaler, scheduler, steps
 
@@ -651,7 +650,7 @@ def train(local_rank, args):
             if rank == 0:
                 torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
-                    save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
+                    save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
             _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
             barrier()
@@ -673,10 +672,10 @@ def train(local_rank, args):
         try:
             if no_sync and (step + 1) % iter_size != 0:
                 with ddp_model.no_sync():
-                    output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                    output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
                                               no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
             else:
-                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
                                           no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
 
         except Exception as e:
