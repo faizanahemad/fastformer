@@ -1748,8 +1748,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.config = config
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
-        self.encoder = TransformerEncoder(config)
-        self.decoder = TransformerDecoder(config)
+        self.encoder = wrap(TransformerEncoder(config))
+        self.decoder = wrap(TransformerDecoder(config))
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1954,7 +1954,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
-        self.discriminator_predictions = DiscriminatorPredictions(config)
+        self.discriminator_predictions = wrap(DiscriminatorPredictions(config))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -1970,7 +1970,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
+            self.sentence_task_attn = wrap(TransformerCrossAttentionDecoder(config))
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
