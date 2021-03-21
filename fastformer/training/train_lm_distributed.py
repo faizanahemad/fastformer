@@ -524,13 +524,13 @@ def train(local_rank, args):
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
-    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf)
+    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
     ddp_model = FSDP(model, fp32_reduce_scatter=True, mixed_precision=False, cpu_offload=True, move_grads_to_cpu=True,
-                     bucket_cap_mb=10, compute_device=device)  # find_unused_parameters=True
+                     bucket_cap_mb=10)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
