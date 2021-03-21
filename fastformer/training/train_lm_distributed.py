@@ -447,7 +447,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
 
     if np.isnan(loss_dict["loss"]):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
-            get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
+            get_time_string(), None, loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
     zgradders = []
     inf_gradders = []
@@ -560,7 +560,7 @@ def train(local_rank, args):
     print("[Train]: Scheduler Created for Rank = %s" % rank)
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("[Train]: Trying Resume from %s for Rank = %s" % (args["resume"], rank))
-        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, gpu_device)
+        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, None, gpu_device)
 
         if other_load_details is None:
             print("[Train]: No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
@@ -680,7 +680,7 @@ def train(local_rank, args):
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
-            get_time_string(), step, rank, scaler.get_scale(), bs_size, optimizer.param_groups[0]['lr'])
+            get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
             print(es)
             torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
             torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
@@ -704,10 +704,10 @@ def train(local_rank, args):
                 loss_dict = output["loss_dict"]
                 time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
-                               batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
+                               batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                                **loss_dict, **acc_dict, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
-                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
-                      (get_time_string(), rank, step, samples_processed, scaler.get_scale(),
+                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
+                      (get_time_string(), rank, step, samples_processed,
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
                 del acc_dict
@@ -731,7 +731,7 @@ def train(local_rank, args):
     if rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
-            save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
+            save(args["checkpoint"], ddp_model, optimizer, scheduler, None,
                  {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"], "loss": loss_dict, "accuracy_dict": acc_dict})
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
