@@ -529,7 +529,7 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = FSDP(model, mixed_precision=True, flatten_parameters=True,  move_grads_to_cpu=False,
+    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=True,  move_grads_to_cpu=False,
                      bucket_cap_mb=10)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
@@ -682,8 +682,6 @@ def train(local_rank, args):
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
             get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
             print(es)
-            torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
-            torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
             reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
 
         # clean_memory()
