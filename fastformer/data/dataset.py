@@ -478,9 +478,11 @@ class get_collate_fn:
         # print({key: [d[key].size() if isinstance(d[key], torch.Tensor) else d[key] for d in samples] for key in samples[0].keys()})
         anchors = [s["anchors"] if "anchors" in s else [] for s in samples]
         positives = [s["positives"] if "positives" in s else [[]] for s in samples]
+        answer = [s["answer"] if "answer" in s else [] for s in samples]
         for s in samples:
             _ = s.pop("anchors", None)
             _ = s.pop("positives", None)
+            _ = s.pop("answer", None)
             if "labels_pet_input_ids" not in s:
                 s["labels_pet_input_ids"] = s["input_ids"].new(128).fill_(0)
                 s["labels_pet_attention_mask"] = s["input_ids"].new(128).fill_(0)
@@ -492,6 +494,7 @@ class get_collate_fn:
         samples = default_collate(samples)
         samples["contrastive_anchors"] = anchors
         samples["contrastive_positives"] = positives
+        samples["answer"] = answer
         if char_ids is not None:
             samples["char_ids"] = char_ids
         # TODO: reduce the batch seq length to minimum required and a multiple of 16.
