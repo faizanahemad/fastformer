@@ -646,7 +646,7 @@ def train(local_rank, args):
         ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         if (step + 1) % save_every_steps == 0:
-            state_dict = ddp_model.module.state_dict()
+            state_dict = ddp_model.state_dict()
             if rank == 0:
                 torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
@@ -725,7 +725,7 @@ def train(local_rank, args):
         start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    state_dict = ddp_model.module.state_dict()
+    state_dict = ddp_model.state_dict()
     if rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
