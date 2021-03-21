@@ -533,8 +533,8 @@ def train(local_rank, args):
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
     if args["no_autocast"]:
-        optimizer_config.eps = 1e-7
-        config.layer_norm_eps = 1e-7
+        optimizer_config.eps = 1e-8
+        config.layer_norm_eps = 1e-8
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
