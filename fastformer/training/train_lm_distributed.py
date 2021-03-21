@@ -529,12 +529,12 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=True,  move_grads_to_cpu=False,
+    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=True,  move_grads_to_cpu=True,
                      bucket_cap_mb=10)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
-    optimizer = torch.optim.Adam(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
+    optimizer = torch.optim.AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad()
 
     # model, optim, gradscaler, scheduler, steps
