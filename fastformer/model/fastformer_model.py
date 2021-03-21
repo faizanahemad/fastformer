@@ -535,6 +535,7 @@ class ShortSeqRNN(nn.Module):
         # stg = time.time()
         for i in range(query.size(0)):
             # print("Short Seq RNN sizes = ", query[i].size(), query.size())
+            self.gru[i].flatten_parameters()
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
@@ -543,6 +544,7 @@ class ShortSeqRNN(nn.Module):
         processed_query = []
         query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
         for i in range(query_global.size(0)):
+            self.gru_global[i].flatten_parameters()
             qp = self.gru_global[i](query_global[i])[0]
             processed_query.append(qp)
         query_global = torch.stack(processed_query, 0).unsqueeze(-2)
