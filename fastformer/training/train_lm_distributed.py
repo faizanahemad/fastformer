@@ -529,8 +529,10 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = FSDP(model, mixed_precision=False, flatten_parameters=True,  move_grads_to_cpu=False,
-                     bucket_cap_mb=25)  # find_unused_parameters=True
+    fsdp_params = dict(mixed_precision=False, flatten_parameters=True, move_grads_to_cpu=False,
+                       bucket_cap_mb=25)
+    with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+        ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
