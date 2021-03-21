@@ -2313,7 +2313,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     contrastive_block_hidden = contrastive_block_hidden[:, :128]
                 elif len(contrastive_block_hidden.size()) == 3:
                     contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
+                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
                 labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
@@ -2341,13 +2341,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("contrastive_loss", et))
         cls_orthogonal_loss = 0.0
         if self.input_cls_orthogonal_w > 0 and self.training:
-            inputs_embeds_cls = inputs_embeds_cls/(inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
+            inputs_embeds_cls = inputs_embeds_cls/(inputs_embeds_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
             cls_orthogonal_loss += input_cls_orthogonal_loss
 
         if self.first_block_cls_orthogonal_w > 0 and self.training:
-            first_block_cls = first_block_cls/(first_block_cls.norm(2, -1, True) + self.config.layer_norm_eps)
+            first_block_cls = first_block_cls/(first_block_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
             first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
             first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * (first_block_cls ** 2).mean()
             cls_orthogonal_loss += first_block_cls_orthogonal_loss
