@@ -328,8 +328,8 @@ class LargeValidator:
                             output = model.module.funnel(**funnel_inputs)
                             # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
                             answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
-                    debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
-                    print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
+                    # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
+                    # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
                     predictions.extend(answering_predictions)
 

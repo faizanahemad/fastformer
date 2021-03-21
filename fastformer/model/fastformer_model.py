@@ -206,7 +206,7 @@ class Embeddings(nn.Module):
         if config.num_highway_cls_tokens > 0:
             self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
 
-    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None):
+    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None, use_embed_proj=True):
         if input_embeds is None:
             input_shape = input_ids.size()
             input_shape = list(input_shape)
@@ -227,7 +227,7 @@ class Embeddings(nn.Module):
 
         embeddings = inputs_embeds
 
-        if self.embed_proj:
+        if use_embed_proj:
             embeddings = self.embed_proj(embeddings)
 
         if self.config.char_rnn and char_ids is not None:
@@ -236,7 +236,7 @@ class Embeddings(nn.Module):
             char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // (2 * self.char_div)).mean(2)
             if self.config.num_highway_cls_tokens > 0:
                 char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
-            char_embeds = self.char_proj(char_embeds)
+            char_embeds = self.char_proj(char_embeds) if use_embed_proj else char_embeds
             embeddings = embeddings + char_embeds
 
         if position_ids is None:
@@ -247,7 +247,7 @@ class Embeddings(nn.Module):
 
         position_embeddings = self.position_embeddings(position_ids.long())
         if self.position_biased_input:
-            embeddings += self.embed_proj(position_embeddings)
+            embeddings += (self.embed_proj(position_embeddings) if use_embed_proj else position_embeddings)
 
         if self.config.type_vocab_size > 0:
             if token_type_ids is None:
@@ -257,9 +257,9 @@ class Embeddings(nn.Module):
                     (torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids),
                     dim=1)
             token_type_embeddings = self.token_type_embeddings(token_type_ids)
-            embeddings += self.embed_proj(token_type_embeddings)
+            embeddings += (self.embed_proj(token_type_embeddings) if use_embed_proj else token_type_embeddings)
 
-        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.LayerNorm(embeddings) if use_embed_proj else embeddings
 
         if mask is not None:
             if mask.dim() != embeddings.dim():
@@ -271,7 +271,7 @@ class Embeddings(nn.Module):
 
             embeddings = embeddings * mask
 
-        embeddings = self.dropout(embeddings)
+        embeddings = self.dropout(embeddings) if use_embed_proj else embeddings
         return embeddings, self.LayerNormPosEmb(position_embeddings.squeeze(0)) if position_embeddings is not None else None
 
 
@@ -1537,6 +1537,7 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.compressed_key_attention_layers = {}
         config.separate_content_and_position_attention = False
         config.sequence_dependent_position_transform = False
+        config.attention_dropout = 0.0
 
         self.config = config
         block_index = 0
@@ -2377,8 +2378,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden[:, :self.cls_tokens + 1])
-            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, )
-            highway_cls_ar_inputs_embeds = self.funnel.embed_proj_transpose(highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:])
+            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False)
+            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
