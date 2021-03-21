@@ -4,6 +4,8 @@ import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast

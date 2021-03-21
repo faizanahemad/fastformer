@@ -25,6 +25,8 @@ import random
 import os
 import argparse
 import time
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm, trange
@@ -433,31 +435,16 @@ def train_catch_exception(local_rank, args):
 def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
     # It seems to me like the first accumulated gradients might get clipped several times hence giving more weight to last accumulated gradients :
 
-    if args["cpu"] or args["no_autocast"]:
-        output = ddp_model(**batch, labels=labels)
-        loss = output["loss"] / iter_size
-        loss_dict = output["loss_dict"]
-        loss.backward()
+    output = ddp_model(**batch, labels=labels)
+    loss = output["loss"] / iter_size
+    loss_dict = output["loss_dict"]
+    loss.backward()
 
-        if not no_sync:
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-            optimizer.step()
-            scheduler.step()
-    else:
-        with autocast():
-            output = ddp_model(**batch, labels=labels)
-            loss = output["loss"] / iter_size
-            loss_dict = output["loss_dict"]
-            scaler.scale(loss).backward()
-        if not no_sync:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-            scaler.step(optimizer)
-            scale = scaler.get_scale()
-            scaler.update()
-            skip_lr_sched = (scale != scaler.get_scale())
-            if not skip_lr_sched:
-                scheduler.step()
+    if not no_sync:
+        ddp_model.clip_grad_norm_(gradient_clipping)
+        optimizer.step()
+        scheduler.step()
+
     if np.isnan(loss_dict["loss"]):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
@@ -537,12 +524,13 @@ def train(local_rank, args):
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
-    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+    ddp_model = FSDP(model, fp32_reduce_scatter=True, mixed_precision=False, cpu_offload=True, move_grads_to_cpu=True,
+                     bucket_cap_mb=10, compute_device=device)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -664,8 +652,9 @@ def train(local_rank, args):
         ddp_model.module.electra_loss_w = electra_loss_w
         optimizer.zero_grad()
         if (step + 1) % save_every_steps == 0:
+            state_dict = ddp_model.module.state_dict()
             if rank == 0:
-                torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+                torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
@@ -744,8 +733,9 @@ def train(local_rank, args):
         start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
+    state_dict = ddp_model.module.state_dict()
     if rank == 0:
-        torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+        torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
             save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
                  {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"], "loss": loss_dict, "accuracy_dict": acc_dict})
