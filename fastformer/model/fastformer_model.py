@@ -4,6 +4,8 @@ import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
+
+from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
 
 import numpy as np
@@ -490,11 +492,15 @@ class ShortSeqRNN(nn.Module):
         self.gru_global = nn.ModuleList()
         for i in range(heads):
             rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-                         nonlinearity="relu",
+                         nonlinearity="tanh",
                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
             rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                          nonlinearity="relu",
+                          nonlinearity="tanh",
                           bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            # rnn = nn.GRU(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+            #              bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            # rnn2 = nn.GRU(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+            #               bias=False, batch_first=True, dropout=0.0, bidirectional=True)
             self.gru.append(rnn)
             self.gru_global.append(rnn2)
 
@@ -1940,7 +1946,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         super().__init__(config)
         self.data_parallel = False
         self.config = config
-        self.tokenizer = tokenizer
+        self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
         self.discriminator_predictions = DiscriminatorPredictions(config)
@@ -2233,12 +2239,19 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             assert alen <= funnel_outputs["answering_logits"].size(1)
             answering_logits = funnel_outputs["answering_logits"][:, :alen]
             answering_lm_loss = self.answering_lm_w * self.loss_ce(answering_logits.reshape(-1, self.config.vocab_size), labels_pet_input_ids.reshape(-1))
-            if record_accuracy:
+            if record_accuracy and "answer" in kwargs:
                 answering_predictions = answering_logits.detach().argmax(dim=-1)
-                non_pad_idx = labels_pet_input_ids != self.pad_token_id
-                answering_lm_correct = answering_predictions[non_pad_idx] == labels_pet_input_ids[non_pad_idx]
-                answering_lm_correct = answering_lm_correct.contiguous()
-                accuracy_hist["answering_lm_accuracy"] = float(answering_lm_correct.sum() / len(answering_lm_correct.view(-1)))
+                answering_predictions = answer_decoder(answering_predictions, self.tokenizer)
+                final_labels, final_predictions = [], []
+                for lbl, prd in zip(kwargs.pop("answer", None), answering_predictions):
+                    if len(prd) > len(lbl):
+                        prd = prd[:len(lbl)]
+                    if len(prd) < len(lbl):
+                        prd = prd + ([''] * (len(lbl) - len(prd)))
+                    final_labels.extend(lbl)
+                    final_predictions.extend(prd)
+                score = accuracy_score(final_labels, final_predictions)
+                accuracy_hist["answering_lm_accuracy"] = score
 
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]

@@ -467,10 +467,10 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
     if zero_grad_check:
         zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
         if len(zgradders):
-            print("Zero Grads: ", zgradders)
+            print("[Train]: Time = %s, Zero Grads: " % get_time_string(), zgradders)
         inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
         if len(inf_gradders):
-            print("INF/NAN Grads: ", inf_gradders)
+            print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
 
         # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"], zero_grad=len(zgradders), inf_grad=len(inf_gradders))

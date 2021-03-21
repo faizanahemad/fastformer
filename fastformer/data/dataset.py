@@ -325,7 +325,7 @@ class TokenizerDataset(Dataset):
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
-        results = dict(n_pet_queries=n_queries)
+        results = dict(n_pet_queries=n_queries, answer=pet_answer)
 
         if self.training:
             seg_sep_token = f" {tokenizer.seg_sep_token} "
@@ -375,8 +375,8 @@ class TokenizerDataset(Dataset):
                 else:
                     labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
 
-            results = dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
-                           highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask)
+            results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
+                           highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask))
 
             segments = segments[seg_idxs]
 
@@ -456,7 +456,7 @@ class get_collate_fn:
         self.non_reduced_keys = ["char_ids", "char_offsets", "token_type_ids",
                                  "contrastive_anchors", "contrastive_positives", 'labels_segment_index',
                                  'highway_cls_ar__attention_mask', 'attention_mask',
-                                 "labels_pet_attention_mask", 'label_mlm_input_ids']
+                                 "labels_pet_attention_mask", 'label_mlm_input_ids', 'answer']
 
     def __call__(self, samples):
         num_cls = self.num_cls
