@@ -532,6 +532,8 @@ def train(local_rank, args):
 
     collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
+    if args["world_size"] != 128:
+        optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
@@ -561,7 +563,7 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
-    print("[Train]: Time = %s, Optimizer Created for Rank = %s" % (get_time_string(), rank))
+    print("[Train]: Time = %s, Optimizer Created for Rank = %s, params = %s" % (get_time_string(), rank, optc))
     shuffle_dataset = args["shuffle_dataset"]
     if not args["validate_only"] and not args["test_only"]:
         train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
