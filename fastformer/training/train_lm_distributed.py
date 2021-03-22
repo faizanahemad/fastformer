@@ -509,6 +509,7 @@ def train(local_rank, args):
     ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
     group = "%s-%s-nodes-%s" % (ds_name, args["nodes"], time_string)
     set_seeds(args["seed"])
+    model_config.model_size = args["model_config"]
     mconf = model_config.to_dict()
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))

@@ -61,7 +61,7 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         args = [None] * len(hosts)
 
     tsize = shutil.get_terminal_size()[0]
-    with ProcessPoolExecutor(min(32, len(hosts))) as executor:
+    with ThreadPoolExecutor(min(64, len(hosts))) as executor:  # ProcessPoolExecutor is quite slower
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
     if len(ld) <= 2:
         for ll in ld:
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
