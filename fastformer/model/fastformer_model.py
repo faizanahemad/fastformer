@@ -1905,7 +1905,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.sentence_task_attn = wrap(checkpoint_wrapper(TransformerCrossAttentionDecoder(config)))
+            self.sentence_task_attn = wrap(TransformerCrossAttentionDecoder(config))
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
