@@ -6,7 +6,6 @@ from typing import Optional, Tuple, Union
 import traceback
 from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
-from fairscale.nn.misc import checkpoint_wrapper
 
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
@@ -188,8 +187,8 @@ class Embeddings(nn.Module):
             char_rnn_layers = config.char_rnn_layers
             char_rnn_vocab_size = config.char_rnn_vocab_size
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
-            self.char_rnn = checkpoint_wrapper(ShortSeqRNN(config, self.embedding_size // (2 * char_div), 1, self.embedding_size // (2 * char_div),
-                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=True))
+            self.char_rnn = ShortSeqRNN(config, self.embedding_size // (2 * char_div), 1, self.embedding_size // (2 * char_div),
+                                        config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=True)
             self.char_proj = nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size, bias=False)
             self.char_div = char_div
 
@@ -430,8 +429,8 @@ class Conv1d(nn.Module):
         super().__init__()
         self.pre_permute = True
         self.post_permute = True
-        self.conv = checkpoint_wrapper(nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                              groups=groups, bias=bias, stride=stride, dilation=dilation, padding=padding, padding_mode=padding_mode))
+        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
+                              groups=groups, bias=bias, stride=stride, dilation=dilation, padding=padding, padding_mode=padding_mode)
 
     def forward(self, x, pre_permute=True, post_permute=True):
         unsqueeze = False
@@ -689,7 +688,7 @@ class SDConv(nn.Module):
         self.act = ACT2FN[act]
         assert hidden_size % heads == 0
         self.head_size = head_size
-        self.separable_conv1d = checkpoint_wrapper(SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride))
+        self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
         self.conv_attn_kernel = Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
         if config.no_v_head:
@@ -1273,8 +1272,8 @@ class LightLayer(nn.Module):
         # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
-        self.rnn = checkpoint_wrapper(ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
-                               config.short_rnn_overlap[block_index]))
+        self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
+                               config.short_rnn_overlap[block_index])
         self.lin = nn.Linear(cin, cin, bias=False)
         self.cout = cout
         # padding
@@ -1297,9 +1296,9 @@ class TransformerLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block,
                  is_encoder_layer, layer_index, last_layer_index=None, alternate_ffn=True):
         super().__init__()
-        self.attention = checkpoint_wrapper(MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
-                                            last_layer_index))
-        self.ffn = checkpoint_wrapper(PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer))
+        self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
+                                            last_layer_index)
+        self.ffn = PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
         self.alternate_ffn = alternate_ffn and (config.alternate_ffn if hasattr(config, "alternate_ffn") else True)
         self.block_index = block_index
         self.block_size = config.block_sizes[block_index]
@@ -1489,9 +1488,9 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.n_head[block_index] = (total_heads,) + tuple([0] * len(config.n_head[block_index][1:]))
         config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.self_attn = checkpoint_wrapper(MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True))
-        self.self_attn_lin = checkpoint_wrapper(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False))
-        self.relu = checkpoint_wrapper(nn.LeakyReLU())
+        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
+        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
+        self.relu = nn.LeakyReLU()
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
 
     def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
@@ -1684,7 +1683,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
         self.encoder = wrap(TransformerEncoder(config))
-        self.decoder = wrap(checkpoint_wrapper(TransformerDecoder(config)))
+        self.decoder = wrap(TransformerDecoder(config))
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1705,8 +1704,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
             else:
-                self.embed_proj_transpose = checkpoint_wrapper(nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
-                                                          ep))
+                self.embed_proj_transpose = nn.Sequential(nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps),
+                                                          ep)
         self.lm_head = nn.Linear(config.embedding_size, config.vocab_size + config.num_highway_cls_tokens)
         self.init_weights()
 
@@ -1889,7 +1888,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
-        self.discriminator_predictions = wrap(checkpoint_wrapper(DiscriminatorPredictions(config)))
+        self.discriminator_predictions = wrap(DiscriminatorPredictions(config))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
