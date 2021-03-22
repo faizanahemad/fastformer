@@ -1453,7 +1453,7 @@ def shift_right(input_ids, decoder_start_token_id, pad_token_id):
     # replace possible -100 values in labels by `pad_token_id`
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
-    assert torch.all(shifted_input_ids >= 0).item(), "Verify that `shifted_input_ids` has only positive values"
+    # assert torch.all(shifted_input_ids >= 0).item(), "Verify that `shifted_input_ids` has only positive values"
 
     return shifted_input_ids
 
@@ -1911,7 +1911,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
         self.electra_loss_w = electra_loss_w
-        self.loss_hist = defaultdict(list)
         self.reccord_loss = False
         self.record_accuracy = False
         self.timing_hist = list()
@@ -2092,13 +2091,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                                                                                                     contrastive_logits,
                                                                                                                     reverse_loss=True)
         adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2) + answering_lm_post_kl + contrastive_post_kl
-        if self.reccord_loss:
-            self.loss_hist["electra_kl"].append(float(electra_post_kl))
-            self.loss_hist["lm_kl"].append(float(lm_post_kl))
-            self.loss_hist["sentence_order_kl"].append(float(sent_order_post_kl))
-            self.loss_hist["answering_lm_kl"].append(float(answering_lm_post_kl))
-            self.loss_hist["contrastive_kl"].append(float(contrastive_post_kl))
-            self.loss_hist["adv_loss_kl"].append(float(adv_loss))
         return self.adv_w * adv_loss
 
     def get_emb(self, embedding_generation_params):
@@ -2389,15 +2381,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("electra_discriminator_accuracy", et))
 
         electra_loss = loss
-        if self.reccord_loss:
-            self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
-            self.loss_hist["cls_orthogonal_loss"].append(float(cls_orthogonal_loss))
-            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
-            self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
-            self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
-            self.loss_hist["electra_loss"].append(float(loss))
-            self.loss_hist["lm_loss"].append(float(masked_lm_loss))
-            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
 
         et = time.time() - st
         adv_loss = torch.tensor(0.0)
@@ -2412,9 +2395,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("aitm_alum_end", et))
 
         loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
-        loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
-                         highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
-                         loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
@@ -2425,8 +2405,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
-        accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
-        loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
+
+        loss_dict = dict()
+        if record_accuracy:
+            accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
+            loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
+                             highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
+                             loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
+            loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
         results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist)
         if self.data_parallel:
             results = [results]
