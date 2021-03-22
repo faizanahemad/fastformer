@@ -23,9 +23,9 @@ from dataclasses_json import dataclass_json
 def get_batch_size(size, autocast):
     size_dicts = {1024: 16}
     if not autocast:
-        size_dicts = {k: v // 2 for k, v in size_dicts}
+        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
     if size == "lg_config":
-        size_dicts = {k: v // 2 for k, v in size_dicts}
+        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
     return size_dicts
 
 
