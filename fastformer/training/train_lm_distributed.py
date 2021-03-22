@@ -200,7 +200,7 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, no_autocast=False):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False):
         self.location = location
         self.model = model
         self.config = config
@@ -265,6 +265,7 @@ class LargeValidator:
                          'swag_qna'
                          ]
         self.no_autocast = no_autocast
+        self.size_dicts = size_dicts
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -276,6 +277,7 @@ class LargeValidator:
         # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
         # WanDB control decide if init or not and make shim
         # Better Batching
+        size_dicts = self.size_dicts
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -305,9 +307,6 @@ class LargeValidator:
                 record_accuracy = True
             length = len(dataset)
             print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
-            global size_dicts
-            if self.no_autocast:
-                size_dicts = {k: v // 2 for k, v in size_dicts.items()}
             loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             loader = custom_batching_fn(loader, size_dicts, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
@@ -375,10 +374,7 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1, no_autocast=False):
-    global size_dicts
-    if no_autocast:
-        size_dicts = {k: v // autocast_factor for k, v in size_dicts.items()}
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, size_dicts, continuous_iter=True, world_size=1, num_workers=1):
     assert max(size_dicts.values()) % min(size_dicts.values()) == 0
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
@@ -510,7 +506,9 @@ def train(local_rank, args):
     group = "%s-%s-nodes-%s" % (ds_name, args["nodes"], time_string)
     set_seeds(args["seed"])
     model_config.model_size = args["model_config"]
+    size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
     mconf = model_config.to_dict()
+
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
@@ -551,7 +549,7 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Optimizer Created for Rank = %s, params = %s" % (get_time_string(), rank, optc))
     shuffle_dataset = args["shuffle_dataset"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, size_dicts, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
 
     print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
@@ -575,7 +573,7 @@ def train(local_rank, args):
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
-        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         if args["validate_only"]:
             return
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
@@ -655,7 +653,7 @@ def train(local_rank, args):
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
