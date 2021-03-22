@@ -24,16 +24,25 @@ sudo yum -y install llvm clang llvm-devel llvm-libs llvm-static
 # chmod +x cuda_11.2.1_460.32.03_linux.run
 # sudo sudo sh cuda_11.2.1_460.32.03_linux.run --silent --driver --toolkit
 
-wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/local_installers/cuda_10.2.89_440.33.01_linux.run
-chmod +x cuda_10.2.89_440.33.01_linux.run
-sudo sudo sh cuda_10.2.89_440.33.01_linux.run --silent --driver --toolkit
+#######################
 
-wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/patches/1/cuda_10.2.1_linux.run
-chmod +x cuda_10.2.1_linux.run
-sudo sudo sh cuda_10.2.1_linux.run --silent --toolkit --driver
+#wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/local_installers/cuda_10.2.89_440.33.01_linux.run
+#chmod +x cuda_10.2.89_440.33.01_linux.run
+#sudo sudo sh cuda_10.2.89_440.33.01_linux.run --silent --driver --toolkit
+#
+#wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/patches/1/cuda_10.2.1_linux.run
+#chmod +x cuda_10.2.1_linux.run
+#sudo sudo sh cuda_10.2.1_linux.run --silent --toolkit --driver
+#
+#wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/patches/2/cuda_10.2.2_linux.run
+#chmod +x cuda_10.2.2_linux.run
+#sudo sudo sh cuda_10.2.2_linux.run --silent --toolkit --driver
 
-wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/patches/2/cuda_10.2.2_linux.run
-chmod +x cuda_10.2.2_linux.run
-sudo sudo sh cuda_10.2.2_linux.run --silent --toolkit --driver
+######################
+
+sudo yum -y remove nvidia-dkms nvidia
+wget https://developer.download.nvidia.com/compute/cuda/11.2.2/local_installers/cuda_11.2.2_460.32.03_linux.run > /dev/null
+chmod +x cuda_11.2.2_460.32.03_linux.run
+sudo sudo sh cuda_11.2.2_460.32.03_linux.run --silent --driver --toolkit
 
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
