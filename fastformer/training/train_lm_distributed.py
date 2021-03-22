@@ -530,15 +530,15 @@ def train(local_rank, args):
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    fsdp_params = dict(mixed_precision=False, flatten_parameters=True, move_grads_to_cpu=False,
-                       bucket_cap_mb=25)
+    fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=True,
+                       bucket_cap_mb=25, reshard_after_forward=True, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False,)
     with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
         ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
     optimizer = torch.optim.AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
 
     # model, optim, gradscaler, scheduler, steps
 
@@ -582,7 +582,7 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     full_times = []
-    model.zero_grad()
+    model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
@@ -647,7 +647,7 @@ def train(local_rank, args):
         #
         electra_loss_w = float(((step + 1) / (2 * optc["warmup_steps"])) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
             state_dict = ddp_model.state_dict()
             if rank == 0:
