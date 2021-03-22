@@ -27,7 +27,7 @@ from torch.nn import TransformerDecoder
 import time
 
 from torch.utils.data import DataLoader
-from transformers.activations import ACT2FN
+
 from transformers.file_utils import (
     ModelOutput,
     add_code_sample_docstrings,
@@ -50,6 +50,19 @@ from transformers.utils import logging
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
 from fastformer.utils import *
+
+# from transformers.activations import ACT2FN
+ACT2FN = {
+    "relu": nn.ReLU,
+    "silu": nn.SiLU,
+    "swish": nn.SiLU,
+    "gelu": nn.GELU,
+    "tanh": nn.Tanh,
+    "gelu_new": nn.GELU,
+    "gelu_fast": nn.GELU,
+    "linear": nn.Linear,
+    "sigmoid": nn.Sigmoid,
+}
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -452,7 +465,6 @@ class SequenceDependentPositionTransform(nn.Module):
     def __init__(self, config: FastFormerConfig, d_pos_in, d_model_in, d_out, qkv_transform_groups, compress):
         super().__init__()
         act = config.hidden_act
-        self.act = ACT2FN[act]
         self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1,
                                     groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
         self.d_pos_in = d_pos_in
@@ -483,7 +495,6 @@ class ShortSeqRNN(nn.Module):
         self.all_head_size = heads * head_size
         self.hidden_size = hidden_size
         act = config.hidden_act
-        self.act = ACT2FN[act]
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
@@ -572,7 +583,6 @@ class ShortSeqRNNOld(nn.Module):
         self.all_head_size = heads * head_size
         self.hidden_size = hidden_size
         act = config.hidden_act
-        self.act = ACT2FN[act]
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
@@ -686,7 +696,7 @@ class SDConv(nn.Module):
         self.hidden_size = hidden_size
         self.stride = stride
         act = config.hidden_act
-        self.act = ACT2FN[act]
+        self.act = ACT2FN[act]()
         assert hidden_size % heads == 0
         self.head_size = head_size
         self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
@@ -1166,7 +1176,7 @@ class ConvFFN(nn.Module):
             self.layers.append(cnn)
         self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups, bias=False)
         self.conv1d_out.pre_permute = False
-        self.act = ACT2FN[act]
+        self.act = ACT2FN[act]()
 
     def forward(self, x):
         h = x
@@ -1187,7 +1197,7 @@ class BertFFN(nn.Module):
     def __init__(self, config: FastFormerConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner, bias=True)
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.activation_function = ACT2FN[config.hidden_act]()
         self.activation_dropout = Dropout(config.hidden_dropout)
         d_out = d_model if d_out is None else d_out
         self.linear_2 = nn.Linear(d_inner, d_out, bias=False)
@@ -1219,7 +1229,7 @@ class PositionwiseFFN(nn.Module):
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.d_model = d_model
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.activation_function = ACT2FN[config.hidden_act]()
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
@@ -1268,7 +1278,7 @@ class LightLayer(nn.Module):
         self.is_encoder_layer = is_encoder_layer
 
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.activation_function = ACT2FN[config.hidden_act]()
         self.cls_tokens = config.num_highway_cls_tokens + 1
         # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
@@ -1621,10 +1631,11 @@ class DiscriminatorPredictions(nn.Module):
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
         self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
+        self.act = ACT2FN[self.config.hidden_act]()
 
     def forward(self, discriminator_hidden_states):
         hidden_states = self.dense(discriminator_hidden_states)
-        hidden_states = ACT2FN[self.config.hidden_act](hidden_states)
+        hidden_states = self.act(hidden_states)
         logits = self.dense_prediction(hidden_states).squeeze()
         return logits
 
