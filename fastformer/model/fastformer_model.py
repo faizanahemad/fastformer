@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Union
 import traceback
 from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+from fairscale.nn.misc import checkpoint_wrapper
 
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
@@ -1904,7 +1905,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.sentence_task_attn = wrap(TransformerCrossAttentionDecoder(config))
+            self.sentence_task_attn = wrap(checkpoint_wrapper(TransformerCrossAttentionDecoder(config)))
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
