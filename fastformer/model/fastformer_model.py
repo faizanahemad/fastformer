@@ -203,12 +203,12 @@ class Embeddings(nn.Module):
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
             self.char_rnn = ShortSeqRNN(config, self.embedding_size // (2 * char_div), 1, self.embedding_size // (2 * char_div),
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=True)
-            self.char_proj = nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size, bias=False)
+            self.char_proj = checkpoint_wrapper(nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size, bias=False))
             self.char_div = char_div
 
         self.embed_proj = nn.Identity()
         if self.embedding_size != hidden_size:
-            self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
+            self.embed_proj = checkpoint_wrapper(nn.Linear(self.embedding_size, hidden_size, bias=False))
 
         self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
         self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
@@ -930,9 +930,8 @@ class MultiheadAttention(nn.Module):
                     in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
-            self.q_head = nn.Linear(d_model, n_head * d_head,
-                                                                                                                            bias=True)
-            self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
+            self.q_head = checkpoint_wrapper(nn.Linear(d_model, n_head * d_head,bias=True))
+            self.k_head = checkpoint_wrapper(nn.Linear(d_model, n_head * d_head, bias=False))
 
             if compress_query:
                 self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
@@ -943,7 +942,7 @@ class MultiheadAttention(nn.Module):
             if config.no_v_head:
                 self.v_head = nn.Identity()
             else:
-                self.v_head = nn.Linear(d_model, d_model)
+                self.v_head = checkpoint_wrapper(nn.Linear(d_model, d_model))
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
@@ -1196,14 +1195,14 @@ class ConvFFN(nn.Module):
 class BertFFN(nn.Module):
     def __init__(self, config: FastFormerConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_inner, bias=True)
+        self.linear_1 = checkpoint_wrapper(nn.Linear(d_model, d_inner, bias=True))
         self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
         self.activation_dropout = Dropout(config.hidden_dropout)
         d_out = d_model if d_out is None else d_out
-        self.linear_2 = nn.Linear(d_inner, d_out, bias=False)
+        self.linear_2 = checkpoint_wrapper(nn.Linear(d_inner, d_out, bias=False))
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
-            self.layers.append(nn.Linear(d_inner, d_inner, bias=False))
+            self.layers.append(checkpoint_wrapper(nn.Linear(d_inner, d_inner, bias=False)))
 
     def forward(self, hidden):
         h = self.linear_1(hidden)
@@ -1233,10 +1232,10 @@ class PositionwiseFFN(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff, bias=False)
+            self.dlin = Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else checkpoint_wrapper(nn.Linear(d_model, self.diff, bias=False))
         if groups > 1:
             assert d_model % groups == 0
-            self.lin = nn.Linear(d_model, d_model)
+            self.lin = checkpoint_wrapper(nn.Linear(d_model, d_model))
             self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
             self.lin = nn.Identity()
@@ -1285,7 +1284,7 @@ class LightLayer(nn.Module):
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
         self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
                                config.short_rnn_overlap[block_index])
-        self.lin = nn.Linear(cin, cin, bias=False)
+        self.lin = checkpoint_wrapper(nn.Linear(cin, cin, bias=False))
         self.cout = cout
         # padding
 
@@ -1500,8 +1499,8 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
-        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
-        self.relu = nn.LeakyReLU()
+        self.self_attn_lin = checkpoint_wrapper(nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False))
+        self.relu = checkpoint_wrapper(nn.LeakyReLU())
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
 
     def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
@@ -1630,7 +1629,7 @@ class DiscriminatorPredictions(nn.Module):
         super().__init__()
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
-        self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
+        self.dense_prediction = checkpoint_wrapper(nn.Linear(config.block_channel_size[0] // 2, 1))
         self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
 
     def forward(self, discriminator_hidden_states):
@@ -1706,12 +1705,12 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 assert block_channel_size[0] % ffn_groups == 0 and block_channel_size[-1] % ffn_groups == 0
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
-                self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
+                self.final_hidden_fc = checkpoint_wrapper(nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False))
             self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True)
+            ep = checkpoint_wrapper(nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True))
             # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
