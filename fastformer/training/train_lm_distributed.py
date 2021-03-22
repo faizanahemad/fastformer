@@ -25,6 +25,8 @@ import random
 import os
 import argparse
 import time
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm, trange
@@ -198,7 +200,7 @@ class SuperGLUEValidator:
 
 
 class LargeValidator:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, no_autocast=False):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False):
         self.location = location
         self.model = model
         self.config = config
@@ -263,6 +265,7 @@ class LargeValidator:
                          'swag_qna'
                          ]
         self.no_autocast = no_autocast
+        self.size_dicts = size_dicts
 
     def __call__(self):
         # TODO: save model if val acc higher than before
@@ -274,6 +277,7 @@ class LargeValidator:
         # TODO: Lower LR by lambda LR or step LR by step counting in a deterministic way
         # WanDB control decide if init or not and make shim
         # Better Batching
+        size_dicts = self.size_dicts
         datadict = DatasetDict.load_from_disk(self.location)
         tokenizer = self.tokenizer
         model = self.model.to(self.device)
@@ -303,9 +307,6 @@ class LargeValidator:
                 record_accuracy = True
             length = len(dataset)
             print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
-            global size_dicts
-            if self.no_autocast:
-                size_dicts = {k: v // 2 for k, v in size_dicts.items()}
             loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
             loader = custom_batching_fn(loader, size_dicts, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
@@ -373,10 +374,7 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, continuous_iter=True, world_size=1, num_workers=1, no_autocast=False):
-    global size_dicts
-    if no_autocast:
-        size_dicts = {k: v // autocast_factor for k, v in size_dicts.items()}
+def build_dataloader(location, shuffle_dataset, sampling_fraction, config, collate_fn, tokenizer, size_dicts, continuous_iter=True, world_size=1, num_workers=1):
     assert max(size_dicts.values()) % min(size_dicts.values()) == 0
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
@@ -433,34 +431,19 @@ def train_catch_exception(local_rank, args):
 def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
     # It seems to me like the first accumulated gradients might get clipped several times hence giving more weight to last accumulated gradients :
 
-    if args["cpu"] or args["no_autocast"]:
-        output = ddp_model(**batch, labels=labels)
-        loss = output["loss"] / iter_size
-        loss_dict = output["loss_dict"]
-        loss.backward()
+    output = ddp_model(**batch, labels=labels)
+    loss = output["loss"] / iter_size
+    loss_dict = output["loss_dict"]
+    loss.backward()
 
-        if not no_sync:
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-            optimizer.step()
-            scheduler.step()
-    else:
-        with autocast():
-            output = ddp_model(**batch, labels=labels)
-            loss = output["loss"] / iter_size
-            loss_dict = output["loss_dict"]
-            scaler.scale(loss).backward()
-        if not no_sync:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-            scaler.step(optimizer)
-            scale = scaler.get_scale()
-            scaler.update()
-            skip_lr_sched = (scale != scaler.get_scale())
-            if not skip_lr_sched:
-                scheduler.step()
-    if np.isnan(loss_dict["loss"]):
+    if not no_sync:
+        ddp_model.clip_grad_norm_(gradient_clipping)
+        optimizer.step()
+        scheduler.step()
+
+    if "loss" in loss_dict and np.isnan(loss_dict["loss"]):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
-            get_time_string(), scaler.get_scale(), loss_dict, optimizer.param_groups[0]['lr'])
+            get_time_string(), None, loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
     zgradders = []
     inf_gradders = []
@@ -522,7 +505,10 @@ def train(local_rank, args):
     ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
     group = "%s-%s-nodes-%s" % (ds_name, args["nodes"], time_string)
     set_seeds(args["seed"])
+    model_config.model_size = args["model_config"]
+    size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
     mconf = model_config.to_dict()
+
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
@@ -539,34 +525,31 @@ def train(local_rank, args):
         config.layer_norm_eps = 1e-8
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
     print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
-    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and rank == 0:
+    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
-    try:
-        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
-        ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
-    except:
-        print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
+    fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=True,
+                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False,)
+    with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+        ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
-    optimizer = AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
-    optimizer.zero_grad()
-    scaler = GradScaler()
+    optimizer = torch.optim.AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
+    optimizer.zero_grad(set_to_none=True)
 
     # model, optim, gradscaler, scheduler, steps
 
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
-    if rank == 0:
+    if local_rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
     print("[Train]: Time = %s, Optimizer Created for Rank = %s, params = %s" % (get_time_string(), rank, optc))
     shuffle_dataset = args["shuffle_dataset"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, size_dicts, world_size=args["world_size"], num_workers=args["num_workers"])
 
     print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
@@ -578,7 +561,7 @@ def train(local_rank, args):
     print("[Train]: Scheduler Created for Rank = %s" % rank)
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("[Train]: Trying Resume from %s for Rank = %s" % (args["resume"], rank))
-        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, scaler, gpu_device)
+        other_load_details = load(args["resume"], ddp_model, optimizer, scheduler, None, gpu_device)
 
         if other_load_details is None:
             print("[Train]: No resume checkpoint from %s for Rank = %s" % (args["resume"], rank))
@@ -590,14 +573,14 @@ def train(local_rank, args):
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
-        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         if args["validate_only"]:
             return
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
     full_times = []
-    model.zero_grad()
+    model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
@@ -662,14 +645,15 @@ def train(local_rank, args):
         #
         electra_loss_w = float(((step + 1) / (2 * optc["warmup_steps"])) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
-            if rank == 0:
-                torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+            state_dict = ddp_model.state_dict()
+            if local_rank == 0:
+                torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
-                    save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
+                    save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], args["no_autocast"])()
+            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
@@ -689,18 +673,16 @@ def train(local_rank, args):
         try:
             if no_sync and (step + 1) % iter_size != 0:
                 with ddp_model.no_sync():
-                    output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                    output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
                                               no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
             else:
-                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=iter_size,
+                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
                                           no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
-            get_time_string(), step, rank, scaler.get_scale(), bs_size, optimizer.param_groups[0]['lr'])
+            get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
             print(es)
-            torch.save(ddp_model.module.state_dict(), os.path.join(os.getcwd(), "error-model.pth"))
-            torch.save(dict(labels=labels, **batch), os.path.join(os.getcwd(), "error-input.pth"))
             reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
 
         # clean_memory()
@@ -721,10 +703,10 @@ def train(local_rank, args):
                 loss_dict = output["loss_dict"]
                 time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
-                               batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times), scale=scaler.get_scale(),
+                               batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
                                **loss_dict, **acc_dict, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
-                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, scale = %s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
-                      (get_time_string(), rank, step, samples_processed, scaler.get_scale(),
+                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
+                      (get_time_string(), rank, step, samples_processed,
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
                 del acc_dict
@@ -744,10 +726,11 @@ def train(local_rank, args):
         start_time = time.time()
 
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    if rank == 0:
-        torch.save(ddp_model.module.state_dict(), os.path.join(model_save_dir, model_save_name))
+    state_dict = ddp_model.state_dict()
+    if local_rank == 0:
+        torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
         if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
-            save(args["checkpoint"], ddp_model, optimizer, scheduler, scaler,
+            save(args["checkpoint"], ddp_model, optimizer, scheduler, None,
                  {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"], "loss": loss_dict, "accuracy_dict": acc_dict})
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.

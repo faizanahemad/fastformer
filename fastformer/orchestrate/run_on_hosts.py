@@ -61,7 +61,7 @@ def run_command_v2(hosts, cmd, args=None, dry_run=False):
         args = [None] * len(hosts)
 
     tsize = shutil.get_terminal_size()[0]
-    with ProcessPoolExecutor(min(32, len(hosts))) as executor:
+    with ThreadPoolExecutor(min(64, len(hosts))) as executor:  # ProcessPoolExecutor is quite slower
         ld = list(executor.map(one_run, hosts, [cmd] * len(hosts), args, [dry_run] * len(hosts)))
     if len(ld) <= 2:
         for ll in ld:
@@ -134,8 +134,8 @@ if __name__ == "__main__":
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
-    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --log_every_steps 50 --num_workers 8 --validate_every_steps 100000 --save_every_steps 5000"
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     cmd0 = "pkill -9 -f 'train_lm_distributed'"
     cmd1 = "pkill -9 -f 'multiprocessing'"
     cmd2 = "rm ~/torch_distributed_init/file-9999"
-    cmd3 = cmd_dir + " && git pull"
+    cmd3 = cmd_dir + "git fetch --all && git reset --hard origin/master && git pull"
     clear_log = cmd_dir + " && rm output.log"
     if args["kill"]:
         run_command_v2(hosts, cmd1)

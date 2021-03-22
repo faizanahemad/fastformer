@@ -5,7 +5,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
 import gc
 import torch
-from ..config import FastFormerConfig, size_dicts
+from ..config import FastFormerConfig
 from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode

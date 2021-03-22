@@ -18,8 +18,15 @@ from dataclasses_json import dataclass_json
 # size_dicts = {128: 16, 192: 8, 256: 8, 384: 4, 512: 4, 768: 2, 1024: 2}
 # size_dicts = {128: 36, 192: 32, 256: 28, 384: 20, 512: 16, 640: 12, 768: 8, 896: 6, 1024: 4}
 # size_dicts = {128: 24, 192: 12, 256: 12, 384: 12, 512: 12, 640: 12, 768: 12, 896: 12, 928: 12, 1024: 12}
-size_dicts = {1024: 16}
-autocast_factor = 2
+
+
+def get_batch_size(size, autocast):
+    size_dicts = {1024: 16}
+    if not autocast:
+        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
+    if size == "lg_config":
+        size_dicts = {k: v // 2 for k, v in size_dicts.items()}
+    return size_dicts
 
 
 @dataclass_json
@@ -37,8 +44,8 @@ class OptimizerConfig:
     gradient_clipping: float
 
 
-optimizer_config = OptimizerConfig(1e-4, 1e-4, 1e-2, 0.85, 0.98,
-                                   8, 8, 10000, 0.5)
+optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-2, 0.9, 0.98,
+                                   8, 8, 20000, 0.5)
 
 
 @dataclass_json

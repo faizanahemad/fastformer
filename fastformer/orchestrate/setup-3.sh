@@ -1,6 +1,7 @@
 source ~/.zshrc
 # pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio===0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
-pip install torch torchvision torchaudio
+# pip install torch torchvision torchaudio
+pip install torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null
 pip install tqdm wandb torchnlp torchtext dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer
 pip install -U joblib scikit-learn
 
@@ -89,8 +90,7 @@ cat ~/.ssh/id_rsa.pub
 
 pip install tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer
 pip install dataclasses-json einops nlpaug pytorch-fast-transformers
-pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json deepspeed
-
+pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json
 
 cd ~ && mkdir mygit && cd mygit && git clone https://github.com/faizanahemad/fastformer.git && cd fastformer && pip install -e .
 
@@ -98,29 +98,34 @@ cd ~/mygit && git clone https://github.com/NVIDIA/apex
 cd ~/mygit/apex
 pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 
+pip install fairscale > /dev/null
+
 cd ~/mygit
 DS_BUILD_OPS=1 pip install deepspeed
 
 cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
 cd ~/mygit/fairseq
 cd fairseq/modules/lightconv_layer
-python cuda_function_gen.py
-python setup.py install
+python cuda_function_gen.py > /dev/null
+python setup.py install > /dev/null
 cd ~/mygit/fairseq
 cd fairseq/modules/dynamicconv_layer
-python cuda_function_gen.py
-python setup.py install
+python cuda_function_gen.py > /dev/null
+python setup.py install > /dev/null
 cd ~/mygit/fairseq
 pip install -e .
 cd ~/mygit/fairseq
 cd fairseq/modules/lightconv_layer
-python cuda_function_gen.py
-python setup.py install
+python cuda_function_gen.py > /dev/null
+python setup.py install > /dev/null
 cd ~/mygit/fairseq
 cd fairseq/modules/dynamicconv_layer
-python cuda_function_gen.py
-python setup.py install
+python cuda_function_gen.py > /dev/null
+python setup.py install > /dev/null
 cd ~/mygit/fastformer
+
+pip freeze | grep dynamicconv-layer
+pip freeze | grep fairscale
 
 
 

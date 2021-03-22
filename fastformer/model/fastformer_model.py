@@ -4,6 +4,9 @@ import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+from fairscale.nn.misc import checkpoint_wrapper
 
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
@@ -24,7 +27,7 @@ from torch.nn import TransformerDecoder
 import time
 
 from torch.utils.data import DataLoader
-from transformers.activations import ACT2FN
+
 from transformers.file_utils import (
     ModelOutput,
     add_code_sample_docstrings,
@@ -47,6 +50,19 @@ from transformers.utils import logging
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
 from fastformer.utils import *
+
+# from transformers.activations import ACT2FN
+ACT2FN = {
+    "relu": nn.ReLU,
+    "silu": nn.SiLU,
+    "swish": nn.SiLU,
+    "gelu": nn.GELU,
+    "tanh": nn.Tanh,
+    "gelu_new": nn.GELU,
+    "gelu_fast": nn.GELU,
+    "linear": nn.Linear,
+    "sigmoid": nn.Sigmoid,
+}
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -187,7 +203,7 @@ class Embeddings(nn.Module):
             self.char_embeddings = nn.Embedding(char_rnn_vocab_size, self.embedding_size // (2 * char_div), padding_idx=pad_token_id)
             self.char_rnn = ShortSeqRNN(config, self.embedding_size // (2 * char_div), 1, self.embedding_size // (2 * char_div),
                                         config.char_rnn_window_size, config.char_rnn_window_overlap, char_rnn_layers, maintain_dim=True)
-            self.char_proj = nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size)
+            self.char_proj = nn.Linear(self.embedding_size // (2 * char_div), self.hidden_size, bias=False)
             self.char_div = char_div
 
         self.embed_proj = nn.Identity()
@@ -206,27 +222,23 @@ class Embeddings(nn.Module):
         if config.num_highway_cls_tokens > 0:
             self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
 
-    def forward(self, input_ids=None, input_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None, use_embed_proj=True):
-        if input_embeds is None:
+    def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None,
+                use_embed_proj=True, use_highway_embeds=True):
+        if inputs_embeds is None:
             input_shape = input_ids.size()
             input_shape = list(input_shape)
             initial_seq_len = input_shape[1]
-            input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
+            if use_highway_embeds:
+                input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
             input_shape = tuple(input_shape)
-
             inputs_embeds = self.word_embeddings(input_ids)
-        if self.config.num_highway_cls_tokens > 0:
+        if self.config.num_highway_cls_tokens > 0 and use_highway_embeds:
             highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
             inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
-
-
-
         else:
-            input_shape = input_embeds.size()
+            input_shape = inputs_embeds.size()
         seq_length = input_shape[1]
-
         embeddings = inputs_embeds
-
         if use_embed_proj:
             embeddings = self.embed_proj(embeddings)
 
@@ -234,14 +246,14 @@ class Embeddings(nn.Module):
             char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size // (2 * self.char_div))
             char_embeds = self.char_rnn(self.char_embeddings(char_ids))
             char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // (2 * self.char_div)).mean(2)
-            if self.config.num_highway_cls_tokens > 0:
+            if self.config.num_highway_cls_tokens > 0 and use_highway_embeds:
                 char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
             char_embeds = self.char_proj(char_embeds) if use_embed_proj else char_embeds
             embeddings = embeddings + char_embeds
 
         if position_ids is None:
             position_ids = self.position_ids[:, :seq_length]
-        else:
+        elif use_highway_embeds and self.config.num_highway_cls_tokens > 0:
             position_ids = torch.cat((self.highway_position_ids.expand((position_ids.size(0), -1)), position_ids + self.config.num_highway_cls_tokens),
                                      dim=1)
 
@@ -252,7 +264,7 @@ class Embeddings(nn.Module):
         if self.config.type_vocab_size > 0:
             if token_type_ids is None:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
-            else:
+            elif use_highway_embeds and self.config.num_highway_cls_tokens > 0:
                 token_type_ids = torch.cat(
                     (torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids),
                     dim=1)
@@ -265,7 +277,8 @@ class Embeddings(nn.Module):
             if mask.dim() != embeddings.dim():
                 if mask.dim() == 4:
                     mask = mask.squeeze(1).squeeze(1)
-                mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device), mask), dim=1)
+                if use_highway_embeds and self.config.num_highway_cls_tokens > 0:
+                    mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device), mask), dim=1)
                 mask = mask.unsqueeze(2)
             mask = mask.to(embeddings.dtype)
 
@@ -320,8 +333,7 @@ def pool_tensor(tensor, cls_size, mode="mean", stride=2):
         return type(tensor)(pool_tensor(x, mode=mode, stride=stride) for x in tensor)
 
     # TODO: check if even length in dim=1 (seq dim)
-    cls_tokens = tensor[:, :cls_size]
-    tensor = tensor[:, cls_size:]
+    cls_tokens, tensor = tensor.split([cls_size, tensor.size(1) - cls_size], 1)
     tensor = pool_tensor_basic(tensor, mode, stride)
 
     tensor = torch.cat([cls_tokens, tensor], dim=1)
@@ -453,7 +465,6 @@ class SequenceDependentPositionTransform(nn.Module):
     def __init__(self, config: FastFormerConfig, d_pos_in, d_model_in, d_out, qkv_transform_groups, compress):
         super().__init__()
         act = config.hidden_act
-        self.act = ACT2FN[act]
         self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1,
                                     groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
         self.d_pos_in = d_pos_in
@@ -484,7 +495,6 @@ class ShortSeqRNN(nn.Module):
         self.all_head_size = heads * head_size
         self.hidden_size = hidden_size
         act = config.hidden_act
-        self.act = ACT2FN[act]
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
@@ -493,7 +503,7 @@ class ShortSeqRNN(nn.Module):
         for i in range(heads):
             rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
                          nonlinearity="tanh",
-                         bias=True, batch_first=True, dropout=config.hidden_dropout, bidirectional=True)
+                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
             rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
                           nonlinearity="tanh",
                           bias=True, batch_first=True, dropout=0.0, bidirectional=True)
@@ -533,6 +543,7 @@ class ShortSeqRNN(nn.Module):
         # stg = time.time()
         for i in range(query.size(0)):
             # print("Short Seq RNN sizes = ", query[i].size(), query.size())
+            self.gru[i].flatten_parameters()
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
@@ -541,6 +552,7 @@ class ShortSeqRNN(nn.Module):
         processed_query = []
         query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
         for i in range(query_global.size(0)):
+            self.gru_global[i].flatten_parameters()
             qp = self.gru_global[i](query_global[i])[0]
             processed_query.append(qp)
         query_global = torch.stack(processed_query, 0).unsqueeze(-2)
@@ -571,7 +583,6 @@ class ShortSeqRNNOld(nn.Module):
         self.all_head_size = heads * head_size
         self.hidden_size = hidden_size
         act = config.hidden_act
-        self.act = ACT2FN[act]
         assert hidden_size % (2 * heads) == 0
         self.head_size = head_size
         self.overlap = overlap
@@ -685,7 +696,7 @@ class SDConv(nn.Module):
         self.hidden_size = hidden_size
         self.stride = stride
         act = config.hidden_act
-        self.act = ACT2FN[act]
+        self.act = checkpoint_wrapper(ACT2FN[act]())
         assert hidden_size % heads == 0
         self.head_size = head_size
         self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
@@ -768,9 +779,9 @@ class CompressSeqSDConv(nn.Module):
         self.config = config
         expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
-            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
             self.expansion_factor = 2
+            self.expand = Conv1d(d_model, d_model * (self.expansion_factor - 1), 1, n_head, False)
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
         else:
             self.expand = nn.Identity()
             self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
@@ -784,12 +795,13 @@ class CompressSeqSDConv(nn.Module):
 
     def forward(self, query):
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.stride)
-        query = self.expand(query)
-        cls = query[:, :self.cls_tokens]
-        query = query[:, self.cls_tokens:]
+        if self.expansion_factor > 1:
+            query = torch.cat((self.expand(query), query), dim=-1)
+        cls, query = query.split([self.cls_tokens, query.size(1) - self.cls_tokens], 1)
         target_len = qskip.shape[1] - self.cls_tokens
         query = self.sd_conv(query)
-        query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
+        if target_len - query.shape[1] > 0:
+            query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
         q = torch.cat([cls, query], dim=1)
         return qskip + self.contract(q)
 
@@ -802,9 +814,9 @@ class CompressSeqMeanPooling(nn.Module):
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
         if expand_dims:
-            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
             self.expansion_factor = 2
+            self.expand = Conv1d(d_model, d_model * (self.expansion_factor - 1), 1, n_head, False)
+            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
         else:
             self.expand = nn.Identity()
             self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
@@ -813,88 +825,12 @@ class CompressSeqMeanPooling(nn.Module):
     def forward(self, query):
         # st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
-        query = self.expand(query)
+        if self.expansion_factor > 1:
+            query = torch.cat((self.expand(query), query), dim=-1)
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
         # ext = time.time()
         # print("Mean pooling = %.5f" % (ext - st))
         return qskip + query
-
-
-class CompressSeqShortSeqRNN(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
-        super().__init__()
-        self.config = config
-        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
-        if expand_dims:
-            self.expand = Conv1d(d_model, d_model * 2, 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
-            self.expansion_factor = 2
-        else:
-            self.expand = nn.Identity()
-            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
-            self.expansion_factor = 1
-        d_head = config.d_head[block_index] * self.expansion_factor
-        self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.rnn = ShortSeqRNN(config, d_model * self.expansion_factor, 1, d_model * self.expansion_factor, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
-
-    def forward(self, query):
-        # st = time.time()
-        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
-        query = self.expand(query)
-        # rnnst = time.time()
-        query = self.rnn(query)
-        # rnnet = time.time()
-        query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
-        # ext = time.time()
-        # print("RNN pooling Total = %.5f" % (ext - st), "Only RNN in pooling = %.5f" % (rnnet - rnnst), "RNN Extra = %.5f" % ((ext - st) - (rnnet - rnnst)))
-        return query + qskip
-
-
-class CompressSeqWeighted(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
-        super().__init__()
-        self.config = config
-        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        d_head = config.d_head[block_index]
-        self.d_model, self.n_head, self.d_head = d_model, n_head, d_head
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
-        self.ffn = BertFFN(config, self.stride * d_model // n_head,
-                           2 * self.stride * d_model // n_head, 0, self.stride)
-
-    def forward(self, query):
-        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.stride)
-        cls = query[:, :self.cls_tokens]
-        query = query[:, self.cls_tokens:]
-        target_len = qskip.shape[1] - self.cls_tokens
-        batch_size, seq_len, dim = query.shape
-        assert seq_len % self.stride == 0
-        assert dim % self.n_head == 0
-        seq_groups = seq_len // self.stride
-
-        q = query.view(batch_size,
-                       seq_groups, self.stride,
-                       self.n_head, dim // self.n_head)  # B, seq_groups, stride, H, h_dim
-        qw = self.ffn(q.permute(0, 1, 3, 2, 4).reshape(batch_size, seq_groups, self.n_head, self.stride * dim // self.n_head))
-
-        qw = qw.permute(0, 1, 3, 2)  # (B, seq_groups, H, stridexh_dim) -> (B, Seq_groups, H, stride) -> (B, Seq_groups, stride, H)
-        # qw -> (B, Seq_groups, stride, H) q -> (B, Seq_groups, stride, H, h_dim)
-        q = (qw.unsqueeze(-1) * q).mean(2).view(batch_size, seq_groups, dim)  # B, S/r, H, Dh -> B, S/r, D
-        q = nn.functional.pad(q, (0, 0, 0, target_len - q.shape[1], 0, 0))
-        q = torch.cat([cls, q], dim=1)
-        return qskip + self.contract(q)
-
-
-class ChannelCompress(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.stride = in_dim // out_dim
-        assert in_dim % out_dim == 0
-
-    def forward(self, x):
-        return pool_tensor_basic(x.transpose(1, 2), "mean", self.stride).transpose(1, 2)
 
 
 class MultiheadAttention(nn.Module):
@@ -948,12 +884,8 @@ class MultiheadAttention(nn.Module):
         self.key_compression_layers = key_compression_layers
         self.learned_compress = config.compress_query_method in ['learn_sdconv', 'learn_rnn', 'learn']
 
-        if config.compress_query_method == 'learn':
-            CompressionClass = CompressSeqWeighted
-        elif config.compress_query_method == 'learn_sdconv':
+        if config.compress_query_method == 'learn_sdconv':
             CompressionClass = CompressSeqSDConv
-        elif config.compress_query_method == 'learn_rnn':
-            CompressionClass = CompressSeqShortSeqRNN
         elif config.compress_query_method == 'mean':
             CompressionClass = CompressSeqMeanPooling
         elif config.compress_query_method is None:
@@ -1167,24 +1099,44 @@ class MultiheadAttention(nn.Module):
         batch_size, seq_len, _ = query.shape
         query_temp = query
         if self.sdconv:
+
             if self.full_channel_separation:
-                sdconv_out = self.sdconv(query[:, :, :self.conv_dims], key[:, :, :self.conv_dims], value[:, :, :self.conv_dims])
-                query = query[:, :, self.conv_dims:]
-                key = key[:, :, self.conv_dims:]
-                value = value[:, :, self.conv_dims:]
+                if key is None and value is None:
+                    qp1, query = query.split([self.conv_dims, query.size(-1) - self.conv_dims], -1)
+                    kp1, _ = qp1, query
+                    vp1, _ = qp1, query
+                else:
+                    qp1, query = query.split([self.conv_dims, query.size(-1) - self.conv_dims], -1)
+                    kp1, key = key.split([self.conv_dims, key.size(-1) - self.conv_dims], -1)
+                    vp1, value = value.split([self.conv_dims, value.size(-1) - self.conv_dims], -1)
+                sdconv_out = self.sdconv(qp1, kp1, vp1)
             else:
+                if key is None and value is None:
+                    key = query
+                    value = query
                 sdconv_out = self.sdconv(query, key, value)
 
         if self.short_rnn:
             if self.full_channel_separation:
-                rnn_out = self.rnn(query[:, :, :self.rnn_dims], key[:, :, :self.rnn_dims], value[:, :, :self.rnn_dims])
-                query = query[:, :, self.rnn_dims:]
-                key = key[:, :, self.rnn_dims:]
-                value = value[:, :, self.rnn_dims:]
+                if key is None and value is None:
+                    qp1, query = query.split([self.rnn_dims, query.size(-1) - self.rnn_dims], -1)
+                    kp1, _ = qp1, query
+                    vp1, _ = qp1, query
+                else:
+                    qp1, query = query.split([self.rnn_dims, query.size(-1) - self.rnn_dims], -1)
+                    kp1, key = key.split([self.rnn_dims, key.size(-1) - self.rnn_dims], -1)
+                    vp1, value = value.split([self.rnn_dims, value.size(-1) - self.rnn_dims], -1)
+                rnn_out = self.rnn(qp1, kp1, vp1)
             else:
+                if key is None and value is None:
+                    key = query
+                    value = query
                 rnn_out = self.rnn(query, key, value)
 
         try:
+            if key is None and value is None:
+                key = query
+                value = query
             attn_out, attn_prob = self.self_attention(query, key, value, attention_inputs, layer_index)
         except Exception as e:
             print("[Exception-in-train]: Query Shape = %s, Key shape = %s, Value shape = %s, layer_index = %s, block index = %s" % (query.size(), key.size(), value.size(), layer_index, self.block_index))
@@ -1213,7 +1165,7 @@ class ConvFFN(nn.Module):
         d_out = d_model if d_out is None else d_out
         cin, cout = d_model, d_out
         act = config.hidden_act
-        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups, bias=False)
+        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups, bias=True)
         self.conv1d_in.post_permute = False
         self.activation_dropout = Dropout(config.hidden_dropout)
         self.layers = nn.ModuleList() if layers > 0 else None
@@ -1222,9 +1174,9 @@ class ConvFFN(nn.Module):
             cnn.pre_permute=False
             cnn.post_permute=False
             self.layers.append(cnn)
-        self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups)
+        self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups, bias=False)
         self.conv1d_out.pre_permute = False
-        self.act = ACT2FN[act]
+        self.act = checkpoint_wrapper(ACT2FN[act]())
 
     def forward(self, x):
         h = x
@@ -1244,14 +1196,14 @@ class ConvFFN(nn.Module):
 class BertFFN(nn.Module):
     def __init__(self, config: FastFormerConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_inner)
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.linear_1 = nn.Linear(d_model, d_inner, bias=True)
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
         self.activation_dropout = Dropout(config.hidden_dropout)
         d_out = d_model if d_out is None else d_out
-        self.linear_2 = nn.Linear(d_inner, d_out)
+        self.linear_2 = nn.Linear(d_inner, d_out, bias=False)
         self.layers = nn.ModuleList() if layers > 0 else None
         for _ in range(layers):
-            self.layers.append(nn.Linear(d_inner, d_inner))
+            self.layers.append(nn.Linear(d_inner, d_inner, bias=False))
 
     def forward(self, hidden):
         h = self.linear_1(hidden)
@@ -1277,11 +1229,11 @@ class PositionwiseFFN(nn.Module):
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.d_model = d_model
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 8) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff)
+            self.dlin = Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff, bias=False)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
@@ -1326,20 +1278,21 @@ class LightLayer(nn.Module):
         self.is_encoder_layer = is_encoder_layer
 
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
-        self.activation_function = ACT2FN[config.hidden_act]
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
         self.cls_tokens = config.num_highway_cls_tokens + 1
         # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
         self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
         self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
                                config.short_rnn_overlap[block_index])
-        self.lin = nn.Linear(cin, cin)
+        self.lin = nn.Linear(cin, cin, bias=False)
         self.cout = cout
         # padding
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        qcnn = self.c1(query[:, :, :self.cout])
-        qrnn = self.rnn(query[:, :, self.cout:])
+        qcnn_in, qrnn_in = query.split([self.cout, query.size(-1) - self.cout], -1)
+        qcnn = self.c1(qcnn_in)
+        qrnn = self.rnn(qrnn_in)
         q = torch.cat((qcnn, qrnn), 2)
         q = self.activation_function(q)
         q = self.lin(q)
@@ -1394,18 +1347,18 @@ class TransformerEncoder(nn.Module):
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
                         inext = i + 1
-                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False))
+                        self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False)))
                         self.repeats[block_index].append(1)
                         i = inext
                     elif i < block_size:
                         if config.light_first_layer and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(LightLayer(config, block_index, True))
+                            self.blocks[block_index].append(wrap(LightLayer(config, block_index, True)))
                             self.repeats[block_index].append(1)
                             i += 1
                         else:
                             reps = (block_size - (i)) if cur_channels != next_channels else (block_size - i)
                             inext = i + reps
-                            self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
+                            self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps)))
                             self.repeats[block_index].append(reps)
                             i = inext
                     else:
@@ -1413,25 +1366,21 @@ class TransformerEncoder(nn.Module):
                 else:
                     inext = i + 1
                     if config.light_first_layer:
-                        self.blocks[block_index].append(LightLayer(config, block_index, True))
+                        self.blocks[block_index].append(wrap(LightLayer(config, block_index, True)))
                     else:
-                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
+                        self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i)))
                     self.repeats[block_index].append(1)
                     i = inext
         self.pool = None
-        if config.pooling_type == 'learn':
-            CompressionClass = CompressSeqWeighted
-        elif config.pooling_type == 'learn_sdconv':
+        if config.pooling_type == 'learn_sdconv':
             CompressionClass = CompressSeqSDConv
-        elif config.pooling_type == 'learn_rnn':
-            CompressionClass = CompressSeqShortSeqRNN
         elif config.pooling_type == 'mean':
             CompressionClass = CompressSeqMeanPooling
-        if config.pooling_type in ["learn", 'mean', 'learn_sdconv', 'learn_rnn'] and config.stride > 1:
+        if config.pooling_type in ['mean', 'learn_sdconv'] and config.stride > 1:
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 bi = block_index + 1
-                pool[str(block_index + 1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
+                pool[str(block_index + 1)] = wrap(CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True))
             self.pool = pool
 
     def forward_one_block(self, block_index, hidden, attention_inputs,
@@ -1515,7 +1464,7 @@ def shift_right(input_ids, decoder_start_token_id, pad_token_id):
     # replace possible -100 values in labels by `pad_token_id`
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
-    assert torch.all(shifted_input_ids >= 0).item(), "Verify that `shifted_input_ids` has only positive values"
+    # assert torch.all(shifted_input_ids >= 0).item(), "Verify that `shifted_input_ids` has only positive values"
 
     return shifted_input_ids
 
@@ -1551,7 +1500,7 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
-        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index])
+        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
         self.relu = nn.LeakyReLU()
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
 
@@ -1569,6 +1518,7 @@ class TransformerCrossAttentionDecoder(nn.Module):
         (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
         query = self.self_attn_lin(self.relu(query))
         (query,) = self.self_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
+        query = self.self_attn_lin(query)
         return self.self_attn_ln(query)
 
 
@@ -1579,8 +1529,7 @@ def upsample(x, stride, target_len, cls_tokens):
     if stride == 1:
         return x
 
-    cls = x[:, :cls_tokens]
-    x = x[:, cls_tokens:]
+    cls, x = x.split([cls_tokens, x.size(1) - cls_tokens], 1)
     output = torch.repeat_interleave(x, repeats=stride, dim=1)
 
     output = nn.functional.pad(output, (0, 0, 0, (target_len - cls_tokens) - output.shape[1], 0, 0))
@@ -1682,10 +1631,11 @@ class DiscriminatorPredictions(nn.Module):
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
         self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
+        self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
 
     def forward(self, discriminator_hidden_states):
         hidden_states = self.dense(discriminator_hidden_states)
-        hidden_states = ACT2FN[self.config.hidden_act](hidden_states)
+        hidden_states = self.act(hidden_states)
         logits = self.dense_prediction(hidden_states).squeeze()
         return logits
 
@@ -1744,8 +1694,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.config = config
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
-        self.encoder = TransformerEncoder(config)
-        self.decoder = TransformerDecoder(config)
+        self.encoder = wrap(TransformerEncoder(config))
+        self.decoder = wrap(TransformerDecoder(config))
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1761,7 +1711,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=False)
+            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True)
             # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
@@ -1950,7 +1900,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
-        self.discriminator_predictions = DiscriminatorPredictions(config)
+        self.discriminator_predictions = wrap(DiscriminatorPredictions(config))
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
@@ -1966,14 +1916,13 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
+            self.sentence_task_attn = wrap(TransformerCrossAttentionDecoder(config))
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
         self.electra_loss_w = electra_loss_w
-        self.loss_hist = defaultdict(list)
         self.reccord_loss = False
         self.record_accuracy = False
         self.timing_hist = list()
@@ -2154,13 +2103,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                                                                                                                     contrastive_logits,
                                                                                                                     reverse_loss=True)
         adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2) + answering_lm_post_kl + contrastive_post_kl
-        if self.reccord_loss:
-            self.loss_hist["electra_kl"].append(float(electra_post_kl))
-            self.loss_hist["lm_kl"].append(float(lm_post_kl))
-            self.loss_hist["sentence_order_kl"].append(float(sent_order_post_kl))
-            self.loss_hist["answering_lm_kl"].append(float(answering_lm_post_kl))
-            self.loss_hist["contrastive_kl"].append(float(contrastive_post_kl))
-            self.loss_hist["adv_loss_kl"].append(float(adv_loss))
         return self.adv_w * adv_loss
 
     def get_emb(self, embedding_generation_params):
@@ -2272,7 +2214,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
 
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = final_hidden[:, self.cls_tokens + 1:]
+            contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
+            assert len(contrastive_block_hidden.size()) == 3
+            contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
             contrastive_len = contrastive_block_hidden.size(1)
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
@@ -2310,10 +2254,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 pass
             else:
                 contrastive_block_hidden = torch.stack(anchors + positives)
-                if len(contrastive_block_hidden.size()) == 2:
-                    contrastive_block_hidden = contrastive_block_hidden[:, :128]
-                elif len(contrastive_block_hidden.size()) == 3:
-                    contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
@@ -2378,9 +2318,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden[:, :self.cls_tokens + 1])
-            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False)
-            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, self.funnel.cls_tokens:]
-            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, 1:]
+            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False, use_highway_embeds=False)
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
             if hshape[1] <= 32:
@@ -2401,10 +2339,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
             highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, 1:hshape2+1]
-            if hshape2 > 128:
-                highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1, hshape2 // 4)
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids
+            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, :hshape2]
             highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
             highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
@@ -2458,15 +2393,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("electra_discriminator_accuracy", et))
 
         electra_loss = loss
-        if self.reccord_loss:
-            self.loss_hist["highway_cls_ar_sentence_loss"].append(float(highway_cls_ar_loss))
-            self.loss_hist["cls_orthogonal_loss"].append(float(cls_orthogonal_loss))
-            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
-            self.loss_hist["contrastive_loss"].append(float(loss_contrastive))
-            self.loss_hist["answering_lm_loss"].append(float(answering_lm_loss))
-            self.loss_hist["electra_loss"].append(float(loss))
-            self.loss_hist["lm_loss"].append(float(masked_lm_loss))
-            self.loss_hist["sentence_order_loss"].append(float(sentence_order_loss))
 
         et = time.time() - st
         adv_loss = torch.tensor(0.0)
@@ -2481,9 +2407,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("aitm_alum_end", et))
 
         loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
-        loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
-                         highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
-                         loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
@@ -2494,8 +2417,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # TODO: Make a separate wrapper for AITM and ALUM vs making it here?
 
         # TODO: CLS correction needed
-        accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
-        loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
+
+        loss_dict = dict()
+        if record_accuracy:
+            accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
+            loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
+                             highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
+                             loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
+            loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
         results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist)
         if self.data_parallel:
             results = [results]
