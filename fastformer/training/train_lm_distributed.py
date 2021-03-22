@@ -549,7 +549,7 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Optimizer Created for Rank = %s, params = %s" % (get_time_string(), rank, optc))
     shuffle_dataset = args["shuffle_dataset"]
     if not args["validate_only"] and not args["test_only"]:
-        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, size_dicts, world_size=args["world_size"], num_workers=args["num_workers"])
+        train_loader = build_dataloader(args["train_dataset"], shuffle_dataset, 0.75, config, collate_fn, tokenizer, size_dicts, world_size=args["world_size"], num_workers=args["num_workers"], no_autocast=args["no_autocast"])
 
     print("[Train]: Data Loaded for Rank = %s" % rank)
     validate_every_steps = args["validate_every_steps"]
