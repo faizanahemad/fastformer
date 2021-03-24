@@ -1,7 +1,8 @@
 import argparse
 import os
+from datetime import datetime, timedelta
+from pytz import timezone
 import time
-from datetime import timezone, datetime
 
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
 from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
@@ -40,7 +41,7 @@ def main(local_rank, *args):
         model.clip_grad_norm_(1.0)
         optimizer.step()
         if i % 100 == 0:
-            print("Loss = %s" % loss.item())
+            print("Loss = %s, rank = %s" % (loss.item(), local_rank))
 
 
 if __name__ == "__main__":
