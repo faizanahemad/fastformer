@@ -210,7 +210,7 @@ class Embeddings(nn.Module):
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
 
-        self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = checkpoint_wrapper(nn.LayerNorm(hidden_size, eps=config.layer_norm_eps))
         self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
         self.dropout = Dropout(config.hidden_dropout)
         self.output_to_half = False
@@ -1630,7 +1630,7 @@ class DiscriminatorPredictions(nn.Module):
         super().__init__()
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
-        self.dense_prediction = checkpoint_wrapper((nn.Linear(config.block_channel_size[0] // 2, 1)))
+        self.dense_prediction = (nn.Linear(config.block_channel_size[0] // 2, 1))
         self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
 
     def forward(self, discriminator_hidden_states):
