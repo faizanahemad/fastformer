@@ -44,7 +44,7 @@ def main(local_rank, *args):
     fsdp_params = dict(mixed_precision=True, flatten_parameters=True,
                        bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False,
                        cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
-    with enable_wrap(wrapper_cls=FullyShardedDDP, process_group=torch.distributed.group.WORLD, **fsdp_params):
+    with enable_wrap(wrapper_cls=FullyShardedDDP, **fsdp_params):
         nn_model = nn.Sequential(nn.Linear(200, 200),
                                  wrap(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True)),
                                  checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
