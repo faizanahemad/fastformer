@@ -40,6 +40,7 @@ def main(local_rank, *args):
     optimizer.zero_grad(set_to_none=True)
 
     for i in range(1000):
+        optimizer.zero_grad(set_to_none=True)
         fake_inputs = torch.randn(32, 200, device=device)
         fake_labels = torch.randn(32, 64, device=device)
         outputs = model(fake_inputs)
