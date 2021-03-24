@@ -28,13 +28,16 @@ def main(local_rank, *args):
     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
     torch.cuda.set_device(device)
     torch.cuda.set_device(device)
+    fsdp_params = dict(mixed_precision=False, flatten_parameters=True,
+                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False, )
     model = nn.Sequential(nn.Linear(200, 200),
-                          FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True)),
+                          FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True), **fsdp_params),
                           nn.GELU(),
                           nn.LayerNorm(200, eps=1e-7),
                           nn.Linear(200, 64)
                           ).cuda()
-    model = FullyShardedDDP(model)
+
+    model = FullyShardedDDP(model, **fsdp_params)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, eps=1e-7, weight_decay=1e-2,
                                   betas=(0.9, 0.99))
     optimizer.zero_grad(set_to_none=True)
