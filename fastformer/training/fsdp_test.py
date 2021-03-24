@@ -30,7 +30,7 @@ def main(local_rank, *args):
     torch.cuda.set_device(device)
     fsdp_params = dict(mixed_precision=True, flatten_parameters=True,
                        bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False,
-                       cpu_offload=True, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
+                       cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
     model = nn.Sequential(nn.Linear(200, 200),
                           FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True), **fsdp_params),
                           checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
