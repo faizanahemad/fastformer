@@ -1381,7 +1381,7 @@ class TransformerEncoder(nn.Module):
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 bi = block_index + 1
-                pool[str(block_index + 1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
+                pool[str(block_index + 1)] = fsdp_wrapper(CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True))
             self.pool = pool
 
     def forward_one_block(self, block_index, hidden, attention_inputs,
@@ -1696,7 +1696,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
         self.encoder = TransformerEncoder(config)
-        self.decoder = TransformerDecoder(config)
+        self.decoder = fsdp_wrapper(TransformerDecoder(config))
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1708,7 +1708,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
-            self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
+            self.final_hidden_fc = fsdp_wrapper(nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)))
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
