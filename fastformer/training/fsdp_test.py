@@ -33,7 +33,7 @@ def main(local_rank, *args):
                        cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
     model = nn.Sequential(nn.Linear(200, 200),
                           FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True), **fsdp_params),
-                          nn.GELU(),
+                          checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
                           nn.LayerNorm(200, eps=1e-7),
                           nn.Linear(200, 64)
                           ).cuda()
