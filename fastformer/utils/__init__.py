@@ -313,7 +313,9 @@ def gcd_array(x):
     return gcv
 
 
-def get_fsdp_params():
-    fsdp_params = dict(mixed_precision=False, flatten_parameters=True,
-                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False,
-                       cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
+def get_fsdp_params(enable_autocast=False, fp32_reduce_scatter=True):
+    fsdp_params = dict(mixed_precision=enable_autocast, flatten_parameters=True,
+                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False if not enable_autocast else fp32_reduce_scatter,
+                       cpu_offload=enable_autocast, move_grads_to_cpu=enable_autocast, process_group=torch.distributed.group.WORLD)
+    return fsdp_params
+
