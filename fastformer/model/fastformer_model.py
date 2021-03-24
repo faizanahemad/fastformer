@@ -1353,7 +1353,7 @@ class TransformerEncoder(nn.Module):
                         i = inext
                     elif i < block_size:
                         if config.light_first_layer and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(fsdp_wrapper(LightLayer(config, block_index, True)))
+                            self.blocks[block_index].append(LightLayer(config, block_index, True))
                             self.repeats[block_index].append(1)
                             i += 1
                         else:
@@ -1367,7 +1367,7 @@ class TransformerEncoder(nn.Module):
                 else:
                     inext = i + 1
                     if config.light_first_layer:
-                        self.blocks[block_index].append(fsdp_wrapper(LightLayer(config, block_index, True)))
+                        self.blocks[block_index].append(LightLayer(config, block_index, True))
                     else:
                         self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
