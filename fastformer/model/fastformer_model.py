@@ -1630,7 +1630,7 @@ class DiscriminatorPredictions(nn.Module):
         super().__init__()
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
-        self.dense_prediction = checkpoint_wrapper((nn.Linear(config.block_channel_size[0] // 2, 1))
+        self.dense_prediction = checkpoint_wrapper((nn.Linear(config.block_channel_size[0] // 2, 1)))
         self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
 
     def forward(self, discriminator_hidden_states):
