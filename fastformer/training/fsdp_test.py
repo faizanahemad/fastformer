@@ -44,14 +44,15 @@ def main(local_rank, *args):
     fsdp_params = dict(mixed_precision=True, flatten_parameters=True,
                        bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False,
                        cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
-    nn_model = nn.Sequential(nn.Linear(200, 200),
-                             FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True), **fsdp_params),
-                             checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
-                             nn.LayerNorm(200, eps=1e-7),
-                             nn.Linear(200, 64)
-                             ).cuda()
+    with enable_wrap(wrapper_cls=FullyShardedDDP, process_group=torch.distributed.group.WORLD, **fsdp_params):
+        nn_model = nn.Sequential(nn.Linear(200, 200),
+                                 wrap(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True)),
+                                 checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
+                                 nn.LayerNorm(200, eps=1e-7),
+                                 nn.Linear(200, 64)
+                                 ).cuda()
 
-    model = FullyShardedDDP(nn_model, **fsdp_params)
+        model = FullyShardedDDP(nn_model, **fsdp_params)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, eps=1e-7, weight_decay=1e-2,
                                   betas=(0.9, 0.99))
     optimizer.zero_grad(set_to_none=True)

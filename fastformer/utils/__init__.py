@@ -316,7 +316,7 @@ def gcd_array(x):
 fsdp_store = dict()
 
 
-def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=True):
+def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=False):
 
     if "fsdp_params" not in fsdp_store and init:
         def get_fsdp_params():
@@ -330,11 +330,26 @@ def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=True):
     return fsdp_store["fsdp_params"]
 
 
-def configure_wrapper():
+def configure_fsdp_wrapper(wrap_type=0, init=False):
+    def get_wrapper_v2(module):
+        from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
+        from fairscale.nn.misc import checkpoint_wrapper
+        return FullyShardedDDP(checkpoint_wrapper(module, offload_to_cpu=True), **configure_fsdp(init=False))
+
+    def get_wrapper_v1(module):
+        from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
+        from fairscale.nn.misc import checkpoint_wrapper
+        return checkpoint_wrapper(module, offload_to_cpu=True)
+
+    def get_wrapper_v0(module):
+        return module
+    wd = {0: get_wrapper_v0, 1: get_wrapper_v1, 2: get_wrapper_v2}
+
+    if "fsdp_wrapper" not in fsdp_store and init:
+        fsdp_store["fsdp_wrapper"] = wd[wrap_type]
+
+    return fsdp_store["fsdp_wrapper"]
 
 
-def get_wrapper(module):
-    from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
-    from fairscale.nn.misc import checkpoint_wrapper
-    return FullyShardedDDP(checkpoint_wrapper(module, offload_to_cpu=True), **configure_fsdp(init=False))
+
 
