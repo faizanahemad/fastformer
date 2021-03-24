@@ -29,7 +29,7 @@ def main(local_rank, *args):
     torch.cuda.set_device(device)
     torch.cuda.set_device(device)
     model = nn.Sequential(nn.Linear(200, 200),
-                          checkpoint_wrapper(nn.Linear(200, 200)),
+                          checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True),
                           nn.GELU(),
                           nn.LayerNorm(200, eps=1e-7),
                           nn.Linear(200, 64)
