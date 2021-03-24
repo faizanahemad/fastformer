@@ -334,12 +334,12 @@ def fsdp_wrapper(module=None, wrap_type=0, init=False):
     def get_wrapper_v2(module):
         from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
         from fairscale.nn.misc import checkpoint_wrapper
-        return FullyShardedDDP(checkpoint_wrapper(module, offload_to_cpu=True), **configure_fsdp(init=False))
+        return FullyShardedDDP(checkpoint_wrapper(module, offload_to_cpu=False), **configure_fsdp(init=False))
 
     def get_wrapper_v1(module):
         from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
         from fairscale.nn.misc import checkpoint_wrapper
-        return checkpoint_wrapper(module, offload_to_cpu=True)
+        return checkpoint_wrapper(module, offload_to_cpu=False)
 
     def get_wrapper_v0(module):
         return module
@@ -352,6 +352,9 @@ def fsdp_wrapper(module=None, wrap_type=0, init=False):
         return fsdp_store["fsdp_wrapper"](module)
     elif module is not None:
         return module
+    else:
+        return wd[wrap_type]
+
 
 
 
