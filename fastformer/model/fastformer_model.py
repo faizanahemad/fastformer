@@ -697,7 +697,7 @@ class SDConv(nn.Module):
         self.hidden_size = hidden_size
         self.stride = stride
         act = config.hidden_act
-        self.act = checkpoint_wrapper(ACT2FN[act]())
+        self.act = checkpoint_wrapper(ACT2FN[act](), offload_to_cpu=True)
         assert hidden_size % heads == 0
         self.head_size = head_size
         self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
@@ -1230,7 +1230,7 @@ class PositionwiseFFN(nn.Module):
         self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
         self.diff = d_next - d_model
         self.d_model = d_model
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=True)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
@@ -1279,7 +1279,7 @@ class LightLayer(nn.Module):
         self.is_encoder_layer = is_encoder_layer
 
         self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=True)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
@@ -1632,7 +1632,7 @@ class DiscriminatorPredictions(nn.Module):
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
         self.dense_prediction = (nn.Linear(config.block_channel_size[0] // 2, 1))
-        self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
+        self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act](), offload_to_cpu=True)
 
     def forward(self, discriminator_hidden_states):
         hidden_states = self.dense(discriminator_hidden_states)
