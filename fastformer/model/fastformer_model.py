@@ -1630,7 +1630,7 @@ class DiscriminatorPredictions(nn.Module):
         super().__init__()
         self.config = config
         self.dense = Conv1d(config.block_channel_size[0], config.block_channel_size[0] // 2, 1, config.ffn_groups, bias=False) if config.ffn_groups > 1 else nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=False)
-        self.dense_prediction = nn.Linear(config.block_channel_size[0] // 2, 1)
+        self.dense_prediction = checkpoint_wrapper((nn.Linear(config.block_channel_size[0] // 2, 1))
         self.act = checkpoint_wrapper(ACT2FN[self.config.hidden_act]())
 
     def forward(self, discriminator_hidden_states):
@@ -1900,7 +1900,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
-        self.discriminator_predictions = checkpoint_wrapper(DiscriminatorPredictions(config))
+        self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
