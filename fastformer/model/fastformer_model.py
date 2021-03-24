@@ -1231,17 +1231,17 @@ class PositionwiseFFN(nn.Module):
         self.diff = d_next - d_model
         self.d_model = d_model
         self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=True)
-        self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
+        self.layer_norm = fsdp_wrapper(nn.LayerNorm(d_model, config.layer_norm_eps))
         if self.need_dim_match:
-            self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff, bias=False)
+            self.dlayer_norm = fsdp_wrapper(nn.LayerNorm(self.diff, config.layer_norm_eps))
+            self.dlin = fsdp_wrapper(Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff, bias=False))
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
             self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
         else:
             self.lin = nn.Identity()
-            self.ffn = BertFFN(config, d_model, d_inner, layers)
+            self.ffn = fsdp_wrapper(BertFFN(config, d_model, d_inner, layers))
 
     def forward(self, hidden, layer_index=None):
         dim_match = self.need_dim_match and layer_index == self.n_blocks
@@ -1353,7 +1353,7 @@ class TransformerEncoder(nn.Module):
                         i = inext
                     elif i < block_size:
                         if config.light_first_layer and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(LightLayer(config, block_index, True))
+                            self.blocks[block_index].append(fsdp_wrapper(LightLayer(config, block_index, True)))
                             self.repeats[block_index].append(1)
                             i += 1
                         else:
@@ -1367,7 +1367,7 @@ class TransformerEncoder(nn.Module):
                 else:
                     inext = i + 1
                     if config.light_first_layer:
-                        self.blocks[block_index].append(LightLayer(config, block_index, True))
+                        self.blocks[block_index].append(fsdp_wrapper(LightLayer(config, block_index, True)))
                     else:
                         self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
@@ -1695,8 +1695,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.config = config
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
-        self.encoder = TransformerEncoder(config)
-        self.decoder = TransformerDecoder(config)
+        self.encoder = fsdp_wrapper(TransformerEncoder(config))
+        self.decoder = fsdp_wrapper(TransformerDecoder(config))
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1708,7 +1708,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
-            self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
+            self.final_hidden_fc = fsdp_wrapper(nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)))
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
