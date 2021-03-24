@@ -9,6 +9,9 @@ import traceback
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
 
+from fairscale.nn.misc import checkpoint_wrapper
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+
 import numpy as np
 import math
 import random
@@ -208,7 +211,7 @@ class Embeddings(nn.Module):
         if self.embedding_size != hidden_size:
             self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
 
-        self.LayerNorm = checkpoint_wrapper(nn.LayerNorm(hidden_size, eps=config.layer_norm_eps))
+        self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
         self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
         self.dropout = Dropout(config.hidden_dropout)
         self.output_to_half = False

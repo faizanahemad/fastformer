@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from pytz import timezone
 import time
 
-from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
 from fairscale.nn.misc import checkpoint_wrapper
 from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap

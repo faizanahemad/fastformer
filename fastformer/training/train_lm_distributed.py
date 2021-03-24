@@ -525,7 +525,7 @@ def train(local_rank, args):
         config.layer_norm_eps = 1e-8
     fsdp_params = configure_fsdp(not args["no_autocast"], False, True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
-    with enable_wrap(wrapper_cls=FSDP, process_group=None, **fsdp_params):
+    with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
