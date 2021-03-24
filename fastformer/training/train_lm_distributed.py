@@ -524,7 +524,7 @@ def train(local_rank, args):
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
     fsdp_params = configure_fsdp(not args["no_autocast"], False, True)
-    fsdp_wrapper(wrap_type=2, init=True)
+    fsdp_wrapper(wrap_type=0, init=True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
     with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
