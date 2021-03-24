@@ -523,7 +523,7 @@ def train(local_rank, args):
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
-    fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=False,
+    fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=True,
                        bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False, )
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
     with enable_wrap(wrapper_cls=FSDP, process_group=None, **fsdp_params):
@@ -536,7 +536,7 @@ def train(local_rank, args):
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
-    optimizer = torch.optim.AdamW(all_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
+    optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad(set_to_none=True)
 
     # model, optim, gradscaler, scheduler, steps
