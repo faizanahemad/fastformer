@@ -23,13 +23,13 @@ def get_time_string():
 def main(local_rank, *args):
     torch.backends.cudnn.benchmark = True
     init_method = "tcp://%s:%s" % ("0.0.0.0", "9999")
-    torch.distributed.init_process_group(backend="nccl", rank=local_rank, world_size=1, init_method=init_method)
+    torch.distributed.init_process_group(backend="nccl", rank=local_rank, world_size=8, init_method=init_method)
     print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), local_rank))
     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
     torch.cuda.set_device(device)
     torch.cuda.set_device(device)
     model = nn.Sequential(nn.Linear(200, 200),
-                          checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True),
+                          FullyShardedDDP(checkpoint_wrapper(nn.Linear(200, 200), offload_to_cpu=True)),
                           nn.GELU(),
                           nn.LayerNorm(200, eps=1e-7),
                           nn.Linear(200, 64)
@@ -54,5 +54,5 @@ def main(local_rank, *args):
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
-    mp.spawn(main, nprocs=1, args=(), join=True)
+    mp.spawn(main, nprocs=8, args=(), join=True)
 
