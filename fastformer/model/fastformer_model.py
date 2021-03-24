@@ -1347,18 +1347,18 @@ class TransformerEncoder(nn.Module):
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
                         inext = i + 1
-                        self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False)))
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False))
                         self.repeats[block_index].append(1)
                         i = inext
                     elif i < block_size:
                         if config.light_first_layer and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(wrap(LightLayer(config, block_index, True)))
+                            self.blocks[block_index].append(LightLayer(config, block_index, True))
                             self.repeats[block_index].append(1)
                             i += 1
                         else:
                             reps = (block_size - (i)) if cur_channels != next_channels else (block_size - i)
                             inext = i + reps
-                            self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps)))
+                            self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
                             self.repeats[block_index].append(reps)
                             i = inext
                     else:
@@ -1366,9 +1366,9 @@ class TransformerEncoder(nn.Module):
                 else:
                     inext = i + 1
                     if config.light_first_layer:
-                        self.blocks[block_index].append(wrap(LightLayer(config, block_index, True)))
+                        self.blocks[block_index].append(LightLayer(config, block_index, True))
                     else:
-                        self.blocks[block_index].append(wrap(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i)))
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
                     i = inext
         self.pool = None
@@ -1380,7 +1380,7 @@ class TransformerEncoder(nn.Module):
             pool = nn.ModuleDict()
             for block_index, _ in enumerate(config.block_sizes[1:]):
                 bi = block_index + 1
-                pool[str(block_index + 1)] = wrap(CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True))
+                pool[str(block_index + 1)] = CompressionClass(config, bi, config.block_channel_size[bi], sum(config.n_head[bi]), use_in_funnel=True)
             self.pool = pool
 
     def forward_one_block(self, block_index, hidden, attention_inputs,
@@ -1694,8 +1694,8 @@ class FastFormerModel(FastFormerPreTrainedModel):
         self.config = config
         self.tokenizer = tokenizer
         self.embeddings = Embeddings(config)
-        self.encoder = wrap(TransformerEncoder(config))
-        self.decoder = wrap(TransformerDecoder(config))
+        self.encoder = TransformerEncoder(config)
+        self.decoder = TransformerDecoder(config)
         self.cls_tokens = config.num_highway_cls_tokens + 1
 
         block_channel_size = self.config.block_channel_size
@@ -1707,11 +1707,11 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
-            self.final_hidden_fc = wrap(nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)))
+            self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            ep = wrap(nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True))
+            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True)
             # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
@@ -1916,7 +1916,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
-            self.sentence_task_attn = wrap(TransformerCrossAttentionDecoder(config))
+            self.sentence_task_attn = TransformerCrossAttentionDecoder(config)
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
