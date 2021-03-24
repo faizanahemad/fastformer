@@ -46,7 +46,7 @@ def main(local_rank, *args):
         outputs = model(fake_inputs)
         loss = ((outputs - fake_labels) ** 2).mean()
         loss.backward()
-        model.clip_grad_norm_(1.0)
+        model.clip_grad_norm(1.0)
         optimizer.step()
         if i % 100 == 0:
             print("Loss = %s, rank = %s" % (loss.item(), local_rank))
