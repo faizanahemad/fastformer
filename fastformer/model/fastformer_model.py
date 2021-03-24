@@ -1707,11 +1707,11 @@ class FastFormerModel(FastFormerPreTrainedModel):
                 self.final_hidden_fc = Conv1d(in_channels=block_channel_size[-1], out_channels=block_channel_size[0], kernel_size=1, groups=ffn_groups, bias=False)
             else:
                 self.final_hidden_fc = nn.Linear(block_channel_size[-1], block_channel_size[0], bias=False)
-            self.final_hidden_fc = nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps))
+            self.final_hidden_fc = wrap(nn.Sequential(self.final_hidden_fc, nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)))
 
         self.embed_proj_transpose = nn.Identity() if self.config.identity_preserving_norm else nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if config.embedding_size != config.block_channel_size[0]:
-            ep = nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True)
+            ep = wrap(nn.Linear(config.block_channel_size[0], config.embedding_size, bias=True))
             # ep.weight = nn.Parameter(self.embeddings.embed_proj.weight.transpose(0, 1))
             if self.config.identity_preserving_norm:
                 self.embed_proj_transpose = ep
