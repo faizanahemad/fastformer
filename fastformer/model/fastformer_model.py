@@ -1359,7 +1359,7 @@ class TransformerEncoder(nn.Module):
                         else:
                             reps = (block_size - (i)) if cur_channels != next_channels else (block_size - i)
                             inext = i + reps
-                            self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps)))
+                            self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
                             self.repeats[block_index].append(reps)
                             i = inext
                     else:
@@ -1369,7 +1369,7 @@ class TransformerEncoder(nn.Module):
                     if config.light_first_layer:
                         self.blocks[block_index].append(LightLayer(config, block_index, True))
                     else:
-                        self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i)))
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
                     i = inext
         self.pool = None
