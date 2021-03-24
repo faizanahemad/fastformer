@@ -325,7 +325,7 @@ def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=False):
                                cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
             return fsdp_params
 
-        fsdp_store["fsdp_params"] = get_fsdp_params
+        fsdp_store["fsdp_params"] = get_fsdp_params()
 
     return fsdp_store["fsdp_params"]
 
