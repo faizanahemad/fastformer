@@ -72,7 +72,7 @@ def main(local_rank, *args):
         if i % 100 == 0:
             print("Loss = %s, rank = %s" % (loss.item(), local_rank))
 
-    state_dict = model.state_dict()
+    state_dict = model.state_dict(recurse=True)
     nn_model = nn.Sequential(nn.Linear(200, 200),
                              nn.Linear(200, 200),
                              checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),

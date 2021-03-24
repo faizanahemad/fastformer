@@ -1177,7 +1177,7 @@ class ConvFFN(nn.Module):
             self.layers.append(cnn)
         self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups, bias=False)
         self.conv1d_out.pre_permute = False
-        self.act = checkpoint_wrapper(ACT2FN[act]())
+        self.act = checkpoint_wrapper(ACT2FN[act](), offload_to_cpu=True)
 
     def forward(self, x):
         h = x
@@ -1198,7 +1198,7 @@ class BertFFN(nn.Module):
     def __init__(self, config: FastFormerConfig, d_model, d_inner, layers=0, d_out=None):
         super().__init__()
         self.linear_1 = nn.Linear(d_model, d_inner, bias=True)
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act]())
+        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=True)
         self.activation_dropout = Dropout(config.hidden_dropout)
         d_out = d_model if d_out is None else d_out
         self.linear_2 = nn.Linear(d_inner, d_out, bias=False)
