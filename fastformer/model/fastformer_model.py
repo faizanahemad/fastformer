@@ -1900,7 +1900,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.tokenizer = copy.deepcopy(tokenizer)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         self.cls_tokens = config.num_highway_cls_tokens
-        self.discriminator_predictions = wrap(DiscriminatorPredictions(config))
+        self.discriminator_predictions = DiscriminatorPredictions(config)
         self.pad_token_id = config.pad_token_id if hasattr(config, "pad_token_id") and config.pad_token_id is not None else 0
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
