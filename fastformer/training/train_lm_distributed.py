@@ -525,7 +525,7 @@ def train(local_rank, args):
         config.layer_norm_eps = 1e-8
     fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=True,
                        bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False, )
-    with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+    with enable_wrap(wrapper_cls=FSDP, process_group=torch.distributed.group.WORLD, **fsdp_params):
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
         print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
         if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
@@ -671,7 +671,7 @@ def train(local_rank, args):
         #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
-            with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+            with enable_wrap(wrapper_cls=FSDP, process_group=torch.distributed.group.WORLD, **fsdp_params):
                 if no_sync and (step + 1) % iter_size != 0:
                     with ddp_model.no_sync():
                         output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
