@@ -523,14 +523,14 @@ def train(local_rank, args):
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
-    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-    print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
-    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
-        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
-
     fsdp_params = dict(mixed_precision=not args["no_autocast"], flatten_parameters=True,
-                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False,)
+                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False, cpu_offload=False, move_grads_to_cpu=False, )
     with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+        print("[Train]: Trainable Params = %s" % (numel(model) / 1_000_000))
+        if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
+            model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
+
         ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
@@ -671,13 +671,14 @@ def train(local_rank, args):
         #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
-            if no_sync and (step + 1) % iter_size != 0:
-                with ddp_model.no_sync():
+            with enable_wrap(wrapper_cls=FSDP, process_group=group, **fsdp_params):
+                if no_sync and (step + 1) % iter_size != 0:
+                    with ddp_model.no_sync():
+                        output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
+                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
+                else:
                     output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
-                                              no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
-            else:
-                output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
-                                          no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
+                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
