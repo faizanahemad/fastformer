@@ -313,9 +313,25 @@ def gcd_array(x):
     return gcv
 
 
-def get_fsdp_params(enable_autocast=False, fp32_reduce_scatter=True):
-    fsdp_params = dict(mixed_precision=enable_autocast, flatten_parameters=True,
-                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False if not enable_autocast else fp32_reduce_scatter,
-                       cpu_offload=enable_autocast, move_grads_to_cpu=enable_autocast, process_group=torch.distributed.group.WORLD)
-    return fsdp_params
+fsdp_store = dict()
+
+
+def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=True):
+
+    if "fsdp_params" not in fsdp_store and init:
+        def get_fsdp_params():
+            fsdp_params = dict(mixed_precision=enable_autocast, flatten_parameters=True,
+                               bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False if not enable_autocast else fp32_reduce_scatter,
+                               cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
+            return fsdp_params
+
+        fsdp_store["fsdp_params"] = get_fsdp_params
+
+    return fsdp_store["fsdp_params"]
+
+
+def get_wrapper(module):
+    from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
+    from fairscale.nn.misc import checkpoint_wrapper
+    return FullyShardedDDP(checkpoint_wrapper(module, offload_to_cpu=True), **configure_fsdp(init=False))
 
