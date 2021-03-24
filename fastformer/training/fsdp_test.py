@@ -6,6 +6,8 @@ import time
 
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
 from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+from fairscale.nn.misc import checkpoint_wrapper
+from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 import torch.multiprocessing as mp
 import torch
@@ -26,13 +28,18 @@ def main(local_rank, *args):
     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
     torch.cuda.set_device(device)
     torch.cuda.set_device(device)
-    model = nn.Sequential(nn.Linear(200, 200), nn.Linear(200, 200), nn.GELU(), nn.LayerNorm(200, eps=1e-7), nn.Linear(200, 64)).cuda()
+    model = nn.Sequential(nn.Linear(200, 200),
+                          checkpoint_wrapper(nn.Linear(200, 200)),
+                          nn.GELU(),
+                          nn.LayerNorm(200, eps=1e-7),
+                          nn.Linear(200, 64)
+                          ).cuda()
     model = FullyShardedDDP(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, eps=1e-7, weight_decay=1e-2,
                                   betas=(0.9, 0.99))
     optimizer.zero_grad(set_to_none=True)
 
-    for i in trange(1000):
+    for i in range(1000):
         fake_inputs = torch.randn(32, 200, device=device)
         fake_labels = torch.randn(32, 64, device=device)
         outputs = model(fake_inputs)
