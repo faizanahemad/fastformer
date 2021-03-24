@@ -69,6 +69,12 @@ def main(local_rank, *args):
             print("Loss = %s, rank = %s" % (loss.item(), local_rank))
 
     state_dict = model.state_dict()
+    nn_model = nn.Sequential(nn.Linear(200, 200),
+                             nn.Linear(200, 200),
+                             checkpoint_wrapper(nn.GELU(), offload_to_cpu=True),
+                             nn.LayerNorm(200, eps=1e-7),
+                             nn.Linear(200, 64)
+                             ).cuda()
     nn_model.load_state_dict(state_dict)
     print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(nn_model) / 1_000_000))
 

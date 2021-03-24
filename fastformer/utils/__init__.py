@@ -330,6 +330,9 @@ def configure_fsdp(enable_autocast=False, fp32_reduce_scatter=True, init=True):
     return fsdp_store["fsdp_params"]
 
 
+def configure_wrapper():
+
+
 def get_wrapper(module):
     from fairscale.nn.data_parallel import FullyShardedDataParallel as FullyShardedDDP
     from fairscale.nn.misc import checkpoint_wrapper
