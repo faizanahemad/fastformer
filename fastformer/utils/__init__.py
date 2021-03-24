@@ -311,3 +311,9 @@ def gcd_array(x):
     for a, b in zip(x[1:], x[:-1]):
         gcv = min(gcv, gcd(a, b))
     return gcv
+
+
+def get_fsdp_params():
+    fsdp_params = dict(mixed_precision=False, flatten_parameters=True,
+                       bucket_cap_mb=25, reshard_after_forward=False, fp32_reduce_scatter=False,
+                       cpu_offload=False, move_grads_to_cpu=False, process_group=torch.distributed.group.WORLD)
