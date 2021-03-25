@@ -318,17 +318,17 @@ class LargeValidator:
                 # print("[Validation]: Time = %s, Rank = %s, Start-Validation, Val for dataset = %s, batch size = %s, first batch loaded" % (get_time_string(), self.rank, k, pt_batch["input_ids"].size()))
                 if 'answer' in cns:
                     with torch.no_grad():
-                        with autocast():
-                            funnel_inputs = dict(input_ids=pt_batch["input_ids"],
-                                                 attention_mask=pt_batch["attention_mask"],
-                                                 token_type_ids=pt_batch["token_type_ids"] if "token_type_ids" in pt_batch else None,
-                                                 inputs_embeds=None,
-                                                 char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
-                                                 run_decoder=False,
-                                                 run_answering=True)
-                            output = model.funnel(**funnel_inputs)
-                            # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
-                            answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
+
+                        funnel_inputs = dict(input_ids=pt_batch["input_ids"],
+                                             attention_mask=pt_batch["attention_mask"],
+                                             token_type_ids=pt_batch["token_type_ids"] if "token_type_ids" in pt_batch else None,
+                                             inputs_embeds=None,
+                                             char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
+                                             run_decoder=False,
+                                             run_answering=True)
+                        output = model.funnel(**funnel_inputs)
+                        # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
+                        answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
                     # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
                     # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
                     answering_predictions = answer_decoder(answering_predictions, tokenizer)
