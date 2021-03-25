@@ -335,7 +335,7 @@ lg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 
 tg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3, use_cuda_conv=True, embedding_size=256,
-                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64], alternate_ffn=False,
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
                              sdconv=[False, False, False], full_channel_separation=True,
