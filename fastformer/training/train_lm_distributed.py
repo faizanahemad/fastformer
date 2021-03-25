@@ -574,7 +574,7 @@ def train(local_rank, args):
 
     else:
         print("[Train]: No Resume for Rank = %s" % rank)
-    _ = model.train()
+    _ = ddp_model.train()
     if args["validate_on_start"] or args["validate_only"]:
         state_dict = ddp_model.state_dict()
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
@@ -588,7 +588,7 @@ def train(local_rank, args):
     batch_times = []
     model_times = []
     full_times = []
-    model.zero_grad(set_to_none=True)
+    ddp_model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
@@ -651,8 +651,10 @@ def train(local_rank, args):
         #     else:
         #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
         #
-        electra_loss_w = float(((step + 1) / (2 * optc["warmup_steps"])) * mconf["electra_loss_w"])
+        electra_loss_w = float(min(1.0, ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
+        input_cls_orthogonal_w = float(max(1e-2, 1.0 - ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
+        ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
         optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
             state_dict = ddp_model.state_dict()
