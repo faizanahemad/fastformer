@@ -326,7 +326,7 @@ class LargeValidator:
                                                  char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
                                                  run_decoder=False,
                                                  run_answering=True)
-                            output = model.module.funnel(**funnel_inputs)
+                            output = model.funnel(**funnel_inputs)
                             # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
                             answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
                     # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
@@ -339,7 +339,7 @@ class LargeValidator:
                     labels = labels.to(self.device)
                     with torch.no_grad():
                         with autocast():
-                            output = model.module(**pt_batch, labels=labels)["accuracy_hist"]
+                            output = model(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
                 samples_cur += pt_batch["input_ids"].size(0)
                 if samples_cur > samples_prev + (16 * 50):
@@ -533,6 +533,8 @@ def train(local_rank, args):
             model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
         ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+        del model
+        clean_memory()
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
@@ -574,7 +576,12 @@ def train(local_rank, args):
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = model.train()
     if args["validate_on_start"] or args["validate_only"]:
-        _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+        state_dict = ddp_model.state_dict()
+        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+        model.load_state_dict(state_dict)
+        _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+        del model
+        clean_memory()
         if args["validate_only"]:
             return
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
@@ -654,7 +661,12 @@ def train(local_rank, args):
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            _ = LargeValidator(args["validation_dataset"], ddp_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+            state_dict = ddp_model.state_dict()
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+            model.load_state_dict(state_dict)
+            _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+            del model
+            clean_memory()
             barrier()
         record_accuracy = False
         if (step + 1) % log_every_steps == 0:
