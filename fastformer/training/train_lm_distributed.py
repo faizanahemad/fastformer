@@ -528,7 +528,9 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
 
     model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+    if rank == 0:
+        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+        print(model)
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
     if args["validate_on_start"] or args["validate_only"]:
