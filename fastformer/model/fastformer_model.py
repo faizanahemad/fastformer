@@ -2017,7 +2017,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
             contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
 
-            anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors)
+            anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors)
                        for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
                                      anchors_cp]
@@ -2025,7 +2025,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
             # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
 
-            positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
+            positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
             n_anchors = len(anchors)
             n_positives = len(positives)
             assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
@@ -2218,35 +2218,35 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
             assert len(contrastive_block_hidden.size()) == 3
             contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-            contrastive_len = contrastive_block_hidden.size(1)
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
             contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
-            for batch_positive in contrastive_positives:
-                for positives_for_anchor in batch_positive:
-                    for positive in positives_for_anchor:
-                        if positive[0]==positive[1]:
-                            if positive[1] < contrastive_len:
-                                positive[1] = positive[1] + 1
-                            elif positive[0] > 0:
-                                positive[0] = positive[0] - 1
-
-                        positive[0] = min(positive[0], positive[1] - 1)
-            for batch_anchor in contrastive_anchors:
-                for anch in batch_anchor:
-                    if anch[0] == anch[1]:
-                        if anch[1] < contrastive_len:
-                            anch[1] = anch[1] + 1
-                        elif anch[0] > 0:
-                            anch[0] = anch[0] - 1
+            # contrastive_len = contrastive_block_hidden.size(1)
+            # for batch_positive in contrastive_positives:
+            #     for positives_for_anchor in batch_positive:
+            #         for positive in positives_for_anchor:
+            #             if positive[0]==positive[1]:
+            #                 if positive[1] < contrastive_len:
+            #                     positive[1] = positive[1] + 1
+            #                 elif positive[0] > 0:
+            #                     positive[0] = positive[0] - 1
+            #
+            #             positive[0] = min(positive[0], positive[1] - 1)
+            # for batch_anchor in contrastive_anchors:
+            #     for anch in batch_anchor:
+            #         if anch[0] == anch[1]:
+            #             if anch[1] < contrastive_len:
+            #                 anch[1] = anch[1] + 1
+            #             elif anch[0] > 0:
+            #                 anch[0] = anch[0] - 1
             # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
-            anchors = [contrastive_block_hidden[anchor_batch_pos, anchor[0]:anchor[1]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
+            anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
             n_positives_per_anchor = max([len(a) for a in contrastive_positives])
             contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
             # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
 
-            positives = [contrastive_block_hidden[anchor_pos[-1], anchor_pos[0]: anchor_pos[1]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
+            positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
             n_anchors = len(anchors)
             n_positives = len(positives)
             assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
@@ -2311,7 +2311,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             if record_accuracy:
                 sent_order_out = sent_order_logits.detach().argmax(dim=-1) == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
-                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu()))
+                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].detach().float().mean().cpu()))
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st

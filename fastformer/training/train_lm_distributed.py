@@ -526,15 +526,21 @@ def train(local_rank, args):
     fsdp_params = configure_fsdp(not args["no_autocast"], False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
-    with enable_wrap(wrapper_cls=FSDP, **fsdp_params):
-        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
-        if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
-            model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
 
-        ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
+        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
+    if args["validate_on_start"] or args["validate_only"]:
+        _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         del model
         clean_memory()
+        if args["validate_only"]:
+            return
+
+    ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+    del model
+    clean_memory()
 
     all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
@@ -575,15 +581,6 @@ def train(local_rank, args):
     else:
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = ddp_model.train()
-    if args["validate_on_start"] or args["validate_only"]:
-        state_dict = ddp_model.state_dict()
-        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-        model.load_state_dict(state_dict)
-        _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
-        del model
-        clean_memory()
-        if args["validate_only"]:
-            return
     print("[Train]: WandB-watch added over model for Rank = %s" % rank)
     batch_times = []
     model_times = []
@@ -653,7 +650,7 @@ def train(local_rank, args):
         #
         electra_loss_w = float(min(1.0, ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
-        input_cls_orthogonal_w = float(max(1e-2, 1.0 - ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
+        input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
         optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
@@ -719,12 +716,13 @@ def train(local_rank, args):
                 loss_dict = output["loss_dict"]
                 time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
-                               batch_times=np.mean(batch_times), model_times=np.mean(model_times), full_times=np.mean(full_times),
+                               input_cls_orthogonal_w=input_cls_orthogonal_w, electra_loss_w=electra_loss_w,
+                               batch_times=np.mean(batch_times), model_times=np.mean(model_times),
                                **loss_dict, **acc_dict, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Loss = %s, Accuracy = %s, LR = %s" %
                       (get_time_string(), rank, step, samples_processed,
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
-                print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, Full time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), np.mean(full_times), samples_per_second))
+                print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), samples_per_second))
                 del acc_dict
                 del loss_dict
 
