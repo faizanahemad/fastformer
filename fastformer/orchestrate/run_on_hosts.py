@@ -130,7 +130,7 @@ if __name__ == "__main__":
     #
 
     cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/training"
-    main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config lg_config"""
+    main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config tg_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
