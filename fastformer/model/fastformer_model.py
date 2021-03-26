@@ -2310,7 +2310,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             mx_labels = labels_segment_index.max(-1)[0].view(-1)
             first_cls = final_hidden[:, 0]
             labels_segment_index = labels_segment_index.view(-1)
-            sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1] + first_cls.unsqueeze(1)
+            sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1]  # + first_cls.unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
             mx_label_pred = self.sent_predict_fc(first_cls)
             sent_order_loss = self.ce(sent_order_logits, labels_segment_index) + self.ce(mx_label_pred, mx_labels)
