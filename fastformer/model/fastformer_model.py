@@ -360,13 +360,16 @@ class AttentionStructure(nn.Module):
         # dividide.
         self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
         self.stride = self.config.stride
+        self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
 
     def init_attention_inputs(self, inputs_embeds, position_embeds, attention_mask=None):
         """ Returns the attention inputs associated to the inputs of the model. """
         # inputs_embeds has shape batch_size x seq_len x d_model
         # attention_mask and token_type_ids have shape batch_size x seq_len
         self.seq_len = seq_len = inputs_embeds.size(1)
-        position_embeds = self.get_position_embeds(seq_len, position_embeds, inputs_embeds.dtype, inputs_embeds.device)
+        position_embeds = None
+        if self.separate_content_and_position_attention:
+            position_embeds = self.get_position_embeds(seq_len, position_embeds, inputs_embeds.dtype, inputs_embeds.device)
         return (position_embeds, attention_mask)
 
     def get_position_embeds(self, seq_len, pos_embed, dtype, device):
@@ -434,7 +437,9 @@ class AttentionStructure(nn.Module):
         """ Pool the proper parts of `attention_inputs` after the attention layer. """
         position_embeds, attention_mask = attention_inputs
         attention_mask = self.pool_tensor(attention_mask, mode="min", stride=self.stride)
-        position_embeds[block_index][0] = position_embeds[block_index][1]
+        if self.separate_content_and_position_attention:
+            position_embeds = [list(pos_block) for pos_block in position_embeds]
+            position_embeds[block_index][0] = position_embeds[block_index][1]
         attention_inputs = (position_embeds, attention_mask)
         return attention_inputs
 
@@ -1441,15 +1446,17 @@ class TransformerEncoder(nn.Module):
         pre_ffn_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
         block_attention_masks = []
+        block_attention_inputs = []
         for block_index, (_, _) in enumerate(zip(self.blocks, self.repeats)):
             # print("Block = ", block_index, ", Sizes = ", hidden.size(), attention_mask[0].size(), attention_mask[1].size(), all_hidden_states[-1].size())
             one_block_res = self.forward_one_block(block_index, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, output_attentions, output_hidden_states)
             hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
             block_attention_masks.append(attention_inputs[1])
+            block_attention_inputs.append(attention_inputs)
 
         # attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index) if self.config.stride > 1 else attention_inputs
         # block_attention_masks.append(attention_inputs[1])
-        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, block_attention_masks] if v is not None)
+        return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, block_attention_inputs, block_attention_masks] if v is not None)
 
 
 def shift_right(input_ids, decoder_start_token_id, pad_token_id):
@@ -1557,7 +1564,6 @@ class TransformerDecoder(nn.Module):
         config = copy.deepcopy(config)
         config.alternate_ffn = False
         self.config = config
-        self.attention_structure = AttentionStructure(config)
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.layers = nn.ModuleList()
         if config.num_decoder_layers > 0:
@@ -1589,7 +1595,8 @@ class TransformerDecoder(nn.Module):
             final_hidden,
             first_block_hidden,
             position_embeds,
-            attention_mask=None,
+            attention_inputs=None,
+            final_hidden_attention_inputs=None,
             output_attentions=False,
             output_hidden_states=False,
     ):
@@ -1612,11 +1619,6 @@ class TransformerDecoder(nn.Module):
         all_hidden_states = (hidden,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
 
-        attention_inputs = self.attention_structure.init_attention_inputs(
-            hidden,
-            position_embeds,
-            attention_mask=attention_mask,
-        )
 
         layer_index = 0
         for layer, repeats in zip(self.layers, self.repeats):
@@ -1793,12 +1795,13 @@ class FastFormerModel(FastFormerPreTrainedModel):
         outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
 
         if hasattr(self, "decoder") and (run_decoder or run_answering):
-
+            block_attention_inputs = encoder_outputs[4]
             decoder_outputs = self.decoder(
                 final_hidden=final_hidden,
                 first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
                 position_embeds=position_embeds,
-                attention_mask=attention_mask,
+                attention_inputs=block_attention_inputs[0],
+                final_hidden_attention_inputs=block_attention_inputs[-1],
                 output_attentions=False,
                 output_hidden_states=False,
             )
