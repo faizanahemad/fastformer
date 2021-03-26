@@ -1988,7 +1988,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         encoder_outputs = new_funnel_outputs["encoder_outputs"]
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
-        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0
@@ -2006,7 +2005,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         sent_order_pre_kl = 0
         if self.sentence_order_prediction_w > 0 and sent_order_predictions is not None:
-            sent_order_block_hidden_cls = new_funnel_outputs["final_hidden"][:, 1:self.cls_tokens + 1] + new_funnel_outputs["final_hidden"][:, 0].unsqueeze(1)
+            sent_order_block_hidden_cls = new_funnel_outputs["final_hidden"][:, 1:self.cls_tokens + 1]  # + new_funnel_outputs["final_hidden"][:, 0].unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls)
             sent_order_pre_kl = KL(sent_order_logits, sent_order_predictions.detach(), reduction="batchmean")
             if reverse_loss:
@@ -2020,45 +2019,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             electra_pre_kl = (electra_pre_kl + KL(electra_logits.detach(), electra_predictions, reduction="batchmean")) / 2.0
 
         contrastive_kl = 0.0
-        if contrastive_anchors is not None and self.contrastive_w > 0:
-            contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
-            contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-
-            dpow = self.config.stride ** 2
-            contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
-            contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
-
-            anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors)
-                       for anchor in anchors]
-            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
-                                     anchors_cp]
-            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
-            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
-            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
-
-            positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
-            n_anchors = len(anchors)
-            n_positives = len(positives)
-            assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
-            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
-            if n_positives == 0 or n_anchors == 0:
-                pass
-            else:
-                contrastive_block_hidden = torch.stack(anchors + positives)
-                if len(contrastive_block_hidden.size()) == 2:
-                    contrastive_block_hidden = contrastive_block_hidden[:, :128]
-                elif len(contrastive_block_hidden.size()) == 3:
-                    contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-
-
-                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True) + self.config.layer_norm_eps)
-                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-
-                contrastive_kl = KL(contrastive_block_matrix, contrastive_logits.detach(), reduction="batchmean")
-                if reverse_loss:
-                    contrastive_kl = (contrastive_kl + KL(contrastive_block_matrix.detach(), contrastive_logits, reduction="batchmean")) / 2.0
-
         answering_lm_loss_kl = 0.0
         run_answering = labels_pet_input_ids is not None
         if run_answering:
