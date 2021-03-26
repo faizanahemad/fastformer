@@ -2380,8 +2380,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             preds_dict["electra_logits"] = electra_logits.tolist()
             preds_dict["electra_preds"] = electra_preds.tolist()
             preds_dict["electra_labels"] = labels.tolist()
-            accuracy_hist["electra_preds_mean"] = electra_preds.mean().item()
-            accuracy_hist["electra_labels_mean"] = labels.mean().item()
+            accuracy_hist["electra_preds_mean"] = electra_preds.type(torch.float).mean().item()
+            accuracy_hist["electra_labels_mean"] = labels.type(torch.float).mean().item()
             accuracy_hist["electra_accuracy"] = (torch.mean((electra_preds == labels).type(torch.float)).item())
             # if self.record_accuracy:
             #     self.accuracy_hist.append(accuracy_hist)
