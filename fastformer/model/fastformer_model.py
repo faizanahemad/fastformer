@@ -1504,11 +1504,12 @@ class TransformerCrossAttentionDecoder(nn.Module):
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
         self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
-        self.relu = nn.LeakyReLU()
+        self.relu = checkpoint_wrapper(nn.LeakyReLU(), offload_to_cpu=False)
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
 
     def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
         bs, seq_len, dim = query.shape
+        query = self.self_attn_ln(query)
         query_temp = query
         if query_mask is None:
             query_mask = subsequent_mask(seq_len).to(query.device).unsqueeze(0)
@@ -1520,9 +1521,11 @@ class TransformerCrossAttentionDecoder(nn.Module):
 
         (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
         query = self.self_attn_lin(self.relu(query))
+        query = query_temp + self.self_attn_ln(query)
+        query_temp = query
         (query,) = self.self_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
         query = self.self_attn_lin(query)
-        return self.self_attn_ln(query)
+        return query_temp + self.self_attn_ln(query)
 
 
 def upsample(x, stride, target_len, cls_tokens):
@@ -2352,9 +2355,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
 
             highway_cls_ar_hidden = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-            # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
+            highway_block_hidden = highway_block_hidden[:,:self.cls_tokens + 1]
+            key_attention = key_attention[:, :highway_block_hidden.size(1)]
+            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_hidden, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
-            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_hidden)[:, :, :self.config.vocab_size]
+            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, :hshape2]
             highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
