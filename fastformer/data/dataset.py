@@ -360,11 +360,19 @@ class TokenizerDataset(Dataset):
             sj = self.sj_p[np.searchsorted(self.sj_l, length) - 1]
             wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
 
-            alpha, beta = (2, 4) if length > 256 else (1, 5)
-            num_segments = int(np.round(self.min_segments + random.betavariate(alpha, beta) * (self.cls_tokens - self.min_segments))) if self.cls_tokens > self.min_segments else 1
-            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
-            count_pad_tokens = sum(segments == tokenizer.pad_token)
-            if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1:
+            alpha, beta = (2, 4) if length > 512 else (1, 5)
+
+            cls_tokens_sent_seg = self.cls_tokens
+            num_segments = 1 if cls_tokens_sent_seg < self.min_segments else self.min_segments
+            count_pad_tokens = 100
+            retries = 0
+            while retries < 8 and count_pad_tokens > 0 and cls_tokens_sent_seg >= self.min_segments:
+                num_segments = int(np.round(self.min_segments + random.betavariate(alpha, beta) * (cls_tokens_sent_seg - self.min_segments)))
+                segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+                count_pad_tokens = sum(segments == tokenizer.pad_token)
+                cls_tokens_sent_seg -= 1
+
+            if random.random() < sj and (n_queries == 0 or self.sentence_jumble_in_pet) and count_pad_tokens <= 1 and num_segments > 1:
                 seg_idxs = random.sample(range(num_segments), num_segments)
                 labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
             else:
