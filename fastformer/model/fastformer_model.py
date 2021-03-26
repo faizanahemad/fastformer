@@ -1440,13 +1440,15 @@ class TransformerEncoder(nn.Module):
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
         pre_ffn_states = (inputs_embeds,) if output_hidden_states else None
         all_attentions = () if output_attentions else None
-        block_attention_masks = [attention_inputs[1]]
+        block_attention_masks = []
         for block_index, (_, _) in enumerate(zip(self.blocks, self.repeats)):
             # print("Block = ", block_index, ", Sizes = ", hidden.size(), attention_mask[0].size(), attention_mask[1].size(), all_hidden_states[-1].size())
             one_block_res = self.forward_one_block(block_index, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, output_attentions, output_hidden_states)
             hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
             block_attention_masks.append(attention_inputs[1])
 
+        attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index) if self.config.stride > 1 else attention_inputs
+        block_attention_masks.append(attention_inputs[1])
         return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, block_attention_masks] if v is not None)
 
 
@@ -2340,7 +2342,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             else:
                 hshape2 = 32 * (hshape[1] // 32)
             assert hshape2 > 0
-            key_attention = encoder_outputs[-1][2] # [:, :highway_block_hidden.size(1)]
+            key_attention = encoder_outputs[-1][2]  # [:, :highway_block_hidden.size(1)]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
             if hshape2 > 128:
@@ -2654,7 +2656,7 @@ if __name__ == "__main__":
 
     # checkpoint = torch.load("model/error-model.pth", map_location=str(device))
     # model.load_state_dict(checkpoint)
-    pt_batch = torch.load("model/error-input.pth", map_location=str(device))
+    # pt_batch = torch.load("model/error-input.pth", map_location=str(device))
     labels = pt_batch.pop("labels", None)
 
     model = model.to(device)
