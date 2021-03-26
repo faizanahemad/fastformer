@@ -1623,6 +1623,8 @@ class TransformerDecoder(nn.Module):
         layer_index = 0
         for layer, repeats in zip(self.layers, self.repeats):
             for _ in range(repeats):
+                layer_output = layer(hidden, final_hidden, final_hidden, final_hidden_attention_inputs, layer_index, output_attentions=output_attentions)
+                hidden = layer_output[0]
                 layer_output = layer(hidden, hidden, hidden, attention_inputs, layer_index, output_attentions=output_attentions)
                 hidden = layer_output[0]
                 layer_index += 1
@@ -1795,7 +1797,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
         outputs = dict(final_hidden=final_hidden, encoder_outputs=encoder_outputs, inputs_embeds=inputs_embeds, position_embeds=position_embeds, input_shape=input_shape)
 
         if hasattr(self, "decoder") and (run_decoder or run_answering):
-            block_attention_inputs = encoder_outputs[4]
+            block_attention_inputs = encoder_outputs[-2]
             decoder_outputs = self.decoder(
                 final_hidden=final_hidden,
                 first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
