@@ -726,7 +726,9 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed,
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), samples_per_second))
-                print("[Train-Timings]: Time = %s, sent_order = %s, mx_labels = %s" % (get_time_string(), list(zip(batch["labels_segment_index"].view(-1).tolist(), preds_dict["sent_order_preds"])), list(zip(preds_dict["mx_labels"], preds_dict["mx_label_pred"]))))
+                print("[Train-Timings]: Time = %s, sent_order = %s, mx_labels = %s, contrastive_labels = %s" % (get_time_string(),
+                                                                                                                list(zip(batch["labels_segment_index"].view(-1).tolist(), preds_dict["sent_order_preds"])),
+                                                                                                                list(zip(preds_dict["mx_labels"], preds_dict["mx_label_pred"])), list(zip(preds_dict["contrastive_actuals"], preds_dict["contrastive_preds"]))))
                 del acc_dict
                 del loss_dict
 

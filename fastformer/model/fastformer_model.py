@@ -1979,6 +1979,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         encoder_outputs = new_funnel_outputs["encoder_outputs"]
         first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
+        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]
 
         if self.adv_lm_w > 0:
             clip_min = clip_max = 1.0
@@ -2011,7 +2012,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         contrastive_kl = 0.0
         if contrastive_anchors is not None:
-            contrastive_block_hidden = new_funnel_outputs["final_hidden"][:, self.cls_tokens + 1:]
+            contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
+            contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
 
             dpow = self.config.stride ** 2
             contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
@@ -2169,6 +2171,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
         final_hidden = funnel_outputs["final_hidden"]
         at_cast = kwargs.pop("autocast", False)
+        preds_dict = dict()
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, input_ids = %s, attention_mask = %s" % (get_time_string(), random.sample(input_ids.reshape(-1).tolist(), 8), random.sample(attention_mask.reshape(-1).tolist(), 8)))
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, char_ids = %s, char_offsets = %s" % (get_time_string(), random.sample(char_ids.reshape(-1).tolist(), 8), random.sample(char_offsets.reshape(-1).tolist(), 8)))
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Input embeds = %s, Input embeds CLS = %s" % (get_time_string(), random.sample(inputs_embeds.reshape(-1).tolist(), 8), random.sample(inputs_embeds_cls.reshape(-1).tolist(), 8)))
@@ -2261,7 +2264,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
                 loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
                 if record_accuracy:
-                    accuracy_hist["contrastive_accuracy"] = ((contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1) == labels_contrastive).sum().item() / n_positives)
+                    contrastive_preds = contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1)
+                    accuracy_hist["contrastive_accuracy"] = ((contrastive_preds == labels_contrastive).sum().item() / n_positives)
+                    preds_dict["contrastive_preds"] = contrastive_preds.tolist()
+                    preds_dict["contrastive_actuals"] = labels_contrastive.tolist()
                 mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
                 const = 1e3
@@ -2299,7 +2305,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sentence_order_loss = 0.0
         highway_cls_ar_loss = 0.0
         sent_order_logits = None
-        preds_dict = dict()
+
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
             mx_labels = labels_segment_index.max(-1)[0].view(-1)
             first_cls = final_hidden[:, 0]
@@ -2315,9 +2321,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 sent_order_out = sent_order_preds == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
                 accuracy_hist["sent_order_accuracy"] = (float(sent_order_out.detach().float().mean().cpu()))
+                accuracy_hist["sent_order_accuracy_non_zero"] = (float(sent_order_out[labels_segment_index != 0].detach().float().mean().cpu()))
                 preds_dict["sent_order_preds"] = sent_order_preds.cpu().tolist()
-                preds_dict["mx_label_pred"] = mx_label_pred.argmax(dim=-1).cpu().tolist()
-                preds_dict["mx_labels"] = mx_labels
+                preds_dict["mx_label_pred"] = mx_label_pred.argmax(dim=-1).detach().cpu().tolist()
+                preds_dict["mx_labels"] = mx_labels.cpu().tolist()
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
