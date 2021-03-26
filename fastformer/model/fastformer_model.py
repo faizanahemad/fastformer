@@ -1472,6 +1472,10 @@ def shift_right(input_ids, decoder_start_token_id, pad_token_id):
     return shifted_input_ids
 
 
+def shift_right_fast(input_ids, decoder_start_token_id, pad_token_id):
+    return torch.cat((input_ids.new_zeros((input_ids.shape[0], 1)), input_ids[:, :-1]), 1)
+
+
 def subsequent_mask(size):
     "Mask out subsequent positions."
     attn_shape = (1, size, size)
@@ -2211,85 +2215,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
 
-        third_block_hidden = encoder_outputs[1][sum(self.config.block_sizes)]  # for last block both input and output shapes are same
-        loss_contrastive = 0.0
-        contrastive_block_matrix = None
-        contrastive_anchors_copy = contrastive_positives_copy = None
-        if contrastive_anchors is not None and self.contrastive_w > 0:
-            bs = input_ids.size(0)
-            if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives)/bs == torch.cuda.device_count():
-                did = torch.cuda.current_device()
-                contrastive_positives = contrastive_positives[did*bs: (did+1)*bs]
-                contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
-
-            contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
-            assert len(contrastive_block_hidden.size()) == 3
-            contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
-            dpow = self.config.stride ** 2
-            contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
-            contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
-            # contrastive_len = contrastive_block_hidden.size(1)
-            # for batch_positive in contrastive_positives:
-            #     for positives_for_anchor in batch_positive:
-            #         for positive in positives_for_anchor:
-            #             if positive[0]==positive[1]:
-            #                 if positive[1] < contrastive_len:
-            #                     positive[1] = positive[1] + 1
-            #                 elif positive[0] > 0:
-            #                     positive[0] = positive[0] - 1
-            #
-            #             positive[0] = min(positive[0], positive[1] - 1)
-            # for batch_anchor in contrastive_anchors:
-            #     for anch in batch_anchor:
-            #         if anch[0] == anch[1]:
-            #             if anch[1] < contrastive_len:
-            #                 anch[1] = anch[1] + 1
-            #             elif anch[0] > 0:
-            #                 anch[0] = anch[0] - 1
-            # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
-            anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
-            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in anchors_cp]
-            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
-            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
-            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
-
-            positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in pos]
-            n_anchors = len(anchors)
-            n_positives = len(positives)
-            assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
-            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
-            if n_positives == 0 or n_anchors == 0:
-                pass
-            else:
-                contrastive_block_hidden = torch.stack(anchors + positives)
-                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
-                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-                labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
-                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
-                if record_accuracy:
-                    contrastive_preds = contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1)
-                    accuracy_hist["contrastive_accuracy"] = ((contrastive_preds == labels_contrastive).sum().item() / n_positives)
-                    preds_dict["contrastive_preds"] = contrastive_preds.tolist()
-                    preds_dict["contrastive_actuals"] = labels_contrastive.tolist()
-                mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-                mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-                const = 1e3
-                for i in range(n_positives_per_anchor):
-                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
-                vertical_lc = 0.0
-                for i in range(n_positives_per_anchor):
-
-                    labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
-                    mask_c = mask2.clone()
-                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))] = const + 1
-                    mask_c = mask1 + mask_c
-                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
-                    vertical_lc += l2
-                vertical_lc /= n_positives_per_anchor
-                loss_contrastive += vertical_lc
-            loss_contrastive = self.contrastive_w * loss_contrastive
         et = time.time() - st
         timing_dict.append(("contrastive_loss", et))
         cls_orthogonal_loss = 0.0
@@ -2335,9 +2260,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
 
+        highway_cls_ar_hidden = None
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
             highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden)  # [:, :self.cls_tokens + 1]
-            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False, use_highway_embeds=False)
+            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right_fast(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False, use_highway_embeds=False)
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
             if hshape[1] <= 32:
@@ -2355,7 +2281,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
 
             highway_cls_ar_hidden = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-            highway_block_hidden = highway_block_hidden[:,:self.cls_tokens + 1]
+            highway_block_hidden = highway_block_hidden[:, :self.cls_tokens + 1]
             key_attention = key_attention[:, :highway_block_hidden.size(1)]
             highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_hidden, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
@@ -2370,6 +2296,88 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
                 highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
                 accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
+
+        loss_contrastive = 0.0
+        contrastive_block_matrix = None
+        contrastive_anchors_copy = contrastive_positives_copy = None
+        if contrastive_anchors is not None and self.contrastive_w > 0 and highway_cls_ar_hidden is not None:
+            bs = input_ids.size(0)
+            if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives) / bs == torch.cuda.device_count():
+                did = torch.cuda.current_device()
+                contrastive_positives = contrastive_positives[did * bs: (did + 1) * bs]
+                contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
+
+            contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
+            contrastive_block_hidden = highway_cls_ar_hidden
+            assert len(contrastive_block_hidden.size()) == 3
+
+            # dpow = self.config.stride ** 2
+            # contrastive_positives = recursive_op(contrastive_positives, lambda x: int(x / dpow))
+            # contrastive_anchors = recursive_op(contrastive_anchors, lambda x: int(x / dpow))
+            # contrastive_len = contrastive_block_hidden.size(1)
+            # for batch_positive in contrastive_positives:
+            #     for positives_for_anchor in batch_positive:
+            #         for positive in positives_for_anchor:
+            #             if positive[0]==positive[1]:
+            #                 if positive[1] < contrastive_len:
+            #                     positive[1] = positive[1] + 1
+            #                 elif positive[0] > 0:
+            #                     positive[0] = positive[0] - 1
+            #
+            #             positive[0] = min(positive[0], positive[1] - 1)
+            # for batch_anchor in contrastive_anchors:
+            #     for anch in batch_anchor:
+            #         if anch[0] == anch[1]:
+            #             if anch[1] < contrastive_len:
+            #                 anch[1] = anch[1] + 1
+            #             elif anch[0] > 0:
+            #                 anch[0] = anch[0] - 1
+            # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
+            anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in
+                       enumerate(contrastive_anchors) for anchor in anchors]
+            contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
+                                     anchors_cp]
+            n_positives_per_anchor = max([len(a) for a in contrastive_positives])
+            contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
+            # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
+
+            positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in
+                         pos]
+            n_anchors = len(anchors)
+            n_positives = len(positives)
+            assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
+            assert n_positives == 0 or n_anchors == 0 or (n_positives / n_anchors) == n_positives_per_anchor
+            if n_positives == 0 or n_anchors == 0:
+                pass
+            else:
+                contrastive_block_hidden = torch.stack(anchors + positives)
+                contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
+                contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
+                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
+                labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
+                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+                if record_accuracy:
+                    contrastive_preds = contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1)
+                    accuracy_hist["contrastive_accuracy"] = ((contrastive_preds == labels_contrastive).sum().item() / n_positives)
+                    preds_dict["contrastive_preds"] = contrastive_preds.tolist()
+                    preds_dict["contrastive_actuals"] = labels_contrastive.tolist()
+                mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                const = 1e3
+                for i in range(n_positives_per_anchor):
+                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
+                vertical_lc = 0.0
+                for i in range(n_positives_per_anchor):
+                    labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
+                    mask_c = mask2.clone()
+                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (
+                                n_anchors * (i + 1))] = const + 1
+                    mask_c = mask1 + mask_c
+                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                    vertical_lc += l2
+                vertical_lc /= n_positives_per_anchor
+                loss_contrastive += vertical_lc
+            loss_contrastive = self.contrastive_w * loss_contrastive
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
@@ -2662,7 +2670,7 @@ if __name__ == "__main__":
     # checkpoint = torch.load("model/error-model.pth", map_location=str(device))
     # model.load_state_dict(checkpoint)
     # pt_batch = torch.load("model/error-input.pth", map_location=str(device))
-    labels = pt_batch.pop("labels", None)
+    # labels = pt_batch.pop("labels", None)
 
     model = model.to(device)
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
