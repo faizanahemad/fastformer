@@ -2374,7 +2374,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         loss = self.electra_loss_w * self.loss_bce(logits, labels)
         if record_accuracy:
-            accuracy_hist["electra_accuracy"] = (torch.mean(((torch.sigmoid(logits.detach()) > 0.5).type(torch.int64) == labels).type(torch.float)).item())
+            electra_logits = torch.sigmoid(logits.detach())
+            electra_preds = electra_logits > 0.5
+            preds_dict["electra_logits"] = electra_logits.view(-1)
+            preds_dict["electra_preds"] = electra_preds.view(-1)
+            preds_dict["electra_labels"] = labels.view(-1)
+            accuracy_hist["electra_accuracy"] = (torch.mean((electra_preds.type(torch.int64) == labels).type(torch.float)).item())
             # if self.record_accuracy:
             #     self.accuracy_hist.append(accuracy_hist)
 
