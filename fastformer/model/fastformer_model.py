@@ -1447,8 +1447,8 @@ class TransformerEncoder(nn.Module):
             hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
             block_attention_masks.append(attention_inputs[1])
 
-        attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index) if self.config.stride > 1 else attention_inputs
-        block_attention_masks.append(attention_inputs[1])
+        # attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index) if self.config.stride > 1 else attention_inputs
+        # block_attention_masks.append(attention_inputs[1])
         return tuple(v for v in [hidden, all_hidden_states, pre_ffn_states, all_attentions, block_attention_masks] if v is not None)
 
 
