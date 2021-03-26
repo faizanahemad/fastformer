@@ -435,6 +435,16 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
     loss = output["loss"] / iter_size
     loss_dict = output["loss_dict"]
     loss.backward()
+    zgradders = []
+    inf_gradders = []
+    if zero_grad_check:
+        zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
+        if len(zgradders):
+            print("[Train]: Time = %s, Zero Grads: " % get_time_string(), zgradders)
+        inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
+        if len(inf_gradders):
+            print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
+            # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
 
     if not no_sync:
         ddp_model.clip_grad_norm_(gradient_clipping)
@@ -445,18 +455,8 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), None, loss_dict, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
-    zgradders = []
-    inf_gradders = []
-    if zero_grad_check:
-        zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
-        if len(zgradders):
-            print("[Train]: Time = %s, Zero Grads: " % get_time_string(), zgradders)
-        inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
-        if len(inf_gradders):
-            print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
 
-        # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
-    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"], zero_grad=len(zgradders), inf_grad=len(inf_gradders))
+    return dict(loss_dict=loss_dict, accuracy_hist=output["accuracy_hist"], preds_dict=output["preds_dict"], zero_grad=len(zgradders), inf_grad=len(inf_gradders))
 
 
 def train(local_rank, args):
