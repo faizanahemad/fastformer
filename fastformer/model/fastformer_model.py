@@ -2306,15 +2306,18 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             labels_segment_index = labels_segment_index.view(-1)
             sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1] + first_cls.unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
-            sent_order_loss = self.loss_ce(sent_order_logits, labels_segment_index) + self.loss_ce(self.sent_predict_fc(first_cls), mx_labels)
+            mx_label_pred = self.sent_predict_fc(first_cls)
+            sent_order_loss = self.ce(sent_order_logits, labels_segment_index) + self.ce(mx_label_pred, mx_labels)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
             if record_accuracy:
-                sent_order_preds =  sent_order_logits.detach().argmax(dim=-1)
+                sent_order_preds = sent_order_logits.detach().argmax(dim=-1)
                 sent_order_out = sent_order_preds == labels_segment_index
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
-                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out[labels_segment_index != 0].detach().float().mean().cpu()))
+                accuracy_hist["sent_order_accuracy"] = (float(sent_order_out.detach().float().mean().cpu()))
                 preds_dict["sent_order_preds"] = sent_order_preds.cpu().tolist()
+                preds_dict["mx_label_pred"] = mx_label_pred.argmax(dim=-1).cpu().tolist()
+                preds_dict["mx_labels"] = mx_labels
 
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
