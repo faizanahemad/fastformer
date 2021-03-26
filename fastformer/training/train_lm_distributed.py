@@ -716,6 +716,7 @@ def train(local_rank, args):
                 samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                 acc_dict = output["accuracy_hist"]
                 loss_dict = output["loss_dict"]
+                preds_dict = output["preds_dict"]
                 time.sleep(random.random() + 0.1)
                 wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second, batch_x_sequence=np.prod(bs_size[:2]),
                                input_cls_orthogonal_w=input_cls_orthogonal_w, electra_loss_w=electra_loss_w,
@@ -725,6 +726,7 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed,
                        bs_size, loss_dict, output["accuracy_hist"], optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Model Time = %.4f, samples_per_second = %s" % (get_time_string(), np.mean(batch_times), np.mean(model_times), samples_per_second))
+                print("[Train-Timings]: Time = %s, sent_order_preds = %s, labels_segment_index = %s" % (get_time_string(), preds_dict["sent_order_preds"], batch["labels_segment_index"].tolist()))
                 del acc_dict
                 del loss_dict
 
