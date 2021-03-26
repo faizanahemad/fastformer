@@ -2011,7 +2011,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             electra_pre_kl = (electra_pre_kl + KL(electra_logits.detach(), electra_predictions, reduction="batchmean")) / 2.0
 
         contrastive_kl = 0.0
-        if contrastive_anchors is not None:
+        if contrastive_anchors is not None and self.contrastive_w > 0:
             contrastive_block_hidden = third_block_hidden[:, self.cls_tokens + 1:]
             contrastive_block_hidden = contrastive_block_hidden[:, :, :128]
 
@@ -2331,7 +2331,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         timing_dict.append(("sentence_order_loss", et))
 
         if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-            highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden[:, :self.cls_tokens + 1])
+            highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden)  # [:, :self.cls_tokens + 1]
             highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False, use_highway_embeds=False)
             hshape = highway_cls_ar_inputs_embeds.size()
             assert hshape[1] > 0
@@ -2340,7 +2340,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             else:
                 hshape2 = 32 * (hshape[1] // 32)
             assert hshape2 > 0
-            key_attention = encoder_outputs[-1][2][:, :highway_block_hidden.size(1)]
+            key_attention = encoder_outputs[-1][2] # [:, :highway_block_hidden.size(1)]
             highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
             highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
             if hshape2 > 128:
@@ -2349,10 +2349,10 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
                 key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
 
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
+            highway_cls_ar_hidden = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
             # highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_out, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
 
-            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
+            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_hidden)[:, :, :self.config.vocab_size]
             highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, :hshape2]
             highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
             highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
