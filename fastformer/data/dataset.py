@@ -254,7 +254,7 @@ class TokenizerDataset(Dataset):
                  word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=True,
                  word_mask_proba: list = ((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
                  word_noise_proba: tuple = ((0, 0.1), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.2)),
-                 max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 2, n_positives: int = 2):
+                 max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 4, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.min_segments = 2
         self.cls_tokens = config.num_highway_cls_tokens
@@ -331,7 +331,8 @@ class TokenizerDataset(Dataset):
             seg_sep_token = f" {tokenizer.seg_sep_token} "
             text_len = length
             max_anchor_len = text_len // (2 * self.n_anchors)
-            min_anchor_len = 32
+            min_anchor_len = 64
+            min_positive_len = min_anchor_len - 16
             anchor_min_start = 0
             anchor_max_start = anchor_min_start + max_anchor_len
             anchors = []
@@ -344,8 +345,8 @@ class TokenizerDataset(Dataset):
                 anchors.append([anchor_start, anchor_end])
                 positives_for_anchor = []
                 while len(positives_for_anchor) < self.n_positives:
-                    positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_anchor_len) + min_anchor_len)
-                    positive_len = int(np.round(positive_len / 8) * 8)
+                    positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_positive_len) + min_positive_len)
+                    # positive_len = int(np.round(positive_len / 8) * 8)  # This line is only to make positives the size multiple of 8 for cuda speed
                     positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
                     positive_end = min(positive_start + positive_len, text_len)
                     positives_for_anchor.append([positive_start, positive_end])
