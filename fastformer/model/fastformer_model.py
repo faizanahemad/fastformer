@@ -2294,6 +2294,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             #             elif anch[0] > 0:
             #                 anch[0] = anch[0] - 1
             # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
+            print(contrastive_block_hidden.size(1))
+            print([[anchor[0], anchor[1]] for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors])
+            print([[anchor_pos[0], anchor_pos[1]] for pos in contrastive_positives for anchor_pos in pos])
             assert all([contrastive_block_hidden.size(1) > anchor[1] and anchor[0] >= 0 for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors])
             anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in
                        enumerate(contrastive_anchors) for anchor in anchors]
