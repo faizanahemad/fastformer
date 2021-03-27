@@ -2300,7 +2300,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             # print("==" * 80)
             assertion_anchor = [contrastive_block_hidden.size(1) > anchor[1] for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             print(assertion_anchor)
-            assert all(assertion_anchor)
+            # assert all(assertion_anchor)
 
             anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in
                        enumerate(contrastive_anchors) for anchor in anchors]
@@ -2311,7 +2311,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
             assertion_pos = [contrastive_block_hidden.size(1) > anchor_pos[1] for pos in contrastive_positives for anchor_pos in pos]
             print(assertion_pos)
-            assert all(assertion_pos)
+            # assert all(assertion_pos)
             positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in
                          pos]
 
