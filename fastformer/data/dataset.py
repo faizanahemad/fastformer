@@ -503,6 +503,7 @@ class get_collate_fn:
         samples = default_collate(samples)
         samples["contrastive_anchors"] = anchors
         samples["contrastive_positives"] = positives
+        print(anchors, positives)
         samples["answer"] = answer
         if char_ids is not None:
             samples["char_ids"] = char_ids
