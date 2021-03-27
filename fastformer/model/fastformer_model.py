@@ -1281,27 +1281,22 @@ class LightLayer(nn.Module):
         super().__init__()
         self.config = config
         cin = config.block_channel_size[block_index]
-        cout = cin // 2
+        cout = cin
         self.is_encoder_layer = is_encoder_layer
 
-        self.layer_norm = nn.LayerNorm(cout * 2, config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(cout, config.layer_norm_eps)
         self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=False)
         self.cls_tokens = config.num_highway_cls_tokens + 1
         # d_head = config.d_head[block_index]
         assert cout % (sum(config.n_head[block_index]) // 2) == 0
-        self.c1 = SDConv(config, cout, sum(config.n_head[block_index]) // 2, cout // (sum(config.n_head[block_index]) // 2), config.sdconv_kernel_size[0])
-        self.rnn = ShortSeqRNN(config, cout, 1, cout, config.short_rnn_kernel[block_index],
-                               config.short_rnn_overlap[block_index])
+        self.c1 = SDConv(config, cout, sum(config.n_head[block_index]), cout // (sum(config.n_head[block_index])), config.sdconv_kernel_size[0])
         self.lin = nn.Linear(cin, cin, bias=False)
         self.cout = cout
         # padding
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        qcnn_in, qrnn_in = query.split([self.cout, query.size(-1) - self.cout], -1)
-        qcnn = self.c1(qcnn_in)
-        qrnn = self.rnn(qrnn_in)
-        q = torch.cat((qcnn, qrnn), 2)
-        q = self.activation_function(q)
+        qcnn = self.c1(query, key, value)
+        q = self.activation_function(qcnn)
         q = self.lin(q)
         if self.config.identity_preserving_norm:
             res = query + self.layer_norm(q)
