@@ -541,6 +541,11 @@ def train(local_rank, args):
 
     # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
     ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+    try:
+        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
+        ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
+    except:
+        print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
     del model
     clean_memory()
 
