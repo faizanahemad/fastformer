@@ -507,16 +507,16 @@ class ShortSeqRNN(nn.Module):
         self.gru = nn.ModuleList()
         self.gru_global = nn.ModuleList()
         for i in range(heads):
-            rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-                         nonlinearity="tanh",
-                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                          nonlinearity="tanh",
-                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            # rnn = nn.GRU(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+            # rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+            #              nonlinearity="tanh",
             #              bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            # rnn2 = nn.GRU(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-            #               bias=False, batch_first=True, dropout=0.0, bidirectional=True)
+            # rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+            #               nonlinearity="tanh",
+            #               bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            rnn = nn.GRU(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
+                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            rnn2 = nn.GRU(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                          bias=False, batch_first=True, dropout=0.0, bidirectional=True)
             self.gru.append(rnn)
             self.gru_global.append(rnn2)
 
