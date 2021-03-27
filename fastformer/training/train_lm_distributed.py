@@ -640,7 +640,7 @@ def train(local_rank, args):
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         bs_size = list(batch["input_ids"].size())
-        # batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
         # if other_load_details is not None:
         #     if step < other_load_details["step"] and args["skip_steps"]:
