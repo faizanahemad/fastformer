@@ -2302,7 +2302,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             # print("==" * 80)
             # contrastive_anchors = [[], [], [], []]
             # contrastive_positives = [[[]], [[]], [[]], [[]]]
-            print(input_ids.size(), contrastive_block_hidden.size(), "\n", contrastive_anchors, contrastive_positives)
+            # print(input_ids.size(), contrastive_block_hidden.size(), "\n", contrastive_anchors, contrastive_positives)
             # assertion_anchor = [contrastive_block_hidden.size(1) > anchor[1] for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             # print(assertion_anchor)
             # assert all(assertion_anchor)
