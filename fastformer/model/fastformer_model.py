@@ -1240,8 +1240,7 @@ class PositionwiseFFN(nn.Module):
         self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=False)
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
-            self.dlayer_norm = nn.LayerNorm(self.diff, config.layer_norm_eps)
-            self.dlin = Conv1d(d_model, self.diff, 1, 8, bias=False) if d_model % 8 == 0 and self.diff % 8 == 0 and groups > 1 else nn.Linear(d_model, self.diff, bias=False)
+            self.layer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
@@ -1256,16 +1255,16 @@ class PositionwiseFFN(nn.Module):
         h = self.ffn(h)
         if dim_match:
             if self.config.identity_preserving_norm:
-                h = self.layer_norm(h)
                 pre_ffn = h
-                dh = self.dlayer_norm(self.dlin(h))
+                dh = h[:, :, :self.diff]
                 h = torch.cat((h, dh), 2)
+                h = self.layer_norm(h)
                 hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
                 h = hidden + h
             else:
-                dh = self.dlin(h)
+                dh = h[:, :, :self.diff] + hidden[:, :, :self.diff]
                 pre_ffn = h
-                h = torch.cat((self.layer_norm(h + hidden), self.dlayer_norm(dh)), 2)
+                h = self.layer_norm(torch.cat((h + hidden, dh), 2))
         else:
             if self.config.identity_preserving_norm:
                 h = self.layer_norm(h)
