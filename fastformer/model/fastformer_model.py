@@ -2298,6 +2298,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             # print([[anchor[0], anchor[1]] for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors])
             # print([[anchor_pos[0], anchor_pos[1]] for pos in contrastive_positives for anchor_pos in pos])
             # print("==" * 80)
+            print(contrastive_anchors, contrastive_positives)
             assertion_anchor = [contrastive_block_hidden.size(1) > anchor[1] for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors]
             print(assertion_anchor)
             # assert all(assertion_anchor)
