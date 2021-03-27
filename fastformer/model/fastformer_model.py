@@ -2294,6 +2294,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             #             elif anch[0] > 0:
             #                 anch[0] = anch[0] - 1
             # print("Anchors Batch size = %s, Input Batch Size = %s" % (len(contrastive_anchors), input_ids.size()))
+            assert all([contrastive_block_hidden.size(1) > anchor[1] and anchor[0] >= 0 for anchor_batch_pos, anchors in enumerate(contrastive_anchors) for anchor in anchors])
             anchors = [contrastive_block_hidden[anchor_batch_pos, [anchor[0], anchor[1]]].mean(0) for anchor_batch_pos, anchors in
                        enumerate(contrastive_anchors) for anchor in anchors]
             contrastive_positives = [[[*cp, batch_pos] for cp in anchor_cp] for batch_pos, anchors_cp in enumerate(contrastive_positives) for anchor_cp in
@@ -2301,9 +2302,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             n_positives_per_anchor = max([len(a) for a in contrastive_positives])
             contrastive_positives = [[a[i]] for i in range(n_positives_per_anchor) for a in contrastive_positives if len(a) > 0]
             # contrastive_positives = torch.tensor(contrastive_positives).transpose(0, 1).tolist()
-
+            assert all([contrastive_block_hidden.size(1) > anchor_pos[1] and anchor_pos[0] >= 0 for pos in contrastive_positives for anchor_pos in
+                         pos])
             positives = [contrastive_block_hidden[anchor_pos[-1], [anchor_pos[0], anchor_pos[1]]].mean(0) for pos in contrastive_positives for anchor_pos in
                          pos]
+
             n_anchors = len(anchors)
             n_positives = len(positives)
             assert n_positives == 0 or n_anchors == 0 or n_positives % n_anchors == 0
