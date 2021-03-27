@@ -825,13 +825,15 @@ class CompressSeqMeanPooling(nn.Module):
             self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
         else:
             self.expand = nn.Identity()
-            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
+            self.contract = nn.Identity()
             self.expansion_factor = 1
 
     def forward(self, query):
         # st = time.time()
         qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
-        if self.expansion_factor > 1:
+        if self.expansion_factor == 1:
+            return qskip
+        else:
             query = torch.cat((self.expand(query), query), dim=-1)
         query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
         # ext = time.time()
@@ -1371,7 +1373,7 @@ class TransformerEncoder(nn.Module):
                         ValueError()
                 else:
                     inext = i + 1
-                    if config.light_first_layer:
+                    if config.light_first_layer and block_index == 0 and i == 0:
                         self.blocks[block_index].append(LightLayer(config, block_index, True))
                     else:
                         self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
@@ -2451,7 +2453,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='md_config',
+    ap.add_argument("--config", type=str, default='dg_config',
                     help="Config")
     ap.add_argument("--texts", type=str, default='large_texts',
                     help="Text Set")
@@ -2478,7 +2480,7 @@ if __name__ == "__main__":
     length = args["length"]
     lr = args["lr"]
     texts = args["texts"]
-    config = dict(md_config=md_config, sm_config=sm_config)[args["config"]]
+    config = dict(md_config=md_config, sm_config=sm_config, dg_config=dg_config, tg_config=tg_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
