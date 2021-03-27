@@ -329,7 +329,7 @@ class TokenizerDataset(Dataset):
 
         if self.training:
             seg_sep_token = f" {tokenizer.seg_sep_token} "
-            text_len = 32 * (length // 32)
+            text_len = 32 * (length // 32) - 1
             max_anchor_len = text_len // (2 * self.n_anchors)
             min_anchor_len = 64
             min_positive_len = min_anchor_len - 16
