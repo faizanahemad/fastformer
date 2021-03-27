@@ -509,7 +509,7 @@ def train(local_rank, args):
     size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
     mconf = model_config.to_dict()
 
-    config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config, tg_config=tg_config)[mconf.pop("model_size")]
+    config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config, tg_config=tg_config, dg_config=dg_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024

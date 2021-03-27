@@ -33,6 +33,7 @@ setopt HIST_IGNORE_ALL_DUPS
 setopt autocd nomatch
 setopt HIST_EXPIRE_DUPS_FIRST
 setopt COMPLETE_IN_WORD
+DISABLE_AUTO_UPDATE="true"
 # export PATH="/home/$USER/anaconda3/bin:$PATH"  # commented out by conda initialize
 
 # >>> conda initialize >>>

@@ -94,14 +94,14 @@ pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transforme
 
 cd ~ && mkdir mygit && cd mygit && git clone https://github.com/faizanahemad/fastformer.git && cd fastformer && pip install -e .
 
-cd ~/mygit && git clone https://github.com/NVIDIA/apex
-cd ~/mygit/apex
-pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+#cd ~/mygit && git clone https://github.com/NVIDIA/apex
+#cd ~/mygit/apex
+#pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+#DS_BUILD_OPS=1 pip install deepspeed
 
-pip install fairscale > /dev/null
+pip install fairscale
 
 cd ~/mygit
-DS_BUILD_OPS=1 pip install deepspeed
 
 cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
 cd ~/mygit/fairseq
