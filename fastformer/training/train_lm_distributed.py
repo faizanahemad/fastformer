@@ -539,7 +539,8 @@ def train(local_rank, args):
         if args["validate_only"]:
             return
 
-    ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+    # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
     del model
     clean_memory()
 
@@ -656,13 +657,13 @@ def train(local_rank, args):
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
         optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
-            state_dict = ddp_model.state_dict()
+            state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
             if local_rank == 0:
                 torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
         if (step + 1) % validate_every_steps == 0:
-            state_dict = ddp_model.state_dict()
+            state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
             model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
             model.load_state_dict(state_dict)
             _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
