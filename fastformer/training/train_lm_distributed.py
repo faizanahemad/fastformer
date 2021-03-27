@@ -535,7 +535,6 @@ def train(local_rank, args):
         model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
-        del model
         clean_memory()
         if args["validate_only"]:
             return
@@ -641,7 +640,8 @@ def train(local_rank, args):
         gen_batch_time = time.time() - start_time
         batch_times.append(gen_batch_time)
         bs_size = list(batch["input_ids"].size())
-        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+        # batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+
         # if other_load_details is not None:
         #     if step < other_load_details["step"] and args["skip_steps"]:
         #         if (step + 1) % log_every_steps == 0 or step == 0:
