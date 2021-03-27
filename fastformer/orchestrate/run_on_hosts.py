@@ -133,9 +133,9 @@ if __name__ == "__main__":
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config tg_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
-    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
     main_cmd += " --log_every_steps 50 --num_workers 8 --validate_every_steps 500000 --save_every_steps 5000"
