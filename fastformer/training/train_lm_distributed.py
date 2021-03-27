@@ -447,7 +447,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
             # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
 
     if not no_sync:
-        ddp_model.clip_grad_norm_(gradient_clipping)
+        ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
         optimizer.step()
         scheduler.step()
 
