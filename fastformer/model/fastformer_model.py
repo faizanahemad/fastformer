@@ -670,10 +670,9 @@ class SeparableConv1d(nn.Module):
         super().__init__()
         if padding is None:
             padding = (kernel_size - 1) // 2
-        if groups is None:
-            groups = in_channels
+
         self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
-                                   kernel_size=kernel_size, groups=groups, bias=False, stride=stride, padding=padding)
+                                   kernel_size=kernel_size, groups=in_channels, bias=False, stride=stride, padding=padding)
         self.pointwise = nn.Conv1d(in_channels, out_channels, bias=bias, kernel_size=1, groups=pointwise_groups)
 
         self.out_channels = out_channels
@@ -705,13 +704,13 @@ class SDConv(nn.Module):
         self.act = checkpoint_wrapper(ACT2FN[act](), offload_to_cpu=False)
         assert hidden_size % heads == 0
         self.head_size = head_size
-        self.separable_conv1d = SeparableConv1d(hidden_size, hidden_size, kernel_size, pointwise_groups=heads, stride=stride)
+        self.conv_attn_kernel = nn.Conv1d(in_channels=hidden_size, out_channels=self.heads * self.kernel_size,
+                                          kernel_size=kernel_size, groups=heads, bias=False, stride=stride, padding=(kernel_size - 1) // 2)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
-        self.conv_attn_kernel = Conv1d(hidden_size, self.heads * self.kernel_size, 1, groups=heads)
         if config.no_v_head:
             self.conv_attn_point = nn.Identity()
         else:
-            self.conv_attn_point = Conv1d(hidden_size, hidden_size, 1, groups=heads)
+            self.conv_attn_point = nn.Linear(hidden_size, hidden_size, bias=False)
         self.use_cuda_conv = config.use_cuda_conv
         if not self.use_cuda_conv or self.stride != 1:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
@@ -737,12 +736,7 @@ class SDConv(nn.Module):
             query = upsample(query, self.config.stride, context_len, self.cls_tokens)
             seqlen = context_len
 
-        key_conv_attn_layer = self.separable_conv1d(key)
-        if self.stride == 1:
-            conv_attn_layer = key_conv_attn_layer * query
-        else:
-            conv_attn_layer = self.act(key_conv_attn_layer)
-        conv_kernel_layer = self.conv_attn_kernel(conv_attn_layer)  # Softmax only in kernel dim
+        conv_kernel_layer = self.conv_attn_kernel(query.transpose(1, 2)).transpose(1, 2)  # Softmax only in kernel dim
 
         if not self.use_cuda_conv or self.stride != 1:
             conv_kernel_layer = conv_kernel_layer.reshape(-1, self.kernel_size, 1)  # BxSxH, k, 1
