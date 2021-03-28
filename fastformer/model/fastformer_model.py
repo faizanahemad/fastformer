@@ -1345,19 +1345,22 @@ class TransformerEncoder(nn.Module):
                         self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False)))
                         self.repeats[block_index].append(1)
                         i = inext
-                    elif i < block_size:
-                        if config.light_first_layer and block_index == 0 and i == 0:
-                            self.blocks[block_index].append(LightLayer(config, block_index, True))
-                            self.repeats[block_index].append(1)
-                            i += 1
-                        else:
-                            reps = (block_size - (i)) if cur_channels != next_channels else (block_size - i)
-                            inext = i + reps
-                            self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
-                            self.repeats[block_index].append(reps)
-                            i = inext
+                    elif config.light_first_layer and block_index == 0 and i == 0:
+                        self.blocks[block_index].append(LightLayer(config, block_index, True))
+                        self.repeats[block_index].append(1)
+                        i += 1
+                    elif i < block_size - 1:
+                        reps = ((block_size - 1) - (i)) if cur_channels != next_channels else ((block_size - 1) - i)
+                        inext = i + reps
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i + reps))
+                        self.repeats[block_index].append(reps)
+                        i = inext
                     else:
-                        ValueError()
+                        inext = i + 1
+                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
+                        self.repeats[block_index].append(1)
+                        i = inext
+
                 else:
                     inext = i + 1
                     if config.light_first_layer and block_index == 0 and i == 0:
