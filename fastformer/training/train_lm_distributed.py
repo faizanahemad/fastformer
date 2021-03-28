@@ -532,7 +532,12 @@ def train(local_rank, args):
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(model)
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
-        model.load_state_dict(torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device))
+        state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
+        del state_dict["funnel.encoder.blocks.0.5.ffn.layer_norm.weight"]
+        del state_dict["funnel.encoder.blocks.0.5.ffn.layer_norm.bias"]
+        del state_dict["funnel.encoder.blocks.1.5.ffn.layer_norm.weight"]
+        del state_dict["funnel.encoder.blocks.1.5.ffn.layer_norm.bias"]
+        model.load_state_dict(state_dict, strict=False)
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         clean_memory()
@@ -656,7 +661,7 @@ def train(local_rank, args):
         #     else:
         #         step += int(other_load_details["step"] * (other_load_details["world_size"]/args["world_size"]))
         #
-        electra_loss_w = float(min(1.0, ((step + 1) / (20 * optc["warmup_steps"]))) * mconf["electra_loss_w"])
+        electra_loss_w = float(min(1.0, ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
         input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
