@@ -707,10 +707,10 @@ class SDConv(nn.Module):
         self.conv_attn_kernel = nn.Conv1d(in_channels=hidden_size, out_channels=self.heads * self.kernel_size,
                                           kernel_size=kernel_size, groups=heads, bias=False, stride=stride, padding=(kernel_size - 1) // 2)
         # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
-        if config.no_v_head:
-            self.conv_attn_point = nn.Identity()
-        else:
-            self.conv_attn_point = nn.Linear(hidden_size, hidden_size, bias=False)
+        # if config.no_v_head:
+        #     self.conv_attn_point = nn.Identity()
+        # else:
+        #     self.conv_attn_point = nn.Linear(hidden_size, hidden_size, bias=False)
         self.use_cuda_conv = config.use_cuda_conv
         if not self.use_cuda_conv or self.stride != 1:
             self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
@@ -743,7 +743,7 @@ class SDConv(nn.Module):
             conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
             # conv_out_layer
-            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
+            conv_out_layer = value.permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
             unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
             # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
             unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2)  # B, seq, D, kernel_size
@@ -761,7 +761,7 @@ class SDConv(nn.Module):
             weights = torch.softmax(conv_kernel_layer, dim=-2)
 
             # B,C,T
-            conv_out_layer = self.conv_attn_point(value).permute(0, 2, 1).contiguous()
+            conv_out_layer = value.permute(0, 2, 1).contiguous()
 
             conv_out_layer = dynamicconvFunction.apply(
                 conv_out_layer, weights,
@@ -837,13 +837,14 @@ class CompressSeqMeanPooling(nn.Module):
 
 class MultiheadAttention(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
-                 last_layer_index=None, force_no_sdconv=False, force_no_rnn=False):
+                 last_layer_index=None, force_no_sdconv=False):
         super().__init__()
         if last_layer_index is None:
             last_layer_index = layer_index
         self.config = config
         self.block_index = block_index
         d_model, all_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
+        d_model_initial = d_model
         n_head = all_head[0]
         total_heads = sum(all_head)
         assert d_model % 16 == 0
@@ -858,17 +859,6 @@ class MultiheadAttention(nn.Module):
             else:
                 self.conv_dims = d_model
             self.sdconv = SDConv(config, self.conv_dims, self.n_conv_head, d_head, config.sdconv_kernel_size[block_index])
-
-        self.short_rnn = config.short_rnn[block_index] and not force_no_rnn
-        if self.short_rnn:
-            self.n_rnn_head = all_head[2]
-            if self.full_channel_separation:
-                self.rnn_dims = (self.n_rnn_head * d_model) // total_heads
-                remaining_d_model -= self.rnn_dims
-            else:
-                self.rnn_dims = d_model
-            assert self.rnn_dims % self.n_rnn_head == 0
-            self.rnn = ShortSeqRNN(config, self.rnn_dims, 1, self.rnn_dims, config.short_rnn_kernel[block_index], config.short_rnn_overlap[block_index])
 
         self.n_head = n_head
         d_model = remaining_d_model
@@ -925,11 +915,8 @@ class MultiheadAttention(nn.Module):
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            if config.no_v_head:
-                self.v_head = nn.Identity()
-            else:
-                self.v_head = Conv1d(
-                    in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
+
+            self.v_head = Conv1d(in_channels=d_model_initial, out_channels=d_model_initial, kernel_size=1, groups=qkv_transform_groups)
 
         else:
             self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
@@ -941,10 +928,10 @@ class MultiheadAttention(nn.Module):
             if compress_key:
                 self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
 
-            if config.no_v_head:
-                self.v_head = nn.Identity()
-            else:
-                self.v_head = nn.Linear(d_model, d_model)
+            self.v_head = nn.Linear(d_model_initial, d_model_initial)
+
+        if config.no_v_head:
+            self.v_head = nn.Identity()
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
@@ -1001,7 +988,7 @@ class MultiheadAttention(nn.Module):
             k_head = pool_tensor_basic(key.transpose(1, 2), "mean", stride).transpose(1, 2).view(batch_size, context_len, n_head, d_head)
         else:
             k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
-        v_head = self.v_head(value).view(batch_size, context_len, n_head, self.d_model // n_head)
+        v_head = value.view(batch_size, context_len, n_head, self.d_model // n_head)
 
         q_head = q_head * self.scale
         # Shape n_head x d_head
@@ -1099,40 +1086,24 @@ class MultiheadAttention(nn.Module):
         assert query.size(1) > 0
         batch_size, seq_len, _ = query.shape
         query_temp = query
+        value = value if value is not None else query
+        value = self.v_head(value)
         if self.sdconv:
 
             if self.full_channel_separation:
-                if key is None and value is None:
+                if key is None:
                     qp1, query = query.split([self.conv_dims, query.size(-1) - self.conv_dims], -1)
                     kp1, _ = qp1, query
-                    vp1, _ = qp1, query
                 else:
                     qp1, query = query.split([self.conv_dims, query.size(-1) - self.conv_dims], -1)
                     kp1, key = key.split([self.conv_dims, key.size(-1) - self.conv_dims], -1)
-                    vp1, value = value.split([self.conv_dims, value.size(-1) - self.conv_dims], -1)
+                vp1, value = value.split([self.conv_dims, value.size(-1) - self.conv_dims], -1)
                 sdconv_out = self.sdconv(qp1, kp1, vp1)
             else:
-                if key is None and value is None:
+                if key is None:
                     key = query
-                    value = query
                 sdconv_out = self.sdconv(query, key, value)
 
-        if self.short_rnn:
-            if self.full_channel_separation:
-                if key is None and value is None:
-                    qp1, query = query.split([self.rnn_dims, query.size(-1) - self.rnn_dims], -1)
-                    kp1, _ = qp1, query
-                    vp1, _ = qp1, query
-                else:
-                    qp1, query = query.split([self.rnn_dims, query.size(-1) - self.rnn_dims], -1)
-                    kp1, key = key.split([self.rnn_dims, key.size(-1) - self.rnn_dims], -1)
-                    vp1, value = value.split([self.rnn_dims, value.size(-1) - self.rnn_dims], -1)
-                rnn_out = self.rnn(qp1, kp1, vp1)
-            else:
-                if key is None and value is None:
-                    key = query
-                    value = query
-                rnn_out = self.rnn(query, key, value)
 
         try:
             if key is None and value is None:
@@ -1147,8 +1118,6 @@ class MultiheadAttention(nn.Module):
 
         if self.sdconv:
             attn_out = torch.cat([sdconv_out, attn_out], dim=-1)
-        if self.short_rnn:
-            attn_out = torch.cat([rnn_out, attn_out], dim=-1)
         if self.config.identity_preserving_norm:
             output = query_temp + self.layer_norm(attn_out)
         else:
@@ -1500,7 +1469,7 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.n_head[block_index] = (total_heads,) + tuple([0] * len(config.n_head[block_index][1:]))
         config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True, force_no_rnn=True)
+        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True)
         self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
         self.relu = checkpoint_wrapper(nn.LeakyReLU(), offload_to_cpu=False)
         self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
@@ -2454,7 +2423,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='tg_config',
+    ap.add_argument("--config", type=str, default='md_config',
                     help="Config")
     ap.add_argument("--texts", type=str, default='large_texts',
                     help="Text Set")

@@ -131,9 +131,6 @@ class FastFormerConfig(PretrainedConfig):
             sdconv=[False, False, False],
             sdconv_kernel_size=[5, 7, 9],
             full_channel_separation=[False, False, False],
-            short_rnn=[False, False, False],
-            short_rnn_kernel=[128, 128, 128],
-            short_rnn_overlap=[16, 16, 16],
             conv_layer_use_dynamic_conv=False,
             no_v_head=False,
             expand_dim_before_pooling=False,
@@ -219,9 +216,6 @@ class FastFormerConfig(PretrainedConfig):
         self.stride = stride
         assert len(block_channel_size) == len(block_sizes)
         self.block_channel_size = block_channel_size
-        self.short_rnn = [short_rnn] * len(block_sizes) if isinstance(short_rnn, bool) else short_rnn
-        self.short_rnn_kernel = [short_rnn_kernel] * len(block_sizes) if isinstance(short_rnn_kernel, int) else short_rnn_kernel
-        self.short_rnn_overlap = [short_rnn_overlap] * len(block_sizes) if isinstance(short_rnn_overlap, int) else short_rnn_overlap
 
         self.sdconv = [sdconv] * len(block_sizes) if isinstance(sdconv, bool) else sdconv
         self.full_channel_separation = [full_channel_separation] * len(block_sizes) if isinstance(full_channel_separation, bool) else full_channel_separation
@@ -235,7 +229,7 @@ class FastFormerConfig(PretrainedConfig):
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
         assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
         assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
-        if light_first_layer or any(self.short_rnn) or any(self.sdconv) or light_last_layer:
+        if light_first_layer or any(self.sdconv) or light_last_layer:
             assert position_biased_input
 
     @property
@@ -285,7 +279,6 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(8, 0, 0), (8, 0, 0), (12, 0, 0)],
                              block_channel_size=[384, 512, 768], no_v_head=True, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
-                             short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
 # Fasttest
@@ -307,7 +300,6 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(4, 4, 0), (4, 4, 0), (12, 0, 0)],
                              block_channel_size=[384, 512, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
-                             short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
 lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=3, use_cuda_conv=True,
@@ -328,7 +320,6 @@ lg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(4, 4, 0), (6, 6, 0), (16, 0, 0)],
                              block_channel_size=[512, 768, 1024], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
-                             short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
 
@@ -350,7 +341,6 @@ dg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(4, 4, 0), (6, 6, 0), (16, 0, 0)],
                              block_channel_size=[512, 768, 1024], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
-                             short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
 
@@ -373,7 +363,6 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
                              block_channel_size=[512, 768, 1024], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
-                             short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
 
 
