@@ -291,7 +291,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 # Fasttest
 md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=4, use_cuda_conv=True,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
-                             approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64],
+                             approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[48, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[3, 3, 3],
@@ -304,8 +304,8 @@ md_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               # (1, 1), (1, 2), (1, 3), (1, 4),
                                                               # (2, 1), (2, 2), (2, 3), (2, 4)
                                                               ],
-                             n_head=[(8, 0, 0), (10, 0, 0), (12, 0, 0)],
-                             block_channel_size=[512, 640, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
+                             n_head=[(8, 0, 0), (8, 0, 0), (12, 0, 0)],
+                             block_channel_size=[384, 512, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
                              short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
                              )
