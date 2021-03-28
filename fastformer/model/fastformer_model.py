@@ -914,7 +914,7 @@ class MultiheadAttention(nn.Module):
         if qkv_transform_groups > 1:
             # assert n_head % qkv_transform_groups == 0 and n_head >= qkv_transform_groups
             self.q_head = Conv1d(
-                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=True)
+                in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
             self.k_head = Conv1d(
                 in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
@@ -932,8 +932,7 @@ class MultiheadAttention(nn.Module):
                     in_channels=d_model, out_channels=d_model, kernel_size=1, groups=qkv_transform_groups)
 
         else:
-            self.q_head = nn.Linear(d_model, n_head * d_head,
-                                                                                                                            bias=True)
+            self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
             self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
 
             if compress_query:
@@ -1553,6 +1552,7 @@ class TransformerDecoder(nn.Module):
         super().__init__()
         config = copy.deepcopy(config)
         config.alternate_ffn = False
+        config.sdconv = [False] * len(config.sdconv)
         self.config = config
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
         self.layers = nn.ModuleList()
@@ -2457,7 +2457,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='dg_config',
+    ap.add_argument("--config", type=str, default='tg_config',
                     help="Config")
     ap.add_argument("--texts", type=str, default='large_texts',
                     help="Text Set")
@@ -2518,11 +2518,11 @@ if __name__ == "__main__":
     dataset.training = True
 
     if "fastformer" in model_name:
-        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=8, num_workers=2)
+        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, num_workers=0)
         size_dicts_t = {128: batch_size, 256: batch_size, 512: batch_size, 768: batch_size, 1024: batch_size}
         pt_batch = next(custom_batching_fn(dataloader, size_dicts_t, True))
     else:
-        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=0)
+        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, num_workers=0)
         iter_dataloader = iter(dataloader)
         pt_batch = next(iter_dataloader)
 

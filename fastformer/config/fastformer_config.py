@@ -357,11 +357,11 @@ dg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 
 
-tg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3, use_cuda_conv=True, embedding_size=256,
+tg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3, use_cuda_conv=True, embedding_size=128,
                              sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64], alternate_ffn=False,
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
-                             sdconv=[False, False, False], full_channel_separation=True,
+                             sdconv=[True, True, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 5, 3],
                              compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
                              compressed_query_attention_layers=[(0, 3), (0, 4),
@@ -372,7 +372,7 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                                                               # (1, 1), (1, 2), (1, 3), (1, 4),
                                                               # (2, 1), (2, 2), (2, 3), (2, 4)
                                                               ],
-                             n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
+                             n_head=[(4, 4, 0), (6, 6, 0), (16, 0, 0)],
                              block_channel_size=[512, 768, 1024], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
                              short_rnn=[False, False, False], short_rnn_overlap=[8, 8, 8], short_rnn_kernel=[32, 32, 32],
