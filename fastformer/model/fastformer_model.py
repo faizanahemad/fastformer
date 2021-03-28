@@ -1300,12 +1300,11 @@ class LightLayer(nn.Module):
 
 class TransformerLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block,
-                 is_encoder_layer, layer_index, last_layer_index=None, alternate_ffn=True):
+                 is_encoder_layer, layer_index, last_layer_index=None):
         super().__init__()
         self.attention = MultiheadAttention(config, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
                                             last_layer_index)
         self.ffn = PositionwiseFFN(config, block_index, is_last_layer_of_block, is_encoder_layer)
-        self.alternate_ffn = alternate_ffn and (config.alternate_ffn if hasattr(config, "alternate_ffn") else True)
         self.block_index = block_index
         self.block_size = config.block_sizes[block_index]
         self.is_last_layer_of_block = is_last_layer_of_block
@@ -1313,11 +1312,7 @@ class TransformerLayer(nn.Module):
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
         assert query.size(1) > 0
         attn = self.attention(query, key, value, attention_inputs, layer_index, output_attentions=output_attentions)
-        if self.alternate_ffn and layer_index % 2 == 0:
-            h = self.ffn.layer_norm(self.ffn.lin(attn[0]))
-            pre_ffn, output = None, h + attn[0]
-        else:
-            pre_ffn, output = self.ffn(attn[0], layer_index)
+        pre_ffn, output = self.ffn(attn[0], layer_index)
         pre_ffn = pre_ffn if self.block_size - 1 == layer_index else None
         return (output, pre_ffn, attn[1]) if output_attentions else (output, pre_ffn)
 
@@ -1342,7 +1337,7 @@ class TransformerEncoder(nn.Module):
 
                     if i == 0 and config.separate_compressiion_layer and block_index > 0:
                         inext = i + 1
-                        self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i, alternate_ffn=False)))
+                        self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i)))
                         self.repeats[block_index].append(1)
                         i = inext
                     elif config.light_first_layer and block_index == 0 and i == 0:
@@ -1554,7 +1549,6 @@ class TransformerDecoder(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
         config = copy.deepcopy(config)
-        config.alternate_ffn = False
         config.sdconv = [False] * len(config.sdconv)
         self.config = config
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
