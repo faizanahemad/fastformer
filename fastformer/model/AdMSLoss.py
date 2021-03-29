@@ -45,7 +45,7 @@ class AdMSoftmaxLoss(nn.Module):
         self.s = s
         self.m = m
         self.ignore_index = ignore_index
-        self.focal = focal
+        self.focal = focal and gamma > 1
         self.alpha = alpha
         self.gamma = gamma
         self.reduce = reduce

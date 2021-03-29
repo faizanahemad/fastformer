@@ -1888,6 +1888,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if highway_cls_ar_w > 0:
             assert config.position_biased_input
             self.sentence_task_attn = fsdp_wrapper(TransformerCrossAttentionDecoder(config))
+        if contrastive_w > 0:
+            self.contrastive_ffn = nn.Sequential(nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=True),
+                                                 checkpoint_wrapper(ACT2FN[self.config.hidden_act](), offload_to_cpu=False), nn.Linear(config.block_channel_size[0] // 2, 128, bias=False),)
 
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
@@ -2221,8 +2224,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss_contrastive = 0.0
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
-        if contrastive_anchors is not None and len(contrastive_anchors) > 0 and self.contrastive_w > 0 and highway_cls_ar_hidden is not None:
-            highway_cls_ar_hidden = highway_cls_ar_hidden.reshape(input_ids.shape[0], -1, highway_cls_ar_hidden.shape[-1])
+        if contrastive_anchors is not None and len(contrastive_anchors) > 0 and self.contrastive_w > 0:
             bs = input_ids.size(0)
             if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives) / bs == torch.cuda.device_count():
                 did = torch.cuda.current_device()
@@ -2230,7 +2232,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
 
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = highway_cls_ar_hidden
+            contrastive_block_hidden = funnel_outputs["decoder_outputs"]["decoder_outputs"][0]
             assert len(contrastive_block_hidden.size()) == 3
 
             # dpow = self.config.stride ** 2
@@ -2287,7 +2289,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             if n_positives == 0 or n_anchors == 0:
                 pass
             else:
-                contrastive_block_hidden = torch.stack(anchors + positives)
+                contrastive_block_hidden = self.contrastive_ffn(torch.stack(anchors + positives))
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
                 contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))

@@ -321,7 +321,7 @@ class TokenizerDataset(Dataset):
         text = unidecode.unidecode(text)
         # assert len(text.strip()) > 0
 
-        tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
+        tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
         # TODO: try one in ten words / alternate sentences?
         highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
         length = torch.sum(highway_cls_ar__attention_mask).item()
@@ -329,32 +329,6 @@ class TokenizerDataset(Dataset):
 
         if self.training:
             seg_sep_token = f" {tokenizer.seg_sep_token} "
-            text_len = 32 * (length // 32) - 1
-            max_anchor_len = text_len // (2 * self.n_anchors)
-            min_anchor_len = 64
-            min_positive_len = min_anchor_len - 16
-            anchor_min_start = 0
-            anchor_max_start = anchor_min_start + max_anchor_len
-            anchors = []
-            positives = []
-            while len(anchors) < self.n_anchors and anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:
-                anchor_len = int(random.betavariate(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
-                anchor_len = int(np.round(anchor_len / 8) * 8)
-                anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
-                anchor_end = min(anchor_start + anchor_len, text_len)
-                anchors.append([anchor_start, anchor_end])
-                positives_for_anchor = []
-                while len(positives_for_anchor) < self.n_positives:
-                    positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_positive_len) + min_positive_len)
-                    # positive_len = int(np.round(positive_len / 8) * 8)  # This line is only to make positives the size multiple of 8 for cuda speed
-                    positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
-                    positive_end = min(positive_start + positive_len, text_len)
-                    positives_for_anchor.append([positive_start, positive_end])
-                positives.append(positives_for_anchor)
-                anchor_min_start = anchor_end + max_anchor_len
-                anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
-            anchors = anchors if min_anchor_len < max_anchor_len else []
-            positives = positives if min_anchor_len < max_anchor_len else [[]]
 
             wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
             wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
@@ -384,10 +358,66 @@ class TokenizerDataset(Dataset):
                 else:
                     labels_segment_index = torch.tensor(list(torch.tensor(seg_idxs) + 1) + [0] * (self.cls_tokens - num_segments))
 
-            results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
-                           highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask))
-
             segments = segments[seg_idxs]
+
+            in_order = all([c < n or labels_segment_index[i+1:].sum().item() == 0 for i, (c, n) in enumerate(zip(labels_segment_index[:-1].tolist(), labels_segment_index[1:].tolist()))])
+
+            min_anchor_len = 32
+            min_positive_len = min_anchor_len - 16
+            anchors = []
+            positives = []
+            if in_order:
+                text_len = 8 * (length // 8) - 1
+                max_anchor_len = text_len // (2 * self.n_anchors)
+                anchor_min_start = 0
+                anchor_max_start = anchor_min_start + max_anchor_len
+                while anchor_min_start < text_len - min_anchor_len and anchor_max_start <= text_len - min_anchor_len:  # len(anchors) < self.n_anchors and
+                    anchor_len = int(random.betavariate(4, 2) * (max_anchor_len - min_anchor_len) + min_anchor_len)
+                    anchor_len = int(np.round(anchor_len / 8) * 8)
+                    anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, text_len - anchor_len)))
+                    anchor_end = min(anchor_start + anchor_len, text_len)
+                    anchors.append([anchor_start, anchor_end])
+                    positives_for_anchor = []
+                    while len(positives_for_anchor) < self.n_positives:
+                        positive_len = int(random.betavariate(2, 4) * (max_anchor_len - min_positive_len) + min_positive_len)
+                        # positive_len = int(np.round(positive_len / 8) * 8)  # This line is only to make positives the size multiple of 8 for cuda speed
+                        positive_start = random.randint(max(0, anchor_start - positive_len), min(anchor_end, text_len - positive_len))
+                        positive_end = min(positive_start + positive_len, text_len)
+                        positives_for_anchor.append([positive_start, positive_end])
+                    positives.append(positives_for_anchor)
+                    anchor_min_start = anchor_end + max_anchor_len
+                    anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
+                anchors = anchors if min_anchor_len < max_anchor_len else []
+                positives = positives if min_anchor_len < max_anchor_len else [[]]
+            elif count_pad_tokens <= 1 and num_segments >= 2:
+                anchors = []
+                positives = []
+                end = 0
+                start = 0
+                for seg in segments:
+                    seg_len = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].squeeze().sum().item()
+                    end += seg_len
+                    ##
+                    anchor_min_start = start + 8
+                    if seg_len > (2 * min_anchor_len) and ((seg_len - 16) - min_anchor_len) > 0:
+                        anchor_len = int(random.betavariate(4, 2) * ((seg_len - 16) - min_anchor_len) + min_anchor_len)
+                        anchor_max_start = end - anchor_len - 8
+                        anchor_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, end - anchor_len)))
+                        anchor_end = min(anchor_start + anchor_len, anchor_min_start + (seg_len - 16))
+                        anchors.append([anchor_start, anchor_end])
+                        positives_for_anchor = []
+                        while len(positives_for_anchor) < self.n_positives:
+                            positive_len = int(random.betavariate(2, 4) * ((seg_len - 16) - min_anchor_len) + min_anchor_len)
+                            # positive_len = int(np.round(positive_len / 8) * 8)  # This line is only to make positives the size multiple of 8 for cuda speed
+                            positive_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, end - anchor_len)))
+                            positive_end = min(positive_start + positive_len, anchor_min_start + (seg_len - 16))
+                            positives_for_anchor.append([positive_start, positive_end])
+                        positives.append(positives_for_anchor)
+                    ##
+                    start += seg_len
+
+            results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
+                                highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask))
 
             # TODO: Gap Sentence to be sentence specific not segment specific and have only 3 segments? Or 3 mode + 7 mode so that for small text also we can use sentence jumble
             # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.

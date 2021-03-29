@@ -21,7 +21,7 @@ from dataclasses_json import dataclass_json
 
 
 def get_batch_size(size, autocast):
-    size_dicts = {1024: 12}
+    size_dicts = {1024: 16}
     if not autocast:
         size_dicts = {k: v // 2 for k, v in size_dicts.items()}
     if size == "lg_config" or size == "tg_config":
@@ -81,7 +81,7 @@ model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=Fa
                                         adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                                         input_cls_orthogonal_w=0.1, first_block_cls_orthogonal_w=0.0,
                                         electra_loss_w=0.5, lm_loss_w=0.5, sentence_order_prediction_w=1.0, contrastive_w=0.5, contrastive_temperature=1e-2,
-                                        answering_lm_w=2.0, highway_cls_ar_w=0.5, additive_margin_softmax_w=0.1)
+                                        answering_lm_w=2.0, highway_cls_ar_w=0.0, additive_margin_softmax_w=0.1)
 
 
 @dataclass_json
@@ -282,8 +282,8 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              )
 
 # Fasttest
-md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=4, use_cuda_conv=True,
-                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=4, use_cuda_conv=True,
+                             sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[48, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
                              sdconv=[True, True, False], full_channel_separation=True,
