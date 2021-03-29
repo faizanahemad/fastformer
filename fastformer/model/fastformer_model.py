@@ -2232,7 +2232,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_anchors = contrastive_anchors[did * bs: (did + 1) * bs]
 
             contrastive_anchors_copy, contrastive_positives_copy = copy.deepcopy(contrastive_anchors), copy.deepcopy(contrastive_positives)
-            contrastive_block_hidden = funnel_outputs["decoder_outputs"]["decoder_outputs"][0]
+            contrastive_block_hidden = funnel_outputs["decoder_outputs"][0]
             assert len(contrastive_block_hidden.size()) == 3
 
             # dpow = self.config.stride ** 2
