@@ -620,7 +620,7 @@ def train(local_rank, args):
                 is_nan_inf = torch.logical_not(torch.isfinite(grad))
                 if is_nan_inf.any():
                     grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-3), grad)
-                    # grad = torch.clamp_(grad, -1e1, 1e1)
+                    grad = torch.clamp_(grad, -1e1, 1e1)
                     return grad
                 else:
                     return None
@@ -631,7 +631,7 @@ def train(local_rank, args):
                 if is_nan_inf.any():
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Nan/Inf" % (get_time_string(), name_of_param))
                     grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-3), grad)
-                    # grad = torch.clamp_(grad, -1e1, 1e1)
+                    grad = torch.clamp_(grad, -1e1, 1e1)
                     return grad
                 else:
                     return None
