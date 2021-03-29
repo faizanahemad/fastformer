@@ -2224,7 +2224,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         loss_contrastive = 0.0
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
-        if contrastive_anchors is not None and len(contrastive_anchors) > 0 and self.contrastive_w > 0:
+        if contrastive_anchors is not None and len(contrastive_anchors) > 0 and self.contrastive_w > 0 and contrastive_positives is not None and len(contrastive_positives) > 0:
             bs = input_ids.size(0)
             if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives) / bs == torch.cuda.device_count():
                 did = torch.cuda.current_device()
