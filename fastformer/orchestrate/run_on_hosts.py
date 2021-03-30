@@ -146,18 +146,18 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
     # main_cmd += " --checkpoint /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
     # main_cmd += " --cpu"
-    main_cmd += " --no_autocast"
+    # main_cmd += " --no_autocast"
     # main_cmd += " --detect_anomaly"
     main_cmd += " --accumulation_steps 4" #  4096/(16*8*8)
     main_cmd += " --shuffle_dataset"
-    # main_cmd += " --backward_hook"
+    main_cmd += " --backward_hook"
 
     main_cmd += " > output.log 2>&1 & disown"
 

@@ -2320,7 +2320,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                         preds_dict["contrastive_preds"] += (cpp[:(n_anchors * i)] + cpp[(n_anchors * (i+1)):])
                         preds_dict["contrastive_actuals"] += (cpa[:(n_anchors * i)] + cpa[(n_anchors * (i+1)):])
                 if record_accuracy:
-                    accuracy_hist["contrastive_accuracy"] = (accuracy_hist["contrastive_accuracy"] - contrastive_block_matrix.size(0)) / (contrastive_block_matrix.size(0) * (n_positives_per_anchor + 1) - contrastive_block_matrix.size(0))
+                    accuracy_hist["contrastive_accuracy"] = max(accuracy_hist["contrastive_accuracy"] - contrastive_block_matrix.size(0), 0) / (contrastive_block_matrix.size(0) * (n_positives_per_anchor + 1) - contrastive_block_matrix.size(0))
                 vertical_lc /= (n_positives_per_anchor + 1)
                 loss_contrastive += vertical_lc
             loss_contrastive = self.contrastive_w * loss_contrastive
