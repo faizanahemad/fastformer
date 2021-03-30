@@ -533,10 +533,6 @@ def train(local_rank, args):
         print(model)
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
-        del state_dict["funnel.encoder.blocks.0.5.ffn.layer_norm.weight"]
-        del state_dict["funnel.encoder.blocks.0.5.ffn.layer_norm.bias"]
-        del state_dict["funnel.encoder.blocks.1.5.ffn.layer_norm.weight"]
-        del state_dict["funnel.encoder.blocks.1.5.ffn.layer_norm.bias"]
         model.load_state_dict(state_dict, strict=False)
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
