@@ -619,18 +619,21 @@ def train(local_rank, args):
             def hook(grad):
                 is_nan_inf = torch.logical_not(torch.isfinite(grad))
                 if is_nan_inf.any():
-                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-3), grad)
-                    grad = torch.clamp_(grad, -1e1, 1e1)
-                    return grad
-                else:
-                    return None
+                    # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Nan/Inf" % (get_time_string(), name_of_param))
+                    grad[is_nan_inf] = 0.0
+                sign = torch.sign(grad)
+                grad_rand = torch.randint_like(grad, -10, 10)
+                grad_rand[grad_rand == 0] = 1
+                grad = torch.where(sign == 0, 1e-3 * grad_rand, grad)
+                grad = torch.clamp_(grad, -1, 1)
+                return grad
             return hook
         else:
             def named_hook(grad):
                 is_nan_inf = torch.logical_not(torch.isfinite(grad))
                 if is_nan_inf.any():
                     print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Nan/Inf" % (get_time_string(), name_of_param))
-                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-3), grad)
+                    grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-2), grad)
                     grad = torch.clamp_(grad, -1e1, 1e1)
                     return grad
                 else:
