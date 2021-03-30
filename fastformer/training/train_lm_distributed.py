@@ -709,6 +709,7 @@ def train(local_rank, args):
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
             get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
             print(es)
+            torch.save(dict(**batch, labels=labels), os.path.join(os.getcwd(), "error-input.pth"))
             reraise(e, es)  # https://stackoverflow.com/questions/9157210/how-do-i-raise-the-same-exception-with-a-custom-message-in-python/62662138#62662138
 
         # clean_memory()
@@ -740,7 +741,7 @@ def train(local_rank, args):
                 print("[Train-Timings]: Time = %s, sent_order = %s, mx_labels = %s, contrastive_labels = %s, electra_labels = %s" % (get_time_string(),
                                                                                                                 list(zip(batch["labels_segment_index"].view(-1).tolist(), preds_dict["sent_order_preds"])),
                                                                                                                 list(zip(preds_dict["mx_labels"], preds_dict["mx_label_pred"])),
-                                                                                                                list(zip(preds_dict["contrastive_actuals"] if "contrastive_actuals" in preds_dict else [], preds_dict["contrastive_preds"] if "contrastive_actuals" in preds_dict else [])),
+                                                                                                                list(zip(preds_dict["contrastive_actuals"][:16] if "contrastive_actuals" in preds_dict else [], preds_dict["contrastive_preds"][:16] if "contrastive_actuals" in preds_dict else [])),
                                                                                                                 list(zip(preds_dict["electra_logits"][:16], preds_dict["electra_preds"][:16], preds_dict["electra_labels"][:16]))))
                 del acc_dict
                 del loss_dict

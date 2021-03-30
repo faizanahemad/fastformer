@@ -389,14 +389,20 @@ class TokenizerDataset(Dataset):
                     anchor_max_start = (text_len - min_anchor_len) if len(anchors) >= (self.n_anchors - 1) else (anchor_min_start + max_anchor_len)
                 anchors = anchors if min_anchor_len < max_anchor_len else []
                 positives = positives if min_anchor_len < max_anchor_len else [[]]
+                positives = positives if len(anchors) > 0 else [[]]
             elif count_pad_tokens <= 1 and num_segments >= 2:
                 anchors = []
                 positives = []
                 end = 0
                 start = 0
+                tokenizer_args = dict(**self.tokenizer_args)
+                tokenizer_args["truncation"] = False
+                tokenizer_args["max_length"] = 2048
                 for seg in segments:
-                    seg_len = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].squeeze().sum().item()
+                    seg_len = tokenizer(seg, return_offsets_mapping=False, **tokenizer_args)["attention_mask"].squeeze().sum().item()
                     end += seg_len
+                    end = min(end, self.tokenizer_args["max_length"])
+                    seg_len = min(seg_len, self.tokenizer_args["max_length"] - start)
                     ##
                     anchor_min_start = start + 8
                     if seg_len > (2 * min_anchor_len) and ((seg_len - 16) - min_anchor_len) > 0:
@@ -409,12 +415,15 @@ class TokenizerDataset(Dataset):
                         while len(positives_for_anchor) < self.n_positives:
                             positive_len = int(random.betavariate(2, 4) * ((seg_len - 16) - min_anchor_len) + min_anchor_len)
                             # positive_len = int(np.round(positive_len / 8) * 8)  # This line is only to make positives the size multiple of 8 for cuda speed
-                            positive_start = random.randint(anchor_min_start, min(anchor_max_start, max(anchor_min_start + 1, end - anchor_len)))
+                            positive_start = random.randint(max(anchor_min_start, anchor_start - positive_len),
+                                                            min(anchor_end, anchor_max_start, max(max(anchor_min_start, anchor_start - positive_len) + 1, end - anchor_len)))
                             positive_end = min(positive_start + positive_len, anchor_min_start + (seg_len - 16))
                             positives_for_anchor.append([positive_start, positive_end])
                         positives.append(positives_for_anchor)
                     ##
                     start += seg_len
+                    start = min(start, self.tokenizer_args["max_length"])
+                positives = positives if len(anchors) > 0 else [[]]
 
             results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
                                 highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask))
@@ -425,6 +434,7 @@ class TokenizerDataset(Dataset):
             # TODO: predict segment order as ar task in block 2 from CLS tokens with segments separated by [SEP]
             mlm_text = seg_sep_token.join(segments)  # Training Labels for MLM
             labels_pet_text = "" if len(pet_query) > 0 else tokenizer.no_question_token
+            mlm_text = ("" if len(pet_query) > 0 else tokenizer.no_question_token) + mlm_text
             for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
                 q, a = q.strip(), a.strip()
                 if i == 0:
@@ -463,6 +473,7 @@ class TokenizerDataset(Dataset):
                 segments[idx] = seq
 
             text = seg_sep_token.join(segments)
+        text = ("" if len(pet_query) > 0 else tokenizer.no_question_token) + text
         # assert len(text.strip()) > 0
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):

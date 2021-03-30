@@ -2292,29 +2292,36 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 contrastive_block_hidden = self.contrastive_ffn(torch.stack(anchors + positives))
                 contrastive_block_hidden = contrastive_block_hidden / (contrastive_block_hidden.norm(2, -1, True).detach() + self.config.layer_norm_eps)
                 contrastive_block_matrix = contrastive_block_hidden.mm(contrastive_block_hidden.t()) / self.contrastive_temperature
-                contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
-                labels_contrastive = torch.tensor(list(range(n_anchors)) * n_positives_per_anchor, device=contrastive_block_matrix.device)
-                loss_contrastive = self.ce(contrastive_block_matrix[n_anchors:], labels_contrastive)
+                # contrastive_block_matrix = contrastive_block_matrix * (1 - torch.eye(contrastive_block_matrix.size(0), device=contrastive_block_matrix.device))
                 if record_accuracy:
-                    contrastive_preds = contrastive_block_matrix[n_anchors:].detach().argmax(dim=-1)
-                    accuracy_hist["contrastive_accuracy"] = ((contrastive_preds == labels_contrastive).sum().item() / n_positives)
-                    preds_dict["contrastive_preds"] = contrastive_preds.tolist()
-                    preds_dict["contrastive_actuals"] = labels_contrastive.tolist()
-                mask1 = torch.ones(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
-                mask2 = torch.zeros(n_anchors, contrastive_block_matrix.size(1), device=contrastive_block_hidden.device)
+                    accuracy_hist["contrastive_accuracy"] = 0
+                    preds_dict["contrastive_preds"] = []
+                    preds_dict["contrastive_actuals"] = []
+
+                mask2 = contrastive_block_matrix.new_zeros(contrastive_block_matrix.size(), requires_grad=False)
                 const = 1e3
-                for i in range(n_positives_per_anchor):
-                    mask1[list(range(n_anchors)), torch.tensor(list(range(n_anchors))) + (n_anchors * (i + 1))] = -const
+                for i in range(n_positives_per_anchor + 1):
+                    idxs = torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1))
+                    mask2[torch.arange(mask2.size(0)), idxs] = -const
                 vertical_lc = 0.0
-                for i in range(n_positives_per_anchor):
-                    labels_contrastive = torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (n_anchors * (i + 1))
+                for i in range(n_positives_per_anchor + 1):
+                    labels_contrastive = torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1), device=contrastive_block_hidden.device)
                     mask_c = mask2.clone()
-                    mask_c[list(range(n_anchors)), torch.tensor(list(range(n_anchors)), device=contrastive_block_hidden.device) + (
-                                n_anchors * (i + 1))] = const + 1
-                    mask_c = mask1 + mask_c
-                    l2 = self.ce(contrastive_block_matrix[:n_anchors] * mask_c, labels_contrastive)
+                    mask_c[torch.arange(mask_c.size(0)), torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1))] = 0.0
+                    block_matrix = contrastive_block_matrix + mask_c
+                    l2 = self.ce(block_matrix, labels_contrastive)
                     vertical_lc += l2
-                vertical_lc /= n_positives_per_anchor
+                    if record_accuracy:
+                        contrastive_preds = block_matrix.detach().argmax(dim=-1)
+                        cacc = (contrastive_preds == labels_contrastive).sum().item()
+                        accuracy_hist["contrastive_accuracy"] += cacc
+                        cpp = contrastive_preds.tolist()
+                        cpa = labels_contrastive.tolist()
+                        preds_dict["contrastive_preds"] += (cpp[:(n_anchors * i)] + cpp[(n_anchors * (i+1)):])
+                        preds_dict["contrastive_actuals"] += (cpa[:(n_anchors * i)] + cpa[(n_anchors * (i+1)):])
+                if record_accuracy:
+                    accuracy_hist["contrastive_accuracy"] = (accuracy_hist["contrastive_accuracy"] - contrastive_block_matrix.size(0)) / (contrastive_block_matrix.size(0) * (n_positives_per_anchor + 1) - contrastive_block_matrix.size(0))
+                vertical_lc /= (n_positives_per_anchor + 1)
                 loss_contrastive += vertical_lc
             loss_contrastive = self.contrastive_w * loss_contrastive
 
@@ -2620,6 +2627,7 @@ if __name__ == "__main__":
     # labels = pt_batch.pop("labels", None)
 
     model = model.to(device)
+    pt_batch["record_accuracy"] = True
     pt_batch = {k: v.to(device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
 
 
