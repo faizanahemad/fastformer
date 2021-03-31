@@ -2487,6 +2487,131 @@ train_fastformer_resampled.save_to_disk("/home/ahemf/processed_datasets/train_fa
 """
 
 
+"""
+# QNA medium set builder
+# ls | grep 'qna\|superglue_\|sciq\|quora\|piqa\|mrqa\|cosmos_qa\|commonsense_qa\|glue_' | grep -v'wikipedia_\|yahoo_answers_topics_qna\|wiki_atomic_edits_\|reddit_qna\|cnn_dailymail_qna\|amazon_polarity_qna\|wikihow_sep_\|natural_questions_qna\|ohsumed\|gigaword_\|mrqa_\|wiki_split_\|xsum_\|multi_news_\|wiki_lingua\|wiki_auto\|reuters_qna\|eli5_qna'
+# ls | grep 'qna\|superglue_\|sciq\|quora\|piqa\|mrqa\|cosmos_qa\|commonsense_qa\|glue_' | grep -v'wikipedia_\|yahoo_answers_topics_qna\|wiki_atomic_edits_\|reddit_qna\|cnn_dailymail_qna\|amazon_polarity_qna\|wikihow_sep_\|natural_questions_qna\|ohsumed\|gigaword_\|mrqa_\|wiki_split_\|xsum_\|multi_news_\|wiki_lingua\|wiki_auto\|reuters_qna\|eli5_qna' | xargs -I '{}' ls -lh '{}'/train/dataset.arrow
+
+import datasets
+import re
+import numpy as np
+import random
+from typing import List, Dict
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+from datasets import DatasetInfo
+import nltk.data
+sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+import os
+os.cpu_count()
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
+
+datasets = [
+"ai2_arc_easy_qna",
+"ai2_arc_qna",
+"amazon_reviews_multi_qna",
+"anli_qna_v1",
+"anli_qna_v2",
+"app_reviews_qna",
+"bookcorpusopen_qna",
+"commonsense_qa",
+"cosmos_qa",
+"discovery_qna",
+"e2e_nlg_cleaned_qna",
+"empathetic_dialogues_qna",
+"eraser_multi_rc_qna",
+"glue_cola",
+"glue_qnli",
+"glue_sst2",
+"glue_sst2_v2",
+"go_emotions_qna",
+"hans_qna_v1",
+"hans_qna_v2",
+"hellaswag_qna",
+"hotpot_qa_qna_v1",
+"hotpot_qa_qna_v2",
+"imdb_qna",
+"medical_questions_pairs_qna",
+"mnli_qna_v1",
+"mnli_qna_v2",
+"mocha_qna",
+"paws_qna",
+"peer_read_reviews_qna",
+"per_sent_qna",
+"piqa",
+"qangaroo_qna",
+"qangaroo_qna_v2",
+"qed_qna_v1",
+"qed_qna_v2",
+"quac_qna",
+"quartz_qna",
+"quora",
+"quoref_qna",
+"race_qna",
+"ropes_qna",
+"ropes_qna_v2",
+"rotten_tomatoes_qna",
+"samsum_qna",
+"sciq",
+"scitail_qna",
+"scitldr_qna",
+"scitldr_qna_v2",
+"scitldr_qna_v3",
+"sent_comp_qna",
+"sentiment140_qna",
+"snli_qna_v1",
+"snli_qna_v2",
+"squad_v2_qna",
+"squad_v2_qna_v2",
+"superglue_boolq",
+"superglue_cb_v1",
+"superglue_cb_v2",
+"superglue_copa_v1",
+"superglue_copa_v2",
+"superglue_copa_v3",
+"superglue_multirc_v1",
+"superglue_multirc_v2",
+"superglue_multirc_v3",
+"superglue_record_v1",
+"superglue_record_v2",
+"superglue_record_v3",
+"superglue_record_v4",
+"superglue_rte_v1",
+"superglue_rte_v2",
+"superglue_wic_v1",
+"superglue_wic_v2",
+"superglue_wsc_fixed_v1",
+"superglue_wsc_fixed_v2",
+"superglue_wsc_v1",
+"superglue_wsc_v2",
+"swag_qna",
+"wikihow_all_qna_v1",
+"wikihow_all_qna_v2",
+"wiki_qa_qna",
+"winogrande_qna",
+"yahoo_answers_qa_qna",
+"yelp_polarity_qna"
+]
+
+contents = datasets
+dataset_dict = dict()
+unloadable = []
+loadable = []
+for c in contents:
+    try:
+        try:
+            dataset_dict[c] = Dataset.load_from_disk("processed_datasets/%s" % c)
+        except:
+            dataset_dict[c] = DatasetDict.load_from_disk("processed_datasets/%s" % c)
+        loadable.append(c)
+    except:
+        unloadable.append(c)
+        
+print(len(unloadable), len(loadable), len(contents))
+
+"""
 def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     article: List[Dict[str, List]] = examples["article"]
     url = examples["url"]

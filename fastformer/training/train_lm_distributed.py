@@ -662,7 +662,7 @@ def train(local_rank, args):
         #
         electra_loss_w = float(min(1.0, ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
-        input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / (2 * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
+        input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / ((2 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
         optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
