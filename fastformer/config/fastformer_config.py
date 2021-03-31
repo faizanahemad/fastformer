@@ -44,8 +44,8 @@ class OptimizerConfig:
     gradient_clipping: float
 
 
-optimizer_config = OptimizerConfig(3e-5, 1e-4, 1e-4, 0.9, 0.98,
-                                   8, 8, 40000, 1.0)
+optimizer_config = OptimizerConfig(1e-5, 1e-4, 1e-4, 0.9, 0.98,
+                                   8, 8, 40000, 0.1)
 
 
 @dataclass_json

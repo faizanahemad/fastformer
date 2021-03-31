@@ -138,7 +138,7 @@ if __name__ == "__main__":
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --log_every_steps 100 --num_workers 8 --validate_every_steps 500000 --save_every_steps 2000"
+    main_cmd += " --log_every_steps 100 --num_workers 8 --validate_every_steps 500000 --save_every_steps 4000"
     # main_cmd += " --wandb_dryrun"
 
     # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
