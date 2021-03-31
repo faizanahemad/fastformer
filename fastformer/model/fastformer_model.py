@@ -2181,9 +2181,9 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
                 nih_preds = sent_order_preds[not_in_order]
                 nih_labels = labels_segment_index[not_in_order]
-                nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens)
+                nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
 
-                non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens)
+                non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
 
 
                 sent_order_out = sent_order_preds == labels_segment_index
