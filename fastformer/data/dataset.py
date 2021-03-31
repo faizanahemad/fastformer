@@ -255,7 +255,7 @@ class TokenizerDataset(Dataset):
                  sentence_jumble_pet_length_threshold=192, sentence_jumble_max_segments_in_pet=6,
                  word_mask_proba: list = ((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
                  word_noise_proba: tuple = ((0, 0.1), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.2)),
-                 max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 4, n_positives: int = 2):
+                 max_span_length: int = 1, max_jumbling_span_length: int = 2, n_anchors: int = 4, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.min_segments = 2
         self.cls_tokens = config.num_highway_cls_tokens
