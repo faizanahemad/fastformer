@@ -1876,10 +1876,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if additive_margin_softmax_w == 0:
             self.ce = CrossEntropyLoss(ignore_index=-100)
             self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+            self.ignore_zero_ce = CrossEntropyLoss(ignore_index=0)
             self.loss_bce = nn.BCEWithLogitsLoss()
         else:
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
+            self.ignore_zero_ce = AdMSoftmaxLoss(ignore_index=0, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
         if sentence_order_prediction_w > 0:
             self.sentence_order_prediction_w = sentence_order_prediction_w
@@ -2083,6 +2085,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                           **kwargs)
 
         timing_dict = list()
+        bs = input_ids.size(0)
         accuracy_hist = defaultdict()
         record_accuracy = self.record_accuracy or kwargs.pop("record_accuracy", False)
         st = time.time()
@@ -2161,22 +2164,43 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         sent_order_logits = None
 
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
+            segment_lens = labels_segment_index.size(1)
             mx_labels = labels_segment_index.max(-1)[0].view(-1)
             first_cls = final_hidden[:, 0]
-            labels_segment_index = labels_segment_index.view(-1)
+            lsi = labels_segment_index.view(-1)
             sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1]  # + first_cls.unsqueeze(1)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
             mx_label_pred = self.sent_predict_fc(first_cls)
-            sent_order_loss = self.ce(sent_order_logits, labels_segment_index) + self.ce(mx_label_pred, mx_labels)
+            sent_order_loss = 0.5 * self.ce(sent_order_logits, lsi) + 0.01 * self.ce(mx_label_pred, mx_labels) + 0.5 * self.ignore_zero_ce(sent_order_logits, lsi)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, sent_order_block_hidden_cls = %s" % (get_time_string(), random.sample(sent_order_block_hidden_cls.reshape(-1).tolist(), 32)))
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels SOP = %s" % (get_time_string(), list(zip(sent_order_logits.detach().reshape(-1, (self.cls_tokens + 1)).tolist(), labels_segment_index.reshape(-1).tolist()))[:4]))
             if record_accuracy:
-                sent_order_preds = sent_order_logits.detach().argmax(dim=-1)
+                # TODO: Get accuracy of zeros only also and see if zeros only acc is too high, if yes then we may add `0` as ignored value for ce.
+                sent_order_preds = sent_order_logits.detach().argmax(dim=-1).reshape(-1, segment_lens)
+                not_in_order = [not all([c < n or ls_one[i + 1:].sum().item() == 0 for i, (c, n) in enumerate(zip(ls_one[:-1].tolist(), ls_one[1:].tolist()))]) for ls_one in labels_segment_index]
+
+                nih_preds = sent_order_preds[not_in_order]
+                nih_labels = labels_segment_index[not_in_order]
+                nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens)
+
+                non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens)
+
+
                 sent_order_out = sent_order_preds == labels_segment_index
+                sent_order_out_nih = nih_preds == nih_labels
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
                 accuracy_hist["sent_order_accuracy"] = (float(sent_order_out.detach().float().mean().cpu()))
-                accuracy_hist["sent_order_accuracy_non_zero"] = (float(sent_order_out[labels_segment_index != 0].detach().float().mean().cpu()))
-                preds_dict["sent_order_preds"] = sent_order_preds.cpu().tolist()
+                accuracy_hist["sent_order_accuracy_non_zero"] = (float(sent_order_out[non_zero].detach().float().mean().cpu()))
+
+                accuracy_hist["sent_order_nih_fraction"] = sum(not_in_order) / bs
+                accuracy_hist["sent_order_nih_accuracy"] = (float(sent_order_out_nih.detach().float().mean().cpu()))
+                accuracy_hist["sent_order_nih_accuracy_non_zero"] = (float(sent_order_out_nih[nih_non_zero].detach().float().mean().cpu()))
+
+                preds_dict["sent_order_preds"] = sent_order_preds.cpu().view(-1).tolist()
+
+                preds_dict["sent_order_nih_preds"] = nih_preds.cpu().view(-1).tolist()
+                preds_dict["sent_order_nih_labels"] = nih_labels.cpu().view(-1).tolist()
+
                 preds_dict["mx_label_pred"] = mx_label_pred.argmax(dim=-1).detach().cpu().tolist()
                 preds_dict["mx_labels"] = mx_labels.cpu().tolist()
 
@@ -2225,7 +2249,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         contrastive_block_matrix = None
         contrastive_anchors_copy = contrastive_positives_copy = None
         if contrastive_anchors is not None and len(contrastive_anchors) > 0 and self.contrastive_w > 0 and contrastive_positives is not None and len(contrastive_positives) > 0:
-            bs = input_ids.size(0)
             if len(contrastive_positives) > bs and len(contrastive_positives) % bs == 0 and len(contrastive_positives) / bs == torch.cuda.device_count():
                 did = torch.cuda.current_device()
                 contrastive_positives = contrastive_positives[did * bs: (did + 1) * bs]

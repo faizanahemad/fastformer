@@ -249,7 +249,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
 
 class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
-                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.5), (256, 0.5), (512, 0.5), (1024, 0.5)),
+                 char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.5), (256, 0.5), (512, 0.75), (1024, 0.75)),
                  word_jumble_proba=((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
                  word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=True,
                  word_mask_proba: list = ((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
