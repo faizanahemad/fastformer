@@ -2180,24 +2180,33 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 not_in_order = [not all([c < n or ls_one[i + 1:].sum().item() == 0 for i, (c, n) in enumerate(zip(ls_one[:-1].tolist(), ls_one[1:].tolist()))]) for ls_one in labels_segment_index]
                 non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
 
-                nih_preds = sent_order_preds[not_in_order]
-                nih_labels = labels_segment_index[not_in_order]
-                nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
+                if sum(not_in_order) > 0:
+                    nih_preds = sent_order_preds[not_in_order]
+                    nih_labels = labels_segment_index[not_in_order]
+                    nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
+                    sent_order_out_nih = nih_preds == nih_labels
+                    accuracy_hist["sent_order_nih_fraction"] = sum(not_in_order) / bs
+                    accuracy_hist["sent_order_nih_accuracy"] = (float(sent_order_out_nih.detach().float().mean().cpu()))
+                    accuracy_hist["sent_order_nih_accuracy_non_zero"] = (float(sent_order_out_nih[nih_non_zero].detach().float().mean().cpu()))
+                    preds_dict["sent_order_nih_preds"] = nih_preds.cpu().view(-1).tolist()
+                    preds_dict["sent_order_nih_labels"] = nih_labels.cpu().view(-1).tolist()
+                else:
+                    accuracy_hist["sent_order_nih_fraction"] = 0.0
+                    accuracy_hist["sent_order_nih_accuracy"] = 0.0
+                    accuracy_hist["sent_order_nih_accuracy_non_zero"] = 0.0
+                    preds_dict["sent_order_nih_preds"] = []
+                    preds_dict["sent_order_nih_labels"] = []
 
                 sent_order_out = sent_order_preds == labels_segment_index
-                sent_order_out_nih = nih_preds == nih_labels
                 # self.accuracy_hist["sent_order"].append({"all": sent_order_out.detach().cpu(), "mean": float(sent_order_out.sum() / len(sent_order_out[labels_segment_index != 0].reshape(-1))), "alt_mean": float(sent_order_out[labels_segment_index != 0].float().mean().detach().cpu())})
                 accuracy_hist["sent_order_accuracy"] = (float(sent_order_out.detach().float().mean().cpu()))
                 accuracy_hist["sent_order_accuracy_non_zero"] = (float(sent_order_out[non_zero].detach().float().mean().cpu()))
 
-                accuracy_hist["sent_order_nih_fraction"] = sum(not_in_order) / bs
-                accuracy_hist["sent_order_nih_accuracy"] = (float(sent_order_out_nih.detach().float().mean().cpu()))
-                accuracy_hist["sent_order_nih_accuracy_non_zero"] = (float(sent_order_out_nih[nih_non_zero].detach().float().mean().cpu()))
+
 
                 preds_dict["sent_order_preds"] = sent_order_preds.cpu().view(-1).tolist()
 
-                preds_dict["sent_order_nih_preds"] = nih_preds.cpu().view(-1).tolist()
-                preds_dict["sent_order_nih_labels"] = nih_labels.cpu().view(-1).tolist()
+                
 
                 preds_dict["mx_label_pred"] = mx_label_pred.argmax(dim=-1).detach().cpu().tolist()
                 preds_dict["mx_labels"] = mx_labels.cpu().tolist()

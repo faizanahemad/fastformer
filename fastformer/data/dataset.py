@@ -344,6 +344,7 @@ class TokenizerDataset(Dataset):
             num_segments = 1 if cls_tokens_sent_seg < self.min_segments else self.min_segments
             count_pad_tokens = 100
             retries = 0
+            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             while retries < 8 and count_pad_tokens > 0 and cls_tokens_sent_seg >= self.min_segments:
                 num_segments = int(np.round(self.min_segments + random.betavariate(alpha, beta) * (cls_tokens_sent_seg - self.min_segments)))
                 segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
