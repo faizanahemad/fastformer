@@ -251,7 +251,8 @@ class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.5), (256, 0.5), (512, 0.75), (1024, 0.75)),
                  word_jumble_proba=((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=True,
+                 word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=True, word_jumble_in_pet=True,
+                 sentence_jumble_pet_length_threshold=256, sentence_jumble_max_segments_in_pet=3,
                  word_mask_proba: list = ((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
                  word_noise_proba: tuple = ((0, 0.1), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.2)),
                  max_span_length: int = 3, max_jumbling_span_length: int = 3, n_anchors: int = 4, n_positives: int = 2):
@@ -280,6 +281,8 @@ class TokenizerDataset(Dataset):
         self.sj_l, self.sj_p = zip(*sentence_jumble_proba)
         self.max_jumbling_span_length = max_jumbling_span_length
         self.sentence_jumble_in_pet = sentence_jumble_in_pet
+        self.sentence_jumble_pet_length_threshold = sentence_jumble_pet_length_threshold
+        self.sentence_jumble_max_segments_in_pet = sentence_jumble_max_segments_in_pet
         self.word_jumble_in_pet = word_jumble_in_pet
         self.n_anchors = n_anchors
         self.n_positives = n_positives
@@ -337,7 +340,7 @@ class TokenizerDataset(Dataset):
 
             alpha, beta = (2, 4) if length > 512 else (1, 5)
 
-            cls_tokens_sent_seg = self.cls_tokens
+            cls_tokens_sent_seg = self.cls_tokens if n_queries == 0 else (min(self.cls_tokens, self.sentence_jumble_max_segments_in_pet) if (length > self.sentence_jumble_pet_length_threshold and self.sentence_jumble_in_pet) else 0)
             num_segments = 1 if cls_tokens_sent_seg < self.min_segments else self.min_segments
             count_pad_tokens = 100
             retries = 0

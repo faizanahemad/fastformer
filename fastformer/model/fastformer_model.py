@@ -2178,13 +2178,11 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 # TODO: Get accuracy of zeros only also and see if zeros only acc is too high, if yes then we may add `0` as ignored value for ce.
                 sent_order_preds = sent_order_logits.detach().argmax(dim=-1).reshape(-1, segment_lens)
                 not_in_order = [not all([c < n or ls_one[i + 1:].sum().item() == 0 for i, (c, n) in enumerate(zip(ls_one[:-1].tolist(), ls_one[1:].tolist()))]) for ls_one in labels_segment_index]
+                non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
 
                 nih_preds = sent_order_preds[not_in_order]
                 nih_labels = labels_segment_index[not_in_order]
                 nih_non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in nih_labels for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
-
-                non_zero = torch.tensor([ls_one[i:].sum().item() != 0 for ls_one in labels_segment_index for i in range(len(ls_one))]).reshape(-1, segment_lens).bool()
-
 
                 sent_order_out = sent_order_preds == labels_segment_index
                 sent_order_out_nih = nih_preds == nih_labels
