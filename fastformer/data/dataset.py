@@ -2611,7 +2611,113 @@ for c in contents:
         
 print(len(unloadable), len(loadable), len(contents))
 
+train_ds = dict()
+validation_ds = dict()
+test_ds = dict()
+for k, v in dataset_dict.items():
+    train = dict()
+    test = dict()
+    validation = dict()
+    if isinstance(v, Dataset):
+        train[k] = v
+    else:
+        splits = list(v.keys())
+        for split in splits:
+            if "train" in split:
+                train[k + split.replace("train", '')] = v[split]
+            elif "test" in split:
+                test[k + split.replace("test", '')] = v[split]
+            elif "validation" in split:
+                validation[k + split.replace("validation", '')] = v[split]
+                
+        
+    for split in [train, validation, test]:
+        if split is None:
+            continue
+        for dk, dv in split.items():
+            feats = dv.column_names
+        
+            if "query" not in feats:
+                dv = dv.map(lambda x: dict(query=[[]] * len(x["text"])), num_proc=1, batched=True, batch_size=4096)
+            if "answer" not in feats:
+                dv = dv.map(lambda x: dict(answer=[[]] * len(x["text"])), num_proc=1, batched=True, batch_size=4096)
+            split[dk] = dv
+    
+    train_ds.update(train)
+
+    validation_ds.update(validation)
+
+    test_ds.update(test)
+    
+
+train_qna_medium_fastformer = DatasetDict(train_ds)
+validation_qna_medium_fastformer = DatasetDict(validation_ds)
+test_qna_medium_fastformer = DatasetDict(test_ds)
+
+train_qna_medium_fastformer.save_to_disk("processed_datasets/train_qna_medium_fastformer")
+validation_qna_medium_fastformer.save_to_disk("processed_datasets/validation_qna_medium_fastformer")
+test_qna_medium_fastformer.save_to_disk("processed_datasets/test_qna_medium_fastformer")
+
+#####
+train_fastformer = train_qna_medium_fastformer
+#####
+
+sampling_fraction = 0.5 # 0.5, 0.65, 0.75
+train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_fastformer.items()}
+lsum = sum(train_dataset_sampling_proba.values())
+train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
+probas = {k: int(v * 5_000_000) for k, v in train_dataset_sampling_proba.items()}
+sum(probas.values())
+probas
+
+def resample_dataset(ds, sample_size):
+    if sample_size < len(ds):
+        select_proba = sample_size / len(ds)
+        return ds.filter(lambda x: random.random() <= select_proba, batch_size=16_000)
+    else:
+        repeats = sample_size // len(ds)
+        delta = resample_dataset(ds, sample_size - (repeats * len(ds)))
+        return concatenate_datasets(([ds]*repeats)+[delta])
+        
+
+
+def add_query_answer_columns(x):
+    if "query" not in x:
+        x["query"] = [[""]] * len(x["text"])
+    else:
+        x["query"] = list(map(lambda y:[""] if isinstance(y, (list, tuple)) and len(y) == 0 else (y if isinstance(y, (list, tuple)) else [str(y)]),x["query"]))
+    if "answer" not in x:
+        x["answer"] = [[""]] * len(x["text"])
+    else:
+        x["answer"] = list(map(lambda y:[""] if isinstance(y, (list, tuple)) and len(y) == 0 else (y if isinstance(y, (list, tuple)) else [str(y)]), x["answer"]))
+    return x
+
+train_fastformer_resampled = DatasetDict({k: resample_dataset(train_fastformer[k], samples) for k, samples in probas.items()})
+train_fastformer_resampled = DatasetDict({k: v.map(add_query_answer_columns, batched=True, batch_size=16_384, remove_columns=["label"] if "label" in v.column_names else []) for k, v in train_fastformer_resampled.items()})
+dsets = list(train_fastformer_resampled.values())
+keys = list(train_fastformer_resampled.keys()) 
+for k, dset in zip(keys, dsets):
+    if dset.features.type != dsets[0].features.type:
+        print(k," :: ", dset.features.type, " :: ", dsets[0].features.type, "\n")
+        dset.cast_(dsets[0].features)
+train_fastformer_resampled = concatenate_datasets(list(train_fastformer_resampled.values()))
+
+def filter_small_text(x):
+    return len(x["text"].strip()) > 8 and len(x["text"].strip().split()) > 4 and x["length"] < 1024
+    
+train_fastformer_resampled = train_fastformer_resampled.filter(filter_small_text, batch_size=4096)
+train_fastformer_resampled.save_to_disk("/home/ahemf/processed_datasets/train_qna_medium_fastformer_5M")
+
+di = DatasetInfo.from_directory("/home/ahemf/processed_datasets/train_qna_medium_fastformer_5M")
+print({x: len(getattr(di, x)) if hasattr(getattr(di, x), "__len__") else x for x in dir(di) if not x.startswith('__')})
+di.homepage=''
+di.license='MIT'
+di.citation=''
+di.description=''
+di.write_to_directory("/home/ahemf/processed_datasets/train_qna_medium_fastformer_5M")
+
 """
+
 def batch_process_wiki_lingua(examples: Dict[str, List])-> Dict[str, List]:
     article: List[Dict[str, List]] = examples["article"]
     url = examples["url"]

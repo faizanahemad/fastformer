@@ -1952,7 +1952,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         active_loss = funnel_inputs["attention_mask"].bool()
         new_funnel_outputs = self.funnel(funnel_inputs)
         encoder_outputs = new_funnel_outputs["encoder_outputs"]
-        first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
+        first_block_hidden = encoder_outputs[1][self.config.block_sizes[0] - 1]
         first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
 
         if self.adv_lm_w > 0:
@@ -2136,7 +2136,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 score = accuracy_score(final_labels, final_predictions)
                 accuracy_hist["answering_lm_accuracy"] = score
 
-        first_block_hidden = encoder_outputs[2][self.config.block_sizes[0]]
+        first_block_hidden = encoder_outputs[1][self.config.block_sizes[0] - 1]
         first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, first_block_cls CLS = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(first_block_cls.reshape(-1).tolist(), 8)))
         et = time.time() - st
