@@ -521,8 +521,10 @@ def train(local_rank, args):
     if args["world_size"] != 128:
         optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
     if args["no_autocast"]:
-        optimizer_config.eps = 1e-8
-        config.layer_norm_eps = 1e-8
+        optimizer_config.eps = 1e-7
+        config.layer_norm_eps = 1e-7
+        optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
+
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
