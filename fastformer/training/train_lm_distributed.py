@@ -523,7 +523,7 @@ def train(local_rank, args):
     if args["no_autocast"]:
         optimizer_config.eps = 1e-8
         config.layer_norm_eps = 1e-8
-    fsdp_params = configure_fsdp(not args["no_autocast"], False, True)
+    fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
 
