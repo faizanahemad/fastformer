@@ -2475,7 +2475,7 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--length", type=int, default=512)
     ap.add_argument("--lr", type=float, default=5e-4)
-    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
+    ap.add_argument("--model", type=str, default='microsoft/deberta-base')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -2700,6 +2700,7 @@ if __name__ == "__main__":
                     optimizer.zero_grad()
             else:
                 if isinstance(model, (AutoModel, DebertaModel)):
+                    pt_batch.pop("record_accuracy", None)
                     output = model(**pt_batch)
                     output = ((output['last_hidden_state'][:, 0] - random.random()).mean(),)
                 else:

@@ -18,6 +18,7 @@ from tqdm.auto import tqdm
 import subprocess
 import shlex
 import shutil
+import math
 import sys
 from distutils.util import strtobool
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -356,6 +357,101 @@ def fsdp_wrapper(module=None, wrap_type=0, init=False):
         return wd[wrap_type]
 
 
+def transpose_for_scores(x, num_attention_heads):
+    new_x_shape = x.size()[:-1] + (num_attention_heads, -1)
+    x = x.view(*new_x_shape)
+    return x.permute(0, 2, 1, 3)
 
+
+def build_relative_position(query_size, key_size, device, query_stride=1, key_stride=1):
+    """
+    Build relative position according to the query and key
+    We assume the absolute position of query :math:`P_q` is range from (0, query_size) and the absolute position of key
+    :math:`P_k` is range from (0, key_size), The relative positions from query to key is :math:`R_{q \\rightarrow k} =
+    P_q - P_k`
+    Args:
+        query_size (int): the length of query
+        key_size (int): the length of key
+    Return:
+        :obj:`torch.LongTensor`: A tensor with shape [1, query_size, key_size]
+    """
+    q_ids = torch.arange(0, query_size * query_stride, query_stride, dtype=torch.long, device=device)
+    k_ids = torch.arange(0, key_size * key_stride, key_stride, dtype=torch.long, device=device)
+    rel_pos_ids = q_ids[:, None] - k_ids.view(1, -1).repeat(query_size, 1)
+    rel_pos_ids = rel_pos_ids[:query_size, :]
+    rel_pos_ids = rel_pos_ids.unsqueeze(0)
+    return rel_pos_ids
+
+
+@torch.jit.script
+def c2p_dynamic_expand(c2p_pos, query_layer, relative_pos):
+    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), query_layer.size(2), relative_pos.size(-1)])
+
+
+@torch.jit.script
+def p2c_dynamic_expand(c2p_pos, query_layer, key_layer):
+    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), key_layer.size(-2)])
+
+
+@torch.jit.script
+def pos_dynamic_expand(pos_index, p2c_att, key_layer):
+    return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
+
+
+def disentangled_att_bias(query_layer, key_layer, relative_pos, rel_embeddings, scale_factor,
+                          max_relative_positions, heads, pos_proj, pos_q_proj,
+                          query_stride=1, key_stride=1, pos_att_type=("c2p", "p2c")):
+    assert heads == query_layer.size(1) or heads == query_layer.size(1)//2
+    half_head = heads == query_layer.size(1)//2
+    if relative_pos is None:
+        q = query_layer.size(-2)
+        relative_pos = build_relative_position(q, key_layer.size(-2), query_layer.device, query_stride=query_stride, key_stride=key_stride)
+    if relative_pos.dim() == 2:
+        relative_pos = relative_pos.unsqueeze(0).unsqueeze(0)
+    elif relative_pos.dim() == 3:
+        relative_pos = relative_pos.unsqueeze(1)
+    # bxhxqxk
+    elif relative_pos.dim() != 4:
+        raise ValueError(f"Relative position ids must be of dim 2 or 3 or 4. {relative_pos.dim()}")
+
+    att_span = min(max(query_layer.size(-2), key_layer.size(-2)), max_relative_positions)
+    relative_pos = relative_pos.long().to(query_layer.device)
+    rel_embeddings = rel_embeddings[
+        max_relative_positions - att_span : max_relative_positions + att_span, :
+    ].unsqueeze(0)
+
+    score = 0
+    # content->position
+    if "c2p" in pos_att_type:
+        pos_key_layer = pos_proj(rel_embeddings)
+        pos_key_layer = transpose_for_scores(pos_key_layer, heads)
+        assert pos_key_layer.size(-1) == query_layer.size(-1)
+        c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, pos_key_layer.transpose(-1, -2))
+        c2p_pos = torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)
+        c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, relative_pos))
+        score += c2p_att
+
+    # position->content
+    if "p2c" in pos_att_type:
+        pos_query_layer = pos_q_proj(rel_embeddings)
+
+        pos_query_layer = transpose_for_scores(pos_query_layer, heads)
+        pos_query_layer = pos_query_layer / math.sqrt(pos_query_layer.size(-1) * scale_factor)
+        if query_layer.size(-2) != key_layer.size(-2):
+            r_pos = build_relative_position(key_layer.size(-2), key_layer.size(-2), query_layer.device, query_stride=key_stride, key_stride=key_stride)
+        else:
+            r_pos = relative_pos
+        p2c_pos = torch.clamp(-r_pos + att_span, 0, att_span * 2 - 1)
+        assert pos_query_layer.size(-1) == key_layer.size(-1)
+        p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, pos_query_layer.transpose(-1, -2))
+        p2c_att = torch.gather(
+            p2c_att, dim=-1, index=p2c_dynamic_expand(p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
+        ).transpose(-1, -2)
+        if query_layer.size(-2) != key_layer.size(-2):
+            pos_index = relative_pos[:, :, :, 0].unsqueeze(-1)
+            p2c_att = torch.gather(p2c_att, dim=-2, index=pos_dynamic_expand(pos_index, p2c_att, key_layer[:, heads:] if half_head else key_layer))
+        score += p2c_att
+
+    return score
 
 
