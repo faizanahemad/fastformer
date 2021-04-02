@@ -117,7 +117,6 @@ class FastFormerConfig(PretrainedConfig):
             embedding_size=128,
             num_highway_cls_tokens=7,
             position_biased_input=True,
-            untie_cls=False,
             separate_content_and_position_attention=False,
             approximate_attention=[False, False, False],
             sequence_dependent_position_transform=False,
@@ -205,7 +204,6 @@ class FastFormerConfig(PretrainedConfig):
         self.compressed_query_attention_stride = compressed_query_attention_stride
         self.compressed_query_attention_layers = compressed_query_attention_layers
         self.compressed_key_attention_layers = compressed_key_attention_layers
-        self.untie_cls = untie_cls
         self.separate_content_and_position_attention = separate_content_and_position_attention
         self.sequence_dependent_position_transform = sequence_dependent_position_transform
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform)
@@ -240,22 +238,22 @@ class FastFormerConfig(PretrainedConfig):
 
 vanilla_bert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
                                      ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                     untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1, block_repeats=False)
+                                     separate_content_and_position_attention=False, approximate_attention=[False] * 1, block_repeats=False)
 vanilla_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
                                        ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3, )
+                                       separate_content_and_position_attention=False, approximate_attention=[False] * 3, )
 repeated_funnel_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[768, 768, 768], num_decoder_layers=2, n_head=12, d_head=64,
                                         ffn_groups=1, qkv_transform_groups=1, embedding_size=768, num_highway_cls_tokens=0,
-                                        untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
+                                        separate_content_and_position_attention=False, approximate_attention=[False] * 3,
                                         block_repeats=True, separate_compressiion_layer=True, )
 repeated_funnel_channel_expanded_base = FastFormerConfig(vocab_size=30522, block_sizes=[6, 6, 6], block_channel_size=[480, 768, 960],
                                                          num_decoder_layers=2, n_head=[8, 12, 12], d_head=[48, 64, 80],
                                                          ffn_groups=4, qkv_transform_groups=4, embedding_size=128, num_highway_cls_tokens=0,
-                                                         untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 3,
+                                                         separate_content_and_position_attention=False, approximate_attention=[False] * 3,
                                                          block_repeats=True, separate_compressiion_layer=False, )
 vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block_channel_size=[768], num_decoder_layers=0, n_head=12, d_head=64,
                                        ffn_groups=1, qkv_transform_groups=1, embedding_size=128, num_highway_cls_tokens=0,
-                                       untie_cls=False, separate_content_and_position_attention=False, approximate_attention=[False] * 1,
+                                       separate_content_and_position_attention=False, approximate_attention=[False] * 1,
                                        block_repeats=True)
 
 sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=False,

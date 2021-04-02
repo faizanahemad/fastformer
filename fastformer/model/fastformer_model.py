@@ -917,7 +917,6 @@ class MultiheadAttention(nn.Module):
         self.d_model = d_model
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
-        self.untie_cls = self.config.untie_cls
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
         self.sequence_dependent_position_transform = self.config.sequence_dependent_position_transform
         self.approximate_attention = self.config.approximate_attention[block_index]
@@ -964,17 +963,14 @@ class MultiheadAttention(nn.Module):
                                                                      compress_query)
                 self.pos_k_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups, False)
             elif qkv_transform_groups > 1:
-                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4 if compress_query else 1,
-                                         groups=qkv_transform_groups, stride=4 if compress_query else 1)
-                self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups)
+                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1,
+                                         groups=qkv_transform_groups, stride=1, bias=True)
+                self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
             else:
-                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=4, groups=qkv_transform_groups,
-                                         stride=4) if compress_query else nn.Linear(config.embedding_size, n_head * d_head)
-                self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head)
+                self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head, bias=True)
+                self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head, bias=False)
             self.c2p_bias = nn.Parameter(torch.zeros([n_head, d_head]))
             self.p2c_bias = nn.Parameter(torch.zeros([n_head, d_head]))
-            self.pos_qln = nn.LayerNorm(n_head * d_head, eps=config.layer_norm_eps)
-            self.pos_kln = nn.LayerNorm(n_head * d_head, eps=config.layer_norm_eps)
 
         self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
         self.layer_norm = nn.LayerNorm(config.block_channel_size[block_index], eps=config.layer_norm_eps)
@@ -1012,9 +1008,12 @@ class MultiheadAttention(nn.Module):
             k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
         v_head = value.view(batch_size, context_len, n_head, self.d_model // n_head)
 
-        q_head = q_head * self.scale
+        scale_factor = 1 + (2 if self.separate_content_and_position_attention else 0)
+        scale = self.scale / (scale_factor ** 0.5)
+
+        q_head = q_head + self.r_w_bias
+        q_head = q_head * scale
         # Shape n_head x d_head
-        r_w_bias = self.r_w_bias * self.scale
         # Shapes batch_size x n_head x seq_len x context_len
         if self.separate_content_and_position_attention:
             position_embeds = position_embeds[self.block_index]
@@ -1025,35 +1024,24 @@ class MultiheadAttention(nn.Module):
             if need_key_compress:
                 position_embed_of_key = pool_tensor(position_embed_of_key.unsqueeze(0), self.cls_tokens, mode='mean',
                                                     stride=self.config.compressed_query_attention_stride).squeeze()
-            v = self.c2p_bias * self.scale
-            w = self.p2c_bias * self.scale
             if self.sequence_dependent_position_transform:
-                pos_k_head = self.pos_kln(self.pos_k_head(key, position_embed_of_key, 1)).view(batch_size, -1, n_head, d_head)
-                pos_q_head = self.pos_qln(self.pos_q_head(query, position_embed_of_query, 1)).view(batch_size, -1, n_head, d_head)
-                if self.untie_cls:
-                    pos_k_head = pos_k_head * F.pad(
-                        pos_k_head.new_ones([pos_k_head.size(0), pos_k_head.size(1) - self.cls_tokens, pos_k_head.size(2), pos_k_head.size(3)]),
-                        (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
-                    pos_q_head = pos_q_head * F.pad(
-                        pos_q_head.new_ones([pos_q_head.size(0), pos_q_head.size(1) - self.cls_tokens, pos_q_head.size(2), pos_q_head.size(3)]),
-                        (0, 0, self.cls_tokens, 0, 0, 0, 0, 0))
+                pos_k_head = self.pos_k_head(key, position_embed_of_key, 1).view(batch_size, -1, n_head, d_head)
+                pos_q_head = self.pos_q_head(query, position_embed_of_query, 1).view(batch_size, -1, n_head, d_head)
+
             else:
 
-                pos_k_head = self.pos_kln(self.pos_k_head(position_embed_of_key)).view(context_len, n_head, d_head)
-                pos_q_head = self.pos_qln(self.pos_q_head(position_embed_of_query)).view(seq_len, n_head, d_head)
+                pos_k_head = self.pos_k_head(position_embed_of_key).view(context_len, n_head, d_head)
+                pos_q_head = self.pos_q_head(position_embed_of_query).view(seq_len, n_head, d_head)
                 # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
-
-                if self.untie_cls:
-                    pos_k_head = pos_k_head * F.pad(pos_k_head.new_ones([pos_k_head.size(0) - self.cls_tokens, pos_k_head.size(1), pos_k_head.size(2)]),
-                                                    (self.cls_tokens, 0, 0, 0, 0, 0))
-                    pos_q_head = pos_q_head * F.pad(pos_q_head.new_ones([pos_q_head.size(0) - self.cls_tokens, pos_q_head.size(1), pos_q_head.size(2)]),
-                                                    (self.cls_tokens, 0, 0, 0, 0, 0))
 
         if self.approximate_attention:
             # TODO: how to handle attention masks
             v_head = v_head.permute(0, 2, 1, 3)
             attn_vec = self.attn(q_head.permute(0, 2, 1, 3), k_head.permute(0, 2, 1, 3), v_head).permute(0, 2, 1, 3)
             if self.separate_content_and_position_attention:
+                v = self.c2p_bias
+                w = self.p2c_bias
+                pos_q_head = pos_q_head / math.sqrt(pos_q_head.size(-1) * scale_factor)
                 c2p_score = self.attn((q_head + v).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
                                                                                                                                                        3)
                 p2c_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), (k_head + w).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
@@ -1061,14 +1049,20 @@ class MultiheadAttention(nn.Module):
                 p2p_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3),
                                       pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
                                                                                                                      3)
-                attn_vec = attn_vec + c2p_score + p2c_score + p2p_score
+                nc_score = c2p_score + p2c_score + p2p_score
+                nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
+                                      torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
+                                                 nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
+                attn_vec = attn_vec + nc_score
                 # TODO: try adaptive weighting
 
         else:
-            content_score = torch.einsum("bind,bjnd->bnij", q_head + r_w_bias, k_head)
+            content_score = torch.einsum("bind,bjnd->bnij", q_head, k_head)
             attn_score = content_score
 
             if self.separate_content_and_position_attention:
+                v = self.c2p_bias
+                w = self.p2c_bias
                 if self.sequence_dependent_position_transform:
                     c2p_score = torch.einsum("bind,bjnd->bnij", q_head + v, pos_k_head)
                     p2c_score = torch.einsum("bind,bjnd->bnij", pos_q_head, k_head + w)
@@ -1078,11 +1072,16 @@ class MultiheadAttention(nn.Module):
                     p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head + w)
                     p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
                 # merge attention scores
-                attn_score = attn_score + c2p_score + p2c_score + p2p_score
+
+                nc_score = c2p_score + p2c_score + p2p_score
+                nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
+                           torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
+                           nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
+                attn_score = attn_score + nc_score
 
             # precision safe in case of mixed precision training
             dtype = attn_score.dtype
-            attn_score = attn_score.float()
+            # attn_score = attn_score.float()
             # perform masking
             if attention_mask is not None:
                 # TODO: handle attention mask's pooling for qk pooling
