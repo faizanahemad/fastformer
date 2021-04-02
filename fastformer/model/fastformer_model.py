@@ -491,7 +491,7 @@ class SequenceDependentPositionTransform(nn.Module):
         return embeds
 
 
-class ShortSeqRNN(nn.Module):
+class ShortSeqRNNOld(nn.Module):
     def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
         super().__init__()
         self.config = config
@@ -579,7 +579,7 @@ class ShortSeqRNN(nn.Module):
         return query
 
 
-class ShortSeqRNNOld(nn.Module):
+class ShortSeqRNN(nn.Module):
     def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
         super().__init__()
         self.config = config
@@ -657,9 +657,10 @@ class ShortSeqRNNOld(nn.Module):
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
 
+        query = query[:, :, self.overlap:-self.overlap]
         query = query.view(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
-
         processed_query = []
+
         query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
         for i in range(query_global.size(0)):
             self.gru_global[i].flatten_parameters()
@@ -674,7 +675,7 @@ class ShortSeqRNNOld(nn.Module):
         # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
         # query = self.gru(query)[0]
         # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        query = query[:, self.overlap:-self.overlap]
+        # query = query[:, self.overlap:-self.overlap]
         query = query.reshape(bs, -1, query.size(-1))[:, :seqlen]
 
         if upsampled:
