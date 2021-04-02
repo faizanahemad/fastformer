@@ -277,7 +277,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              )
 
 # Fasttest
-md_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=4, use_cuda_conv=True,
+md_config = FastFormerConfig(separate_content_and_position_attention=True, pooling_type="learn_sdconv", pooling_kernel_size=4, use_cuda_conv=True,
                              sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[48, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,

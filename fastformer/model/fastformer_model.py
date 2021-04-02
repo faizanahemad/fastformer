@@ -367,10 +367,11 @@ class AttentionStructure(nn.Module):
         # inputs_embeds has shape batch_size x seq_len x d_model
         # attention_mask and token_type_ids have shape batch_size x seq_len
         self.seq_len = seq_len = inputs_embeds.size(1)
-        position_embeds = None
         if self.separate_content_and_position_attention:
             position_embeds = self.get_position_embeds(seq_len, position_embeds, inputs_embeds.dtype, inputs_embeds.device)
-        return (position_embeds, attention_mask)
+            return (position_embeds, attention_mask)
+        else:
+            return (None, attention_mask)
 
     def get_position_embeds(self, seq_len, pos_embed, dtype, device):
         """
@@ -404,7 +405,7 @@ class AttentionStructure(nn.Module):
                 position_embeds_no_pooling = pos_embed
             else:
                 pooled_pos = self.stride_pool_pos(pos, block_index, stride)
-                pooled_pos = pooled_pos[:2 * (pooled_pos.size(0) // 2)]
+                # pooled_pos = pooled_pos[:2 * (pooled_pos.size(0) // 2)]
                 ppos = pooled_pos[:, None].expand(pooled_pos.size(0), pos_embed.size(1)).type(torch.long)
                 position_embeds_pooling = torch.gather(pos_embed, 0, ppos)
                 if block_index == 1:
@@ -428,7 +429,16 @@ class AttentionStructure(nn.Module):
         # will be at `1 - 2 ** block_index`.
         cls_pos = pos_id[:self.cls_tokens_total]
         pooled_pos_id = pos_id[self.cls_tokens_total:]
-        return torch.cat([cls_pos, pooled_pos_id[::stride]], 0)
+        tensor = torch.cat([cls_pos, pooled_pos_id[::stride]], 0)
+        ts = tensor.size()
+        padding_extra = 8 * math.ceil(ts[0] / 8) - ts[0]
+        if len(ts) == 3:
+            tensor = nn.functional.pad(tensor, (0, 0, 0, padding_extra), mode="constant")
+        elif len(ts) == 2:
+            tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
+        elif len(ts) == 1:
+            tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
+        return tensor
 
     def pool_tensor(self, tensor, mode="mean", stride=2):
         return pool_tensor(tensor, self.cls_tokens_total, mode, stride)
@@ -1775,12 +1785,18 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
         if hasattr(self, "decoder") and (run_decoder or run_answering):
             block_attention_inputs = encoder_outputs[-2]
+            final_hidden_attention_inputs = list(block_attention_inputs[-1])
+            block_index = 0
+
+            position_embeds = list(final_hidden_attention_inputs[0])
+            position_embeds[block_index][0] = position_embeds[-1][0]  # Take key position embed from last block.
+            final_hidden_attention_inputs[0] = position_embeds
             decoder_outputs = self.decoder(
                 final_hidden=final_hidden,
                 first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
                 position_embeds=position_embeds,
                 attention_inputs=block_attention_inputs[0],
-                final_hidden_attention_inputs=block_attention_inputs[-1],
+                final_hidden_attention_inputs=final_hidden_attention_inputs,
                 output_attentions=False,
                 output_hidden_states=False,
             )
