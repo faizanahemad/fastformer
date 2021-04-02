@@ -593,10 +593,16 @@ class ShortSeqRNNOld(nn.Module):
         self.head_size = head_size
         self.overlap = overlap
         self.gru = nn.ModuleList()
+        self.gru_global = nn.ModuleList()
         for i in range(heads):
-            rnn = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+            rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
                          nonlinearity="tanh",
                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+            rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
+                          nonlinearity="tanh",
+                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
+
+            
             # rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0',)
             # rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
             # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
@@ -606,6 +612,7 @@ class ShortSeqRNNOld(nn.Module):
             # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0_reverse', )
             # rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0_reverse', )
             self.gru.append(rnn)
+            self.gru_global.append(rnn2)
 
     def forward(self, query, key=None, value=None):
         # st = time.time()
@@ -648,6 +655,19 @@ class ShortSeqRNNOld(nn.Module):
             qp = self.gru[i](query[i])[0]
             processed_query.append(qp)
         query = torch.stack(processed_query, 0)
+
+        query = query.view(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
+
+        processed_query = []
+        query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
+        for i in range(query_global.size(0)):
+            self.gru_global[i].flatten_parameters()
+            qp = self.gru_global[i](query_global[i])[0]
+            processed_query.append(qp)
+        query_global = torch.stack(processed_query, 0).unsqueeze(-2)
+        query = query + query_global
+        query = query.view(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
+
         query = query.permute(1, 2, 0, 3).reshape(-1, query.shape[2], query.size(-1))
 
         # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
@@ -2475,7 +2495,7 @@ if __name__ == "__main__":
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--length", type=int, default=512)
     ap.add_argument("--lr", type=float, default=5e-4)
-    ap.add_argument("--model", type=str, default='microsoft/deberta-base')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
+    ap.add_argument("--model", type=str, default='fastformer_fused_electra')  # fastformer_mlm, fastformer_electra, fastformer_fused_electra, fastformer, microsoft/deberta-base, roberta-base, distilroberta-base, funnel-transformer/intermediate
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]

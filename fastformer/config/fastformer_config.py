@@ -186,9 +186,6 @@ class FastFormerConfig(PretrainedConfig):
         assert compress_query_method in [
             None,
             "mean",
-            "learn",
-            "learn_sdconv",
-            'learn_rnn',
         ], f"Got {pooling_type} for `compress_query_method`"
         self.pooling_type = pooling_type
         self.compress_query_method = compress_query_method
