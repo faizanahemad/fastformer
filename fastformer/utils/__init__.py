@@ -383,23 +383,23 @@ def build_relative_position(query_size, key_size, device, query_stride=1, key_st
     return rel_pos_ids
 
 
-@torch.jit.script
+# @torch.jit.script
 def c2p_dynamic_expand(c2p_pos, query_layer, relative_pos):
     return c2p_pos.expand([query_layer.size(0), query_layer.size(1), query_layer.size(2), relative_pos.size(-1)])
 
 
-@torch.jit.script
+# @torch.jit.script
 def p2c_dynamic_expand(c2p_pos, query_layer, key_layer):
-    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), key_layer.size(-2)])
+    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), c2p_pos.size(-1)])
 
 
-@torch.jit.script
+# @torch.jit.script
 def pos_dynamic_expand(pos_index, p2c_att, key_layer):
     return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
 
 
-def disentangled_att_bias(query_layer, key_layer, relative_pos, rel_embeddings, scale_factor,
-                          max_relative_positions, heads, pos_proj, pos_q_proj,
+def disentangled_att_bias(query_layer, key_layer, relative_pos, query_embeddings, key_embeddings, scale_factor, query_max_relative_postions,
+                          key_max_relative_positions, heads, pos_k_proj=None, pos_q_proj=None,
                           query_stride=1, key_stride=1, pos_att_type=("c2p", "p2c")):
     assert heads == query_layer.size(1) or heads == query_layer.size(1)//2
     half_head = heads == query_layer.size(1)//2
@@ -414,34 +414,38 @@ def disentangled_att_bias(query_layer, key_layer, relative_pos, rel_embeddings, 
     elif relative_pos.dim() != 4:
         raise ValueError(f"Relative position ids must be of dim 2 or 3 or 4. {relative_pos.dim()}")
 
-    att_span = min(max(query_layer.size(-2), key_layer.size(-2)), max_relative_positions)
     relative_pos = relative_pos.long().to(query_layer.device)
-    rel_embeddings = rel_embeddings[
-        max_relative_positions - att_span : max_relative_positions + att_span, :
+    q_att_span = min(max(query_layer.size(-2), key_layer.size(-2)), query_max_relative_postions)
+    query_embeddings = query_embeddings[
+        max(0, query_max_relative_postions - q_att_span): min(query_embeddings.size(0), query_max_relative_postions + q_att_span), :
     ].unsqueeze(0)
+    att_span = min(max(query_layer.size(-2), key_layer.size(-2)), key_max_relative_positions)
+    key_embeddings = key_embeddings[
+                     max(0, key_max_relative_positions - att_span): min(key_embeddings.size(0), key_max_relative_positions + att_span), :
+                     ].unsqueeze(0)
 
     score = 0
     # content->position
     if "c2p" in pos_att_type:
-        pos_key_layer = pos_proj(rel_embeddings)
+        pos_key_layer = pos_k_proj(key_embeddings) if pos_k_proj else key_embeddings
         pos_key_layer = transpose_for_scores(pos_key_layer, heads)
         assert pos_key_layer.size(-1) == query_layer.size(-1)
         c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, pos_key_layer.transpose(-1, -2))
-        c2p_pos = torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)
+        c2p_pos = torch.clamp(relative_pos + att_span, 0, min(att_span * 2 - 1, key_embeddings.size(0) - 1))
         c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, relative_pos))
         score += c2p_att
 
     # position->content
     if "p2c" in pos_att_type:
-        pos_query_layer = pos_q_proj(rel_embeddings)
+        pos_query_layer = pos_q_proj(query_embeddings) if pos_q_proj else query_embeddings
 
         pos_query_layer = transpose_for_scores(pos_query_layer, heads)
         pos_query_layer = pos_query_layer / math.sqrt(pos_query_layer.size(-1) * scale_factor)
         if query_layer.size(-2) != key_layer.size(-2):
-            r_pos = build_relative_position(key_layer.size(-2), key_layer.size(-2), query_layer.device, query_stride=key_stride, key_stride=key_stride)
+            r_pos = build_relative_position(key_layer.size(-2), query_layer.size(-2), query_layer.device, query_stride=key_stride, key_stride=key_stride)
         else:
             r_pos = relative_pos
-        p2c_pos = torch.clamp(-r_pos + att_span, 0, att_span * 2 - 1)
+        p2c_pos = torch.clamp(-r_pos + q_att_span, 0, min(q_att_span * 2 - 1, query_embeddings.size(0) - 1))
         assert pos_query_layer.size(-1) == key_layer.size(-1)
         p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, pos_query_layer.transpose(-1, -2))
         p2c_att = torch.gather(

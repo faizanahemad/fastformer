@@ -192,7 +192,7 @@ class Embeddings(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size + config.num_highway_cls_tokens, self.embedding_size, padding_idx=pad_token_id)
 
         self.position_biased_input = getattr(config, "position_biased_input", True)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings + config.num_highway_cls_tokens, self.embedding_size)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings * (2 if config.relative_attention else 1) + config.num_highway_cls_tokens, self.embedding_size)
 
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
@@ -286,7 +286,7 @@ class Embeddings(nn.Module):
             embeddings = embeddings * mask
 
         embeddings = self.dropout(embeddings) if use_embed_proj else embeddings
-        return embeddings, self.LayerNormPosEmb(position_embeddings.squeeze(0)) if position_embeddings is not None else None
+        return embeddings, self.LayerNormPosEmb(self.position_embeddings.weight if self.config.relative_attention else position_embeddings.squeeze(0)) if position_embeddings is not None else None
 
 
 def pool_tensor_basic(tensor, mode="mean", stride=2):
@@ -361,6 +361,7 @@ class AttentionStructure(nn.Module):
         self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
         self.stride = self.config.stride
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
+        self.relative_attention = self.config.relative_attention
 
     def init_attention_inputs(self, inputs_embeds, position_embeds, attention_mask=None):
         """ Returns the attention inputs associated to the inputs of the model. """
@@ -390,7 +391,7 @@ class AttentionStructure(nn.Module):
         # Notations from the paper, appending A.2.1, final formula.
         # We need to create and return all the possible vectors R for all blocks and shifts.
 
-        pos = torch.arange(0, seq_len, dtype=dtype, device=device)
+        pos = torch.arange(0, pos_embed.size(0) if self.relative_attention else seq_len, dtype=dtype, device=device)
 
         position_embeds_list = []
         for block_index in range(0, self.config.num_blocks):
@@ -874,6 +875,7 @@ class MultiheadAttention(nn.Module):
         if last_layer_index is None:
             last_layer_index = layer_index
         self.config = config
+        self.relative_attention = config.relative_attention[block_index]
         self.block_index = block_index
         d_model, all_head, d_head = config.block_channel_size[block_index], config.n_head[block_index], config.d_head[block_index]
         d_model_initial = d_model
@@ -1025,7 +1027,7 @@ class MultiheadAttention(nn.Module):
         q_head = q_head * scale
         # Shape n_head x d_head
         # Shapes batch_size x n_head x seq_len x context_len
-        if self.separate_content_and_position_attention:
+        if self.separate_content_and_position_attention or self.relative_attention:
             position_embeds = position_embeds[self.block_index]
             position_embed_of_key, position_embed_of_query = position_embeds
             if need_query_compress:
@@ -1038,6 +1040,9 @@ class MultiheadAttention(nn.Module):
                 pos_k_head = self.pos_k_head(key, position_embed_of_key, 1).view(batch_size, -1, n_head, d_head)
                 pos_q_head = self.pos_q_head(query, position_embed_of_query, 1).view(batch_size, -1, n_head, d_head)
 
+            elif self.relative_attention:
+                pos_k_head = self.pos_k_head(position_embed_of_key) # .reshape(position_embed_of_key.size(0), n_head, d_head)
+                pos_q_head = self.pos_q_head(position_embed_of_query) # .reshape(position_embed_of_query.size(0), n_head, d_head)
             else:
 
                 pos_k_head = self.pos_k_head(position_embed_of_key).view(context_len, n_head, d_head)
@@ -1048,6 +1053,7 @@ class MultiheadAttention(nn.Module):
             # TODO: how to handle attention masks
             v_head = v_head.permute(0, 2, 1, 3)
             attn_vec = self.attn(q_head.permute(0, 2, 1, 3), k_head.permute(0, 2, 1, 3), v_head).permute(0, 2, 1, 3)
+            assert not self.relative_attention
             if self.separate_content_and_position_attention:
                 v = self.c2p_bias
                 w = self.p2c_bias
@@ -1069,8 +1075,17 @@ class MultiheadAttention(nn.Module):
         else:
             content_score = torch.einsum("bind,bjnd->bnij", q_head, k_head)
             attn_score = content_score
-
-            if self.separate_content_and_position_attention:
+            if self.relative_attention:
+                pos_q_head = pos_q_head[self.cls_tokens:, ]
+                pos_k_head = pos_k_head[self.cls_tokens:, ]
+                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2), None, pos_q_head, pos_k_head, scale_factor,
+                                                 self.config.max_position_embeddings // (self.config.stride ** self.block_index),
+                                                 (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if layer_index > 0 else ((self.config.max_position_embeddings // (self.config.stride ** max(self.block_index - 1, 0))) if self.is_encoder_layer else (self.config.max_position_embeddings // (self.config.stride ** (len(self.config.block_channel_size) - 1)))), n_head)
+                nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
+                                      torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
+                                                 nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
+                attn_score = attn_score + nc_score
+            elif self.separate_content_and_position_attention:
                 v = self.c2p_bias
                 w = self.p2c_bias
                 if self.sequence_dependent_position_transform:
@@ -1612,6 +1627,7 @@ class TransformerDecoder(nn.Module):
             for _ in range(repeats):
                 layer_output = layer(hidden, final_hidden, final_hidden, final_hidden_attention_inputs, layer_index, output_attentions=output_attentions)
                 hidden = layer_output[0]
+                layer_index += 1
                 layer_output = layer(hidden, hidden, hidden, attention_inputs, layer_index, output_attentions=output_attentions)
                 hidden = layer_output[0]
                 layer_index += 1
@@ -2572,7 +2588,7 @@ if __name__ == "__main__":
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
                         char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0, highway_cls_ar_w=2.0,
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0, highway_cls_ar_w=0.0,
                                                          aitm=aitm, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only

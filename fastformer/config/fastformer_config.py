@@ -118,6 +118,7 @@ class FastFormerConfig(PretrainedConfig):
             num_highway_cls_tokens=7,
             position_biased_input=True,
             separate_content_and_position_attention=False,
+            relative_attention=[False, False, False],
             approximate_attention=[False, False, False],
             sequence_dependent_position_transform=False,
             light_first_layer=False,
@@ -219,6 +220,7 @@ class FastFormerConfig(PretrainedConfig):
         self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
         self.no_v_head = no_v_head
         self.identity_preserving_norm = identity_preserving_norm
+        self.relative_attention = relative_attention if isinstance(relative_attention, (list, tuple)) else [relative_attention] * self.block_channel_size
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
         assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
@@ -295,6 +297,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=True, pooli
                              n_head=[(4, 4, 0), (4, 4, 0), (12, 0, 0)],
                              block_channel_size=[384, 512, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
+                             relative_attention=[True, True, True],
                              )
 
 lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=3, use_cuda_conv=True,
