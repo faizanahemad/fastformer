@@ -512,7 +512,7 @@ def train(local_rank, args):
 
     config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config, tg_config=tg_config, dg_config=dg_config)[mconf.pop("model_size")]
     if any(config.relative_attention):
-        size_dicts = {k: v - 2 for k, v in size_dicts.items()}
+        size_dicts = {k: v - 4 for k, v in size_dicts.items()}
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
