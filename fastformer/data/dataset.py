@@ -2758,4 +2758,37 @@ def ds_length_stats(ds, lbs=((0, 64), (64, 128), (128, 512), (512, 768), (768, 1
 
 # TODO: Run the dataset processor / collator on full dataset first instead of running it with model, with and without shuffle
 # TODO: Run the same for validation datasets.
+#
 
+"""
+import numpy as np
+
+udeps_catalog = ['en_esl', 'en_ewt', 'en_gum', 'en_gumreddit', 'en_lines', 'en_partut', 'en_pronouns', 'en_pud',]
+udeps_all = {uc: load_dataset("universal_dependencies", uc, script_version="master") for uc in udeps_catalog}
+udeps_all = {k: v.filter(lambda x: isinstance(x["text"], str) and len(x["text"].split()) >= 8 and len(x["text"].split()) <= 64) for k, v in udeps_all.items()}
+udeps_all = {k+"_"+vk: vv for k, v in udeps_all.items() for vk, vv in v.items()}
+udeps_concat = concatenate_datasets([vv for k, v in udeps_all.items() for vk, vv in v.items()])
+udeps_concat = udeps_concat.filter(lambda x: len(set(x["text"])) > 6)
+udeps_concat = udeps_concat.map(lambda x: x, remove_columns=['feats', 'lemmas', 'misc', 'deps'])
+
+def build_token_info(x):
+    head = np.array(list(map(int, x['head'])))
+    tokens = np.array(x['tokens'])
+    deprel = np.array(x['deprel'])
+    upos = np.array(x['upos'])
+    xpos = np.array(x['xpos'])
+    
+    th = tokens[head]
+    dist = head - np.arange(len(tokens))
+    heads_upos =  upos[head]
+    heads_xpos = xpos[head]
+    heads_deprel = deprel[head]
+    
+    return [dict(token=token, head_token=head_token, head_dist=head_dist, token_deprel=token_deprel, head_deprel=head_deprel, token_upos=token_upos, head_upos=head_upos, token_xpos=token_xpos, head_xpos=head_xpos) for token, head_token, head_dist, token_deprel, head_deprel, token_upos, head_upos, token_xpos, head_xpos, in zip(tokens, th, dist, deprel, heads_deprel, upos, heads_upos, xpos, heads_xpos)]
+
+"""
+#
+#
+
+# Atleast 8 words, deprel present, single sentence, text present.
+# Use only those words which have single token representation in the respective tokenizer

@@ -192,7 +192,7 @@ class Embeddings(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size + config.num_highway_cls_tokens, self.embedding_size, padding_idx=pad_token_id)
 
         self.position_biased_input = getattr(config, "position_biased_input", True)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings * (2 if config.relative_attention else 1) + config.num_highway_cls_tokens, self.embedding_size)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings * (2 if config.relative_attention else 1) + (config.num_highway_cls_tokens + 1) * (2 if config.relative_attention else 1), self.embedding_size)
 
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
@@ -908,13 +908,8 @@ class MultiheadAttention(nn.Module):
             set(config.compressed_key_attention_layers))
         compress_key = is_encoder_layer and len(key_compression_layers) > 0 and config.compressed_query_attention_stride != 1
         self.key_compression_layers = key_compression_layers
-        self.learned_compress = config.compress_query_method in ['learn_sdconv', 'learn_rnn', 'learn']
 
-        if config.compress_query_method == 'learn_sdconv':
-            CompressionClass = CompressSeqSDConv
-        elif config.compress_query_method == 'mean':
-            CompressionClass = CompressSeqMeanPooling
-        elif config.compress_query_method is None:
+        if config.compress_query_method is None:
             compress_query = False
             compress_key = False
         else:
@@ -942,11 +937,11 @@ class MultiheadAttention(nn.Module):
                 in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
             if compress_query:
-                self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
+                self.q_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
 
 
             if compress_key:
-                self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
+                self.k_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
 
 
             self.v_head = Conv1d(in_channels=d_model_initial, out_channels=d_model_initial, kernel_size=1, groups=qkv_transform_groups)
@@ -956,10 +951,10 @@ class MultiheadAttention(nn.Module):
             self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
 
             if compress_query:
-                self.q_head_compress = CompressionClass(config, block_index, d_model, n_head)
+                self.q_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
 
             if compress_key:
-                self.k_head_compress = CompressionClass(config, block_index, d_model, n_head)
+                self.k_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
 
             self.v_head = nn.Linear(d_model_initial, d_model_initial)
 
@@ -981,12 +976,11 @@ class MultiheadAttention(nn.Module):
             else:
                 self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head, bias=True)
                 self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head, bias=False)
-            self.c2p_bias = nn.Parameter(torch.zeros([n_head, d_head]))
-            self.p2c_bias = nn.Parameter(torch.zeros([n_head, d_head]))
 
         self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
         self.layer_norm = nn.LayerNorm(config.block_channel_size[block_index], eps=config.layer_norm_eps)
-        self.scale = 1.0 / (d_head ** 0.5)
+        self.scale_factor = 1 + (2 if self.separate_content_and_position_attention else 0)
+        self.scale = 1.0 / ((d_head ** 0.5)*(self.scale_factor ** 0.5))
 
     def self_attention(self, query, key, value, attention_inputs, layer_index):
         batch_size, seq_len, dim = query.shape
@@ -996,7 +990,6 @@ class MultiheadAttention(nn.Module):
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
         need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
         need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
-        stride = dim // (n_head * d_head)
         if need_query_compress:
             query = self.q_head_compress(query)
             seq_len = (2 * int(
@@ -1009,20 +1002,12 @@ class MultiheadAttention(nn.Module):
                 np.ceil(
                     (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
         # Shape batch_size x seq_len x n_head x d_head
-        if self.learned_compress and need_query_compress:
-            q_head = pool_tensor_basic(query.transpose(1, 2), "mean", stride).transpose(1, 2).view(batch_size, seq_len, n_head, d_head)
-        else:
-            q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
+        q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
-        if self.learned_compress and need_key_compress:
-            k_head = pool_tensor_basic(key.transpose(1, 2), "mean", stride).transpose(1, 2).view(batch_size, context_len, n_head, d_head)
-        else:
-            k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
+        k_head = self.k_head(key).view(batch_size, context_len, n_head, d_head)
         v_head = value.view(batch_size, context_len, n_head, self.d_model // n_head)
 
-        scale_factor = 1 + (2 if self.separate_content_and_position_attention else 0)
-        scale = self.scale / (scale_factor ** 0.5)
-
+        scale = self.scale
         q_head = q_head + self.r_w_bias
         q_head = q_head * scale
         # Shape n_head x d_head
@@ -1041,8 +1026,8 @@ class MultiheadAttention(nn.Module):
                 pos_q_head = self.pos_q_head(query, position_embed_of_query, 1).view(batch_size, -1, n_head, d_head)
 
             elif self.relative_attention:
-                pos_k_head = self.pos_k_head(position_embed_of_key) # .reshape(position_embed_of_key.size(0), n_head, d_head)
-                pos_q_head = self.pos_q_head(position_embed_of_query) # .reshape(position_embed_of_query.size(0), n_head, d_head)
+                pos_k_head = self.pos_k_head(position_embed_of_key)
+                pos_q_head = self.pos_q_head(position_embed_of_query)
             else:
 
                 pos_k_head = self.pos_k_head(position_embed_of_key).view(context_len, n_head, d_head)
@@ -1055,12 +1040,10 @@ class MultiheadAttention(nn.Module):
             attn_vec = self.attn(q_head.permute(0, 2, 1, 3), k_head.permute(0, 2, 1, 3), v_head).permute(0, 2, 1, 3)
             assert not self.relative_attention
             if self.separate_content_and_position_attention:
-                v = self.c2p_bias
-                w = self.p2c_bias
-                pos_q_head = pos_q_head / math.sqrt(pos_q_head.size(-1) * scale_factor)
-                c2p_score = self.attn((q_head + v).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                pos_q_head = pos_q_head / math.sqrt(pos_q_head.size(-1) * self.scale_factor)
+                c2p_score = self.attn((q_head).permute(0, 2, 1, 3), pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
                                                                                                                                                        3)
-                p2c_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), (k_head + w).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
+                p2c_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), (k_head).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
                                                                                                                                                        3)
                 p2p_score = self.attn(pos_q_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3),
                                       pos_k_head.expand(batch_size, -1, -1, -1).permute(0, 2, 1, 3), v_head).permute(0, 2, 1,
@@ -1076,9 +1059,7 @@ class MultiheadAttention(nn.Module):
             content_score = torch.einsum("bind,bjnd->bnij", q_head, k_head)
             attn_score = content_score
             if self.relative_attention:
-                pos_q_head = pos_q_head[self.cls_tokens:, ]
-                pos_k_head = pos_k_head[self.cls_tokens:, ]
-                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2), None, pos_q_head, pos_k_head, scale_factor,
+                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2), None, pos_q_head, pos_k_head, self.scale_factor,
                                                  self.config.max_position_embeddings // (self.config.stride ** self.block_index),
                                                  (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if layer_index > 0 else ((self.config.max_position_embeddings // (self.config.stride ** max(self.block_index - 1, 0))) if self.is_encoder_layer else (self.config.max_position_embeddings // (self.config.stride ** (len(self.config.block_channel_size) - 1)))), n_head)
                 nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
@@ -1086,15 +1067,13 @@ class MultiheadAttention(nn.Module):
                                                  nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
                 attn_score = attn_score + nc_score
             elif self.separate_content_and_position_attention:
-                v = self.c2p_bias
-                w = self.p2c_bias
                 if self.sequence_dependent_position_transform:
-                    c2p_score = torch.einsum("bind,bjnd->bnij", q_head + v, pos_k_head)
-                    p2c_score = torch.einsum("bind,bjnd->bnij", pos_q_head, k_head + w)
+                    c2p_score = torch.einsum("bind,bjnd->bnij", q_head, pos_k_head)
+                    p2c_score = torch.einsum("bind,bjnd->bnij", pos_q_head, k_hea)
                     p2p_score = torch.einsum("bind,bjnd->bnij", pos_q_head, pos_k_head)
                 else:
-                    c2p_score = torch.einsum("bind,jnd->bnij", q_head + v, pos_k_head)
-                    p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head + w)
+                    c2p_score = torch.einsum("bind,jnd->bnij", q_head, pos_k_head)
+                    p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head)
                     p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
                 # merge attention scores
 
@@ -1689,16 +1668,14 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.constant_(module.bias, 0.0)
         elif classname == "MultiheadAttention":
             nn.init.uniform_(module.r_w_bias, b=self.config.initializer_range)
-            if hasattr(module, "c2p_bias"):
-                nn.init.uniform_(module.c2p_bias, b=self.config.initializer_range)
-            if hasattr(module, "p2c_bias"):
-                nn.init.uniform_(module.p2c_bias, b=self.config.initializer_range)
         elif classname == "Embeddings":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
             nn.init.normal_(module.word_embeddings.weight, std=std)
             nn.init.normal_(module.position_embeddings.weight, std=std)
             if hasattr(module, "token_type_embeddings"):
                 nn.init.normal_(module.token_type_embeddings.weight, std=std)
+            if hasattr(module, "char_embeddings"):
+                nn.init.normal_(module.char_embeddings.weight, std=std)
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
                 projection_matrix = module.create_projection(device=next(self.parameters()).device)

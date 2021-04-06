@@ -503,7 +503,7 @@ def train(local_rank, args):
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
     ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
-    group = "%s-%s-nodes-%s" % (ds_name, args["nodes"], time_string)
+    group = "%s-%s-%s-nodes-%s" % (ds_name, args["nodes"], args["model_config"], time_string)
     set_seeds(args["seed"])
     model_config.model_size = args["model_config"]
     size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
