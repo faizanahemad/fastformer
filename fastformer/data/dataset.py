@@ -429,8 +429,7 @@ class TokenizerDataset(Dataset):
                     start = min(start, self.tokenizer_args["max_length"])
                 positives = positives if len(anchors) > 0 else [[]]
 
-            results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives,
-                                highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask))
+            results.update(dict(labels_segment_index=labels_segment_index, anchors=anchors, positives=positives))
 
             # TODO: Gap Sentence to be sentence specific not segment specific and have only 3 segments? Or 3 mode + 7 mode so that for small text also we can use sentence jumble
             # TODO: from block 2 CLS tokens remain biased since most small text don't have n_highway segments.

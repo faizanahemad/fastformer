@@ -253,7 +253,7 @@ def train(args):
 
     set_seeds(args["seed"])
     mconf = model_config.to_dict()
-    config = dict(md_config=md_config, sm_config=sm_config, lg_config=lg_config)[mconf.pop("model_size")]
+    config = dict(md_config=md_config, sm_config=sm_config)[mconf.pop("model_size")]
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024

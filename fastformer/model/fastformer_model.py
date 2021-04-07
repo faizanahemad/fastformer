@@ -579,35 +579,6 @@ class MultiheadAttention(nn.Module):
         return (output, attn_prob) if output_attentions else (output,)
 
 
-class LightLayer(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, is_encoder_layer):
-        super().__init__()
-        self.config = config
-        cin = config.block_channel_size[block_index]
-        cout = cin
-        self.is_encoder_layer = is_encoder_layer
-
-        self.layer_norm = nn.LayerNorm(cout, config.layer_norm_eps)
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=False)
-        self.cls_tokens = config.num_highway_cls_tokens + 1
-        # d_head = config.d_head[block_index]
-        assert cout % (sum(config.n_head[block_index]) // 2) == 0
-        self.c1 = SDConv(config, cout, sum(config.n_head[block_index]), cout // (sum(config.n_head[block_index])), config.sdconv_kernel_size[0])
-        self.lin = nn.Linear(cin, cin, bias=False)
-        self.cout = cout
-        # padding
-
-    def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
-        qcnn = self.c1(query, key, value)
-        q = self.activation_function(qcnn)
-        q = self.lin(q)
-        if self.config.identity_preserving_norm:
-            res = query + self.layer_norm(q)
-        else:
-            res = self.layer_norm(query + q)
-        return (res, res)
-
-
 class TransformerLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block,
                  is_encoder_layer, layer_index, last_layer_index=None):
@@ -650,10 +621,6 @@ class TransformerEncoder(nn.Module):
                         self.blocks[block_index].append(fsdp_wrapper(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i)))
                         self.repeats[block_index].append(1)
                         i = inext
-                    elif config.light_first_layer and block_index == 0 and i == 0:
-                        self.blocks[block_index].append(LightLayer(config, block_index, True))
-                        self.repeats[block_index].append(1)
-                        i += 1
                     elif i < block_size - 1:
                         reps = ((block_size - 1) - (i)) if cur_channels != next_channels else ((block_size - 1) - i)
                         inext = i + reps
@@ -668,10 +635,7 @@ class TransformerEncoder(nn.Module):
 
                 else:
                     inext = i + 1
-                    if config.light_first_layer and block_index == 0 and i == 0:
-                        self.blocks[block_index].append(LightLayer(config, block_index, True))
-                    else:
-                        self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
+                    self.blocks[block_index].append(TransformerLayer(config, block_index, (inext - 1) == block_size - 1, i == 0, True, i, i))
                     self.repeats[block_index].append(1)
                     i = inext
         self.pool = None
@@ -787,56 +751,6 @@ def subsequent_mask(size):
     return torch.from_numpy(subsequent_mask) == 0
 
 
-class TransformerCrossAttentionDecoder(nn.Module):
-    def __init__(self, config: FastFormerConfig):
-        super().__init__()
-        config = copy.deepcopy(config)
-        config.short_rnn = [False]
-        config.sdconv = [False]
-        config.compressed_query_attention_layers = {}
-        config.compressed_key_attention_layers = {}
-        config.separate_content_and_position_attention = False
-        config.attention_dropout = 0.0
-
-        self.config = config
-        block_index = 0
-        all_head = config.n_head[block_index]
-
-        total_heads = sum(all_head) // 2
-        assert sum(all_head) % 2 == 0
-        config.block_channel_size[block_index] = config.embedding_size
-        config.block_channel_size[block_index] % total_heads == 0
-        config.n_head[block_index] = (total_heads,) + tuple([0] * len(config.n_head[block_index][1:]))
-        config.d_head[block_index] = config.block_channel_size[block_index] // total_heads
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.self_attn = MultiheadAttention(config, block_index, False, True, False, 0, force_no_sdconv=True)
-        self.self_attn_lin = nn.Linear(config.block_channel_size[block_index], config.block_channel_size[block_index], bias=False)
-        self.relu = checkpoint_wrapper(nn.LeakyReLU(), offload_to_cpu=False)
-        self.self_attn_ln = nn.LayerNorm(config.block_channel_size[block_index], config.layer_norm_eps)
-
-    def forward(self, query, key, value, query_padding_mask, key_padding_mask, query_mask=None, key_mask=None):
-        bs, seq_len, dim = query.shape
-        query = self.self_attn_ln(query)
-        query_temp = query
-        if query_mask is None:
-            query_mask = subsequent_mask(seq_len).to(query.device).unsqueeze(0)
-
-        query_padding_mask = query_padding_mask[:, None, None].expand(bs, 1, seq_len, seq_len)
-
-        if key_mask is None:
-            key_mask = key_padding_mask
-
-        (query, ) = self.self_attn(query, query, query, (None, torch.logical_and(query_mask, query_padding_mask).type(query_padding_mask.dtype)), 0, False)
-        query = self.self_attn_lin(self.relu(query))
-        query = query_temp + self.self_attn_ln(query)
-        query_temp = query
-        (query,) = self.self_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
-        query = self.self_attn_lin(query)
-        return query_temp + self.self_attn_ln(query)
-
-# TODO: Decoder layer keep 1 layer with Q=1st block hidden, K,V= 3rd block hidden. This does better upsampling than current method
-
-
 class TransformerDecoder(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
@@ -848,21 +762,12 @@ class TransformerDecoder(nn.Module):
         if config.num_decoder_layers > 0:
             if config.block_repeats:
                 self.layers.extend([TransformerLayer(config, 0, True, True, False, 0)])
-                if config.light_last_layer:
-                    self.layers.extend([LightLayer(config, 0, False)])
-                    self.repeats = [config.num_decoder_layers - 1] + [1]
-                else:
-                    self.repeats = [config.num_decoder_layers]
+                self.repeats = [config.num_decoder_layers]
             else:
-                if config.light_last_layer:
-                    self.layers.extend(
-                        [TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers - 1)])
-                    self.repeats = [1] * config.num_decoder_layers
-                    self.layers = nn.ModuleList([LightLayer(config, 0, False)])
-                else:
-                    self.layers.extend(
-                        [TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers)])
-                    self.repeats = [1] * config.num_decoder_layers
+
+                self.layers.extend(
+                    [TransformerLayer(config, 0, i == config.num_decoder_layers - 1, i == 0, False, i) for i in range(config.num_decoder_layers)])
+                self.repeats = [1] * config.num_decoder_layers
 
         else:
             self.layers = None
@@ -1192,7 +1097,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
                  input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
-                answering_lm_w=1.0, highway_cls_ar_w=1.0, additive_margin_softmax_w=0.3):
+                answering_lm_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
         self.data_parallel = False
         self.config = config
@@ -1215,9 +1120,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.sentence_order_prediction_w = sentence_order_prediction_w
             self.sent_predict_fc = nn.Linear(config.block_channel_size[0], (self.cls_tokens + 1))
 
-        if highway_cls_ar_w > 0:
-            assert config.position_biased_input
-            self.sentence_task_attn = fsdp_wrapper(TransformerCrossAttentionDecoder(config))
         if contrastive_w > 0:
             self.contrastive_ffn = nn.Sequential(nn.Linear(config.block_channel_size[0], config.block_channel_size[0] // 2, bias=True),
                                                  checkpoint_wrapper(ACT2FN[self.config.hidden_act](), offload_to_cpu=False), nn.Linear(config.block_channel_size[0] // 2, 128, bias=False),)
@@ -1241,7 +1143,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.adv_ascent_steps = adv_ascent_steps
         self.adv_w = adv_w
         self.answering_lm_w = answering_lm_w
-        self.highway_cls_ar_w = highway_cls_ar_w
         self.contrastive_w = contrastive_w
         self.contrastive_temperature = contrastive_temperature
         self.additive_margin_softmax_w = additive_margin_softmax_w
@@ -1488,7 +1389,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("cls_orthogonal_loss", et))
         sentence_order_loss = 0.0
-        highway_cls_ar_loss = 0.0
         sent_order_logits = None
 
         if self.sentence_order_prediction_w > 0 and labels_segment_index is not None:
@@ -1542,43 +1442,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             sentence_order_loss = self.sentence_order_prediction_w * sent_order_loss
         et = time.time() - st
         timing_dict.append(("sentence_order_loss", et))
-
-        highway_cls_ar_hidden = None
-        if self.highway_cls_ar_w > 0 and highway_cls_ar_input_ids is not None and self.config.num_highway_cls_tokens > 0:
-            highway_block_hidden = self.funnel.embed_proj_transpose(final_hidden)  # [:, :self.cls_tokens + 1]
-            highway_cls_ar_inputs_embeds, _ = self.funnel.embeddings(shift_right_fast(highway_cls_ar_input_ids, self.pad_token_id, self.pad_token_id), None, None, char_ids=None, char_offsets=None, use_embed_proj=False, use_highway_embeds=False)
-            hshape = highway_cls_ar_inputs_embeds.size()
-            assert hshape[1] > 0
-            if hshape[1] <= 32:
-                hshape2 = hshape[1]
-            else:
-                hshape2 = 32 * (hshape[1] // 32)
-            assert hshape2 > 0
-            key_attention = encoder_outputs[-1][2]  # [:, :highway_block_hidden.size(1)]
-            highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds[:, :hshape2]
-            highway_cls_ar__attention_mask = highway_cls_ar__attention_mask[:, :hshape2]
-            if hshape2 > 128:
-                highway_cls_ar_inputs_embeds = highway_cls_ar_inputs_embeds.reshape(-1, hshape2 // 4, hshape[2])
-                highway_cls_ar__attention_mask = highway_cls_ar__attention_mask.reshape(-1, hshape2 // 4)
-                highway_block_hidden = torch.repeat_interleave(highway_block_hidden, repeats=4, dim=0)
-                key_attention = torch.repeat_interleave(key_attention, repeats=4, dim=0)
-
-            highway_cls_ar_hidden = self.sentence_task_attn(highway_cls_ar_inputs_embeds, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-            highway_block_hidden = highway_block_hidden[:, :self.cls_tokens + 1]
-            key_attention = key_attention[:, :highway_block_hidden.size(1)]
-            highway_cls_ar_out = self.sentence_task_attn(highway_cls_ar_hidden, highway_block_hidden, highway_block_hidden, highway_cls_ar__attention_mask, key_attention)
-
-            highway_cls_ar_out = self.funnel.lm_head(highway_cls_ar_out)[:, :, :self.config.vocab_size]
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids[:, :hshape2]
-            highway_cls_ar_out = highway_cls_ar_out.reshape(-1, self.config.vocab_size)
-            highway_cls_ar_input_ids = highway_cls_ar_input_ids.reshape(-1)
-            highway_cls_ar_loss = self.highway_cls_ar_w * self.loss_ce(highway_cls_ar_out, highway_cls_ar_input_ids)
-
-            if record_accuracy:
-                highway_cls_ar_out = highway_cls_ar_out.detach().argmax(dim=-1)
-                # self.accuracy_hist["highway_cls_ar_sentence_outputs"].append({"actual": tokenizer.decode(highway_cls_ar_input_ids[0, 1:21].tolist()), "predictions": tokenizer.decode(highway_cls_ar_out[0, 1:21].tolist())})
-                highway_cls_ar_out = highway_cls_ar_out[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1) == highway_cls_ar_input_ids[highway_cls_ar_input_ids != self.pad_token_id].reshape(-1)
-                accuracy_hist["highway_cls_ar_sentence_accuracy"] = (float(highway_cls_ar_out.detach().float().cpu().numpy().mean()))
 
         loss_contrastive = 0.0
         contrastive_block_matrix = None
@@ -1747,7 +1610,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("aitm_alum_end", et))
 
-        loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + highway_cls_ar_loss + cls_orthogonal_loss + loss_contrastive
+        loss = loss + masked_lm_loss + sentence_order_loss + answering_lm_loss + cls_orthogonal_loss + loss_contrastive
         et = time.time() - st
         timing_dict = [(k, 100 * (v/et)) for k, v in timing_dict]
         self.timing_hist.append(timing_dict)
@@ -1763,7 +1626,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         if record_accuracy:
             accuracy_hist = {k: v.detach() if hasattr(v, "detach") else v for k, v in accuracy_hist.items()}
             loss_dict = dict(masked_lm_loss=float(masked_lm_loss), sentence_order_loss=float(sentence_order_loss), answering_lm_loss=float(answering_lm_loss),
-                             highway_cls_ar_loss=float(highway_cls_ar_loss), cls_orthogonal_loss=float(cls_orthogonal_loss),
+                             cls_orthogonal_loss=float(cls_orthogonal_loss),
                              loss_contrastive=float(loss_contrastive), adv_loss=float(adv_loss), electra_loss=float(electra_loss), loss=float(loss))
             loss_dict = {k: v.detach() if hasattr(v, "detach") else v for k, v in loss_dict.items()}
         results = dict(loss=loss, loss_dict=loss_dict, timing_dict=timing_dict, accuracy_hist=accuracy_hist, preds_dict=preds_dict)
@@ -1817,7 +1680,7 @@ if __name__ == "__main__":
     length = args["length"]
     lr = args["lr"]
     texts = args["texts"]
-    config = dict(md_config=md_config, sm_config=sm_config, dg_config=dg_config, tg_config=tg_config)[args["config"]]
+    config = dict(md_config=md_config, sm_config=sm_config, tg_config=tg_config)[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"
@@ -1863,7 +1726,7 @@ if __name__ == "__main__":
         sm_pt_batch = dict(input_ids=pt_batch["input_ids"], attention_mask=pt_batch["attention_mask"],
                         char_offsets=pt_batch["char_offsets"], char_ids=pt_batch["char_ids"])
         if model_name == "fastformer_fused_electra":
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0, highway_cls_ar_w=0.0,
+            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, adv_step_size=1e-3, lm_loss_w=5.0, electra_loss_w=1.0,
                                                          aitm=aitm, alum=False, alum_aitm_alternate=False)
             sm_pt_batch = pt_batch
             assert not forward_only
