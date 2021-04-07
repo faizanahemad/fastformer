@@ -1680,7 +1680,7 @@ if __name__ == "__main__":
     length = args["length"]
     lr = args["lr"]
     texts = args["texts"]
-    config = dict(md_config=md_config, sm_config=sm_config, tg_config=tg_config)[args["config"]]
+    config = config_dict[args["config"]]
     epochs = args["epochs"]
     if aitm:
         assert not forward_only and model_name == "fastformer_fused_electra"

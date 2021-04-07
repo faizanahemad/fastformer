@@ -514,7 +514,7 @@ def train(local_rank, args):
 
     mconf = model_config.to_dict()
 
-    config = dict(md_config=md_config, sm_config=sm_config, tg_config=tg_config)[mconf.pop("model_size")]
+    config = config_dict[mconf.pop("model_size")]
     if any(config.relative_attention):
         size_dicts = {k: v - 4 for k, v in size_dicts.items()}
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
