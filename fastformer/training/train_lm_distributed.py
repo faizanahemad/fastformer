@@ -52,6 +52,7 @@ import wandb
 from pytz import timezone
 from datetime import datetime, timedelta
 from torch.utils.data.dataloader import DataLoader
+from collections import Counter
 
 
 def training_args():
@@ -357,7 +358,10 @@ class LargeValidator:
                     final_labels.extend(lbl)
                     final_predictions.extend(prd)
                 score = accuracy_score(final_labels, final_predictions)
-                results[k] = dict(accuracy=score)
+                most_common_label = Counter(final_labels).most_common(1)[0][0]
+                most_common_label_count = Counter(final_labels).most_common(1)[0][1]
+                discount_score = most_common_label_count / len(final_labels)
+                results[k] = dict(accuracy=score, common_class_accuracy=discount_score)
             else:
                 results[k] = pd.DataFrame.from_records(predictions).mean().to_dict()
                 _ = results[k].pop("answering_lm_accuracy", None)
