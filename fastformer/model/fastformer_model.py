@@ -50,20 +50,9 @@ from transformers.utils import logging
 
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
+from fastformer.model.lib import *
 from fastformer.utils import *
 
-# from transformers.activations import ACT2FN
-ACT2FN = {
-    "relu": nn.ReLU,
-    "silu": nn.SiLU,
-    "swish": nn.SiLU,
-    "gelu": nn.GELU,
-    "tanh": nn.Tanh,
-    "gelu_new": nn.GELU,
-    "gelu_fast": nn.GELU,
-    "linear": nn.Linear,
-    "sigmoid": nn.Sigmoid,
-}
 
 try:
     from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
@@ -74,110 +63,48 @@ from fastformer.config import *
 
 logger = logging.get_logger(__name__)
 
-INF = 1e6
-EPS = 1e-6
-
-
-class DropoutContext(object):
-    def __init__(self):
-        self.dropout = 0
-        self.mask = None
-        self.scale = 1
-        self.reuse_mask = True
-
-
-def get_mask(input, local_context):
-    if not isinstance(local_context, DropoutContext):
-        dropout = local_context
-        mask = None
-    else:
-        dropout = local_context.dropout
-        dropout *= local_context.scale
-        mask = local_context.mask if local_context.reuse_mask else None
-
-    if dropout > 0 and mask is None:
-        mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).bool()
-
-    if isinstance(local_context, DropoutContext):
-        if local_context.mask is None:
-            local_context.mask = mask
-
-    return mask, dropout
-
-
-class XDropout(torch.autograd.Function):
-    """Optimized dropout function to save computation and memory by using mask operation instead of multiplication."""
-
-    @staticmethod
-    def forward(ctx, input, local_ctx):
-        mask, dropout = get_mask(input, local_ctx)
-        ctx.scale = 1.0 / (1 - dropout)
-        if dropout > 0:
-            ctx.save_for_backward(mask)
-            return input.masked_fill(mask, 0) * ctx.scale
-        else:
-            return input
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if ctx.scale > 1:
-            (mask,) = ctx.saved_tensors
-            return grad_output.masked_fill(mask, 0) * ctx.scale, None
-        else:
-            return grad_output, None
-
-
-class Dropout(torch.nn.Module):
+class PatchEmbed(nn.Module):
+    """ Image to Patch Embedding
     """
-    Optimized dropout module for stabilizing the training
-
-    Args:
-
-        drop_prob (float): the dropout probabilities
-
-    """
-
-    def __init__(self, drop_prob):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
         super().__init__()
-        self.drop_prob = drop_prob
-        self.count = 0
-        self.context_stack = None
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        """
-        Call the module
-
-        Args:
-            x (:obj:`torch.tensor`): The input tensor to apply dropout
-
-
-        """
-        if self.training and self.drop_prob > 0:
-            return XDropout.apply(x, self.get_context())
+        B, C, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        assert H == self.img_size[0] and W == self.img_size[1], \
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
-    def clear_context(self):
-        self.count = 0
-        self.context_stack = None
 
-    def init_context(self, reuse_mask=True, scale=1):
-        if self.context_stack is None:
-            self.context_stack = []
-        self.count = 0
-        for c in self.context_stack:
-            c.reuse_mask = reuse_mask
-            c.scale = scale
+class ImageEmbeddings(nn.Module):
+    def __init__(self, config: FastFormerConfig):
+        super().__init__()
+        hidden_size = config.block_channel_size[0]
+        self.embedding_size = config.embedding_size
+        self.position_biased_input = getattr(config, "position_biased_input", True)
+        self.position_embeddings = nn.Embedding(
+            config.max_position_embeddings * (2 if config.relative_attention else 1) + (config.num_highway_cls_tokens + 1) * (
+                2 if config.relative_attention else 1), self.embedding_size)
+        if self.embedding_size != hidden_size:
+            self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
+        self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
+        self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
+        self.dropout = Dropout(config.hidden_dropout)
 
-    def get_context(self):
-        if self.context_stack is not None:
-            if self.count >= len(self.context_stack):
-                self.context_stack.append(DropoutContext())
-            ctx = self.context_stack[self.count]
-            ctx.dropout = self.drop_prob
-            self.count += 1
-            return ctx
-        else:
-            return self.drop_prob
+    def forward(self, input_patches):
+        pass
 
 
 class Embeddings(nn.Module):
@@ -219,8 +146,8 @@ class Embeddings(nn.Module):
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.register_buffer("position_ids", torch.arange(config.max_position_embeddings + config.num_highway_cls_tokens).expand((1, -1)))
-        self.register_buffer("highway_position_ids", torch.arange(config.num_highway_cls_tokens).expand((1, -1)))
         if config.num_highway_cls_tokens > 0:
+            self.register_buffer("highway_position_ids", torch.arange(config.num_highway_cls_tokens).expand((1, -1)))
             self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
 
     def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None,
@@ -287,65 +214,6 @@ class Embeddings(nn.Module):
 
         embeddings = self.dropout(embeddings) if use_embed_proj else embeddings
         return embeddings, self.LayerNormPosEmb(self.position_embeddings.weight if self.config.relative_attention else position_embeddings.squeeze(0)) if position_embeddings is not None else None
-
-
-def pool_tensor_basic(tensor, mode="mean", stride=2):
-    if tensor is None:
-        return None
-
-    if stride == 1:
-        return tensor
-
-    ndim = tensor.ndim
-    if ndim == 2:
-        tensor = tensor[:, None, :, None]
-    elif ndim == 3:
-        tensor = tensor[:, None, :, :]
-    # Stride is applied on the second-to-last dimension.
-    stride = (stride, 1)
-
-    if mode == "mean":
-        tensor = F.avg_pool2d(tensor, stride, stride=stride, ceil_mode=True)
-    elif mode == "max":
-        tensor = F.max_pool2d(tensor, stride, stride=stride, ceil_mode=True)
-    elif mode == "min":
-        tensor = -F.max_pool2d(-tensor, stride, stride=stride, ceil_mode=True)
-    else:
-        raise NotImplementedError("The supported modes are 'mean', 'max' and 'min'.")
-
-    if ndim == 2:
-        tensor = tensor[:, 0, :, 0]
-    elif ndim == 3:
-        tensor = tensor[:, 0]
-
-    return tensor
-
-
-def pool_tensor(tensor, cls_size, mode="mean", stride=2):
-    """Apply 1D pooling to a tensor of size [B x T (x H)]."""
-    if tensor is None:
-        return None
-
-    if stride == 1:
-        return tensor
-
-    # Do the pool recursively if tensor is a list or tuple of tensors.
-    if isinstance(tensor, (tuple, list)):
-        return type(tensor)(pool_tensor(x, mode=mode, stride=stride) for x in tensor)
-
-    # TODO: check if even length in dim=1 (seq dim)
-    cls_tokens, tensor = tensor.split([cls_size, tensor.size(1) - cls_size], 1)
-    tensor = pool_tensor_basic(tensor, mode, stride)
-
-    tensor = torch.cat([cls_tokens, tensor], dim=1)
-    ts = tensor.size()
-    padding_extra = 8 * math.ceil(ts[1] / 8) - ts[1]
-    # https://pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.pad
-    if len(ts) == 3:
-        tensor = nn.functional.pad(tensor, (0, 0, 0, padding_extra), mode="constant")
-    elif len(ts) == 2:
-        tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
-    return tensor
 
 
 class AttentionStructure(nn.Module):
@@ -455,419 +323,6 @@ class AttentionStructure(nn.Module):
         return attention_inputs
 
 
-class Conv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, groups, bias=True, stride=1, dilation=1, padding=0, padding_mode='zeros'):
-        super().__init__()
-        self.pre_permute = True
-        self.post_permute = True
-        self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                              groups=groups, bias=bias, stride=stride, dilation=dilation, padding=padding, padding_mode=padding_mode)
-
-    def forward(self, x, pre_permute=True, post_permute=True):
-        unsqueeze = False
-        if len(x.shape) == 2:
-            x = x.unsqueeze(0)
-            unsqueeze = True
-        if pre_permute and self.pre_permute:
-            x = x.permute(0, 2, 1)
-        x = self.conv(x)
-        if post_permute and self.post_permute:
-            x = x.permute(0, 2, 1)
-        if unsqueeze:
-            x = x.squeeze(0)
-        return x
-
-
-class SequenceDependentPositionTransform(nn.Module):
-    def __init__(self, config: FastFormerConfig, d_pos_in, d_model_in, d_out, qkv_transform_groups, compress):
-        super().__init__()
-        act = config.hidden_act
-        self.cls_transform = Conv1d(in_channels=d_model_in, out_channels=d_pos_in, kernel_size=1,
-                                    groups=qkv_transform_groups) if qkv_transform_groups > 1 else nn.Linear(d_model_in, d_pos_in)
-        self.d_pos_in = d_pos_in
-        self.ffn = BertFFN(config, 2 * d_pos_in, 4 * d_pos_in, 0, d_out)
-        self.compress = nn.AvgPool1d(4) if compress else None
-
-    def forward(self, seq, position_embeds, stride=1):
-        seq_len, _ = position_embeds.shape
-        batch_size, _, _ = seq.shape
-        cls_token = seq[:, 0:1, :]
-        cls_token = self.cls_transform(cls_token).expand(batch_size, seq_len, self.d_pos_in)
-        position_embeds = position_embeds.expand(batch_size, seq_len, self.d_pos_in)
-        embeds = torch.cat([cls_token, position_embeds], dim=2)
-        embeds = self.ffn(embeds)
-        if stride > 1:
-            embeds = pool_tensor(embeds, 0, "mean", stride)
-
-        return embeds
-
-
-class ShortSeqRNNOld(nn.Module):
-    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
-        super().__init__()
-        self.config = config
-        self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.heads = heads
-        self.kernel_size = kernel_size
-        self.all_head_size = heads * head_size
-        self.hidden_size = hidden_size
-        act = config.hidden_act
-        assert hidden_size % (2 * heads) == 0
-        self.head_size = head_size
-        self.overlap = overlap
-        self.gru = nn.ModuleList()
-        self.gru_global = nn.ModuleList()
-        for i in range(heads):
-            rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-                         nonlinearity="tanh",
-                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                          nonlinearity="tanh",
-                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            # rnn = nn.GRU(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-            #              bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            # rnn2 = nn.GRU(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-            #               bias=False, batch_first=True, dropout=0.0, bidirectional=True)
-            self.gru.append(rnn)
-            self.gru_global.append(rnn2)
-
-    def forward(self, query, key=None, value=None):
-        # st = time.time()
-        if key is None:
-            key = query
-        if value is None:
-            value = key
-
-        bs, seqlen, _ = query.shape
-        context_len = key.shape[1]
-        # assert self.hidden_size == dim
-
-        upsampled = False
-        if seqlen < context_len:
-            upsampled = True
-            query = value + upsample(query, self.config.stride, context_len, self.cls_tokens)
-            seqlen = context_len
-
-        num_segments = int(np.ceil(seqlen / self.kernel_size))
-        target_len = num_segments * self.kernel_size
-        if target_len - seqlen > 0:
-            query = nn.functional.pad(query, (0, 0, 0, target_len - seqlen, 0, 0))
-        query = query.view(-1, self.kernel_size, query.shape[2])
-        query = query.view(query.shape[0], self.kernel_size, self.heads, -1)
-
-        query = query.permute(2, 0, 1, 3)
-        processed_query = []
-        # stg = time.time()
-        for i in range(query.size(0)):
-            # print("Short Seq RNN sizes = ", query[i].size(), query.size())
-            self.gru[i].flatten_parameters()
-            qp = self.gru[i](query[i])[0]
-            processed_query.append(qp)
-        query = torch.stack(processed_query, 0)
-        query = query.view(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
-
-        processed_query = []
-        query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
-        for i in range(query_global.size(0)):
-            self.gru_global[i].flatten_parameters()
-            qp = self.gru_global[i](query_global[i])[0]
-            processed_query.append(qp)
-        query_global = torch.stack(processed_query, 0).unsqueeze(-2)
-        query = query + query_global
-        query = query.view(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
-        query = query.permute(1, 2, 0, 3).reshape(-1, self.kernel_size, query.size(-1))
-
-        # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
-        # query = self.gru(query)[0]
-        # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        query = query.view(bs, -1, query.size(-1))[:, :seqlen]
-
-        if upsampled:
-            query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
-
-        # et = time.time()
-        # print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg), query.size())
-        return query
-
-
-class ShortSeqRNN(nn.Module):
-    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size, overlap, layers=1, maintain_dim=True):
-        super().__init__()
-        self.config = config
-        self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.heads = heads
-        self.kernel_size = kernel_size
-        self.all_head_size = heads * head_size
-        self.hidden_size = hidden_size
-        act = config.hidden_act
-        assert hidden_size % (2 * heads) == 0
-        self.head_size = head_size
-        self.overlap = overlap
-        self.gru = nn.ModuleList()
-        self.gru_global = nn.ModuleList()
-        for i in range(heads):
-            rnn = nn.RNN(hidden_size // self.heads, hidden_size // (2 * self.heads), layers,
-                         nonlinearity="tanh",
-                         bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-            rnn2 = nn.RNN(hidden_size // self.heads, hidden_size // ((2 if maintain_dim else 1) * self.heads), layers,
-                          nonlinearity="tanh",
-                          bias=True, batch_first=True, dropout=0.0, bidirectional=True)
-
-            
-            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0',)
-            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0',)
-            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0', )
-            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0', )
-            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_hh_l0_reverse', )
-            # rnn = torch.nn.utils.weight_norm(rnn, 'weight_ih_l0_reverse', )
-            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_hh_l0_reverse', )
-            # rnn = torch.nn.utils.weight_norm(rnn, 'bias_ih_l0_reverse', )
-            self.gru.append(rnn)
-            self.gru_global.append(rnn2)
-
-    def forward(self, query, key=None, value=None):
-        # st = time.time()
-        if key is None:
-            key = query
-        if value is None:
-            value = key
-
-        bs, seqlen, _ = query.shape
-        context_len = key.shape[1]
-        # assert self.hidden_size == dim
-
-        upsampled = False
-        if seqlen < context_len:
-            upsampled = True
-            query = value + upsample(query, self.config.stride, context_len, self.cls_tokens)
-            seqlen = context_len
-
-        num_segments = int(np.ceil(seqlen / self.kernel_size))
-        target_len = num_segments * self.kernel_size
-        query = nn.functional.pad(query, (0, 0, self.overlap, target_len + self.overlap - seqlen, 0, 0))
-        segs = []
-        segments = []
-        for i in range(num_segments):
-            seg_start = i * self.kernel_size
-            seg_end = (i + 1) * self.kernel_size + 2 * self.overlap
-            seg = query[:, seg_start:seg_end]
-            segs.append(seg)
-            segments.append((seg_start, seg_end, seg_end - 2 * self.overlap, seg_end - seg_start,))
-
-        query = torch.stack(segs, 0).transpose(0, 1)
-        query = query.reshape(-1, query.shape[2], query.shape[3])
-        query = query.view(query.shape[0], query.shape[1], self.heads, -1)
-
-        query = query.permute(2, 0, 1, 3)
-        processed_query = []
-        # stg = time.time()
-        for i in range(query.size(0)):
-            # print("Short Seq RNN sizes = ", query[i].size(), query.size())
-            self.gru[i].flatten_parameters()
-            qp = self.gru[i](query[i])[0]
-            processed_query.append(qp)
-        query = torch.stack(processed_query, 0)
-
-        query = query[:, :, self.overlap:-self.overlap]
-        query = query.view(query.size(0), bs, num_segments, self.kernel_size, query.size(-1))
-        processed_query = []
-
-        query_global = torch.cat((query[:, :, :, 0:1, :], query[:, :, :, -2:-1, :]), -2).mean(-2)
-        for i in range(query_global.size(0)):
-            self.gru_global[i].flatten_parameters()
-            qp = self.gru_global[i](query_global[i])[0]
-            processed_query.append(qp)
-        query_global = torch.stack(processed_query, 0).unsqueeze(-2)
-        query = query + query_global
-        query = query.view(query.size(0), bs * num_segments, self.kernel_size, query.size(-1))
-
-        query = query.permute(1, 2, 0, 3).reshape(-1, query.shape[2], query.size(-1))
-
-        # query = query.transpose(1, 2).reshape(-1, query.shape[1], query.shape[3])
-        # query = self.gru(query)[0]
-        # query = query.reshape(-1, self.heads, query.shape[1], query.shape[2]).transpose(1, 2).view(-1, query.shape[1], self.heads * query.shape[2])
-        # query = query[:, self.overlap:-self.overlap]
-        query = query.reshape(bs, -1, query.size(-1))[:, :seqlen]
-
-        if upsampled:
-            query = pool_tensor(query, self.cls_tokens, "mean", self.config.stride)
-
-        # et = time.time()
-        # print("ShortSeqRNN timing, Overall = %.5f" % (et - st), "Only Gru = %.5f" % (et - stg), query.size())
-        return query
-
-
-class SeparableConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, groups=None, pointwise_groups=None,
-                 bias=False, stride=1, padding=None):
-        super().__init__()
-        if padding is None:
-            padding = (kernel_size - 1) // 2
-
-        self.depthwise = nn.Conv1d(in_channels=in_channels, out_channels=in_channels,
-                                   kernel_size=kernel_size, groups=in_channels, bias=False, stride=stride, padding=padding)
-        self.pointwise = nn.Conv1d(in_channels, out_channels, bias=bias, kernel_size=1, groups=pointwise_groups)
-
-        self.out_channels = out_channels
-
-    def forward(self, inputs):
-        """
-        Expect inputs in channels first format
-        :param inputs:
-        :return:
-        """
-        inputs = inputs.permute(0, 2, 1)
-        inputs = self.depthwise(inputs)
-        inputs = self.pointwise(inputs)
-        inputs = inputs.permute(0, 2, 1)
-        return inputs
-
-
-class SDConv(nn.Module):
-    def __init__(self, config: FastFormerConfig, hidden_size, heads, head_size, kernel_size=9, stride=1):
-        super().__init__()
-        self.config = config
-        self.cls_tokens = config.num_highway_cls_tokens + 1
-        self.heads = heads
-        self.kernel_size = kernel_size
-        self.all_head_size = heads * head_size
-        self.hidden_size = hidden_size
-        self.stride = stride
-        act = config.hidden_act
-        self.act = checkpoint_wrapper(ACT2FN[act](), offload_to_cpu=False)
-        assert hidden_size % heads == 0
-        self.head_size = head_size
-        self.conv_attn_kernel = nn.Conv1d(in_channels=hidden_size, out_channels=self.heads * self.kernel_size,
-                                          kernel_size=kernel_size, groups=heads, bias=False, stride=stride, padding=(kernel_size - 1) // 2)
-        # self.conv_attn_kernel = nn.Linear(self.all_head_size, self.heads * self.kernel_size)  # Multi-head?
-        # if config.no_v_head:
-        #     self.conv_attn_point = nn.Identity()
-        # else:
-        #     self.conv_attn_point = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.use_cuda_conv = config.use_cuda_conv
-        if not self.use_cuda_conv or self.stride != 1:
-            self.unfold1d = nn.Unfold(kernel_size=[kernel_size, 1], padding=[(kernel_size - 1) // 2, 0], stride=[stride, 1])
-        else:
-            self.padding_l = (self.kernel_size - 1) // 2
-
-    def forward(self, query, key=None, value=None):
-        # return query[:, :, :self.all_head_size]
-        assert key is None or self.stride == 1
-        assert value is None or self.stride == 1
-        if key is None:
-            key = query
-        if value is None:
-            value = key
-
-        bs, seqlen, dim = query.shape
-        context_len = key.shape[1]
-        assert self.hidden_size == dim
-
-        upsampled = False
-        if seqlen < context_len:
-            upsampled = True
-            query = upsample(query, self.config.stride, context_len, self.cls_tokens)
-            seqlen = context_len
-
-        conv_kernel_layer = self.conv_attn_kernel(query.transpose(1, 2)).transpose(1, 2)  # Softmax only in kernel dim
-
-        if not self.use_cuda_conv or self.stride != 1:
-            conv_kernel_layer = conv_kernel_layer.reshape(-1, self.kernel_size, 1)  # BxSxH, k, 1
-            conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
-
-            # conv_out_layer
-            conv_out_layer = value.permute(0, 2, 1).unsqueeze(-1)  # B,D,Seq, 1
-            unfold_conv_out_layer = self.unfold1d(conv_out_layer)  # B, D*kernel_size, seq
-            # unfold_conv_out_layer.shape[2] below is sequence length after strided unfolding
-            unfold_conv_out_layer = unfold_conv_out_layer.transpose(1, 2)  # B, seq, D, kernel_size
-            conv_out_layer = torch.reshape(unfold_conv_out_layer, [-1, self.hidden_size // self.heads, self.kernel_size])  # BxSxH, H_dim, kernel
-            conv_out_layer = torch.matmul(conv_out_layer, conv_kernel_layer)
-            # seqlen = unfold_conv_out_layer.shape[1]
-            conv_out = torch.reshape(conv_out_layer, [bs, unfold_conv_out_layer.shape[1], -1])  # B, S, D
-        else:
-            # TODO: implement strides here
-            conv_kernel_layer = conv_kernel_layer.reshape(
-                bs, seqlen, -1, self.kernel_size)
-            conv_kernel_layer = conv_kernel_layer.permute(0, 2, 3,
-                                                          1).contiguous()
-            # B H K T
-            weights = torch.softmax(conv_kernel_layer, dim=-2)
-
-            # B,C,T
-            conv_out_layer = value.permute(0, 2, 1).contiguous()
-
-            conv_out_layer = dynamicconvFunction.apply(
-                conv_out_layer, weights,
-                self.padding_l).transpose(1, 2).contiguous()
-            conv_out = torch.reshape(conv_out_layer, [bs, seqlen, -1])
-
-        if upsampled:
-            conv_out = pool_tensor(conv_out, self.cls_tokens, "mean", self.config.stride)
-        return conv_out
-
-
-class CompressSeqSDConv(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
-        super().__init__()
-        self.config = config
-        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
-        if expand_dims:
-            self.expansion_factor = 2
-            self.expand = Conv1d(d_model, d_model * (self.expansion_factor - 1), 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
-        else:
-            self.expand = nn.Identity()
-            self.contract = nn.LayerNorm(d_model, config.layer_norm_eps) if use_in_funnel else nn.Identity()
-            self.expansion_factor = 1
-        self.stride = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        kernel_size = config.pooling_kernel_size if use_in_funnel else config.compressed_query_attention_kernel_size
-        d_head = config.d_head[block_index] * self.expansion_factor
-        self.d_model, self.n_head, self.d_head = d_model * self.expansion_factor, n_head, d_head
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        self.sd_conv = SDConv(config, d_model * self.expansion_factor, n_head, d_head, kernel_size, self.stride)
-
-    def forward(self, query):
-        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.stride)
-        if self.expansion_factor > 1:
-            query = torch.cat((self.expand(query), query), dim=-1)
-        cls, query = query.split([self.cls_tokens, query.size(1) - self.cls_tokens], 1)
-        target_len = qskip.shape[1] - self.cls_tokens
-        query = self.sd_conv(query)
-        if target_len - query.shape[1] > 0:
-            query = nn.functional.pad(query, (0, 0, 0, target_len - query.shape[1], 0, 0))
-        q = torch.cat([cls, query], dim=1)
-        return qskip + self.contract(q)
-
-
-class CompressSeqMeanPooling(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, d_model, n_head, use_in_funnel=False):
-        super().__init__()
-        self.config = config
-        self.compressed_query_attention = config.stride if use_in_funnel else config.compressed_query_attention_stride
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
-        expand_dims = config.expand_dim_before_pooling if use_in_funnel else False
-        if expand_dims:
-            self.expansion_factor = 2
-            self.expand = Conv1d(d_model, d_model * (self.expansion_factor - 1), 1, n_head, False)
-            self.contract = nn.Sequential(Conv1d(d_model * 2, d_model, 1, n_head, False), nn.LayerNorm(d_model, config.layer_norm_eps))
-        else:
-            self.expand = nn.Identity()
-            self.contract = nn.Identity()
-            self.expansion_factor = 1
-
-    def forward(self, query):
-        # st = time.time()
-        qskip = pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention)
-        if self.expansion_factor == 1:
-            return qskip
-        else:
-            query = torch.cat((self.expand(query), query), dim=-1)
-        query = self.contract(pool_tensor(query, self.cls_tokens, mode='mean', stride=self.compressed_query_attention))
-        # ext = time.time()
-        # print("Mean pooling = %.5f" % (ext - st))
-        return qskip + query
-
-
 class MultiheadAttention(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
                  last_layer_index=None, force_no_sdconv=False):
@@ -925,7 +380,6 @@ class MultiheadAttention(nn.Module):
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
         self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
-        self.sequence_dependent_position_transform = self.config.sequence_dependent_position_transform
         self.approximate_attention = self.config.approximate_attention[block_index]
 
         qkv_transform_groups = self.config.qkv_transform_groups
@@ -965,11 +419,7 @@ class MultiheadAttention(nn.Module):
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
             assert not compress_key
         if self.separate_content_and_position_attention:
-            if self.sequence_dependent_position_transform:
-                self.pos_q_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups,
-                                                                     compress_query)
-                self.pos_k_head = SequenceDependentPositionTransform(config, config.embedding_size, d_model, n_head * d_head, qkv_transform_groups, False)
-            elif qkv_transform_groups > 1:
+            if qkv_transform_groups > 1:
                 self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1,
                                          groups=qkv_transform_groups, stride=1, bias=True)
                 self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
@@ -1021,11 +471,7 @@ class MultiheadAttention(nn.Module):
             if need_key_compress:
                 position_embed_of_key = pool_tensor(position_embed_of_key.unsqueeze(0), self.cls_tokens, mode='mean',
                                                     stride=self.config.compressed_query_attention_stride).squeeze()
-            if self.sequence_dependent_position_transform:
-                pos_k_head = self.pos_k_head(key, position_embed_of_key, 1).view(batch_size, -1, n_head, d_head)
-                pos_q_head = self.pos_q_head(query, position_embed_of_query, 1).view(batch_size, -1, n_head, d_head)
-
-            elif self.relative_attention:
+            if self.relative_attention:
                 pos_k_head = self.pos_k_head(position_embed_of_key)
                 pos_q_head = self.pos_q_head(position_embed_of_query)
             else:
@@ -1067,14 +513,10 @@ class MultiheadAttention(nn.Module):
                                                  nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
                 attn_score = attn_score + nc_score
             elif self.separate_content_and_position_attention:
-                if self.sequence_dependent_position_transform:
-                    c2p_score = torch.einsum("bind,bjnd->bnij", q_head, pos_k_head)
-                    p2c_score = torch.einsum("bind,bjnd->bnij", pos_q_head, k_hea)
-                    p2p_score = torch.einsum("bind,bjnd->bnij", pos_q_head, pos_k_head)
-                else:
-                    c2p_score = torch.einsum("bind,jnd->bnij", q_head, pos_k_head)
-                    p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head)
-                    p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
+
+                c2p_score = torch.einsum("bind,jnd->bnij", q_head, pos_k_head)
+                p2c_score = torch.einsum("ind,bjnd->bnij", pos_q_head, k_head)
+                p2p_score = torch.einsum("ind,jnd->nij", pos_q_head, pos_k_head).expand(batch_size, n_head, seq_len, context_len)
                 # merge attention scores
 
                 nc_score = c2p_score + p2c_score + p2p_score
@@ -1148,119 +590,6 @@ class MultiheadAttention(nn.Module):
         else:
             output = self.layer_norm(query_temp + attn_out)
         return (output, attn_prob) if output_attentions else (output,)
-
-
-class ConvFFN(nn.Module):
-    """
-    ConvActivation: Conv, Activation
-    """
-
-    def __init__(self, config: FastFormerConfig, d_model, d_inner, groups, layers=0, d_out=None):
-        super().__init__()
-        d_out = d_model if d_out is None else d_out
-        cin, cout = d_model, d_out
-        act = config.hidden_act
-        self.conv1d_in = Conv1d(in_channels=cin, out_channels=d_inner, kernel_size=1, groups=groups, bias=True)
-        self.conv1d_in.post_permute = False
-        self.activation_dropout = Dropout(config.hidden_dropout)
-        self.layers = nn.ModuleList() if layers > 0 else None
-        for _ in range(layers):
-            cnn = Conv1d(in_channels=d_inner, out_channels=d_inner, kernel_size=1, groups=groups)
-            cnn.pre_permute=False
-            cnn.post_permute=False
-            self.layers.append(cnn)
-        self.conv1d_out = Conv1d(in_channels=d_inner, out_channels=cout, kernel_size=1, groups=groups, bias=False)
-        self.conv1d_out.pre_permute = False
-        self.act = checkpoint_wrapper(ACT2FN[act](), offload_to_cpu=False)
-
-    def forward(self, x):
-        h = x
-        output = self.conv1d_in(h)
-        output = self.act(output)
-        output = self.activation_dropout(output)
-        if self.layers:
-            for ll in self.layers:
-                output = ll(output)
-                output = self.act(output)
-                output = self.activation_dropout(output)
-        output = self.conv1d_out(output)
-
-        return output
-
-
-class BertFFN(nn.Module):
-    def __init__(self, config: FastFormerConfig, d_model, d_inner, layers=0, d_out=None):
-        super().__init__()
-        self.linear_1 = nn.Linear(d_model, d_inner, bias=True)
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=False)
-        self.activation_dropout = Dropout(config.hidden_dropout)
-        d_out = d_model if d_out is None else d_out
-        self.linear_2 = nn.Linear(d_inner, d_out, bias=False)
-        self.layers = nn.ModuleList() if layers > 0 else None
-        for _ in range(layers):
-            self.layers.append(nn.Linear(d_inner, d_inner, bias=False))
-
-    def forward(self, hidden):
-        h = self.linear_1(hidden)
-        h = self.activation_function(h)
-        h = self.activation_dropout(h)
-        if self.layers:
-            for ll in self.layers:
-                h = ll(h)
-                h = self.act(h)
-                h = self.activation_dropout(h)
-        h = self.linear_2(h)
-        return h
-
-
-class PositionwiseFFN(nn.Module):
-    def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_encoder_layer):
-        super().__init__()
-        self.config = config
-        groups, layers = config.ffn_groups, config.ffn_layers
-        d_model, d_inner = config.block_channel_size[block_index], config.block_channel_size[block_index] * config.ffn_width
-        d_next = config.block_channel_size[block_index + 1] if (block_index + 1) < len(config.block_channel_size) else d_model
-        self.n_blocks = config.block_sizes[block_index] - 1
-        self.need_dim_match = d_model != d_next and is_encoder_layer and is_last_layer_of_block
-        self.diff = d_next - d_model
-        self.d_model = d_model
-        self.activation_function = checkpoint_wrapper(ACT2FN[config.hidden_act](), offload_to_cpu=False)
-        self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
-        if self.need_dim_match:
-            self.layer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
-        if groups > 1:
-            assert d_model % groups == 0
-            self.lin = nn.Linear(d_model, d_model)
-            self.ffn = ConvFFN(config, d_model, d_inner, groups, layers)
-        else:
-            self.lin = nn.Identity()
-            self.ffn = BertFFN(config, d_model, d_inner, layers)
-
-    def forward(self, hidden, layer_index=None):
-        dim_match = self.need_dim_match and layer_index == self.n_blocks
-        h = self.lin(hidden)
-        h = self.ffn(h)
-        if dim_match:
-            if self.config.identity_preserving_norm:
-                pre_ffn = h
-                dh = h[:, :, :self.diff]
-                h = torch.cat((h, dh), 2)
-                h = self.layer_norm(h)
-                hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
-                h = hidden + h
-            else:
-                dh = h[:, :, :self.diff] + hidden[:, :, :self.diff]
-                pre_ffn = h
-                h = self.layer_norm(torch.cat((h + hidden, dh), 2))
-        else:
-            if self.config.identity_preserving_norm:
-                h = self.layer_norm(h)
-                pre_ffn = h
-                h = hidden + h
-            else:
-                pre_ffn = h
-                h = self.layer_norm(hidden + h)
-        return pre_ffn, h
 
 
 class LightLayer(nn.Module):
@@ -1480,7 +809,6 @@ class TransformerCrossAttentionDecoder(nn.Module):
         config.compressed_query_attention_layers = {}
         config.compressed_key_attention_layers = {}
         config.separate_content_and_position_attention = False
-        config.sequence_dependent_position_transform = False
         config.attention_dropout = 0.0
 
         self.config = config
@@ -1518,23 +846,6 @@ class TransformerCrossAttentionDecoder(nn.Module):
         (query,) = self.self_attn(query, key, value, (None, torch.logical_and(key_mask, key_padding_mask).type(key_padding_mask.dtype)), 0, False)
         query = self.self_attn_lin(query)
         return query_temp + self.self_attn_ln(query)
-
-
-def upsample(x, stride, target_len, cls_tokens):
-    """
-    Upsample tensor `x` to match `target_len` by repeating the tokens `stride` time on the sequence length dimension.
-    """
-    if stride == 1:
-        return x
-
-    cls, x = x.split([cls_tokens, x.size(1) - cls_tokens], 1)
-    output = torch.repeat_interleave(x, repeats=stride, dim=1)
-
-    output = nn.functional.pad(output, (0, 0, 0, (target_len - cls_tokens) - output.shape[1], 0, 0))
-    output = output[:, : target_len - cls_tokens]
-    output = torch.cat([cls, output], dim=1)
-
-    return output
 
 # TODO: Decoder layer keep 1 layer with Q=1st block hidden, K,V= 3rd block hidden. This does better upsampling than current method
 

@@ -120,7 +120,6 @@ class FastFormerConfig(PretrainedConfig):
             separate_content_and_position_attention=False,
             relative_attention=[False, False, False],
             approximate_attention=[False, False, False],
-            sequence_dependent_position_transform=False,
             light_first_layer=False,
             light_last_layer=False,
             compress_query_method=None,
@@ -206,8 +205,6 @@ class FastFormerConfig(PretrainedConfig):
         self.compressed_query_attention_layers = compressed_query_attention_layers
         self.compressed_key_attention_layers = compressed_key_attention_layers
         self.separate_content_and_position_attention = separate_content_and_position_attention
-        self.sequence_dependent_position_transform = sequence_dependent_position_transform
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or (not sequence_dependent_position_transform)
         assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
         assert len(block_channel_size) == len(block_sizes)
@@ -223,7 +220,6 @@ class FastFormerConfig(PretrainedConfig):
         self.relative_attention = relative_attention if isinstance(relative_attention, (list, tuple)) else [relative_attention] * self.block_channel_size
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
-        assert (sequence_dependent_position_transform and separate_content_and_position_attention) or not sequence_dependent_position_transform
         assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
         assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
         if light_first_layer or any(self.sdconv) or light_last_layer:
@@ -259,7 +255,7 @@ vanilla_albert_base = FastFormerConfig(vocab_size=30522, block_sizes=[12], block
                                        block_repeats=True)
 
 sm_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=5, use_cuda_conv=False,
-                             sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=8, ffn_groups=8, block_sizes=[4, 4, 4],
+                             stride=4, qkv_transform_groups=8, ffn_groups=8, block_sizes=[4, 4, 4],
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[24, 32, 64],
                              separate_compressiion_layer=False, light_last_layer=False, light_first_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
@@ -280,7 +276,7 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 # Fasttest
 md_config = FastFormerConfig(separate_content_and_position_attention=True, pooling_type="learn_sdconv", pooling_kernel_size=4, use_cuda_conv=True,
-                             sequence_dependent_position_transform=False, stride=4, qkv_transform_groups=1, ffn_groups=1,
+                             stride=4, qkv_transform_groups=1, ffn_groups=1,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[48, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
                              sdconv=[True, True, False], full_channel_separation=True,
@@ -301,7 +297,7 @@ md_config = FastFormerConfig(separate_content_and_position_attention=True, pooli
                              )
 
 lg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="learn_sdconv", pooling_kernel_size=3, use_cuda_conv=True,
-                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1,
+                             stride=2, qkv_transform_groups=1, ffn_groups=1,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=True,
                              sdconv=[True, True, False], full_channel_separation=True,
@@ -322,7 +318,7 @@ lg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 
 dg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3, use_cuda_conv=True, embedding_size=128,
-                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
+                             stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=True,
                              sdconv=[True, True, False], full_channel_separation=True,
@@ -344,7 +340,7 @@ dg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 
 tg_config = FastFormerConfig(separate_content_and_position_attention=False, pooling_type="mean", pooling_kernel_size=3, use_cuda_conv=True, embedding_size=256,
-                             sequence_dependent_position_transform=False, stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
+                             stride=2, qkv_transform_groups=1, ffn_groups=1, block_repeats=False,
                              approximate_attention=[False, False, False], max_position_embeddings=1024, d_head=[64, 64, 64],
                              separate_compressiion_layer=True, light_last_layer=False, light_first_layer=False,
                              sdconv=[False, False, False], full_channel_separation=True,
