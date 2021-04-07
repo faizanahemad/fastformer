@@ -251,7 +251,7 @@ class TokenizerDataset(Dataset):
     def __init__(self, config: FastFormerConfig, tokenizer: PreTrainedTokenizerFast,
                  char_to_id: dict, tokenizer_args: dict, dataset: Dataset, sentence_jumble_proba=((0, 0.95), (256, 1.0), (512, 1.0), (1024, 1.0)),
                  word_jumble_proba=((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.2), (1024, 0.25)),
-                 word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=True, word_jumble_in_pet=True,
+                 word_mask_in_pet=False, word_noise_in_pet=True, sentence_jumble_in_pet=False, word_jumble_in_pet=False,
                  sentence_jumble_pet_length_threshold=192, sentence_jumble_max_segments_in_pet=6,
                  word_mask_proba: list = ((0, 0.05), (128, 0.1), (256, 0.15), (512, 0.15), (1024, 0.2)),
                  word_noise_proba: tuple = ((0, 0.1), (128, 0.1), (256, 0.1), (512, 0.15), (1024, 0.2)),
