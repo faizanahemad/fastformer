@@ -90,6 +90,8 @@ class PatchEmbed(nn.Module):
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        self.height = img_size[0] // patch_size[0]
+        self.width = img_size[1] // patch_size[1]
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
@@ -285,7 +287,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         config = self.config
         B, C, H, W = x.shape
         x = self.patch_embed(x)
-        H = W = x.shape[1]
+        H, W = self.patch_embed.height, self.patch_embed.width
         initail_attention = torch.ones(x.shape[:2], device=x.device)
         hidden = x
         for layer in self.encoder_block_one:
@@ -298,12 +300,12 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             assert H % self.stride == 0 and W % self.stride == 0
             cls, hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
             hidden = hidden.reshape(B, H, W, config.block_channel_size[1]).permute(0, 3, 1, 2)
-            cls_attention, second_block_attention = second_block_attention.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+            cls_attention, second_block_attention = second_block_attention.split([config.num_highway_cls_tokens, second_block_attention.shape[1] - config.num_highway_cls_tokens], 1)
             second_block_attention = second_block_attention.reshape(B, H, W).unsqueeze(-1).permute(0, 3, 1, 2)
 
-            hidden = F.avg_pool2d(hidden, self.stride, self.stride).permute(0, 2, 3, 1).flatten(2)
+            hidden = F.avg_pool2d(hidden, self.stride, self.stride).flatten(2).permute(0, 2, 1)
             hidden = torch.cat((cls, hidden), 1)
-            second_block_attention = F.max_pool2d(second_block_attention, self.stride, self.stride).permute(0, 2, 3, 1).flatten(2).squeeze(-1)
+            second_block_attention = F.max_pool2d(second_block_attention, self.stride, self.stride).permute(0, 2, 3, 1).flatten(1)
             second_block_attention = torch.cat((cls_attention, second_block_attention), 1)
 
         for layer in self.encoder_block_two:
@@ -330,7 +332,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
 if __name__ == '__main__':
     x = torch.randn(8, 3, 224, 224)
-    config = vision_md_config
+    config = vision_lg_config
     model = FastFormerVisionModel(config)
     output = model(x)
     print(output)
