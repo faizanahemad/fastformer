@@ -1077,8 +1077,8 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             self.loss_ce = AdMSoftmaxLoss(ignore_index=self.pad_token_id, m=additive_margin_softmax_w)
             self.ignore_zero_ce = AdMSoftmaxLoss(ignore_index=0, m=additive_margin_softmax_w)
             self.loss_bce = BCELossFocal()
+        self.sentence_order_prediction_w = sentence_order_prediction_w
         if sentence_order_prediction_w > 0:
-            self.sentence_order_prediction_w = sentence_order_prediction_w
             self.sent_predict_fc = nn.Linear(config.block_channel_size[0], (self.cls_tokens + 1))
 
         if contrastive_w > 0:
