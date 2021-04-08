@@ -117,8 +117,8 @@ class FastFormerConfig(PretrainedConfig):
             num_highway_cls_tokens=7,
             position_biased_input=True,
             separate_content_and_position_attention=False,
-            relative_attention=[False, False, False],
-            approximate_attention=[False, False, False],
+            relative_attention=False,
+            approximate_attention=False,
             compress_query_method=None,
             compressed_query_attention_kernel_size=3,
             compressed_query_attention_stride=2,
@@ -219,11 +219,12 @@ class FastFormerConfig(PretrainedConfig):
         self.sdconv_kernel_size = [sdconv_kernel_size] * len(block_sizes) if isinstance(sdconv_kernel_size, int) else sdconv_kernel_size
         self.no_v_head = no_v_head
         self.identity_preserving_norm = identity_preserving_norm
-        self.relative_attention = relative_attention if isinstance(relative_attention, (list, tuple)) else [relative_attention] * self.block_channel_size
+        self.relative_attention = relative_attention if isinstance(relative_attention, (list, tuple)) else [relative_attention] * len(self.block_channel_size)
+        self.approximate_attention = approximate_attention if isinstance(approximate_attention, (list, tuple)) else [approximate_attention] * len(self.block_channel_size)
         assert position_biased_input or separate_content_and_position_attention
         assert not (separate_content_and_position_attention and any(approximate_attention))
-        assert (any(approximate_attention) and position_biased_input) or not any(approximate_attention)
-        assert len(approximate_attention) == len(block_sizes)  # + 1 for decoder
+        assert (any(self.approximate_attention) and position_biased_input) or not any(self.approximate_attention)
+        assert len(self.approximate_attention) == len(block_sizes)  # + 1 for decoder
         if any(self.sdconv):
             assert position_biased_input
 
@@ -340,8 +341,17 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              char_rnn_window_size=128,
                              )
 
+vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6])
+
+vision_lg_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[6, 6])
+
+vision_md_funnel_config = FastFormerConfig(stride=2, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6])
+
+vision_lg_funnel_config = FastFormerConfig(stride=2, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[6, 6])
+
 config_dict = dict(tg_config=tg_config, md_config=md_config, sm_config=sm_config, md_config_relative=md_config_relative)
 
+vision_config_dict = dict(vision_md_config=vision_md_config, vision_lg_config=vision_lg_config, vision_md_funnel_config=vision_md_funnel_config, vision_lg_funnel_config=vision_lg_funnel_config)
 
 
 # 20 % -> expand_dim_before_pooling=True, char_rnn=True

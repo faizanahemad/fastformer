@@ -61,8 +61,26 @@ except:
 
 from fastformer.config import *
 from fastformer.model import FastFormerPreTrainedModel
+from itertools import repeat
+import collections.abc
 
 logger = logging.get_logger(__name__)
+
+
+def _ntuple(n):
+    def parse(x):
+        if isinstance(x, collections.abc.Iterable):
+            return x
+        return tuple(repeat(x, n))
+    return parse
+
+
+to_1tuple = _ntuple(1)
+to_2tuple = _ntuple(2)
+to_3tuple = _ntuple(3)
+to_4tuple = _ntuple(4)
+to_ntuple = _ntuple
+
 
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
@@ -123,20 +141,13 @@ class MultiheadAttention(nn.Module):
         self.d_model = d_model
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
-
-
         self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
         self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
         self.v_head = nn.Linear(d_model_initial, d_model_initial)
 
         if self.relative_attention:
-            if qkv_transform_groups > 1:
-                self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1,
-                                         groups=qkv_transform_groups, stride=1, bias=True)
-                self.pos_k_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
-            else:
-                self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head, bias=True)
-                self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head, bias=False)
+            self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head, bias=True)
+            self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head, bias=False)
 
         self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
         self.layer_norm = nn.LayerNorm(config.block_channel_size[block_index], eps=config.layer_norm_eps)
@@ -183,8 +194,6 @@ class MultiheadAttention(nn.Module):
         # perform masking
         if attention_mask is not None:
             # TODO: handle attention mask's pooling for qk pooling
-            if need_key_compress:
-                attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=self.config.compressed_query_attention_stride)
             if len(attention_mask.size()) == 2:
                 attention_mask = attention_mask[:, None, None].float()
             attn_score = attn_score - INF * (1 - attention_mask)
@@ -225,6 +234,7 @@ class PositionwiseFFN(nn.Module):
         self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), activation_dropout, nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
 
     def forward(self, hidden):
+        h = hidden
         h = self.ffn(h)
         h = self.layer_norm(h)
         h = hidden + h
@@ -239,9 +249,9 @@ class TransformerLayer(nn.Module):
         self.block_index = block_index
         self.block_size = config.block_sizes[block_index]
 
-    def forward(self, query, key, value, attention_inputs, output_attentions=False):
+    def forward(self, query, key, value, attention_inputs):
         assert query.size(1) > 0
-        attn = self.attention(query, key, value, attention_inputs, output_attentions=output_attentions)
+        attn = self.attention(query, key, value, attention_inputs)
         output = self.ffn(attn)
         return output
 
@@ -250,24 +260,85 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig):
         super().__init__(config)
         self.config = config
-        self.embeddings = PatchEmbed(config.img_size, config.patch_size, config.in_chans, config.block_channel_size[0],
-                                     config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps)
+        self.patch_embed = PatchEmbed(config.img_size, config.patch_size, config.in_chans, config.block_channel_size[0],
+                                      config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps)
         self.encoder_block_one = nn.ModuleList()
         for i in range(config.block_sizes[0]):
             self.encoder_block_one.append(TransformerLayer(config, 0, True, i))
 
         self.encoder_block_two = nn.ModuleList()
         for i in range(config.block_sizes[1]):
-            self.encoder_block_one.append(TransformerLayer(config, 1, True, i))
+            self.encoder_block_two.append(TransformerLayer(config, 1, True, i))
 
         self.stride = config.stride
         self.decoder_block = nn.ModuleList()
         for i in range(config.num_decoder_layers):
             self.decoder_block.append(TransformerLayer(config, 0, False, i))
+        if config.block_channel_size[0] != config.block_channel_size[1]:
+            self.dim_match = nn.Sequential(nn.Linear(config.block_channel_size[0],config.block_channel_size[1], bias=False),
+                                           nn.LayerNorm(config.block_channel_size[1], eps=config.layer_norm_eps))
+        self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
+        self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
+        self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
 
-    def forward(self, x):
-        B = x.shape[0]
+    def forward(self, x, run_decoder=False):
+        config = self.config
+        B, C, H, W = x.shape
         x = self.patch_embed(x)
+        H = W = x.shape[1]
+        initail_attention = torch.ones(x.shape[:2], device=x.device)
+        hidden = x
+        for layer in self.encoder_block_one:
+            hidden = layer(hidden, hidden, hidden, (None, initail_attention))
+        first_block_hidden = hidden
+        if config.block_channel_size[0] != config.block_channel_size[1]:
+            hidden = self.dim_match(hidden)
+        second_block_attention = initail_attention
+        if self.stride > 1:
+            assert H % self.stride == 0 and W % self.stride == 0
+            cls, hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+            hidden = hidden.reshape(B, H, W, config.block_channel_size[1]).permute(0, 3, 1, 2)
+            cls_attention, second_block_attention = second_block_attention.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+            second_block_attention = second_block_attention.reshape(B, H, W).unsqueeze(-1).permute(0, 3, 1, 2)
+
+            hidden = F.avg_pool2d(hidden, self.stride, self.stride).permute(0, 2, 3, 1).flatten(2)
+            hidden = torch.cat((cls, hidden), 1)
+            second_block_attention = F.max_pool2d(second_block_attention, self.stride, self.stride).permute(0, 2, 3, 1).flatten(2).squeeze(-1)
+            second_block_attention = torch.cat((cls_attention, second_block_attention), 1)
+
+        for layer in self.encoder_block_two:
+            hidden = layer(hidden, hidden, hidden, (None, second_block_attention))
+        second_block_hidden = hidden
+
+        upsampled_hidden = None
+        if run_decoder:
+            cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+            cls = self.dim_match_decoder_linear(cls)
+            upsampled_hidden = upsampled_hidden.reshape(B, H // (config.stride ** (len(config.block_sizes) - 1)), W // (config.stride ** (len(config.block_sizes) - 1)), config.block_channel_size[1]).permute(0, 3, 1, 2)
+            upsampled_hidden = self.dim_match_decoder(upsampled_hidden).permute(0, 2, 3, 1).flatten(2)
+            upsampled_hidden = self.dim_match_decoder_ln(torch.cat((cls, hidden), 1))
+            upsampled_hidden = upsampled_hidden + first_block_hidden
+            hidden = self.dim_match_decoder_ln(self.dim_match_decoder_linear(hidden))
+
+            for i, layer in enumerate(self.decoder_block):
+                if i == 0:
+                    upsampled_hidden = layer(upsampled_hidden, hidden, hidden, (None, second_block_attention))
+                else:
+                    upsampled_hidden = layer(upsampled_hidden, upsampled_hidden, upsampled_hidden, (None, initail_attention))
+        return dict(first_block_hidden=first_block_hidden, second_block_hidden=second_block_hidden, third_block_hidden=upsampled_hidden)
+
+
+if __name__ == '__main__':
+    x = torch.randn(8, 3, 224, 224)
+    config = vision_md_config
+    model = FastFormerVisionModel(config)
+    output = model(x)
+    print(output)
+
+
+
+
+
 
 
 
