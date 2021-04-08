@@ -63,49 +63,6 @@ from fastformer.config import *
 
 logger = logging.get_logger(__name__)
 
-class PatchEmbed(nn.Module):
-    """ Image to Patch Embedding
-    """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
-        super().__init__()
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = num_patches
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
-
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-        # FIXME look at relaxing size constraints
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
-
-
-class ImageEmbeddings(nn.Module):
-    def __init__(self, config: FastFormerConfig):
-        super().__init__()
-        hidden_size = config.block_channel_size[0]
-        self.embedding_size = config.embedding_size
-        self.position_biased_input = getattr(config, "position_biased_input", True)
-        self.position_embeddings = nn.Embedding(
-            config.max_position_embeddings * (2 if config.relative_attention else 1) + (config.num_highway_cls_tokens + 1) * (
-                2 if config.relative_attention else 1), self.embedding_size)
-        if self.embedding_size != hidden_size:
-            self.embed_proj = nn.Linear(self.embedding_size, hidden_size, bias=False)
-        self.LayerNorm = nn.LayerNorm(hidden_size, eps=config.layer_norm_eps)
-        self.LayerNormPosEmb = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps) if config.separate_content_and_position_attention else nn.Identity()
-        self.dropout = Dropout(config.hidden_dropout)
-
-    def forward(self, input_patches):
-        pass
-
 
 class Embeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
@@ -856,7 +813,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             if getattr(module, "bias", None) is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-        if classname.find("Conv1d") != -1:
+        if classname.find("Conv1d") != -1 or classname.find("Conv2d") != -1:
             if getattr(module, "weight", None) is not None:
                 if self.config.initializer_std is None:
                     fan_out, fan_in = module.weight.shape[:2]
@@ -878,6 +835,10 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.token_type_embeddings.weight, std=std)
             if hasattr(module, "char_embeddings"):
                 nn.init.normal_(module.char_embeddings.weight, std=std)
+        elif classname == "PatchEmbed":
+            nn.init.normal_(module.cls_token, std=std)
+            nn.init.normal_(module.pos_embed, std=std)
+
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
                 projection_matrix = module.create_projection(device=next(self.parameters()).device)
@@ -1325,7 +1286,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                              token_type_ids=token_type_ids,
                              inputs_embeds=inputs_embeds,
                              char_ids=char_ids, char_offsets=char_offsets,
-                             run_decoder=True,
+                             run_decoder=run_answering or self.electra_loss_w > 0,
                              run_answering=run_answering, )
 
         assert attention_mask is not None
@@ -1548,50 +1509,55 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
 
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
-        active_loss = tokenizer_attn_mask.bool()
-        first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
-        prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :self.config.vocab_size]
-        active_labels = labels[active_loss].reshape(-1)
-        active_prediction_logits = prediction_logits.reshape(-1, self.config.vocab_size)
-        masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
-        labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
-        if record_accuracy:
-            # predictions = prediction_logits.argmax(dim=-1)
-            # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
-            accuracy_hist["lm_accuracy"] = (float(labels.float().cpu().numpy().mean()))
 
-        et = time.time() - st
-        timing_dict.append(("lm_accuracy_loss", et))
+        masked_lm_loss = 0.0
+        if self.lm_loss_w > 0 or self.electra_loss_w > 0:
+            active_loss = tokenizer_attn_mask.bool()
+            first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
+            prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :self.config.vocab_size]
+            active_labels = labels[active_loss].reshape(-1)
+            active_prediction_logits = prediction_logits.reshape(-1, self.config.vocab_size)
+            masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
+            labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
+            if record_accuracy:
+                # predictions = prediction_logits.argmax(dim=-1)
+                # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
+                accuracy_hist["lm_accuracy"] = (float(labels.float().cpu().numpy().mean()))
 
-        decoder_outputs = funnel_outputs["decoder_outputs"]
+            et = time.time() - st
+            timing_dict.append(("lm_accuracy_loss", et))
 
-        et = time.time() - st
-        timing_dict.append(("decoder_outputs", et))
+            decoder_outputs = funnel_outputs["decoder_outputs"]
 
-        # cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
-        # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
-        discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:][active_loss].contiguous()
-        logits = self.discriminator_predictions(discriminator_sequence_output)
-        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, discriminator_sequence_output = %s, logits = %s" % (get_time_string(), random.sample(discriminator_sequence_output.reshape(-1).tolist(), 8), random.sample(logits.reshape(-1).tolist(), 8)))
+            et = time.time() - st
+            timing_dict.append(("decoder_outputs", et))
 
-        et = time.time() - st
-        timing_dict.append(("electra_discriminator_logits", et))
+        loss = 0.0
+        if self.electra_loss_w > 0:
+            # cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
+            # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
+            discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:][active_loss].contiguous()
+            logits = self.discriminator_predictions(discriminator_sequence_output)
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, discriminator_sequence_output = %s, logits = %s" % (get_time_string(), random.sample(discriminator_sequence_output.reshape(-1).tolist(), 8), random.sample(logits.reshape(-1).tolist(), 8)))
 
-        # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
+            et = time.time() - st
+            timing_dict.append(("electra_discriminator_logits", et))
 
-        loss = self.electra_loss_w * self.loss_bce(logits, labels)
-        if record_accuracy:
-            electra_logits = torch.sigmoid(logits.detach()).view(-1)
-            electra_preds = (electra_logits > 0.5).type(torch.int64).view(-1)
-            labels = labels.view(-1)
-            preds_dict["electra_logits"] = electra_logits.tolist()
-            preds_dict["electra_preds"] = electra_preds.tolist()
-            preds_dict["electra_labels"] = labels.tolist()
-            accuracy_hist["electra_preds_mean"] = electra_preds.type(torch.float).mean().item()
-            accuracy_hist["electra_labels_mean"] = labels.type(torch.float).mean().item()
-            accuracy_hist["electra_accuracy"] = (torch.mean((electra_preds == labels).type(torch.float)).item())
-            # if self.record_accuracy:
-            #     self.accuracy_hist.append(accuracy_hist)
+            # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, Logits and Labels for electra = %s" % (get_time_string(), list(zip(active_logits.detach().tolist(), labels.tolist()))[:4]))
+
+            loss = self.electra_loss_w * self.loss_bce(logits, labels)
+            if record_accuracy:
+                electra_logits = torch.sigmoid(logits.detach()).view(-1)
+                electra_preds = (electra_logits > 0.5).type(torch.int64).view(-1)
+                labels = labels.view(-1)
+                preds_dict["electra_logits"] = electra_logits.tolist()
+                preds_dict["electra_preds"] = electra_preds.tolist()
+                preds_dict["electra_labels"] = labels.tolist()
+                accuracy_hist["electra_preds_mean"] = electra_preds.type(torch.float).mean().item()
+                accuracy_hist["electra_labels_mean"] = labels.type(torch.float).mean().item()
+                accuracy_hist["electra_accuracy"] = (torch.mean((electra_preds == labels).type(torch.float)).item())
+                # if self.record_accuracy:
+                #     self.accuracy_hist.append(accuracy_hist)
 
         et = time.time() - st
         timing_dict.append(("electra_discriminator_accuracy", et))
@@ -1601,7 +1567,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         adv_loss = torch.tensor(0.0)
         timing_dict.append(("aitm_alum_start", et))
-        if (self.aitm or self.alum) and self.training:
+        if (self.aitm or self.alum) and self.training and self.electra_loss_w > 0 and self.lm_loss_w > 0:
             adv_loss = self.forward_for_aitm(funnel_inputs, funnel_outputs, first_block_hidden, labels, sent_order_logits, logits,
                                              labels_pet_input_ids, labels_pet_attention_mask, labels_pet_max_length,
                                              contrastive_anchors_copy, contrastive_positives_copy, contrastive_block_matrix)

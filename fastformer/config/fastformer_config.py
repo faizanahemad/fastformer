@@ -78,8 +78,8 @@ class ModelConfig:
 model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=False,
                                         adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                                         adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
-                                        input_cls_orthogonal_w=0.1, first_block_cls_orthogonal_w=0.0,
-                                        electra_loss_w=0.5, lm_loss_w=0.5, sentence_order_prediction_w=1.0, contrastive_w=0.5, contrastive_temperature=1e-2,
+                                        input_cls_orthogonal_w=0.0, first_block_cls_orthogonal_w=0.0,
+                                        electra_loss_w=0.0, lm_loss_w=0.0, sentence_order_prediction_w=0.0, contrastive_w=0.0, contrastive_temperature=1e-2,
                                         answering_lm_w=2.0, additive_margin_softmax_w=0.1)
 
 
@@ -136,6 +136,10 @@ class FastFormerConfig(PretrainedConfig):
             char_rnn_vocab_size=1024,
             char_rnn_window_size=512,
             char_rnn_window_overlap=64,
+            
+            img_size=224,
+            patch_size=16,
+            in_chans=3,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -143,6 +147,9 @@ class FastFormerConfig(PretrainedConfig):
             from fairseq.modules.dynamicconv_layer.dynamicconv_layer import dynamicconvFunction
         except:
             use_cuda_conv = False
+        self.in_chans = in_chans
+        self.patch_size = patch_size
+        self.img_size = img_size
         self.vocab_size = vocab_size
         self.tokenizer_length = max_position_embeddings - num_highway_cls_tokens
         assert all([bsz % 2 == 0 for bsz in block_sizes])

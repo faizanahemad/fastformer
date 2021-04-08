@@ -22,7 +22,7 @@ from fastformer.utils import *
 INF = 1e6
 EPS = 1e-6
 
-ACT2FN = {
+luACT2FN = {
     "relu": nn.ReLU,
     "silu": nn.SiLU,
     "swish": nn.SiLU,
