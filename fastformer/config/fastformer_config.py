@@ -20,6 +20,18 @@ from dataclasses_json import dataclass_json
 # size_dicts = {128: 24, 192: 12, 256: 12, 384: 12, 512: 12, 640: 12, 768: 12, 896: 12, 928: 12, 1024: 12}
 
 
+def get_vision_batch_size(size, autocast):
+    batch_size = 32
+    if not autocast:
+        batch_size = batch_size // 2
+
+    if size == "vision_lg_funnel_config" or size == "vision_md_config":
+        batch_size = batch_size // 2
+    if size == "vision_lg_config":
+        batch_size = batch_size // 4
+    return batch_size
+
+
 def get_batch_size(size, autocast):
     size_dicts = {1024: 16}
     if not autocast:

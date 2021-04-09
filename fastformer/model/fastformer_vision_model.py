@@ -352,10 +352,12 @@ class ClassificationModel(FastFormerPreTrainedModel):
                 representation = representation[:, 0]
         logits = self.head(representation)
         loss = 0
+        predictions = logits.detach().argmax(dim=-1)
+        accuracy = None
         if labels is not None:
             loss = self.loss_ce(logits, labels)
-        predictions = logits.detach().argmax(dim=-1)
-        return dict(loss=loss, logits=logits, predictions=predictions)
+            accuracy = (predictions == labels).float().mean().item()
+        return dict(loss=loss, logits=logits, predictions=predictions, accuracy=accuracy)
 
 
 class PatchCLR(FastFormerPreTrainedModel):

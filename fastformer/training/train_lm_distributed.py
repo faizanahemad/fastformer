@@ -121,9 +121,6 @@ def training_args():
     parser.add_argument('--test_dataset', required=False, type=str,
                         help='Test Dataset')
 
-    parser.add_argument('--test_fastformer', required=False, type=str,
-                        help='Test Dataset')
-
     parser.add_argument('--init_method', required=False, type=str, default="tcp",
                         help='init_method')
 
@@ -559,7 +556,6 @@ def train(local_rank, args):
     del model
     clean_memory()
 
-    all_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optc = optimizer_config.to_dict()
     optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad(set_to_none=True)
@@ -583,7 +579,6 @@ def train(local_rank, args):
     save_every_steps = args["save_every_steps"]
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     gradient_clipping = optc["gradient_clipping"]
-    other_load_details = None
     print("[Train]: Scheduler Created for Rank = %s" % rank)
     if "resume" in args and isinstance(args["resume"], str) and len(args["resume"].strip()) > 0:
         print("[Train]: Trying Resume from %s for Rank = %s" % (args["resume"], rank))
@@ -598,7 +593,7 @@ def train(local_rank, args):
     else:
         print("[Train]: No Resume for Rank = %s" % rank)
     _ = ddp_model.train()
-    print("[Train]: WandB-watch added over model for Rank = %s" % rank)
+
     batch_times = []
     model_times = []
     full_times = []
@@ -613,6 +608,7 @@ def train(local_rank, args):
 
         time.sleep(random.random() * 5)
         wandb.init(**wandb_init_args)
+        print("[Train]: WandB-watch added over model for Rank = %s" % rank)
         # wandb.watch(model, log="all", log_freq=log_every_steps * 4)
     barrier()
 
