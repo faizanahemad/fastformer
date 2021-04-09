@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
+from attrdict import AttrDict
 
 
 from sklearn.metrics import accuracy_score
@@ -143,7 +144,7 @@ class MultiheadAttention(nn.Module):
         self.d_model = d_model
         self.cls_tokens = self.config.num_highway_cls_tokens + 1
 
-        self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
+        self.q_head = nn.Linear(d_model, n_head * d_head, bias=True)
         self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
         self.v_head = nn.Linear(d_model_initial, d_model_initial)
 
@@ -262,6 +263,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig):
         super().__init__(config)
         self.config = config
+        self.cls_tokens = config.num_highway_cls_tokens
         self.patch_embed = PatchEmbed(config.img_size, config.patch_size, config.in_chans, config.block_channel_size[0],
                                       config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps)
         self.encoder_block_one = nn.ModuleList()
@@ -282,6 +284,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
         self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
         self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
+        self.init_weights()
 
     def forward(self, x, run_decoder=False):
         config = self.config
@@ -317,8 +320,8 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
             cls = self.dim_match_decoder_linear(cls)
             upsampled_hidden = upsampled_hidden.reshape(B, H // (config.stride ** (len(config.block_sizes) - 1)), W // (config.stride ** (len(config.block_sizes) - 1)), config.block_channel_size[1]).permute(0, 3, 1, 2)
-            upsampled_hidden = self.dim_match_decoder(upsampled_hidden).permute(0, 2, 3, 1).flatten(2)
-            upsampled_hidden = self.dim_match_decoder_ln(torch.cat((cls, hidden), 1))
+            upsampled_hidden = self.dim_match_decoder(upsampled_hidden).flatten(2).permute(0, 2, 1)
+            upsampled_hidden = self.dim_match_decoder_ln(torch.cat((cls, upsampled_hidden), 1))
             upsampled_hidden = upsampled_hidden + first_block_hidden
             hidden = self.dim_match_decoder_ln(self.dim_match_decoder_linear(hidden))
 
@@ -330,12 +333,104 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         return dict(first_block_hidden=first_block_hidden, second_block_hidden=second_block_hidden, third_block_hidden=upsampled_hidden)
 
 
+class ClassificationModel(FastFormerPreTrainedModel):
+    def __init__(self, backbone, num_classes, num_features=768, ):
+        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 0.1}))
+        self.backbone = backbone
+        self.num_features = num_features
+        self.head = nn.Linear(self.num_features, num_classes)
+        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+        self.init_weights()
+
+    def forward(self, x, labels=None):
+        if isinstance(self.backbone, FastFormerVisionModel):
+            output = self.backbone(x, run_decoder=True)
+            representation = torch.cat((output["second_block_hidden"][:, :self.backbone.cls_tokens].mean(1), output["third_block_hidden"][:, :self.backbone.cls_tokens].mean(1)), 2)
+        else:
+            representation = self.backbone(x)
+            if len(representation.size()) == 3:
+                representation = representation[:, 0]
+        logits = self.head(representation)
+        loss = 0
+        if labels is not None:
+            loss = self.loss_ce(logits, labels)
+        predictions = logits.detach().argmax(dim=-1)
+        return dict(loss=loss, logits=logits, predictions=predictions)
+
+
+class PatchCLR(FastFormerPreTrainedModel):
+    def __init__(self, backbone, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
+        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 0.1}))
+        self.backbone = backbone
+        self.num_features = num_features
+        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+        self.ffn = nn.Sequential(nn.LayerNorm(num_features, eps=eps), nn.GELU(), nn.Linear(num_features, num_features))
+        self.eps = eps
+        self.contrastive_temperature = contrastive_temperature
+        self.simclr_w = simclr_w
+        self.clustering_w = clustering_w
+        self.init_weights()
+
+    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths):
+        contrastive_matrix = contrastive_matrix / self.contrastive_temperature
+        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(-1e3)
+        contrastive_matrix = contrastive_matrix - mask
+        labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths, torch.arange(label_lengths, device=contrastive_matrix.device)))
+        loss = self.loss_ce(contrastive_matrix, labels)
+        predictions = contrastive_matrix.detach().argmax(dim=-1)
+        accuracy = (predictions == labels).float().mean().item()
+        return loss, accuracy
+
+    def forward(self, x1, x2):
+        b1 = self.ffn(self.backbone(x1, run_decoder=True)["third_block_hidden"])  # B,S,D
+        b2 = self.ffn(self.backbone(x2, run_decoder=True)["third_block_hidden"])  # B,S,D
+        b,s = b1.shape[:2]
+        bs = b * s
+        out_1 = b1.reshape(-1, self.num_features)  # BxS , D
+        out_2 = b2.reshape(-1, self.num_features)  # BxS , D
+
+        c1 = torch.cat((out_1, out_2), 0)
+        c1 = c1 / (c1.norm(2, -1, True).detach() + self.eps)
+        # b2 = torch.cat((out_2, out_1), 0)
+        contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0)))
+        contrastive_matrix_store = contrastive_matrix
+
+        patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
+        clustering_loss = 0.0
+        if self.clustering_w > 0:
+            cmm = contrastive_matrix_store.reshape(2, bs, 2, bs).transpose(1,2).reshape(4, bs, bs)
+            cmm2 = cmm.reshape(4, b, s, b, s).transpose(2, 3).reshape(4, b, b, -1).mean(-1)
+            should_be_similar = torch.diagonal(cmm2, dim1=1, dim2=2)
+            clustering_loss = self.clustering_w * ((4*b - (2*b/s)) + cmm2.sum() - 2 * should_be_similar.sum()) / (math.prod(cmm2.size()) * 0.5)
+
+        simclr_loss = 0.0
+        if self.simclr_w > 0:
+            b1s = b1[:, :self.backbone.cls_tokens].mean(1)  # B, D
+            b2s = b2[:, :self.backbone.cls_tokens].mean(1)  # B, D
+            sc1 = torch.cat((b1s, b2s), 0)
+            sc1 = sc1 / (sc1.norm(2, -1, True).detach() + self.eps)
+            contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0)))
+            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0])
+            simclr_loss = self.simclr_w * simclr_loss
+
+        loss = patchclr_loss + clustering_loss + simclr_loss
+        return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss,
+                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy)
+
+
 if __name__ == '__main__':
     x = torch.randn(8, 3, 224, 224)
     config = vision_lg_config
     model = FastFormerVisionModel(config)
+    print(model)
     output = model(x)
     print(output)
+
+    patchclr_model = PatchCLR(model, config.block_channel_size[0], 1e-7)
+    output = patchclr_model(x, x)
+    print(output)
+
+
 
 
 

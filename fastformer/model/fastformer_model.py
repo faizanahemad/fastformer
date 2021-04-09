@@ -813,7 +813,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             if getattr(module, "bias", None) is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-        if classname.find("Conv1d") != -1 or classname.find("Conv2d") != -1:
+        if classname.find("Conv1d") != -1 or classname.find("Conv2d") != -1 or classname.find("ConvTranspose2d") != -1:
             if getattr(module, "weight", None) is not None:
                 if self.config.initializer_std is None:
                     fan_out, fan_in = module.weight.shape[:2]
@@ -836,6 +836,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             if hasattr(module, "char_embeddings"):
                 nn.init.normal_(module.char_embeddings.weight, std=std)
         elif classname == "PatchEmbed":
+            std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
             nn.init.normal_(module.cls_token, std=std)
             nn.init.normal_(module.pos_embed, std=std)
 
@@ -1045,7 +1046,7 @@ def hook(grad):
         # print("[GRAD-HOOK]: Time = %s, Param Name = %s, Detected Inf" % (get_time_string(), name_of_param))
         grad = torch.where(is_nan_inf, torch.sign(grad) * torch.empty_like(grad).fill_(1e-2), grad)
         grad = torch.clamp_(grad, -1e1, 1e1)
-        # grad = F.normalize(grad, 2, -1, eps=config.layer_norm_eps)
+        # grad = F.normalize(grad, 2, -1, eps=config.eps)
         # grad = grad / grad.norm(2, -1, True)
         return grad
     else:
@@ -1480,17 +1481,26 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                     preds_dict["contrastive_preds"] = []
                     preds_dict["contrastive_actuals"] = []
 
+                mask1 = contrastive_block_matrix.new_ones(contrastive_block_matrix.size(), requires_grad=False)
                 mask2 = contrastive_block_matrix.new_zeros(contrastive_block_matrix.size(), requires_grad=False)
                 const = 1e3
+                column_idxs = []
                 for i in range(n_positives_per_anchor + 1):
-                    idxs = torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1))
-                    mask2[torch.arange(mask2.size(0)), idxs] = -const
+                    idxs = (torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1)
+                    column_idxs.extend(idxs)
+                row_idxs = list(range(mask2.size(0))) * (n_positives_per_anchor + 1)
+                mask1[torch.tensor(row_idxs), torch.tensor(column_idxs)] = 0
+                mask2[torch.tensor(row_idxs), torch.tensor(column_idxs)] = -const
                 vertical_lc = 0.0
                 for i in range(n_positives_per_anchor + 1):
                     labels_contrastive = torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1), device=contrastive_block_hidden.device)
                     mask_c = mask2.clone()
+                    mask_ones = mask1.clone()
                     mask_c[torch.arange(mask_c.size(0)), torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1))] = 0.0
-                    block_matrix = contrastive_block_matrix + mask_c
+                    mask_ones[torch.arange(mask_c.size(0)), torch.tensor((torch.tensor(list(range(n_anchors))) + (n_anchors * i)).tolist() * (n_positives_per_anchor + 1))] = 1.0
+
+                    block_matrix = (contrastive_block_matrix * mask_ones) + mask_c
+                    # TODO: check this
                     l2 = self.ce(block_matrix, labels_contrastive)
                     vertical_lc += l2
                     if record_accuracy:
