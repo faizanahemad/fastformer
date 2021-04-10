@@ -545,7 +545,7 @@ def train(local_rank, args):
         except:
 
             pos_emb = state_dict["funnel.embeddings.position_embeddings.weight"]
-            state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb pos_emb[:5]), 0)
+            state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[:5]), 0)
             model.load_state_dict(state_dict, strict=False)
 
     if args["validate_on_start"] or args["validate_only"]:
