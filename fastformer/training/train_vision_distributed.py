@@ -191,6 +191,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
         cut = get_cutout(0.75, 0.15)
         non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
                                 transforms.RandomGrayscale(p=0.2), cut]
+        non_shape_transforms = transforms.Compose(non_shape_transforms)
 
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
