@@ -406,6 +406,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             clustering_loss = self.clustering_w * ((4*b - (2*b/s)) + cmm2.sum() - 2 * should_be_similar.sum()) / (math.prod(cmm2.size()) * 0.5)
 
         simclr_loss = 0.0
+        simclr_accuracy = None
         if self.simclr_w > 0:
             b1s = b1[:, :self.backbone.cls_tokens].mean(1)  # B, D
             b2s = b2[:, :self.backbone.cls_tokens].mean(1)  # B, D
