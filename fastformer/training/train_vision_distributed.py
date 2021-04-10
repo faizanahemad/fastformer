@@ -54,7 +54,7 @@ def training_args():
 
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
-    parser.add_argument('--warmup_steps', default=optimizer_config.optimizer_config, type=int,
+    parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
                         help='warmup_steps')
     parser.add_argument('--lr', default=optimizer_config.lr, type=float,
                         help='lr')
