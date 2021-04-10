@@ -403,7 +403,7 @@ def train(local_rank, args):
             if (step + 1) % log_every_steps == 0:
                 if local_rank == 0:
                     total_steps = args["epochs"] * len(dataloader)
-                    steps_done = (epoch + 1) * len(dataloader) + step
+                    steps_done = epoch * len(dataloader) + step
                     steps_remaining = total_steps - steps_done
                     output = {k: float(v) for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
