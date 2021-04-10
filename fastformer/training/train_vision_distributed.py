@@ -164,23 +164,46 @@ class CLRDataset(torch.utils.data.Dataset):
 def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1):
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
-    shape_transforms = None
+
+    shape_transforms = []
+    if mode == "validation":
+        shape_transforms.append(transforms.Resize(256))
+        shape_transforms.append(transforms.CenterCrop(224))
+    else:
+        shape_transforms.append(transforms.RandomHorizontalFlip())
+        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.25))
+        shape_transforms.append(transforms.RandomRotation(45))
+        shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.4, 1.6)))
+    shape_transforms = transforms.Compose(shape_transforms)
+
     if "imagenet" in location.lower():
         dataset = ImageNet(location, "val" if mode == "validation" else "train", transform=shape_transforms)
     elif "cifar10" in location.lower():
         dataset = CIFAR10(root=location, train=mode != "validation", download=True, transform=shape_transforms)
 
     if mode == "clr":
+        def get_cutout(cutout_proba, cutout_size):
+            cut = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.RandomErasing(p=cutout_proba, scale=(0.05, cutout_size), ratio=(0.3, 3.3), value='random', inplace=False),
+                transforms.ToPILImage(),
+            ])
+            return cut
+
+        cut = get_cutout(0.75, 0.15)
+        non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
+                                transforms.RandomGrayscale(p=0.2), cut]
+
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
-        dataset = CLRDataset(dataset, None, None, to_tensor)
+        dataset = CLRDataset(dataset, non_shape_transforms, non_shape_transforms, to_tensor)
 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                         prefetch_factor=4, num_workers=num_workers, pin_memory=True)
-
+    return loader
 
 
 def train(local_rank, args):
@@ -293,12 +316,12 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
-    epochs = args["epochs"]
     dataloader = build_dataloader(args["dataset"], args["mode"], args["shuffle_dataset"], batch_size,
                                   world_size=args["world_size"], num_workers=args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
-    scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
+    # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
+    scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epcohs"] * len(dataloader))
     gradient_clipping = optc["gradient_clipping"]
 
     if local_rank == 0:
@@ -381,11 +404,11 @@ def train(local_rank, args):
                     output = {k: float(v) for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
-                    wandb.log(dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
+                    wandb.log(dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
                                    batch_times=np.mean(batch_times), full_times=np.mean(full_times),
                                    **output, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
-                    print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
-                          (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
+                    print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
+                          (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                     print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second))
                 batch_times = []
@@ -417,6 +440,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         raise ValueError
 
     loss = output.pop("loss") / iter_size
+    _ = output.pop("predictions", None)
     zgradders = []
     inf_gradders = []
     if zero_grad_check:
