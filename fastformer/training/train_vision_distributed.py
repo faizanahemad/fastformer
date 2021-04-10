@@ -247,7 +247,7 @@ def train(local_rank, args):
     format = "%Y-%m-%d %H-%M %Z"
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
-    ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
+    ds_name = list(filter(lambda x: len(x.strip()) > 0, args["dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
     group = "%s-%s-%sN-%s" % (ds_name, args["model_config"], args["nodes"], time_string)
     set_seeds(args["seed"])
     model_size = args["model_config"]
