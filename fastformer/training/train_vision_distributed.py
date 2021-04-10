@@ -455,7 +455,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         optimizer.step()
         scheduler.step()
 
-    if np.isnan(loss):
+    if np.isnan(loss.detach().cpu().item()):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), None, loss, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
