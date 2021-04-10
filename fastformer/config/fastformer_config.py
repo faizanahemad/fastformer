@@ -21,7 +21,7 @@ from dataclasses_json import dataclass_json
 
 
 def get_vision_batch_size(size, autocast):
-    batch_size = 32
+    batch_size = 80
     if not autocast:
         batch_size = batch_size // 2
 
