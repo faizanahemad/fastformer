@@ -394,7 +394,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         c1 = torch.cat((out_1, out_2), 0)
         c1 = c1 / (c1.norm(2, -1, True).detach() + self.eps)
         # b2 = torch.cat((out_2, out_1), 0)
-        contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0)))
+        contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
         contrastive_matrix_store = contrastive_matrix
 
         patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
@@ -411,7 +411,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             b2s = b2[:, :self.backbone.cls_tokens].mean(1)  # B, D
             sc1 = torch.cat((b1s, b2s), 0)
             sc1 = sc1 / (sc1.norm(2, -1, True).detach() + self.eps)
-            contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0)))
+            contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0])
             simclr_loss = self.simclr_w * simclr_loss
 
