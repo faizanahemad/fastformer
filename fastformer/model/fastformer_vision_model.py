@@ -226,14 +226,14 @@ class MultiheadAttention(nn.Module):
 
 
 class PositionwiseFFN(nn.Module):
-    def __init__(self, d_model):
+    def __init__(self, d_model, hidden_dropout, layer_norm_eps):
         super().__init__()
         
         d_inner = d_model * 4
         self.d_model = d_model
-        activation_dropout = Dropout(config.hidden_dropout)
+        activation_dropout = Dropout(hidden_dropout)
 
-        self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(d_model, layer_norm_eps)
         self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), activation_dropout, nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
 
     def forward(self, hidden):
@@ -248,7 +248,7 @@ class TransformerLayer(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_encoder_layer, layer_index):
         super().__init__()
         self.attention = MultiheadAttention(config, block_index, is_encoder_layer, layer_index)
-        self.ffn = PositionwiseFFN(config.block_channel_size[block_index])
+        self.ffn = PositionwiseFFN(config.block_channel_size[block_index], config.hidden_dropout, config.layer_norm_eps)
         self.block_index = block_index
         self.block_size = config.block_sizes[block_index]
 
