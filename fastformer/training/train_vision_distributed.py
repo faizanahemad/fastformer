@@ -441,6 +441,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         raise ValueError
 
     loss = output.pop("loss") / iter_size
+    loss.backward()
     _ = output.pop("predictions", None)
     zgradders = []
     inf_gradders = []
