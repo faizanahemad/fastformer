@@ -272,9 +272,9 @@ def train(local_rank, args):
     backbone = FastFormerVisionModel(config)
 
     if args["mode"] == "clr":
-        model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0)
+        model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
-        model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1])
+        model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1]).to(device)
     else:
         raise ValueError
 
@@ -402,16 +402,19 @@ def train(local_rank, args):
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
             if (step + 1) % log_every_steps == 0:
                 if local_rank == 0:
+                    total_steps = args["epochs"] * len(dataloader)
+                    steps_done = (epoch + 1) * len(dataloader) + step
+                    steps_remaining = total_steps - steps_done
                     output = {k: float(v) for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
                     wandb.log(dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                                   batch_times=np.mean(batch_times), full_times=np.mean(full_times),
+                                   batch_times=np.mean(batch_times), full_times=np.mean(full_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                                    **output, zero_grad=output["zero_grad"], inf_grad=output["inf_grad"]))
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second))
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps)))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0
