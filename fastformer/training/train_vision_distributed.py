@@ -425,10 +425,10 @@ def train(local_rank, args):
             del output
             del bs_size
             start_time = time.time()
-            print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-            state_dict = ddp_model.state_dict()
-            if local_rank == 0:
-                torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+    print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
+    state_dict = ddp_model.state_dict()
+    if local_rank == 0:
+        torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
