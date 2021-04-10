@@ -150,7 +150,7 @@ class CLRDataset(torch.utils.data.Dataset):
         self.to_tensor = to_tensor
 
     def __getitem__(self, item):
-        item = self.dataset[item]
+        item, label = self.dataset[item]
         x1 = self.to_tensor(self.x1_transform(item.copy()))
         x2 = self.to_tensor(self.x2_transform(item))
         return dict(x1=x1, x2=x2)
