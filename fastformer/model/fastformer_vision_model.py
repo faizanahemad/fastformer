@@ -392,13 +392,13 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1 = self.backbone(x1, run_decoder=True)
             b2 = self.backbone(x2, run_decoder=True)
         else:
-            b1 = self.backbone(x1)
-            b2 = self.backbone(x2)
+            b1 = self.ffn(self.backbone(x1))
+            b2 = self.ffn(self.backbone(x2))
         if isinstance(b1, dict):
             b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
 
-        b,s = b1.shape[:2]
+        b, s = b1.shape[:2]
         bs = b * s
         out_1 = b1.reshape(-1, self.num_features)  # BxS , D
         out_2 = b2.reshape(-1, self.num_features)  # BxS , D
@@ -493,6 +493,7 @@ if __name__ == '__main__':
             x = self.norm(x)
             return x
         model.forward = types.MethodType(forward, model)
+        del model.head
         print(model)
         model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
     else:
