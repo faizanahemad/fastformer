@@ -422,16 +422,116 @@ class PatchCLR(FastFormerPreTrainedModel):
 
 
 if __name__ == '__main__':
-    x = torch.randn(8, 3, 224, 224)
-    config = vision_lg_config
-    model = FastFormerVisionModel(config)
-    print(model)
-    output = model(x)
-    print(output)
+    import time
+    import argparse
+    import numpy as np
+    from tqdm.auto import tqdm, trange
+    from torch.optim import AdamW
 
-    patchclr_model = PatchCLR(model, config.block_channel_size[0], 1e-7)
-    output = patchclr_model(x, x)
-    print(output)
+    torch.backends.cudnn.benchmark = True
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--device", type=str, default='cpu',
+                    help="Device")
+    ap.add_argument("--config", type=str, default='vision_lg_config',
+                    help="Config")
+
+    ap.add_argument("--forward_only", type=str2bool, default=False)
+    ap.add_argument("--fp16", type=str2bool, default=False)
+    ap.add_argument("--epochs", type=int, default=1)
+    ap.add_argument("--batch_size", type=int, default=16)
+    ap.add_argument("--lr", type=float, default=5e-4)
+
+    args = vars(ap.parse_args())
+    forward_only = args["forward_only"]
+    device = args["device"]
+    fp16 = args["fp16"]
+    lr = args["lr"]
+    epochs = args["epochs"]
+    config = args["config"]
+    batch_size = args["batch_size"]
+    config = vision_config_dict[config]
+
+    model = FastFormerVisionModel(config)
+    model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print("Trainable Params = %s" % (numel(model) / 1_000_000))
+    print(model)
+    device = torch.device(device)
+
+    x = torch.randn(batch_size, 3, 224, 224, device=device)
+
+    model = PatchCLR(model, config.block_channel_size[0], 1e-7, simclr_w=0.0)
+    model = model.to(device)
+    output = model(x, x)
+
+    all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
+    optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
+    torch.autograd.set_detect_anomaly(True)
+    optimizer.zero_grad()
+
+    try:
+        from torch.cuda.amp import GradScaler, autocast
+
+        scaler = GradScaler()
+    except:
+        pass
+    if forward_only:
+        _ = model.eval()
+    else:
+        _ = model.train()
+
+    def get_unused_params(model):
+        for name, params in model.named_parameters():
+            if params.grad is None:
+                print(name)
+
+    def run():
+        if not forward_only:
+            if fp16:
+                with autocast():
+                    output = model(x, x)
+                    loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
+                    scaler.scale(loss).backward()
+                    get_unused_params(model)
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+            else:
+                output = model(x, x)
+                loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
+                loss.backward()
+                get_unused_params(model)
+                torch.nn.utils.clip_grad_norm_(all_params, 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+        else:
+            if fp16:
+                with autocast():
+                    with torch.no_grad():
+                        output = model(x, x)
+
+            else:
+                with torch.no_grad():
+                    output = model(x, x)
+            return output
+        return output
+
+
+    _ = [run() for _ in range(1)]
+    times = []
+    accuracy = []
+    for _ in trange(epochs):
+        st = time.time()
+        output = run()
+        et = time.time() - st
+        times.append(et)
+        output = {k: float(v) for k, v in output.items()}
+        accuracy.append(output)
+    print("Time Taken = %.4f, Lowest = %.4f, Highest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.max(times), np.std(times)))
+    print(accuracy[-10:])
 
 
 
