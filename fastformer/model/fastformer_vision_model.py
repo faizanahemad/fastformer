@@ -339,7 +339,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
 class ClassificationModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_classes, num_features=768, ):
-        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 1.0}))
+        super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
         self.head = nn.Linear(self.num_features, num_classes)
@@ -366,7 +366,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
-        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 1.0}))
+        super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
@@ -468,21 +468,20 @@ if __name__ == '__main__':
     batch_size = args["batch_size"]
     config = vision_config_dict[config]
 
-    model = FastFormerVisionModel(config)
-
-
-    model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    params = sum([np.prod(p.size()) for p in model_parameters])
-    print("Trainable Params = %s" % (numel(model) / 1_000_000))
-    print(model)
     device = torch.device(device)
 
     x = torch.randn(batch_size, 3, 224, 224, device=device)
 
     if args["deit"]:
         model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=False)
+        print(model)
         model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
     else:
+        model = FastFormerVisionModel(config)
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        print("Trainable Params = %s" % (numel(model) / 1_000_000))
+        print(model)
         model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
     model = model.to(device)
     output = model(x, x)
