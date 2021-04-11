@@ -276,14 +276,18 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
         self.stride = config.stride
         self.decoder_block = nn.ModuleList()
-        for i in range(config.num_decoder_layers):
-            self.decoder_block.append(TransformerLayer(config, 0, False, i))
+
         if config.block_channel_size[0] != config.block_channel_size[1]:
             self.dim_match = nn.Sequential(nn.Linear(config.block_channel_size[0],config.block_channel_size[1], bias=False),
                                            nn.LayerNorm(config.block_channel_size[1], eps=config.layer_norm_eps))
-        self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
-        self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
-        self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
+
+        self.has_decoder = config.has_decoder
+        if config.has_decoder:
+            for i in range(config.num_decoder_layers):
+                self.decoder_block.append(TransformerLayer(config, 0, False, i))
+            self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
+            self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
+            self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         self.init_weights()
 
     def forward(self, x, run_decoder=False):
@@ -316,7 +320,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         second_block_hidden = hidden
 
         upsampled_hidden = None
-        if run_decoder:
+        if run_decoder and self.has_decoder:
             cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
             cls = self.dim_match_decoder_linear(cls)
             upsampled_hidden = upsampled_hidden.reshape(B, H // (config.stride ** (len(config.block_sizes) - 1)), W // (config.stride ** (len(config.block_sizes) - 1)), config.block_channel_size[1]).permute(0, 3, 1, 2)
@@ -384,8 +388,10 @@ class PatchCLR(FastFormerPreTrainedModel):
         return loss, accuracy
 
     def forward(self, x1, x2):
-        b1 = self.ffn(self.backbone(x1, run_decoder=True)["third_block_hidden"])  # B,S,D
-        b2 = self.ffn(self.backbone(x2, run_decoder=True)["third_block_hidden"])  # B,S,D
+        b1 = self.backbone(x1, run_decoder=True)
+        b2 = self.backbone(x2, run_decoder=True)
+        b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
+        b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
         b,s = b1.shape[:2]
         bs = b * s
         out_1 = b1.reshape(-1, self.num_features)  # BxS , D
@@ -461,7 +467,7 @@ if __name__ == '__main__':
 
     x = torch.randn(batch_size, 3, 224, 224, device=device)
 
-    model = PatchCLR(model, config.block_channel_size[0], 1e-7, simclr_w=0.0)
+    model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
     model = model.to(device)
     output = model(x, x)
 

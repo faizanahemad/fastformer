@@ -152,6 +152,7 @@ class FastFormerConfig(PretrainedConfig):
             img_size=224,
             patch_size=16,
             in_chans=3,
+            has_decoder=True,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -162,6 +163,7 @@ class FastFormerConfig(PretrainedConfig):
         self.in_chans = in_chans
         self.patch_size = patch_size
         self.img_size = img_size
+        self.has_decoder = has_decoder
         self.vocab_size = vocab_size
         self.tokenizer_length = max_position_embeddings - num_highway_cls_tokens
         assert all([bsz % 2 == 0 for bsz in block_sizes])
@@ -353,6 +355,8 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              char_rnn_window_size=128,
                              )
 
+vision_base_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False)
+
 vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
 
 vision_lg_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
@@ -363,7 +367,7 @@ vision_lg_funnel_config = FastFormerConfig(stride=2, d_head=[64, 64], n_head=[(8
 
 config_dict = dict(tg_config=tg_config, md_config=md_config, sm_config=sm_config, md_config_relative=md_config_relative)
 
-vision_config_dict = dict(vision_md_config=vision_md_config, vision_lg_config=vision_lg_config, vision_md_funnel_config=vision_md_funnel_config, vision_lg_funnel_config=vision_lg_funnel_config)
+vision_config_dict = dict(vision_md_config=vision_md_config, vision_lg_config=vision_lg_config, vision_md_funnel_config=vision_md_funnel_config, vision_lg_funnel_config=vision_lg_funnel_config, vision_base_config=vision_base_config)
 
 
 # 20 % -> expand_dim_before_pooling=True, char_rnn=True
