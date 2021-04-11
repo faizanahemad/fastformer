@@ -531,7 +531,8 @@ if __name__ == '__main__':
         output = {k: float(v) for k, v in output.items() if v is not None}
         accuracy.append(output)
     print("Time Taken = %.4f, Lowest = %.4f, Highest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.max(times), np.std(times)))
-    print(accuracy[-10:])
+    print(accuracy[:5])
+    print(accuracy[-5:])
 
 
 
