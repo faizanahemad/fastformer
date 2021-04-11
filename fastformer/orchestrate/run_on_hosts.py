@@ -31,6 +31,8 @@ def get_args():
 
     parser.add_argument("--start", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument("--vision", default=False, action="store_true",
+                        help="Flag to do something")
     parser.add_argument("--ggl", default=False, action="store_true",
                         help="Flag to do something")
     parser.add_argument("--ds", default=False, action="store_true",
@@ -164,6 +166,11 @@ if __name__ == "__main__":
 
     main_cmd += " > output.log 2>&1 & disown"
 
+    vision_cmd = "python train_vision_distributed.py -n %s -g 8 --nr %s --model_config vision_md_config"
+    vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name patchclr.pth --dataset /home/ahemf/processed_datasets/ImageNet"
+    vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 10000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --mode clr --shuffle_dataset --accumulation_steps 4 --no_autocast --epochs 300 --lr 0.01"
+    # vision_cmd += " --wandb_dryrun"
+    vision_cmd += " > output.log 2>&1 & disown"
 
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
@@ -183,6 +190,20 @@ if __name__ == "__main__":
         run_command_v2(hosts, cmd3)
     if args["start"]:
         cmd4 = cmd_dir + " && " + main_cmd
+        if "tcp" in main_cmd:
+            ip_address_cmd = cmd_dir + " && " + "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
+            part0, part1 = cmd4.split("--master_addr")
+            part1 = part1.strip().split()[1:]
+            part1[1] = "9999"
+            part1 = ["--master_addr" + " " + ipaddr] + part1
+            part1 = " ".join(part1)
+            cmd4 = part0 + " " + part1
+
+        run_command_v2(hosts, cmd4, list(zip([len(hosts)] * len(hosts), list(map(str, list(range(len(hosts))))))), args["ds"])
+
+    if args["vision"]:
+        cmd4 = cmd_dir + " && " + vision_cmd
         if "tcp" in main_cmd:
             ip_address_cmd = cmd_dir + " && " + "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
             ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]

@@ -335,7 +335,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
 class ClassificationModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_classes, num_features=768, ):
-        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 0.1}))
+        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 1.0}))
         self.backbone = backbone
         self.num_features = num_features
         self.head = nn.Linear(self.num_features, num_classes)
@@ -362,7 +362,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
-        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 0.1}))
+        super().__init__(backbone.config if hasattr(backbone, "config") else AttrDict({"initializer_std": 1.0}))
         self.backbone = backbone
         self.num_features = num_features
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
