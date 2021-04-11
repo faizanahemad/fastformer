@@ -388,8 +388,12 @@ class PatchCLR(FastFormerPreTrainedModel):
         return loss, accuracy
 
     def forward(self, x1, x2):
-        b1 = self.backbone(x1, run_decoder=True)
-        b2 = self.backbone(x2, run_decoder=True)
+        if isinstance(self.backbone, FastFormerVisionModel):
+            b1 = self.backbone(x1, run_decoder=True)
+            b2 = self.backbone(x2, run_decoder=True)
+        else:
+            b1 = self.backbone(x1)
+            b2 = self.backbone(x2)
         b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
         b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
         b,s = b1.shape[:2]
@@ -414,8 +418,12 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_loss = 0.0
         simclr_accuracy = None
         if self.simclr_w > 0:
-            b1s = b1[:, :self.backbone.cls_tokens].mean(1)  # B, D
-            b2s = b2[:, :self.backbone.cls_tokens].mean(1)  # B, D
+            if hasattr(self.backbone, "cls_tokens"):
+                b1s = b1[:, :self.backbone.cls_tokens].mean(1)  # B, D
+                b2s = b2[:, :self.backbone.cls_tokens].mean(1)  # B, D
+            else:
+                b1s = b1[:, 0]
+                b2s = b2[:, 0]
             sc1 = torch.cat((b1s, b2s), 0)
             sc1 = sc1 / (sc1.norm(2, -1, True).detach() + self.eps)
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
@@ -433,6 +441,7 @@ if __name__ == '__main__':
     import numpy as np
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
+    import timm
 
     torch.backends.cudnn.benchmark = True
 
@@ -443,6 +452,7 @@ if __name__ == '__main__':
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
+    ap.add_argument("--deit", type=str2bool, default=False)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=16)
@@ -459,6 +469,8 @@ if __name__ == '__main__':
     config = vision_config_dict[config]
 
     model = FastFormerVisionModel(config)
+
+
     model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     params = sum([np.prod(p.size()) for p in model_parameters])
     print("Trainable Params = %s" % (numel(model) / 1_000_000))
@@ -467,7 +479,11 @@ if __name__ == '__main__':
 
     x = torch.randn(batch_size, 3, 224, 224, device=device)
 
-    model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
+    if args["deit"]:
+        model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=False)
+        model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
+    else:
+        model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
     model = model.to(device)
     output = model(x, x)
 
