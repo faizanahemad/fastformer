@@ -394,8 +394,10 @@ class PatchCLR(FastFormerPreTrainedModel):
         else:
             b1 = self.backbone(x1)
             b2 = self.backbone(x2)
-        b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
-        b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
+        if isinstance(b1, dict):
+            b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
+            b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
+
         b,s = b1.shape[:2]
         bs = b * s
         out_1 = b1.reshape(-1, self.num_features)  # BxS , D
@@ -473,7 +475,24 @@ if __name__ == '__main__':
     x = torch.randn(batch_size, 3, 224, 224, device=device)
 
     if args["deit"]:
+        from timm.models.vision_transformer import VisionTransformer
+        import types
         model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=False)
+        def forward(self, x):
+            B = x.shape[0]
+            x = self.patch_embed(x)
+
+            cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = x + self.pos_embed
+            x = self.pos_drop(x)
+
+            for blk in self.blocks:
+                x = blk(x)
+
+            x = self.norm(x)
+            return x
+        model.forward = types.MethodType(forward, model)
         print(model)
         model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
     else:
