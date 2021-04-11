@@ -837,8 +837,10 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.char_embeddings.weight, std=std)
         elif classname == "PatchEmbed":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
-            nn.init.normal_(module.cls_token, std=std)
-            nn.init.normal_(module.pos_embed, std=std)
+            if hasattr(module, "cls_token"):
+                nn.init.normal_(module.cls_token, std=std)
+            if hasattr(module, "pos_embed"):
+                nn.init.normal_(module.pos_embed, std=std)
 
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
