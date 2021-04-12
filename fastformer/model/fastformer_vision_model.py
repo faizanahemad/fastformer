@@ -365,7 +365,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, patchclr_w=1.0, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
+    def __init__(self, backbone, num_features=384, eps=1e-4, patchclr_w=1.0, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
