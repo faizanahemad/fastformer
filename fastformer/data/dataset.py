@@ -1343,52 +1343,52 @@ def superglue_test():
     sglue_proc['boolq'] = sglue_proc['boolq'].map(get_matching_mapper(["passage"], [], [], ["question"], ["label"], 1024, tokenizer), batched=True, num_proc=16,
                                                   batch_size=4, remove_columns=['question', 'passage', 'idx', 'label'])
 
-    sglue_proc['cb_v1'] = super_glue['cb'].map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"],
+    sglue_proc['cb'] = super_glue['cb'].map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"],
                                                               label=({0: "agree", 1: "contradict", 2: "neutral", -1: tokenizer.mask_token}[x["label"]])),
                                                remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
-    sglue_proc['cb_v1'] = sglue_proc['cb_v1'].map(
+    sglue_proc['cb'] = sglue_proc['cb'].map(
         get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer),
         batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
 
-    sglue_proc['copa_v1'] = super_glue["copa"].map(lambda x: dict(question=x["question"] + ", ")).map(
+    sglue_proc['copa'] = super_glue["copa"].map(lambda x: dict(question=x["question"] + ", ")).map(
         get_matching_mapper(["premise"], [], [], [], [], 1024, tokenizer, ['question'], [["choice1", "choice2"]], ["label"], n_jumbled_options=0,
                             n_within_text_options=2), batched=True, num_proc=16, batch_size=2,
         remove_columns=['premise', 'choice1', 'choice2', 'question', 'idx', 'label'])
 
-    sglue_proc['multirc_v1'] = super_glue["multirc"].map(lambda x: dict(label=({0: "no", 1: "yes", -1: tokenizer.mask_token}[x["label"]])))
-    sglue_proc['multirc_v1'] = sglue_proc['multirc_v1'].map(get_matching_mapper(["paragraph", "question", "answer"], [], [], [
+    sglue_proc['multirc'] = super_glue["multirc"].map(lambda x: dict(label=({0: "no", 1: "yes", -1: tokenizer.mask_token}[x["label"]])))
+    sglue_proc['multirc'] = sglue_proc['multirc'].map(get_matching_mapper(["paragraph", "question", "answer"], [], [], [
         ["Is the question answered correctly?", "Does the previous statement provide valid answer to the asked question?"]], ["label"], 1024, tokenizer),
                                                             batched=True, num_proc=16, batch_size=8,
                                                             remove_columns=['paragraph', 'question', 'answer', 'idx', 'label'])
 
-    sglue_proc['record_v1'] = super_glue['record'].map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder from the given options.",
+    sglue_proc['record'] = super_glue['record'].map(lambda x: dict(query=x["query"] + " Find the right entity for @placeholder from the given options.",
                                                                       label=x['entities'].index(x['answers'][0]) if len(x['answers']) > 0 else -1))
-    sglue_proc['record_v1'] = sglue_proc['record_v1'].map(
+    sglue_proc['record'] = sglue_proc['record'].map(
         get_matching_mapper(["passage"], [], [], [], [], 1024, tokenizer, ["query"], ['entities'], ["label"], n_jumbled_options=0, n_within_text_options=2),
         batched=True, num_proc=16, batch_size=1, remove_columns=['passage', 'query', 'entities', 'answers', 'idx', 'label'])
 
-    sglue_proc['rte_v1'] = super_glue['rte'].map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"],
+    sglue_proc['rte'] = super_glue['rte'].map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"],
                                                                 label=({0: "agree", 1: "contradict", 2: "neutral", -1: tokenizer.mask_token}[x["label"]])),
                                                  remove_columns=["idx", "hypothesis", "premise"], num_proc=8)
-    sglue_proc['rte_v1'] = sglue_proc['rte_v1'].map(
+    sglue_proc['rte'] = sglue_proc['rte'].map(
         get_matching_mapper(["text"], [], [], ["Do the premise and hypothesis agree, contradict or are unrelated (neutral)"], ["label"], 1024, tokenizer),
         batched=True, num_proc=16, batch_size=8, remove_columns=["label"])
 
-    sglue_proc["wic_v1"] = super_glue["wic"].map(lambda x: dict(text="first sentence: " + x["sentence1"] + ", second sentence: " + x["sentence2"],
+    sglue_proc["wic"] = super_glue["wic"].map(lambda x: dict(text="first sentence: " + x["sentence1"] + ", second sentence: " + x["sentence2"],
                                                                 query="Does the word '%s' have same meaning in first sentence and second sentence" % x["word"],
                                                                 label={0: "no", 1: "yes", -1: tokenizer.mask_token}[x["label"]]))
 
-    sglue_proc["wic_v1"] = sglue_proc["wic_v1"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16,
+    sglue_proc["wic"] = sglue_proc["wic"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True, num_proc=16,
                                                     batch_size=8,
                                                     remove_columns=['word', 'sentence1', 'sentence2', 'start1', 'start2', 'end1', 'end2', 'idx', 'label'])
 
-    sglue_proc["wsc.fixed_v1"] = super_glue["wsc.fixed"].map(lambda x: dict(label={0: "no", 1: "yes", -1: tokenizer.mask_token}[x["label"]],
+    sglue_proc["wsc.fixed"] = super_glue["wsc.fixed"].map(lambda x: dict(label={0: "no", 1: "yes", -1: tokenizer.mask_token}[x["label"]],
                                                                             query="Do [word1] %s and [word2] %s refer to the same entity" % (
                                                                             x["span1_text"], x["span2_text"]),
                                                                             text=" ".join([defaultdict(str, {x["span1_index"]: "[word1] ",
                                                                                                              x["span2_index"]: "[word2] "})[idx] + w for idx, w
                                                                                            in enumerate(x["text"].split())])))
-    sglue_proc["wsc.fixed_v1"] = sglue_proc["wsc.fixed_v1"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True,
+    sglue_proc["wsc.fixed"] = sglue_proc["wsc.fixed"].map(get_matching_mapper(["text"], [], [], ["query"], ["label"], 1024, tokenizer), batched=True,
                                                                 num_proc=16, batch_size=8,
                                                                 remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index',
                                                                                 'span2_text'])
