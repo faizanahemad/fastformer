@@ -417,7 +417,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
             patchclr_loss = self.patchclr_w * patchclr_loss
         clustering_loss = 0.0
-        if self.clustering_w > 0:
+        if self.clustering_w > 0 and self.patchclr_w > 0:
             cmm = contrastive_matrix_store.reshape(2, bs, 2, bs).transpose(1,2).reshape(4, bs, bs)
             cmm2 = cmm.reshape(4, b, s, b, s).transpose(2, 3).reshape(4, b, b, -1).mean(-1)
             should_be_similar = torch.diagonal(cmm2, dim1=1, dim2=2)
