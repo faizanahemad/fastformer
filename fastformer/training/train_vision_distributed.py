@@ -423,7 +423,7 @@ def train(local_rank, args):
                     total_steps = args["epochs"] * len(dataloader)
                     steps_done = epoch * len(dataloader) + step
                     steps_remaining = total_steps - steps_done
-                    output = {k: float(v) for k, v in output.items()}
+                    output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
                     wandb.log(dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
