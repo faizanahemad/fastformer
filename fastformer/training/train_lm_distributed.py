@@ -211,7 +211,7 @@ class SuperGlueTest:
                 continue
             clean_memory()
             sg_dataset = super_glue[k]
-            idx = [dataset[i]["idx"] for i in range(len(sg_dataset))]
+            idx = [sg_dataset[i]["idx"] for i in range(len(sg_dataset))]
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
@@ -596,7 +596,7 @@ def train(local_rank, args):
     if args["test_only"]:
         _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         return
-    
+
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         clean_memory()
