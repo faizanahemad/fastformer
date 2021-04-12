@@ -16,6 +16,8 @@
 import shutil
 import sys
 import traceback
+import jsonlines
+import jsonlines as jsonlines
 
 import numpy as np
 import torch
@@ -41,7 +43,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
-from fastformer.data.dataset import datadict_iterator
+from fastformer.data.dataset import datadict_iterator, superglue_test
 from fastformer.utils import *
 from fastformer.model import *
 from transformers import optimization
@@ -156,12 +158,30 @@ def training_args():
     return vars(args)
 
 
-class SuperGLUEEvaluator:
-    def __init__(self, location, model, config):
+class SuperGlueTest:
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False):
         self.location = location
         self.model = model
         self.config = config
-        self.superglue_validation_set = ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc_fixed']
+        self.device = device
+        self.tokenizer = tokenizer
+        self.rank = rank
+        self.world_size = world_size
+        self.no_autocast = no_autocast
+        self.size_dicts = size_dicts
+        self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
+                                  cb=dict(agree="entailment", entailment="entailment", entail="entailment", contradiction="contradiction",
+                                          contradict="contradiction", disagree="contradiction", neutral="neutral"),
+                                  copa={"0": 0, "1": 1}, multirc=dict(true=1, false=0, yes=1, no=0), record=dict(),
+                                  rte=dict(agree= "entailment", entailment="entailment", entail="entailment", contradiction="not_entailment", contradict= "not_entailment", disagree= "not_entailment", neutral= "not_entailment"))
+        self.task_word_map["wic"] = self.task_word_map["boolq"]
+        self.task_word_map["axg"] = self.task_word_map["rte"]
+        self.task_word_map["axb"] = self.task_word_map["rte"]
+        self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
+
+        self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
+                                             ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
+                                              "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
     def read_data(self):
         import glob
@@ -177,24 +197,53 @@ class SuperGLUEEvaluator:
         return datadict
 
     def __call__(self, generate_test_predictions=True):
-        datadict = self.read_data()
-        tokenizer = self.model.tokenizer
+        tokenizer = self.tokenizer
+        model = self.model.to(self.device)
+        size_dicts = self.size_dicts
+        super_glue, datadict = superglue_test(test_only=True)
+        model = model.eval()
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
-        for d in self.superglue_validation_set:
-            # record answers
-            # Start from Dataset of superglue from huggingface datasets and build labels
-            # For prediction use majority voting from superglue datasets we made.
-            # Validation fastformer dataset can be used?
-            dataset = datadict[d]["validation"]
-            labels = [dataset[i] for i in range(len(dataset))]
 
+        for idx, (k, dataset) in enumerate(sorted(datadict.items())):
+            while idx >= self.world_size:
+                idx -= self.world_size
+            if idx != self.rank:
+                continue
+            clean_memory()
+            sg_dataset = super_glue[k]
+            idx = [dataset[i]["idx"] for i in range(len(sg_dataset))]
             dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
             dataset.training = False
-            data_loader = DataLoader(dataset, sampler=None, batch_size=1, collate_fn=None,
-                                     prefetch_factor=8, num_workers=4)
-            data_loader = custom_batching_fn(data_loader, size_dicts, collate_fn, False)
+            predictions = []
+            loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
+            for pt_batch in loader:
+                pt_batch["record_accuracy"] = False
+                pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
+                with torch.no_grad():
+                    funnel_inputs = dict(input_ids=pt_batch["input_ids"],
+                                         attention_mask=pt_batch["attention_mask"],
+                                         token_type_ids=pt_batch["token_type_ids"] if "token_type_ids" in pt_batch else None,
+                                         inputs_embeds=None,
+                                         char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
+                                         run_decoder=False,
+                                         run_answering=True)
+                    output = model.funnel(**funnel_inputs)
+                    # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
+                    answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
+                # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
+                # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
+                answering_predictions = answer_decoder(answering_predictions, tokenizer)
+                predictions.extend(answering_predictions)
+            final_predictions = [(i, str(prd[0]).lower()) for i, prd in zip(idx, predictions)]
+            word_map = self.task_word_map[k]
+            print(k, len([p for _, p in final_predictions if p not in word_map]), len(idx))
+            final_predictions = [dict(idx=i, label=word_map[p] if p in word_map else (list(word_map.values())[0] if len(word_map) > 0 else p)) for i, p in final_predictions]
+            with jsonlines.open(self.superglue_file_names[k], mode='w') as writer:
+                writer.write_all(final_predictions)
+        model = model.train()
+
 
 
 class LargeValidator:
@@ -306,10 +355,9 @@ class LargeValidator:
             length = len(dataset)
             print("[Validation]: Time = %s, Rank = %s, Prepare-Validation-Dataset, Val for dataset = %s, length = %s, with columns = %s" % (get_time_string(), self.rank, k, len(dataset), cns))
             loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-            loader = custom_batching_fn(loader, size_dicts, False)
+            # loader = custom_batching_fn(loader, size_dicts, False)
             # loader = custom_batching_fn(tqdm(loader, desc=k, miniters=100, mininterval=30.0), size_dicts_val, False)
-            samples_prev = 0
-            samples_cur = 0
+
             for pt_batch in loader:
                 pt_batch["record_accuracy"] = record_accuracy
                 pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
@@ -339,10 +387,7 @@ class LargeValidator:
                         with autocast():
                             output = model(**pt_batch, labels=labels)["accuracy_hist"]
                     predictions.append(output)
-                samples_cur += pt_batch["input_ids"].size(0)
-                if samples_cur > samples_prev + (16 * 50):
-                    # print("[Validation]: Time = %s, Rank = %s, Val for dataset = %s, samples done = %s/%s" % (get_time_string(), self.rank, k, samples_cur, length))
-                    samples_prev = samples_cur
+
 
             print("[Validation]: Time = %s, Rank = %s, For Dataset %s, Built predictions list, samples = %s" % (get_time_string(), self.rank, k, list(zip(labels, predictions))[:4]))
             if 'answer' in cns:
@@ -548,6 +593,10 @@ def train(local_rank, args):
             state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[-5:]), 0)
             model.load_state_dict(state_dict, strict=False)
 
+    if args["test_only"]:
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+        return
+    
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
         clean_memory()

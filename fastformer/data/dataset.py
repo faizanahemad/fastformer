@@ -1320,15 +1320,15 @@ def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expandu
     from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
     tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
+    super_glue = dict()
+    for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg']: # 'wsc',
+        super_glue[gl] = load_dataset("super_glue", gl)
+
     if not os.path.exists(dataset_location):
         os.makedirs(dataset_location)
-    if test_only and dataset_location is not None and os.path.exists(dataset_location):
+    if test_only and dataset_location is not None and os.path.exists(dataset_location) and os.path.exists(os.path.join(dataset_location, "dataset_dict.json")):
         sglue_proc = DatasetDict.load_from_disk(dataset_location)
-        return sglue_proc
-
-    super_glue = dict()
-    for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc', 'wsc.fixed', 'axb', 'axg']:
-        super_glue[gl] = load_dataset("super_glue", gl)
+        return super_glue, sglue_proc
 
     sglue_proc = dict()
 
@@ -1403,7 +1403,7 @@ def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expandu
     if test_only:
         sglue_proc = DatasetDict({k: v['test'] for k, v in sglue_proc.items()})
 
-    return sglue_proc
+    return super_glue, sglue_proc
 
 
 # https://github.com/niderhoff/nlp-datasets
