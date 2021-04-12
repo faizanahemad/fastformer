@@ -154,8 +154,16 @@ class CLRDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         item, label = self.dataset[item]
-        x1 = self.to_tensor(self.x1_transform(item.copy()))
-        x2 = self.to_tensor(self.x2_transform(item))
+        if self.x1_transform:
+            x1 = self.to_tensor(self.x1_transform(item.copy()))
+        else:
+            x1 = self.to_tensor(item)
+
+        if self.x2_transform:
+            x2 = self.to_tensor(self.x2_transform(item.copy()))
+        else:
+            x2 = self.to_tensor(item)
+
         return dict(x1=x1, x2=x2)
 
     def __len__(self):
