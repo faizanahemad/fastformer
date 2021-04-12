@@ -365,7 +365,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
+    def __init__(self, backbone, patchclr_w=1.0, num_features=384, eps=1e-4, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
@@ -375,6 +375,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.contrastive_temperature = contrastive_temperature
         self.simclr_w = simclr_w
         self.clustering_w = clustering_w
+        self.patchclr_w = patchclr_w
         self.init_weights()
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths):
@@ -400,16 +401,21 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         b, s = b1.shape[:2]
         bs = b * s
-        out_1 = b1.reshape(-1, self.num_features)  # BxS , D
-        out_2 = b2.reshape(-1, self.num_features)  # BxS , D
 
-        c1 = torch.cat((out_1, out_2), 0)
-        c1 = c1 / (c1.norm(2, -1, True).detach() + self.eps)
-        # b2 = torch.cat((out_2, out_1), 0)
-        contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
-        contrastive_matrix_store = contrastive_matrix
+        patchclr_loss = 0.0
+        patchclr_accuracy = None
+        if self.patchclr_w > 0:
+            out_1 = b1.reshape(-1, self.num_features)  # BxS , D
+            out_2 = b2.reshape(-1, self.num_features)  # BxS , D
 
-        patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
+            c1 = torch.cat((out_1, out_2), 0)
+            c1 = c1 / (c1.norm(2, -1, True).detach() + self.eps)
+            # b2 = torch.cat((out_2, out_1), 0)
+            contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
+            contrastive_matrix_store = contrastive_matrix
+
+            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
+            patchclr_loss = self.patchclr_w * patchclr_loss
         clustering_loss = 0.0
         if self.clustering_w > 0:
             cmm = contrastive_matrix_store.reshape(2, bs, 2, bs).transpose(1,2).reshape(4, bs, bs)

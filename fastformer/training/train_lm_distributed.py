@@ -256,7 +256,6 @@ class SuperGlueTest:
         model = model.train()
 
 
-
 class LargeValidator:
     def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False):
         self.location = location
