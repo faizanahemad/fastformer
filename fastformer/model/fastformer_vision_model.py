@@ -234,7 +234,7 @@ class PositionwiseFFN(nn.Module):
         activation_dropout = Dropout(hidden_dropout)
 
         self.layer_norm = nn.LayerNorm(d_model, layer_norm_eps)
-        self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), activation_dropout, nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
+        self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
 
     def forward(self, hidden):
         h = hidden
@@ -476,24 +476,7 @@ if __name__ == '__main__':
 
     if args["deit"]:
         from timm.models.vision_transformer import VisionTransformer
-        import types
-        model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=False)
-        def forward(self, x):
-            B = x.shape[0]
-            x = self.patch_embed(x)
-
-            cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-            x = torch.cat((cls_tokens, x), dim=1)
-            x = x + self.pos_embed
-            x = self.pos_drop(x)
-
-            for blk in self.blocks:
-                x = blk(x)
-
-            x = self.norm(x)
-            return x
-        model.forward = types.MethodType(forward, model)
-        del model.head
+        model = get_pretrained_deit()
         print(model)
         model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
     else:

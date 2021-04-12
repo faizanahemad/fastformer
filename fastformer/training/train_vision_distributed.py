@@ -83,6 +83,9 @@ def training_args():
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
+    parser.add_argument('--deit', action="store_true", default=False,
+                        help='DEIT')
+
     parser.add_argument('--no_autocast', action="store_true", default=False,
                         help='Avoid Autocast')
 
@@ -269,10 +272,17 @@ def train(local_rank, args):
 
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
-    backbone = FastFormerVisionModel(config)
+    if args["deit"]:
+        assert args["mode"] == "clr"
+        backbone = get_pretrained_deit()
+    else:
+        backbone = FastFormerVisionModel(config)
 
     if args["mode"] == "clr":
-        model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0).to(device)
+        if args["deit"]:
+            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0)
+        else:
+            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1]).to(device)
     else:
