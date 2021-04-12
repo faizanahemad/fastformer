@@ -1303,6 +1303,33 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
 
     return mapper
 
+
+def superglue_test():
+    import datasets
+    import re
+    import numpy as np
+    import random
+    from typing import List, Dict
+    from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    import nltk.data
+    sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+    import os
+    os.cpu_count()
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
+    from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
+    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
+    super_glue = dict()
+    for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc', 'wsc.fixed', 'axb', 'axg']:
+        super_glue[gl] = load_dataset("super_glue", gl)
+
+    sglue_proc = dict()
+    sglue_proc['boolq'] = super_glue['boolq'].map(lambda x: dict(label={1: "yes", 0: "no", -1: tokenizer.mask_token}[x["label"]]))
+    sglue_proc['boolq'] = sglue_proc['boolq'].map(get_matching_mapper(["passage"], [], [], ["question"], ["label"], 1024, tokenizer), batched=True, num_proc=16,
+                                                  batch_size=4, remove_columns=['question', 'passage', 'idx', 'label'])
+    return sglue_proc
+
+
 # https://github.com/niderhoff/nlp-datasets
 # https://amitness.com/toolbox/
 

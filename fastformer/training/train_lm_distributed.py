@@ -156,7 +156,7 @@ def training_args():
     return vars(args)
 
 
-class SuperGLUEValidator:
+class SuperGLUEEvaluator:
     def __init__(self, location, model, config):
         self.location = location
         self.model = model
