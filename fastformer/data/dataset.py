@@ -1328,6 +1328,7 @@ def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expandu
         os.makedirs(dataset_location)
     if test_only and dataset_location is not None and os.path.exists(dataset_location) and os.path.exists(os.path.join(dataset_location, "dataset_dict.json")):
         sglue_proc = DatasetDict.load_from_disk(dataset_location)
+        super_glue = DatasetDict({k: v['test'] for k, v in super_glue.items()})
         return super_glue, sglue_proc
 
     sglue_proc = dict()
