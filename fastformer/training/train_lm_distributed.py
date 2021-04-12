@@ -249,7 +249,7 @@ class SuperGlueTest:
                 final_predictions = mrcp
 
             if k == "record":
-                final_predictions = [dict(idx=pr["idx"]["passage"], label=pr["label"]) for pr in final_predictions]
+                final_predictions = [dict(idx=pr["idx"]["query"], label=pr["label"]) for pr in final_predictions]
 
             with jsonlines.open(self.superglue_file_names[k], mode='w') as writer:
                 writer.write_all(final_predictions)
@@ -851,8 +851,6 @@ if __name__ == "__main__":
     if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
     else:
-        try:
-            mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
-        finally:
-            cleanup()
+        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
+
 
