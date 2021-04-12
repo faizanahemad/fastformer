@@ -237,7 +237,7 @@ class SuperGlueTest:
                 # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
                 answering_predictions = answer_decoder(answering_predictions, tokenizer)
                 predictions.extend(answering_predictions)
-            final_predictions = [(i, str(prd[0]).lower()) for i, prd in zip(idx, predictions)]
+            final_predictions = [(i, str(prd[0]).lower() if len(prd) > 0 else "none") for i, prd in zip(idx, predictions)]
             word_map = self.task_word_map[k]
             print(k, len([p for _, p in final_predictions if p not in word_map]), len(idx))
             final_predictions = [dict(idx=i, label=word_map[p] if p in word_map else (list(word_map.values())[0] if len(word_map) > 0 else p)) for i, p in final_predictions]
