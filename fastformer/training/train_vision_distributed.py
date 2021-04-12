@@ -280,7 +280,7 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         if args["deit"]:
-            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0)
+            model = PatchCLR(backbone, 768, 1e-7, simclr_w=1.0)
         else:
             model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
