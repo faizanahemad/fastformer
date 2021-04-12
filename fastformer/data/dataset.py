@@ -9,6 +9,7 @@ from ..config import FastFormerConfig
 from torch.nn import functional as F
 import nlpaug.augmenter.char as nac
 import unidecode
+import os
 
 from fastformer.utils import squeeze_after, get_time_string, recursive_op, gcd_array
 from collections import deque
@@ -1304,7 +1305,7 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
     return mapper
 
 
-def superglue_test():
+def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expanduser("~"), "processed_datasets/superglue_test")):
     import datasets
     import re
     import numpy as np
@@ -1318,6 +1319,12 @@ def superglue_test():
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     from transformers import PreTrainedTokenizerFast, BertTokenizerFast, RobertaTokenizerFast
     tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+
+    if not os.path.exists(dataset_location):
+        os.makedirs(dataset_location)
+    if test_only and dataset_location is not None and os.path.exists(dataset_location):
+        sglue_proc = DatasetDict.load_from_disk(dataset_location)
+        return sglue_proc
 
     super_glue = dict()
     for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc', 'wsc.fixed', 'axb', 'axg']:
@@ -1392,6 +1399,9 @@ def superglue_test():
                                                                 num_proc=16, batch_size=8,
                                                                 remove_columns=['idx', 'label', 'query', 'span1_index', 'span1_text', 'span2_index',
                                                                                 'span2_text'])
+
+    if test_only:
+        sglue_proc = DatasetDict({k: v['test'] for k, v in sglue_proc.items()})
 
     return sglue_proc
 
