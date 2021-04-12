@@ -242,10 +242,10 @@ class SuperGlueTest:
             print(k, len([p for _, p in final_predictions if p not in word_map]), len(idx))
             final_predictions = [dict(idx=i, label=word_map[p] if p in word_map else (list(word_map.values())[0] if len(word_map) > 0 else p)) for i, p in final_predictions]
             if k == "multirc":
-                mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(int)))))
+                mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
                 for pd in final_predictions:
-                    mrcp[pd["idx"]["paragraph"]]["questions"][pd["idx"]["question"]]["answers"][pd["idx"]["answer"]] = pd["label"]
-                mrcp = [{"idx": k, "passage": {i: [{"idx": m, "answers": [{"idx": o, "label": p} for o, p in sorted(n.items())]} for m, n in sorted(js.items())] for i, js in v.items()}} for k, v in sorted(mrcp.items())]
+                    mrcp[pd["idx"]["paragraph"]][pd["idx"]["question"]][pd["idx"]["answer"]] = pd["label"]
+                mrcp = [{"idx": k, "passage": {"questions": [{"idx": m, "answers": [{"idx": o, "label": p} for o, p in sorted(n.items())]} for m, n in sorted(v.items())]}} for k, v in sorted(mrcp.items())]
                 final_predictions = mrcp
 
             if k == "record":
