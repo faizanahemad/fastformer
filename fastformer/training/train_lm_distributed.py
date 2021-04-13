@@ -190,8 +190,10 @@ class SuperGlueTest:
         classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
         classifier.funnel = model.funnel
         classifier = classifier.to(device)
-
         del model
+
+        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
+
 
 
 

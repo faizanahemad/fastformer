@@ -1051,7 +1051,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         logits = self.classifier(funnel_outputs)
         loss = 0.0
-        if labels is not None:
+        if labels is not None and labels.min() >= 0:
             loss = self.ce(logits, labels)
         predictions = logits.argmax(-1)
         return dict(predictions=predictions, loss=loss)

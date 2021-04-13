@@ -24,6 +24,10 @@ import math
 import sys
 from distutils.util import strtobool
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from PIL import Image
+from albumentations import augmentations as alb
+import imgaug.augmenters as iaa
+import torchvision.transforms as transforms
 
 
 def str2bool(v):
@@ -486,6 +490,29 @@ def get_pretrained_deit(features_only=True):
     return model
 
 
+def get_cutout(cutout_proba, cutout_size):
+    cut = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.RandomErasing(p=cutout_proba, scale=(0.02, cutout_size), ratio=(0.3, 3.3), value='random', inplace=False),
+        transforms.ToPILImage(),
+    ])
+    return cut
+
+
+def get_imgaug(aug):
+    def augment(image):
+        return Image.fromarray(aug(image=np.array(image, dtype=np.uint8)))
+
+    return augment
+
+
+def get_alb(aug):
+    def augment(image):
+        return Image.fromarray(aug(image=np.array(image, dtype=np.uint8))['image'])
+
+    return augment
+
+
 def get_image_augmetations(mode):
     from PIL import Image
     from albumentations import augmentations as alb
@@ -502,27 +529,6 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.6, 1.4)))
     shape_transforms = transforms.Compose(shape_transforms)
-
-    def get_cutout(cutout_proba, cutout_size):
-        cut = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.RandomErasing(p=cutout_proba, scale=(0.02, cutout_size), ratio=(0.3, 3.3), value='random', inplace=False),
-            transforms.ToPILImage(),
-        ])
-        return cut
-
-    def get_imgaug(aug):
-        def augment(image):
-            return Image.fromarray(aug(image=np.array(image, dtype=np.uint8)))
-
-        return augment
-
-    def get_alb(aug):
-        def augment(image):
-            return Image.fromarray(aug(image=np.array(image, dtype=np.uint8))['image'])
-
-        return augment
-
     cut = get_cutout(0.75, 0.05)
     non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
                             transforms.RandomGrayscale(p=0.1),
