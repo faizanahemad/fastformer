@@ -365,7 +365,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=384, eps=1e-4, patchclr_w=1.0, contrastive_temperature=5e-2, simclr_w=1.0, clustering_w=1.0):
+    def __init__(self, backbone, num_features=384, eps=1e-4, patchclr_w=1.0, contrastive_temperature=1e-2, simclr_w=1.0, clustering_w=1.0):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
@@ -399,9 +399,6 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
 
-        b1 = b1 / (b1.norm(2, -1, True).detach() + self.eps)
-        b2 = b2 / (b2.norm(2, -1, True).detach() + self.eps)
-        bmm = torch.bmm(b1, b2.transpose(1, 2))
         b, s = b1.shape[:2]
         bs = b * s
 
