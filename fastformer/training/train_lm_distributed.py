@@ -190,6 +190,7 @@ class SuperGlueTest:
         classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
         classifier.funnel = model.funnel
         classifier = classifier.to(device)
+
         del model
 
 

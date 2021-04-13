@@ -183,7 +183,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
 
     if mode == "clr":
 
-        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], to_tensor)
+        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"])
 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
