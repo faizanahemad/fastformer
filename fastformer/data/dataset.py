@@ -299,6 +299,7 @@ class TokenizerDataset(Dataset):
         item = self.dataset[item]
         pet_query = item["query"] if "query" in item and len(item["query"]) > 0 else []
         pet_answer = item["answer"] if "answer" in item and len(item["answer"]) > 0 else []
+        label = item["label"] if "label" in item else 0.0
 
 
         # TODO: Prompt is added at end of our Seq, labels_seq is generated from an auto-regressive head
@@ -490,6 +491,9 @@ class TokenizerDataset(Dataset):
 
         inp = char_rnn_tokenize(text, self.tokenizer, self.char_to_id, **self.tokenizer_args)
         results.update(inp)
+        if "label" in item:
+            results["label"] = label
+
         length = torch.sum(results["attention_mask"]).item()
         if "positives" in results:
             results["positives"] = recursive_op(results["positives"], lambda x: min(x, length))

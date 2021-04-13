@@ -1040,7 +1040,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         self.cls_tokens = config.num_highway_cls_tokens
         self.init_weights()
 
-    def forward(self, input_ids, attention_mask, char_ids, char_offsets, labels=None, token_type_ids=None, **kwargs):
+    def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
                              token_type_ids=token_type_ids,
@@ -1051,8 +1051,8 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         logits = self.classifier(funnel_outputs)
         loss = 0.0
-        if labels is not None and labels.min() >= 0:
-            loss = self.ce(logits, labels)
+        if label is not None and label.min() >= 0:
+            loss = self.ce(logits, label)
         predictions = logits.argmax(-1)
         return dict(predictions=predictions, loss=loss)
 

@@ -366,7 +366,7 @@ def train(local_rank, args):
             key = list(batch.keys())[0]
             bs_size = list(batch[key].size())
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-            optimizer.zero_grad(set_to_none=True)
+
             if (step + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
                 if local_rank == 0:
@@ -385,6 +385,7 @@ def train(local_rank, args):
                     output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"])
+                    optimizer.zero_grad(set_to_none=True)
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])

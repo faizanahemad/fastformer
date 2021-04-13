@@ -185,35 +185,66 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def boolq(self, model, boolq, device):
-        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
-
+    def prepare_classifier(self, model, dataset, device):
+        size_dicts = self.size_dicts
         model = model.train()
         optimizer_config.eps = 1e-7
         model.config.eps = 1e-7
         classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
         classifier.funnel = model.funnel
         classifier = classifier.to(device)
+        collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, model.tokenizer.pad_token_id)
         del model
         model = classifier
         optc = optimizer_config.to_dict()
         optimizer = torch.optim.AdamW(model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
-        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
-                                   dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
-                                   dataset["train"])
-        train.training = False
+        scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
+
 
         train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
                                  dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                  dataset["train"])
         train.training = False
 
-        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
-                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
-                                 dataset["train"])
-        train.training = False
+        validation = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                      dataset["validation"])
+        validation.training = False
+
+        test = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                dataset["test"])
+        test.training = False
+
+        train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=4, shuffle=True)
+        validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
+        test = DataLoader(test, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
+
+        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc)
+
+    def boolq(self, model, boolq, device):
+        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
+
+        classifier_data = self.prepare_classifier(model, boolq, device)
+        gradient_clipping = classifier_data["optc"]["gradient_clipping"]
+        scheduler = classifier_data["scheduler"]
+        optimizer = classifier_data["optimizer"]
+        iter_size = 4
+        for step, batch in enumerate(classifier_data["train"]):
+            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+
+            label = batch.pop("label")
+            output = model(**batch, label=label)
+            loss = output["loss"] / iter_size
+            loss.backward()
+            if (step + 1) % iter_size == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad(set_to_none=True)
+
 
 
 
@@ -763,7 +794,6 @@ def train(local_rank, args):
         ddp_model.module.electra_loss_w = electra_loss_w
         input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / ((2 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
-        optimizer.zero_grad(set_to_none=True)
         if (step + 1) % save_every_steps == 0:
             state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
             if local_rank == 0:
@@ -785,7 +815,6 @@ def train(local_rank, args):
 
         batch["record_accuracy"] = record_accuracy
         labels = batch["label_mlm_input_ids"] if "label_mlm_input_ids" in batch else batch["input_ids"]
-        labels = labels.to(device, non_blocking=True)
         model_start_time = time.time()
         samples_processed += int(batch["input_ids"].size(0))
         samples_processed_this_log_iter += int(batch["input_ids"].size(0))
@@ -794,7 +823,6 @@ def train(local_rank, args):
         #       (step, rank, batch["input_ids"].size(), torch.cuda.memory_allocated() / 1e6, torch.cuda.max_memory_allocated() /1e6, torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()))  # torch.cuda.memory_summary()
 
         try:
-
             if no_sync and (step + 1) % iter_size != 0:
                 with ddp_model.no_sync():
                     output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
@@ -802,6 +830,7 @@ def train(local_rank, args):
             else:
                 output = train_inner_loop(dict(no_autocast=args["no_autocast"], cpu=args["cpu"]), ddp_model, batch, labels, optimizer, scheduler, None, gradient_clipping, iter_size=iter_size,
                                           no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0)
+                optimizer.zero_grad(set_to_none=True)
 
         except Exception as e:
             es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
