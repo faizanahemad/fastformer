@@ -175,7 +175,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     single_node = world_size == 1
 
     shape_transforms = []
-    if mode == "validation" or mode == "clr":
+    if mode == "validation":
         shape_transforms.append(transforms.Resize(256))
         shape_transforms.append(transforms.CenterCrop(224))
     else:
@@ -288,9 +288,9 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         if args["deit"]:
-            model = PatchCLR(backbone, 768, 1e-7, patchclr_w=0.0, simclr_w=1.0).to(device)
+            model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, simclr_w=1.0, clustering_w=1.0).to(device)
+            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1]).to(device)
     else:
