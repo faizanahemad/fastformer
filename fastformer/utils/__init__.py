@@ -499,18 +499,20 @@ def get_cutout(cutout_proba, cutout_size):
     return cut
 
 
-def get_imgaug(aug):
-    def augment(image):
-        return Image.fromarray(aug(image=np.array(image, dtype=np.uint8)))
+class get_imgaug:
+    def __init__(self, aug):
+        self.aug = aug
 
-    return augment
+    def __call__(self, image):
+        return Image.fromarray(self.aug(image=np.array(image, dtype=np.uint8)))
 
 
-def get_alb(aug):
-    def augment(image):
-        return Image.fromarray(aug(image=np.array(image, dtype=np.uint8))['image'])
+class get_alb:
+    def __init__(self, aug):
+        self.aug = aug
 
-    return augment
+    def __call__(self, image):
+        return Image.fromarray(self.aug(image=np.array(image, dtype=np.uint8))['image'])
 
 
 def get_image_augmetations(mode):
