@@ -207,7 +207,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
-        dataset = CLRDataset(dataset, None, None, to_tensor)
+        dataset = CLRDataset(dataset, non_shape_transforms, non_shape_transforms, to_tensor)
 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
