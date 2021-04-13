@@ -1031,6 +1031,31 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
         return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
 
 
+class FastFormerForClassification(FastFormerPreTrainedModel):
+    def __init__(self, config: FastFormerConfig, num_classes, tokenizer=None, additive_margin_softmax_w=0.3):
+        super().__init__(config)
+        self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
+        self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
+        self.classifier = nn.Linear(config.block_channel_size[-1], num_classes)
+        self.cls_tokens = config.num_highway_cls_tokens
+        self.init_weights()
+
+    def forward(self, input_ids, attention_mask, char_ids, char_offsets, labels=None, token_type_ids=None, **kwargs):
+        funnel_inputs = dict(input_ids=input_ids,
+                             attention_mask=attention_mask,
+                             token_type_ids=token_type_ids,
+                             char_ids=char_ids, char_offsets=char_offsets,
+                             run_decoder=False,
+                             run_answering=False)
+        funnel_outputs = self.funnel(**funnel_inputs)
+        funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
+        logits = self.classifier(funnel_outputs)
+        loss = 0.0
+        if labels is not None:
+            loss = self.ce(logits, labels)
+        predictions = logits.argmax(-1)
+        return dict(predictions=predictions, loss=loss)
+
 
 from abc import ABC, abstractmethod
 

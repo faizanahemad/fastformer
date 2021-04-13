@@ -185,8 +185,14 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def boolq(self, model, boolq_train, boolq_val, boolq_test):
-        pass
+    def boolq(self, model, boolq, device):
+        model = model.train()
+        classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
+        classifier.funnel = model.funnel
+        classifier = classifier.to(device)
+        del model
+
+
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer

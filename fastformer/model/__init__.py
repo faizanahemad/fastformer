@@ -1,1 +1,1 @@
-from .fastformer_model import FastFormerModel, FastFormerForMaskedLM, FastFormerForFusedELECTRAPretraining, FastFormerPreTrainedModel
+from .fastformer_model import FastFormerModel, FastFormerForMaskedLM, FastFormerForFusedELECTRAPretraining, FastFormerPreTrainedModel, FastFormerForClassification

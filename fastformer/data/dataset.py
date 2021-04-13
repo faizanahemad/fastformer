@@ -325,13 +325,14 @@ class TokenizerDataset(Dataset):
         text = unidecode.unidecode(text)
         # assert len(text.strip()) > 0
 
-        tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
-        # TODO: try one in ten words / alternate sentences?
-        highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
-        length = torch.sum(highway_cls_ar__attention_mask).item()
         results = dict(n_pet_queries=n_queries, answer=pet_answer)
 
         if self.training:
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
+            # TODO: try one in ten words / alternate sentences?
+            highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
+            length = torch.sum(highway_cls_ar__attention_mask).item()
+
             seg_sep_token = f" {tokenizer.seg_sep_token} "
 
             wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
