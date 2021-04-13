@@ -461,7 +461,7 @@ def disentangled_att_bias(query_layer, key_layer, relative_pos, query_embeddings
     return score
 
 
-def get_pretrained_deit():
+def get_pretrained_deit(features_only=True):
     import types
     model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=True)
 
@@ -480,8 +480,9 @@ def get_pretrained_deit():
         x = self.norm(x)
         return x
 
-    model.forward = types.MethodType(forward, model)
-    del model.head
+    if features_only:
+        model.forward = types.MethodType(forward, model)
+        del model.head
     return model
 
 

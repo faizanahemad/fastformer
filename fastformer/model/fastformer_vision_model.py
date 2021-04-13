@@ -380,7 +380,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths):
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
-        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(-1e3)
+        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e3)
         contrastive_matrix = contrastive_matrix - mask
         labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths, torch.arange(label_lengths, device=contrastive_matrix.device)))
         loss = self.loss_ce(contrastive_matrix, labels)
@@ -399,6 +399,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
 
+        b1 = b1 / (b1.norm(2, -1, True).detach() + self.eps)
+        b2 = b2 / (b2.norm(2, -1, True).detach() + self.eps)
+        bmm = torch.bmm(b1, b2.transpose(1, 2))
         b, s = b1.shape[:2]
         bs = b * s
 
@@ -450,6 +453,8 @@ if __name__ == '__main__':
     from tqdm.auto import tqdm, trange
     from torch.optim import AdamW
     import timm
+    from PIL import Image
+    import torchvision.transforms as transforms
 
     torch.backends.cudnn.benchmark = True
 
@@ -460,7 +465,8 @@ if __name__ == '__main__':
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
-    ap.add_argument("--deit", type=str2bool, default=False)
+    ap.add_argument("--deit", action="store_true", default=False,)
+    ap.add_argument("--classification", action="store_true", default=False,)
     ap.add_argument("--fp16", type=str2bool, default=False)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=16)
@@ -477,22 +483,42 @@ if __name__ == '__main__':
     config = vision_config_dict[config]
 
     device = torch.device(device)
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+    dog = to_tensor(Image.open("dog.jpg"))
+    cat = to_tensor(Image.open("cat.jpg"))
+    fox = to_tensor(Image.open("fox.jpg"))
+    grasshopper = to_tensor(Image.open("grasshopper.jpg"))
+    x = torch.stack([dog, cat, fox, grasshopper])
+    
 
-    x = torch.randn(batch_size, 3, 224, 224, device=device)
+    # x = torch.randn(batch_size, 3, 224, 224, device=device)
 
     if args["deit"]:
         from timm.models.vision_transformer import VisionTransformer
-        model = get_pretrained_deit()
+        if args["classification"]:
+            model = get_pretrained_deit(False)
+        else:
+            model = get_pretrained_deit()
+            model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
         print(model)
-        model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
     else:
         model = FastFormerVisionModel(config)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
         print("Trainable Params = %s" % (numel(model) / 1_000_000))
         print(model)
-        model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
+        if args["classification"]:
+            pass
+        else:
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
     model = model.to(device)
+    if args["classification"]:
+        output = model(x)
+        print(output.argmax(-1))
+        exit()
+
     output = model(x, x)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))

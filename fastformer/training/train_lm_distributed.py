@@ -160,7 +160,7 @@ def training_args():
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -170,6 +170,7 @@ class SuperGlueTest:
         self.world_size = world_size
         self.no_autocast = no_autocast
         self.size_dicts = size_dicts
+        self.finetune = finetune
         self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
                                   cb=dict(agree="entailment", entailment="entailment", entail="entailment", contradiction="contradiction",
                                           contradict="contradiction", disagree="contradiction", neutral="neutral"),
@@ -184,18 +185,8 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def read_data(self):
-        import glob
-        datasets = glob.glob(os.path.join(self.location, "superglue_*"))
-        datadict = dict()
-        for d in datasets:
-            load_point = os.path.join(self.location, d)
-            try:
-                ds = Dataset.load_from_disk(load_point)
-            except:
-                ds = DatasetDict.load_from_disk(load_point)
-            datadict[d.replace("superglue_", '')] = ds
-        return datadict
+    def boolq(self, model, boolq_train, boolq_val, boolq_test):
+        pass
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
