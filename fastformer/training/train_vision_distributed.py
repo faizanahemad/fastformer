@@ -174,40 +174,16 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
 
-    shape_transforms = []
-    if mode == "validation":
-        shape_transforms.append(transforms.Resize(256))
-        shape_transforms.append(transforms.CenterCrop(224))
-    else:
-        shape_transforms.append(transforms.RandomHorizontalFlip())
-        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.25))
-        shape_transforms.append(transforms.RandomRotation(45))
-        shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.4, 1.6)))
-    shape_transforms = transforms.Compose(shape_transforms)
+    image_transforms = get_image_augmetations(mode)
 
     if "imagenet" in location.lower():
-        dataset = ImageNet(location, "val" if mode == "validation" else "train", transform=shape_transforms)
+        dataset = ImageNet(location, "val" if mode == "validation" else "train", transform=image_transforms["shape_transforms"])
     elif "cifar10" in location.lower():
-        dataset = CIFAR10(root=location, train=mode != "validation", download=True, transform=shape_transforms)
+        dataset = CIFAR10(root=location, train=mode != "validation", download=True, transform=image_transforms["shape_transforms"])
 
     if mode == "clr":
-        def get_cutout(cutout_proba, cutout_size):
-            cut = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.RandomErasing(p=cutout_proba, scale=(0.05, cutout_size), ratio=(0.3, 3.3), value='random', inplace=False),
-                transforms.ToPILImage(),
-            ])
-            return cut
 
-        cut = get_cutout(0.75, 0.15)
-        non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
-                                transforms.RandomGrayscale(p=0.2), cut]
-        non_shape_transforms = transforms.Compose(non_shape_transforms)
-
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-        to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
-        dataset = CLRDataset(dataset, non_shape_transforms, non_shape_transforms, to_tensor)
+        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], to_tensor)
 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),

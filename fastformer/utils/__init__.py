@@ -486,3 +486,60 @@ def get_pretrained_deit(features_only=True):
     return model
 
 
+def get_image_augmetations(mode):
+    from PIL import Image
+    from albumentations import augmentations as alb
+    import imgaug.augmenters as iaa
+    import torchvision.transforms as transforms
+
+    shape_transforms = []
+    if mode == "validation":
+        shape_transforms.append(transforms.Resize(256))
+        shape_transforms.append(transforms.CenterCrop(224))
+    else:
+        shape_transforms.append(transforms.RandomHorizontalFlip())
+        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
+        shape_transforms.append(transforms.RandomRotation(15))
+        shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.6, 1.4)))
+    shape_transforms = transforms.Compose(shape_transforms)
+
+    def get_cutout(cutout_proba, cutout_size):
+        cut = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.RandomErasing(p=cutout_proba, scale=(0.02, cutout_size), ratio=(0.3, 3.3), value='random', inplace=False),
+            transforms.ToPILImage(),
+        ])
+        return cut
+
+    def get_imgaug(aug):
+        def augment(image):
+            return Image.fromarray(aug(image=np.array(image, dtype=np.uint8)))
+
+        return augment
+
+    def get_alb(aug):
+        def augment(image):
+            return Image.fromarray(aug(image=np.array(image, dtype=np.uint8))['image'])
+
+        return augment
+
+    cut = get_cutout(0.75, 0.05)
+    non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
+                            transforms.RandomGrayscale(p=0.1),
+                            transforms.RandomChoice([
+                                get_imgaug(iaa.CoarseDropout((0.02, 0.05), size_percent=(0.25, 0.5), per_channel=0.5)),
+                                get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.01, 0.05), per_channel=True)),
+
+                                get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
+                            cut]
+    non_shape_transforms = transforms.Compose(non_shape_transforms)
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
+
+    return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
+
