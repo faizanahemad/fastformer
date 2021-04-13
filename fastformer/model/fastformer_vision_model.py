@@ -396,8 +396,8 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1 = self.ffn(self.backbone(x1))
             b2 = self.ffn(self.backbone(x2))
         if isinstance(b1, dict):
-            b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] else b1["second_block_hidden"])  # B,S,D
-            b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] else b2["second_block_hidden"])  # B,S,D
+            b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
+            b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
 
         b, s = b1.shape[:2]
         bs = b * s
