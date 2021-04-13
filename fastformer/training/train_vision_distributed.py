@@ -300,6 +300,7 @@ def train(local_rank, args):
     clean_memory()
     _ = model_train_validation_switch(ddp_model.module, args, train=True)
     optc = optimizer_config.to_dict()
+    optc["lr"] = (optc["lr"] * batch_size * args["world_size"]) / 512.0
     optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                   betas=(optc["beta_1"], optc["beta_2"]))
     optimizer.zero_grad(set_to_none=True)
@@ -316,7 +317,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=len(dataloader),
-                                                    div_factor=1e3, three_phase=True, pct_start=0.1)
+                                                    div_factor=1e3, three_phase=True, pct_start=0.2)
     gradient_clipping = optc["gradient_clipping"]
 
     if local_rank == 0:

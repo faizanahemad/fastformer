@@ -186,13 +186,40 @@ class SuperGlueTest:
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
     def boolq(self, model, boolq, device):
+        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
+
         model = model.train()
+        optimizer_config.eps = 1e-7
+        model.config.eps = 1e-7
         classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
         classifier.funnel = model.funnel
         classifier = classifier.to(device)
         del model
+        model = classifier
+        optc = optimizer_config.to_dict()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+                                      betas=(optc["beta_1"], optc["beta_2"]))
+        optimizer.zero_grad(set_to_none=True)
+        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                   dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                   dataset["train"])
+        train.training = False
 
-        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
+        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                 dataset["train"])
+        train.training = False
+
+        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                 dataset["train"])
+        train.training = False
+
+
+
+
+
+
 
 
 
