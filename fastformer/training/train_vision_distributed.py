@@ -314,9 +314,11 @@ def train(local_rank, args):
                                   world_size=args["world_size"], num_workers=args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
+    iter_size = max(args["accumulation_steps"], 1)
+    no_sync = iter_size > 1
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
-    steps_per_epoch = int(np.ceil(len(dataloader.sampler) / batch_size) if dataloader.sampler is not None else len(dataloader))
+    steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else len(dataloader))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
                                                     div_factor=1e3, three_phase=True, pct_start=0.2)
     gradient_clipping = optc["gradient_clipping"]
@@ -351,9 +353,6 @@ def train(local_rank, args):
     if not args["no_autocast"] and args["backward_hook"]:
         for name, param in ddp_model.named_parameters():
             param.register_hook(hook)
-
-    no_sync = args["accumulation_steps"] > 1
-    iter_size = args["accumulation_steps"]
 
     for epoch in range(args["epochs"]):
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
