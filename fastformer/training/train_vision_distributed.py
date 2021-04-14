@@ -316,9 +316,11 @@ def train(local_rank, args):
     save_every_steps = args["save_every_steps"]
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=len(dataloader),
+    steps_per_epoch = np.ceil(len(dataloader.sampler) / batch_size) if dataloader.sampler is not None else len(dataloader)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
                                                     div_factor=1e3, three_phase=True, pct_start=0.2)
     gradient_clipping = optc["gradient_clipping"]
+    print("[Train]: Time = %s, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s" % (get_time_string(), args["epochs"], steps_per_epoch, batch_size, len(dataloader)))
 
     if local_rank == 0:
         wandb_init_args = dict(project="patchclr", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
