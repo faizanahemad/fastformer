@@ -185,12 +185,12 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def prepare_classifier(self, model, dataset, device):
+    def prepare_classifier(self, model, dataset, device, num_classes):
         size_dicts = self.size_dicts
         model = model.train()
         optimizer_config.eps = 1e-7
         model.config.eps = 1e-7
-        classifier = FastFormerForClassification(model.config, 2, model.tokenizer)
+        classifier = FastFormerForClassification(model.config, num_classes, model.tokenizer)
         classifier.funnel = model.funnel
         classifier = classifier.to(device)
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, model.tokenizer.pad_token_id)
@@ -217,43 +217,71 @@ class SuperGlueTest:
                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                 dataset["test"])
         test.training = False
-
+        test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
         train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=4, shuffle=True)
         validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
         test = DataLoader(test, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
 
-        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc)
+        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc, test_idx=test_idx)
 
-    def boolq(self, model, boolq, device):
-        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
-
-        classifier_data = self.prepare_classifier(model, boolq, device)
+    def train_classifier(self, model, device, classifier_data):
         gradient_clipping = classifier_data["optc"]["gradient_clipping"]
         scheduler = classifier_data["scheduler"]
         optimizer = classifier_data["optimizer"]
         iter_size = 4
-        for step, batch in enumerate(classifier_data["train"]):
+
+        cur_val_loss = 1e8
+        prev_val_loss = 1e8
+
+        while cur_val_loss <= prev_val_loss:
+            prev_val_loss = cur_val_loss
+            model = model.train()
+            for step, batch in enumerate(classifier_data["train"]):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+
+                label = batch.pop("label")
+                output = model(**batch, label=label)
+                loss = output["loss"] / iter_size
+                loss.backward()
+                if (step + 1) % iter_size == 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+
+            model = model.eval()
+            labels, predictions, val_loss = [], [], []
+            for step, batch in enumerate(classifier_data["validation"]):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                label = batch.pop("label")
+                labels.extend(label.cpu().tolist())
+                with torch.no_grad():
+                    output = model(**batch, label=label)
+                val_loss = output["loss"].detach().cpu().item()
+                val_preds = output["predictions"].cpu().tolist()
+                predictions.extend(val_preds)
+                val_loss.append(val_loss)
+            cur_val_loss = np.mean(val_loss)
+
+        val_acc = accuracy_score(labels, predictions)
+        predictions = []
+        for step, batch in enumerate(classifier_data["test"]):
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+            _ = batch.pop("label", None)
+            with torch.no_grad():
+                output = model(**batch, label=None)
+            val_preds = output["predictions"].cpu().tolist()
+            predictions.extend(val_preds)
 
-            label = batch.pop("label")
-            output = model(**batch, label=label)
-            loss = output["loss"] / iter_size
-            loss.backward()
-            if (step + 1) % iter_size == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
+        return dict(val_acc=val_acc, predictions=predictions)
 
+    def boolq(self, model, boolq, device):
+        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
 
-
-
-
-
-
-
-
-
+        classifier_data = self.prepare_classifier(model, boolq, device, 2)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("boolq", classifier_results["val_acc"]))
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer

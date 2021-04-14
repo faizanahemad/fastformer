@@ -21,7 +21,7 @@ from dataclasses_json import dataclass_json
 
 
 def get_vision_batch_size(size, autocast):
-    batch_size = 96
+    batch_size = 128
     if not autocast:
         batch_size = batch_size // 2
 
@@ -357,13 +357,13 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 vision_base_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False, hidden_dropout=0.0, attention_dropout=0.0)
 
-vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
+vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[4, 6], num_highway_cls_tokens=8)
 
-vision_lg_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
+vision_lg_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[4, 6], num_highway_cls_tokens=8)
 
-vision_md_funnel_config = FastFormerConfig(stride=2, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
+vision_md_funnel_config = FastFormerConfig(stride=2, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[4, 6], num_highway_cls_tokens=8)
 
-vision_lg_funnel_config = FastFormerConfig(stride=2, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=8)
+vision_lg_funnel_config = FastFormerConfig(stride=2, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 1024], num_decoder_layers=2, block_sizes=[4, 6], num_highway_cls_tokens=8)
 
 config_dict = dict(tg_config=tg_config, md_config=md_config, sm_config=sm_config, md_config_relative=md_config_relative)
 
