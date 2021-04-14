@@ -316,7 +316,7 @@ def train(local_rank, args):
     save_every_steps = args["save_every_steps"]
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
-    steps_per_epoch = np.ceil(len(dataloader.sampler) / batch_size) if dataloader.sampler is not None else len(dataloader)
+    steps_per_epoch = int(np.ceil(len(dataloader.sampler) / batch_size) if dataloader.sampler is not None else len(dataloader))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
                                                     div_factor=1e3, three_phase=True, pct_start=0.2)
     gradient_clipping = optc["gradient_clipping"]
