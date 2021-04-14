@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     vision_cmd = "python train_vision_distributed.py -n %s -g 8 --nr %s --model_config vision_md_config"
     vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name patchclr.pth --dataset /home/ahemf/processed_datasets/ImageNet"
-    vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 10000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --mode clr --shuffle_dataset --accumulation_steps 4 --no_autocast --epochs 300 --lr 0.0001"
+    vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 10000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --mode clr --shuffle_dataset --accumulation_steps 4 --no_autocast --epochs 300 --lr 0.00002"
     # vision_cmd += " --wandb_dryrun"
     # vision_cmd += " --deit"
     vision_cmd += " > output.log 2>&1 & disown"

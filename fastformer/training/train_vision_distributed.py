@@ -188,7 +188,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
-                        prefetch_factor=4, num_workers=num_workers, pin_memory=True)
+                        prefetch_factor=8, num_workers=num_workers, pin_memory=True)
     return loader
 
 
