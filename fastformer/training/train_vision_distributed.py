@@ -355,6 +355,8 @@ def train(local_rank, args):
         for name, param in ddp_model.named_parameters():
             param.register_hook(hook)
 
+    extra_negative_repr_simclr = None
+    extra_negative_repr_patchclr = None
     for epoch in range(args["epochs"]):
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
@@ -383,12 +385,14 @@ def train(local_rank, args):
                     with ddp_model.no_sync():
                         output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
-                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"])
+                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                 else:
                     output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"])
+                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
+                extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
+                extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
@@ -430,11 +434,11 @@ def train(local_rank, args):
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
 
 
-def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
+def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,):
     if args["mode"] == "clr":
         x1 = batch["x1"]
         x2 = batch["x2"]
-        output = ddp_model(x1, x2)
+        output = ddp_model(x1, x2, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
     elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
         x = batch["x"]
         labels = batch["labels"]
