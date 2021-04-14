@@ -418,7 +418,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_patchclr is not None:
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
                 contrastive_matrix = torch.cat((contrastive_matrix, patchclr_negative), 1)
-                if extra_negative_repr_patchclr.size(0) >= 2 * c1.size(0):
+                if extra_negative_repr_patchclr.size(0) >= 1 * c1.size(0):
                     extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[c1.size(0):], c1.detach()), 0)
                 else:
                     extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()), 0)
@@ -450,7 +450,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None:
                 simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 contrastive_matrix = torch.cat((contrastive_matrix, simclr_negative), 1)
-                if extra_negative_repr_simclr.size(0) >= 8 * sc1.size(0):
+                if extra_negative_repr_simclr.size(0) >= 4 * sc1.size(0):
                     extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[sc1.size(0):], sc1.detach()), 0)
                 else:
                     extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()), 0)
