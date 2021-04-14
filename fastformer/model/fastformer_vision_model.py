@@ -438,6 +438,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0])
             simclr_loss = self.simclr_w * simclr_loss
 
+        # TODO: GAP bias SIMCLR
+        # TODO: Additive Margin Softmax to make the task harder.
+
         loss = patchclr_loss + clustering_loss + simclr_loss
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss,
                     patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy)

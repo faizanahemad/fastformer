@@ -1035,9 +1035,13 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, num_classes, tokenizer=None, additive_margin_softmax_w=0.3):
         super().__init__(config)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
-        self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
+        if num_classes == 1:
+            self.ce = BCELossFocal(m=additive_margin_softmax_w)
+        else:
+            self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
         self.classifier = nn.Linear(config.block_channel_size[-1], num_classes)
         self.cls_tokens = config.num_highway_cls_tokens
+        self.num_classes = num_classes
         self.init_weights()
 
     def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
@@ -1053,7 +1057,11 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         loss = 0.0
         if label is not None and label.min() >= 0:
             loss = self.ce(logits, label)
-        predictions = logits.argmax(-1)
+
+        if self.num_classes > 1:
+            predictions = logits.argmax(-1)
+        else:
+            predictions = torch.sigmoid(logits.detach())
         return dict(predictions=predictions, loss=loss)
 
 

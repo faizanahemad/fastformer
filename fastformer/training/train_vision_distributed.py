@@ -154,7 +154,8 @@ class CLRDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         item, label = self.dataset[item]
-        if self.x1_transform:
+        # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
+        if self.x1_transform and random.random() < 0.75:
             x1 = self.to_tensor(self.x1_transform(item.copy()))
         else:
             x1 = self.to_tensor(item)
@@ -320,7 +321,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else len(dataloader))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
-                                                    div_factor=1e3, three_phase=True, pct_start=0.2)
+                                                    div_factor=1e2, three_phase=False, pct_start=0.3, anneal_strategy="cos")
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
           (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))

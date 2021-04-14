@@ -180,22 +180,25 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
+        self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
         self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def prepare_classifier(self, model, dataset, device, num_classes):
+    def prepare_classifier(self, model, dataset, device, num_classes, reinit=True):
         size_dicts = self.size_dicts
         model = model.train()
         optimizer_config.eps = 1e-7
         model.config.eps = 1e-7
-        classifier = FastFormerForClassification(model.config, num_classes, model.tokenizer)
-        classifier.funnel = model.funnel
-        classifier = classifier.to(device)
+
+        if reinit or not isinstance(model, FastFormerForClassification):
+            classifier = FastFormerForClassification(model.config, num_classes, model.tokenizer)
+            classifier.funnel = model.funnel
+            classifier = classifier.to(device)
+            del model
+            model = classifier
         collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, model.tokenizer.pad_token_id)
-        del model
-        model = classifier
         optc = optimizer_config.to_dict()
         optimizer = torch.optim.AdamW(model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
@@ -203,67 +206,76 @@ class SuperGlueTest:
         scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
 
 
-        train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
-                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
-                                 dataset["train"])
-        train.training = False
+        train = None
+        if "train" in dataset:
+            train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                     dataset["train"])
+            train.training = False
+            train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
+                               shuffle=True)
 
-        validation = TokenizerDataset(model.config, model.tokenizer, char_to_id,
-                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
-                                      dataset["validation"])
-        validation.training = False
+        validation = None
+        if "validation" in dataset:
+            validation = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+                                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+                                          dataset["validation"])
+            validation.training = False
+            validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2,
+                                    shuffle=False)
 
         test = TokenizerDataset(model.config, model.tokenizer, char_to_id,
                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                 dataset["test"])
         test.training = False
         test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-        train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=4, shuffle=True)
-        validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
         test = DataLoader(test, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2, shuffle=False)
 
         return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc, test_idx=test_idx)
 
-    def train_classifier(self, model, device, classifier_data):
-        gradient_clipping = classifier_data["optc"]["gradient_clipping"]
-        scheduler = classifier_data["scheduler"]
-        optimizer = classifier_data["optimizer"]
-        iter_size = 4
+    def train_classifier(self, model, device, classifier_data, predict_only=False):
+        if not predict_only:
+            gradient_clipping = classifier_data["optc"]["gradient_clipping"]
+            scheduler = classifier_data["scheduler"]
+            optimizer = classifier_data["optimizer"]
+            iter_size = 4
 
-        cur_val_loss = 1e8
-        prev_val_loss = 1e8
+            cur_val_loss = 1e8
+            prev_val_loss = 1e8
 
-        while cur_val_loss <= prev_val_loss:
-            prev_val_loss = cur_val_loss
-            model = model.train()
-            for step, batch in enumerate(classifier_data["train"]):
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+            while cur_val_loss <= prev_val_loss:
+                prev_val_loss = cur_val_loss
+                model = model.train()
+                for step, batch in enumerate(classifier_data["train"]):
+                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
-                label = batch.pop("label")
-                output = model(**batch, label=label)
-                loss = output["loss"] / iter_size
-                loss.backward()
-                if (step + 1) % iter_size == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
-                    optimizer.step()
-                    scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
-
-            model = model.eval()
-            labels, predictions, val_loss = [], [], []
-            for step, batch in enumerate(classifier_data["validation"]):
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                label = batch.pop("label")
-                labels.extend(label.cpu().tolist())
-                with torch.no_grad():
+                    label = batch.pop("label")
                     output = model(**batch, label=label)
-                val_loss = output["loss"].detach().cpu().item()
-                val_preds = output["predictions"].cpu().tolist()
-                predictions.extend(val_preds)
-                val_loss.append(val_loss)
-            cur_val_loss = np.mean(val_loss)
+                    loss = output["loss"] / iter_size
+                    loss.backward()
+                    if (step + 1) % iter_size == 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                        optimizer.step()
+                        scheduler.step()
+                        optimizer.zero_grad(set_to_none=True)
 
-        val_acc = accuracy_score(labels, predictions)
+                model = model.eval()
+                labels, predictions, val_loss = [], [], []
+                for step, batch in enumerate(classifier_data["validation"]):
+                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                    label = batch.pop("label")
+                    labels.extend(label.cpu().tolist())
+                    with torch.no_grad():
+                        output = model(**batch, label=label)
+                    val_loss = output["loss"].detach().cpu().item()
+                    val_preds = output["predictions"].cpu().tolist()
+                    predictions.extend(val_preds)
+                    val_loss.append(val_loss)
+                cur_val_loss = np.mean(val_loss)
+
+            val_acc = accuracy_score(labels, np.array(predictions) > 0.5)
+        else:
+            val_acc = 0.0
         predictions = []
         for step, batch in enumerate(classifier_data["test"]):
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
@@ -277,11 +289,120 @@ class SuperGlueTest:
 
     def boolq(self, model, boolq, device):
         boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
-
-        classifier_data = self.prepare_classifier(model, boolq, device, 2)
+        classifier_data = self.prepare_classifier(model, boolq, device, 1)
         classifier_results = self.train_classifier(model, device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s" % ("boolq", classifier_results["val_acc"]))
+        final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        return final_predictions
+
+    def wic(self, model, wic, device):
+        wic = wic.map(lambda x: dict(text='sentence1: ' + x["sentence1"] + " sentence2: " + x["sentence2"] + " word: " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
+        classifier_data = self.prepare_classifier(model, wic, device, 1)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("wic", classifier_results["val_acc"]))
+        final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        return final_predictions
+    
+    def commitmentbank(self, model, cb, device):
+        cb = cb.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model, cb, device, 3)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("cb", classifier_results["val_acc"]))
+        final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        return final_predictions
+
+    def rte_axb_axg(self, model, rte, axb, axg, device):
+        rte = rte.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model, rte, device, 1)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("rte", classifier_results["val_acc"]))
+        final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+
+        axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model, axb, device, 1, reinit=False)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+
+        axg = axg.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model, axg, device, 1, reinit=False)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        final_predictions_axg = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in
+                                 zip(test_idx, classifier_results["predictions"])]
+
+        return final_predictions, final_predictions_axb, final_predictions_axg
+
+    def multirc(self, model, multirc, device):
+        multirc = multirc.map(lambda x: dict(text="paragraph: " + x["paragraph"] + " question: " + x["question"] + "answer: " + x["answer"]), remove_columns=["paragraph", "question", "answer"])
+        classifier_data = self.prepare_classifier(model, multirc, device, 1)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("multirc", classifier_results["val_acc"]))
+        final_predictions = [dict(idx=idx, label=pred > 0.5) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        for pd in final_predictions:
+            mrcp[pd["idx"]["paragraph"]][pd["idx"]["question"]][pd["idx"]["answer"]] = pd["label"]
+        mrcp = [
+            {"idx": k, "passage": {"questions": [{"idx": m, "answers": [{"idx": o, "label": p} for o, p in sorted(n.items())]} for m, n in sorted(v.items())]}}
+            for k, v in sorted(mrcp.items())]
+        final_predictions = mrcp
+        return final_predictions
+
+    def copa(self, model, copa, device):
+        copa_c1 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice1"], label=x["label"] == 0, choice=0), remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_c2 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice2"], label=x["label"] == 1, choice=1),
+                           remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa = concatenate_datasets([copa_c1, copa_c2])
+        classifier_data = self.prepare_classifier(model, copa, device, 1)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("copa", classifier_results["val_acc"]))
+        choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
+        final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
+        final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
+        return final_predictions
+
+    def record(self, model, record, device):
+
+        def rproc(x):
+            answers = x["answers"][0]
+            entities = x["entities"][0]
+            idx = x["idx"][0]["query"]
+            passage = x["passage"][0]
+            query = x["query"][0]
+
+
+            text = "passage: " + passage + " query: " + query
+            return [dict(idx=idx, text=text + " answer: " + e, choice=i, label=e in answers) for i, e in enumerate(entities)]
+
+        record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
+        classifier_data = self.prepare_classifier(model, record, device, 1)
+        classifier_results = self.train_classifier(model, device, classifier_data)
+        test_idx = classifier_data["test_idx"]
+        print("Val Acc for %s = %s" % ("record", classifier_results["val_acc"]))
+        choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
+        final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
+        final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(
+            lambda x: x[x.label >= x.label.max()][["idx", "choice"]]).to_dict('records')
+
+        entities = [record["test"][i]["entities"] for i in range(len(record["test"]))]
+        final_predictions = [dict(idx=fp["idx"], label=en[fp["choice"]]) for fp, en in zip(final_predictions, entities)]
+        return final_predictions
+
+
+
+
+
+
+
+
+
+
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
