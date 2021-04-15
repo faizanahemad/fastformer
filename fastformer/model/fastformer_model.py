@@ -1036,7 +1036,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         super().__init__(config)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         if num_classes == 1:
-            self.ce = BCELossFocal(m=additive_margin_softmax_w)
+            self.ce = BCELossFocal()
         else:
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
         self.classifier = nn.Linear(config.block_channel_size[-1], num_classes)

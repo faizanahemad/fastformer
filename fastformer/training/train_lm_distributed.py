@@ -360,7 +360,8 @@ class SuperGlueTest:
         copa_c1 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice1"], label=x["label"] == 0, choice=0), remove_columns=["premise", 'question', "choice1", "choice2"])
         copa_c2 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice2"], label=x["label"] == 1, choice=1),
                            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa = concatenate_datasets([copa_c1, copa_c2])
+        copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
+
         classifier_data = self.prepare_classifier(model, copa, device, 1)
         classifier_results = self.train_classifier(model, device, classifier_data)
         test_idx = classifier_data["test_idx"]
