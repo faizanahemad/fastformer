@@ -423,11 +423,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_patchclr is not None:
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()[:out_1.size(0)]), 0)
                 if extra_negative_repr_patchclr.size(0) >= 2 * out_1.size(0):
-                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[out_1.size(0):], c1.detach()[:out_1.size(0)]), 0)
-                else:
-                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()[:out_1.size(0)]), 0)
+                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[out_1.size(0):]
             else:
                 extra_negative_repr_patchclr = c1.detach()[:out_1.size(0)]
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
@@ -457,11 +455,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None:
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
-
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()[:b1s.size(0)]), 0)
                 if extra_negative_repr_simclr.size(0) >= 16 * b1s.size(0):
-                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b1s.size(0):], sc1.detach()[:b1s.size(0)]), 0)
-                else:
-                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()[:b1s.size(0)]), 0)
+                    extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
                 extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
 
