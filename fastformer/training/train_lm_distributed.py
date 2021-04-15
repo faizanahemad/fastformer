@@ -56,6 +56,13 @@ from pytz import timezone
 from datetime import datetime, timedelta
 from torch.utils.data.dataloader import DataLoader
 from collections import Counter
+import warnings
+warnings.simplefilter("ignore")
+
+import logging
+
+for name in logging.Logger.manager.loggerDict.keys():
+    logging.getLogger(name).setLevel(logging.CRITICAL)
 
 
 def training_args():
