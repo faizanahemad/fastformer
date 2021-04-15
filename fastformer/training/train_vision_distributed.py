@@ -267,7 +267,7 @@ def train(local_rank, args):
         if args["deit"]:
             model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0).to(device)
+            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1]).to(device)
     else:
