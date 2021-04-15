@@ -379,10 +379,14 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.gap_bias_w = gap_bias_w
         self.init_weights()
 
-    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths):
+    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
         mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e3)
         contrastive_matrix = contrastive_matrix - mask
+        del mask
+        if extra_negatives is not None:
+            contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
+
         labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths, torch.arange(label_lengths, device=contrastive_matrix.device)))
         loss = self.loss_ce(contrastive_matrix, labels)
         predictions = contrastive_matrix.detach().argmax(dim=-1)
@@ -415,19 +419,20 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
             contrastive_matrix_store = contrastive_matrix
 
+            patchclr_negative=None
             if extra_negative_repr_patchclr is not None:
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-                contrastive_matrix = torch.cat((contrastive_matrix, patchclr_negative), 1)
-                if extra_negative_repr_patchclr.size(0) >= 2 * c1.size(0):
-                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[c1.size(0):], c1.detach()), 0)
+
+                if extra_negative_repr_patchclr.size(0) >= 4 * out_1.size(0):
+                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[out_1.size(0):], c1.detach()[:out_1.size(0)]), 0)
                 else:
-                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()), 0)
+                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()[:out_1.size(0)]), 0)
             else:
-                extra_negative_repr_patchclr = c1.detach()
+                extra_negative_repr_patchclr = c1.detach()[:out_1.size(0)]
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
 
-            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
+            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
             patchclr_loss = self.patchclr_w * patchclr_loss
         clustering_loss = 0.0
         if self.clustering_w > 0 and self.patchclr_w > 0:
@@ -448,19 +453,19 @@ class PatchCLR(FastFormerPreTrainedModel):
             sc1 = torch.cat((b1s, b2s), 0)
             sc1 = sc1 / (sc1.norm(2, -1, True).detach() + self.eps)
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
-
+            simclr_negative = None
             if extra_negative_repr_simclr is not None:
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
-                contrastive_matrix = torch.cat((contrastive_matrix, simclr_negative), 1)
-                if extra_negative_repr_simclr.size(0) >= 8 * sc1.size(0):
-                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[sc1.size(0):], sc1.detach()), 0)
-                else:
-                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()), 0)
-            else:
-                extra_negative_repr_simclr = sc1.detach()
 
-            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0])
+                if extra_negative_repr_simclr.size(0) >= 16 * b1s.size(0):
+                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b1s.size(0):], sc1.detach()[:b1s.size(0)]), 0)
+                else:
+                    extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()[:b1s.size(0)]), 0)
+            else:
+                extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
+
+            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
 
         gap_bias_loss = 0.0
@@ -477,11 +482,11 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             gap_bias = torch.cat((sc1, pc1), 0)
             contrastive_matrix = gap_bias.mm(gap_bias.t()) * (1 - torch.eye(gap_bias.size(0), gap_bias.size(0), device=sc1.device))
+            simclr_negative = None
             if extra_negative_repr_simclr is not None:
                 simclr_negative = gap_bias.mm(extra_negative_repr_simclr.t())
-                contrastive_matrix = torch.cat((contrastive_matrix, simclr_negative), 1)
 
-            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, pc1.shape[0])
+            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, pc1.shape[0], simclr_negative)
             gap_bias_loss = self.gap_bias_w * gap_bias_loss
 
         # TODO: GAP bias SIMCLR
