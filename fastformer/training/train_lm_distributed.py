@@ -269,7 +269,7 @@ class SuperGlueTest:
                         optimizer.zero_grad(set_to_none=True)
 
                 model = model.eval()
-                labels, predictions, val_loss = [], [], []
+                labels, predictions, val_losses = [], [], []
                 for step, batch in enumerate(classifier_data["validation"]):
                     batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                     label = batch.pop("label")
@@ -279,8 +279,8 @@ class SuperGlueTest:
                     val_loss = output["loss"].detach().cpu().item()
                     val_preds = output["predictions"].cpu().tolist()
                     predictions.extend(val_preds)
-                    val_loss.append(val_loss)
-                cur_val_loss = np.mean(val_loss)
+                    val_losses.append(val_loss)
+                cur_val_loss = np.mean(val_losses)
                 all_val_loss.append(cur_val_loss)
                 val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                 all_val_acc.append(val_acc)
