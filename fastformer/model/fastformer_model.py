@@ -1042,6 +1042,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         self.classifier = nn.Linear(config.block_channel_size[-1], num_classes)
         self.cls_tokens = config.num_highway_cls_tokens
         self.num_classes = num_classes
+        self.tokenizer = tokenizer
         self.init_weights()
 
     def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
