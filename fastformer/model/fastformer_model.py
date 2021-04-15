@@ -1032,7 +1032,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 
 
 class FastFormerForClassification(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig, num_classes, tokenizer=None, additive_margin_softmax_w=0.3):
+    def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None, additive_margin_softmax_w=0.3):
         super().__init__(config)
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         if num_classes == 1:
