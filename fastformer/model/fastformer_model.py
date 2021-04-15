@@ -1057,7 +1057,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         logits = self.classifier(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
-            loss = self.ce(logits.squeeze(), label)
+            loss = self.ce(logits.squeeze(), label.float() if self.num_classes == 1 else label.long())
 
         if self.num_classes > 1:
             predictions = logits.argmax(-1)
