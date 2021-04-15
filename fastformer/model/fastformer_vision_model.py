@@ -416,14 +416,16 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix_store = contrastive_matrix
 
             if extra_negative_repr_patchclr is not None:
+                extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
                 contrastive_matrix = torch.cat((contrastive_matrix, patchclr_negative), 1)
-                if extra_negative_repr_patchclr.size(0) >= 1 * c1.size(0):
+                if extra_negative_repr_patchclr.size(0) >= 2 * c1.size(0):
                     extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[c1.size(0):], c1.detach()), 0)
                 else:
                     extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()), 0)
             else:
                 extra_negative_repr_patchclr = c1.detach()
+            extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0])
             patchclr_loss = self.patchclr_w * patchclr_loss
@@ -448,9 +450,10 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
 
             if extra_negative_repr_simclr is not None:
+                extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 contrastive_matrix = torch.cat((contrastive_matrix, simclr_negative), 1)
-                if extra_negative_repr_simclr.size(0) >= 4 * sc1.size(0):
+                if extra_negative_repr_simclr.size(0) >= 8 * sc1.size(0):
                     extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[sc1.size(0):], sc1.detach()), 0)
                 else:
                     extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()), 0)
@@ -489,7 +492,8 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         loss = patchclr_loss + clustering_loss + simclr_loss + gap_bias_loss
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss,
-                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach(), extra_negative_repr_simclr=extra_negative_repr_simclr.detach())
+                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, 
+                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu(), extra_negative_repr_simclr=extra_negative_repr_simclr.detach().cpu())
 
 
 if __name__ == '__main__':
