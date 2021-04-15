@@ -212,7 +212,7 @@ class SuperGlueTest:
                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                      dataset["train"])
             train.training = False
-            train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
+            train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                                shuffle=True)
 
         validation = None
@@ -221,7 +221,7 @@ class SuperGlueTest:
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                           dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 4, collate_fn=collate_fn, prefetch_factor=2, num_workers=2,
+            validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2,
                                     shuffle=False)
 
         test = TokenizerDataset(model.config, model.tokenizer, char_to_id,
