@@ -374,8 +374,10 @@ def train(local_rank, args):
 
             if (step + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
+                barrier()
                 if local_rank == 0:
                     torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+                barrier()
 
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
