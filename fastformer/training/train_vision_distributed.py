@@ -357,6 +357,7 @@ def train(local_rank, args):
 
     extra_negative_repr_simclr = None
     extra_negative_repr_patchclr = None
+    total_steps = args["epochs"] * len(dataloader)
     for epoch in range(args["epochs"]):
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
@@ -366,13 +367,14 @@ def train(local_rank, args):
 
         start_time = time.time()
         for step, batch in enumerate(dataloader):
+            steps_done = epoch * len(dataloader) + step
             gen_batch_time = time.time() - start_time
             batch_times.append(gen_batch_time)
             key = list(batch.keys())[0]
             bs_size = list(batch[key].size())
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
-            if (step + 1) % save_every_steps == 0:
+            if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
                 barrier()
                 if local_rank == 0:
@@ -405,10 +407,8 @@ def train(local_rank, args):
             full_times.append(full_time)
             if step == 0:
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
-            if (step + 1) % log_every_steps == 0:
+            if (steps_done + 1) % log_every_steps == 0:
                 if local_rank == 0:
-                    total_steps = args["epochs"] * len(dataloader)
-                    steps_done = epoch * len(dataloader) + step
                     steps_remaining = total_steps - steps_done
                     output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
