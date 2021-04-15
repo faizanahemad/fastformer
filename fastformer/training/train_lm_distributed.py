@@ -293,7 +293,7 @@ class SuperGlueTest:
     def boolq(self, model, boolq, device):
         boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
         classifier_data = self.prepare_classifier(model, boolq, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("boolq", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -302,7 +302,7 @@ class SuperGlueTest:
     def wic(self, model, wic, device):
         wic = wic.map(lambda x: dict(text='sentence1: ' + x["sentence1"] + " sentence2: " + x["sentence2"] + " word: " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
         classifier_data = self.prepare_classifier(model, wic, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("wic", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -311,7 +311,7 @@ class SuperGlueTest:
     def cb(self, model, cb, device):
         cb = cb.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         classifier_data = self.prepare_classifier(model, cb, device, 3)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("cb", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -320,20 +320,20 @@ class SuperGlueTest:
     def rte_axb_axg(self, model, rte, axb, axg, device):
         rte = rte.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         classifier_data = self.prepare_classifier(model, rte, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("rte", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, axb, device, 1, reinit=False)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, reinit=False)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         axg = axg.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, axg, device, 1, reinit=False)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, reinit=False)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         final_predictions_axg = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in
                                  zip(test_idx, classifier_results["predictions"])]
@@ -343,7 +343,7 @@ class SuperGlueTest:
     def multirc(self, model, multirc, device):
         multirc = multirc.map(lambda x: dict(text="paragraph: " + x["paragraph"] + " question: " + x["question"] + "answer: " + x["answer"]), remove_columns=["paragraph", "question", "answer"])
         classifier_data = self.prepare_classifier(model, multirc, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("multirc", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=pred > 0.5) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -363,7 +363,7 @@ class SuperGlueTest:
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         classifier_data = self.prepare_classifier(model, copa, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("copa", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
@@ -394,7 +394,7 @@ class SuperGlueTest:
         rtest = record["test"]
         record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
         classifier_data = self.prepare_classifier(model, record, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("record", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
@@ -417,7 +417,7 @@ class SuperGlueTest:
             
         wsc = wsc.map(wsc_proc, remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
         classifier_data = self.prepare_classifier(model, wsc, device, 1)
-        classifier_results = self.train_classifier(model, device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Val Acc for %s = %s, all_val_loss = %s, all_val_acc = %s" % ("wsc", classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
