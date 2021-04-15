@@ -370,7 +370,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.backbone = backbone
         self.num_features = num_features
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
-        self.ffn = nn.Sequential(nn.LayerNorm(num_features, eps=eps), nn.GELU(), nn.Linear(num_features, num_features))
+        self.ffn = nn.Linear(num_features, 128)
         self.eps = eps
         self.contrastive_temperature = contrastive_temperature
         self.simclr_w = simclr_w
