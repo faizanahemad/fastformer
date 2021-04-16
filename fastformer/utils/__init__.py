@@ -566,6 +566,9 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.Equalize(p=1.0)),
                                 get_alb(alb.transforms.Posterize(num_bits=4, always_apply=False, p=1.0)),
                                 get_alb(alb.transforms.Solarize(threshold=128, always_apply=False, p=1.0)),
+                                get_imgaug(iaa.AllChannelsCLAHE()),
+                                get_imgaug(iaa.LogContrast(gain=(0.6, 1.4))),
+                                get_imgaug(iaa.pillike.Autocontrast((10, 20), per_channel=True))
 
                             ]),
                             transforms.RandomChoice([
