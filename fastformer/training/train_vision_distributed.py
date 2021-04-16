@@ -461,7 +461,7 @@ def train(local_rank, args):
                 reraise(e, es)
             full_time = time.time() - start_time
             full_times.append(full_time)
-            if step == 0:
+            if step == 0 and epoch == 0:
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
             if (steps_done + 1) % log_every_steps == 0:
                 if local_rank == 0:
