@@ -549,5 +549,8 @@ def get_image_augmetations(mode):
                             cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
 
+    if mode != "clr" and mode != "validation":
+        shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
+
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
 
