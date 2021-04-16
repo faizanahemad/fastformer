@@ -314,15 +314,20 @@ def train(local_rank, args):
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
+        load_type = None
         try:
             model.load_state_dict(state_dict, strict=True)
+            load_type = "strict"
         except:
             try:
                 model.load_state_dict(state_dict, strict=False)
+                load_type = "not_strict"
             except Exception as e:
                 print(e)
                 traceback.print_exc()
                 model.backbone.load_state_dict(state_dict["backbone"] if "backbone" in state_dict else state_dict, strict=True)
+                load_type = "backbone"
+        print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
