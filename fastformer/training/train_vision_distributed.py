@@ -315,7 +315,7 @@ def train(local_rank, args):
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
-        load_type = None
+
         try:
             model.load_state_dict(state_dict, strict=True)
             load_type = "strict"
@@ -329,6 +329,7 @@ def train(local_rank, args):
                 model.backbone.load_state_dict(state_dict["backbone"] if "backbone" in state_dict else state_dict, strict=True)
                 load_type = "backbone"
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
+        del state_dict
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
@@ -344,6 +345,7 @@ def train(local_rank, args):
     except:
         print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
     del model
+    del backbone
     clean_memory()
     _ = model_train_validation_switch(ddp_model.module, args, train=True)
     optc = optimizer_config.to_dict()
@@ -431,6 +433,8 @@ def train(local_rank, args):
                 barrier()
                 if local_rank == 0:
                     torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+                del state_dict
+                clean_memory()
                 barrier()
 
             samples_processed += int(batch[key].size(0))
@@ -486,10 +490,13 @@ def train(local_rank, args):
     state_dict = ddp_model.state_dict()
     if local_rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+    del ddp_model
     if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
+        model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1],
+                                    train_backbone=True if "full_train" else False).to(device)
+        model.load_state_dict(state_dict, strict=True)
         assert isinstance(model, ClassificationModel)
         ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
-
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,):
@@ -542,7 +549,6 @@ def train_catch_exception(local_rank, args):
         # traceback.print_exception(*sys.exc_info())
         traceback.print_exc()
         raise e
-
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True

@@ -526,17 +526,23 @@ def get_image_augmetations(mode):
 
     to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
     shape_transforms = []
+    cut = get_cutout(0.75, 0.05)
     if mode == "validation":
         shape_transforms.append(transforms.Resize(256))
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
-    else:
+    elif mode == "patchclr":
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.6, 1.4)))
+    elif mode == "full_train" or mode == "linear_probe":
+        shape_transforms.append(transforms.RandomHorizontalFlip())
+        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
+        shape_transforms.append(transforms.RandomRotation(15))
+        shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.8, 1.2)))
     shape_transforms = transforms.Compose(shape_transforms)
-    cut = get_cutout(0.75, 0.05)
+
     non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
                             transforms.RandomGrayscale(p=0.1),
                             transforms.RandomChoice([
@@ -549,8 +555,10 @@ def get_image_augmetations(mode):
                             cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
 
-    if mode != "clr" and mode != "validation":
+    if mode == "full_train":
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
+    if mode == "linear_probe":
+        shape_transforms = transforms.Compose([shape_transforms, cut, to_tensor])
 
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
 
