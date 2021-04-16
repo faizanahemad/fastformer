@@ -294,7 +294,7 @@ def train(local_rank, args):
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     if args["deit"]:
-        batch_size = (16 if args["no_autocast"] else 32) if args["mode"] == "clr" else (64 if args["no_autocast"] else 80)
+        batch_size = get_vision_batch_size("vision_md_config", not args["no_autocast"], args["mode"])
         backbone = get_pretrained_deit()
     else:
         backbone = FastFormerVisionModel(config)
@@ -350,8 +350,10 @@ def train(local_rank, args):
     _ = model_train_validation_switch(ddp_model.module, args, train=True)
     optc = optimizer_config.to_dict()
     optc["lr"] = (optc["lr"] * batch_size * args["world_size"]) / 512.0
-    optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+    trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
+    optimizer = torch.optim.AdamW(trainable_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                   betas=(optc["beta_1"], optc["beta_2"]))
+    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
