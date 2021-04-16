@@ -524,7 +524,10 @@ def get_image_augmetations(mode):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
+    if mode == "patchclr":
+        to_tensor = transforms.Compose([transforms.Resize(224), transforms.ToTensor(), normalize])
+    else:
+        to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
     shape_transforms = []
     cut = get_cutout(0.75, 0.05)
     if mode == "validation":
@@ -533,9 +536,9 @@ def get_image_augmetations(mode):
         shape_transforms.append(to_tensor)
     elif mode == "patchclr":
         shape_transforms.append(transforms.RandomHorizontalFlip())
-        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
-        shape_transforms.append(transforms.RandomRotation(15))
-        shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.6, 1.4)))
+        shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.15))
+        shape_transforms.append(transforms.RandomRotation(30))
+        shape_transforms.append(transforms.RandomResizedCrop(480, scale=(0.6, 1.4)))
     elif mode == "full_train":
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
@@ -546,16 +549,34 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.CenterCrop(224))
     shape_transforms = transforms.Compose(shape_transforms)
 
-    non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
-                            transforms.RandomGrayscale(p=0.1),
+    non_shape_transforms = [
+                            transforms.RandomChoice([
+                                transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.2),
+                                transforms.RandomGrayscale(p=1.0),
+                            ]),
+                            
+                            transforms.RandomChoice([
+                                get_alb(alb.transforms.MedianBlur(p=1.0)),
+                                get_alb(alb.transforms.RandomGamma(p=1.0)),
+                                get_alb(alb.transforms.RGBShift(p=1.0)),
+                                get_alb(alb.transforms.MotionBlur(p=1.0)),
+                            ]),
+                            transforms.RandomChoice([
+                                get_alb(alb.transforms.ImageCompression(95, p=1.0)),
+                                get_alb(alb.transforms.Equalize(p=1.0)),
+                                get_alb(alb.transforms.Posterize(num_bits=4, always_apply=False, p=1.0)),
+                                get_alb(alb.transforms.Solarize(threshold=128, always_apply=False, p=1.0)),
+
+                            ]),
                             transforms.RandomChoice([
                                 get_imgaug(iaa.CoarseDropout((0.02, 0.05), size_percent=(0.25, 0.5), per_channel=0.5)),
                                 get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.01, 0.05), per_channel=True)),
+                                get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
 
                                 get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
-                            cut]
+                            cut, cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
 
     if mode == "full_train":
