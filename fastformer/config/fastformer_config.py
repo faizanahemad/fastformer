@@ -25,13 +25,16 @@ def get_vision_batch_size(size, autocast, mode):
     if not autocast:
         batch_size = batch_size // 2
 
+    if mode == "validation":
+        batch_size = batch_size * 2
+
     if mode == "clr":
         batch_size = batch_size // 2
 
     if size == "vision_lg_funnel_config" or size == "vision_md_config":
-        batch_size = batch_size // 4
+        batch_size = batch_size // 2
     if size == "vision_lg_config":
-        batch_size = batch_size // 8
+        batch_size = batch_size // 4
     return batch_size
 
 
