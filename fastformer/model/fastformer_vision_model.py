@@ -522,7 +522,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_base_config',
+    ap.add_argument("--config", type=str, default='vision_md_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -532,6 +532,8 @@ if __name__ == '__main__':
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--batch_size", type=int, default=16)
     ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument('--pretrained_model', required=False, type=str,
+                        help='Pretrained Model')
 
     args = vars(ap.parse_args())
     forward_only = args["forward_only"]
@@ -562,7 +564,7 @@ if __name__ == '__main__':
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            model = PatchCLR(model, 768, 1e-7, simclr_w=0.0)
+            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0)
         print(model)
     else:
         model = FastFormerVisionModel(config)
@@ -573,7 +575,14 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0)
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0)
+    if "pretrained_model" in args:
+        if not os.path.exists(args["pretrained_model"]):
+            args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
+        if os.path.exists(args["pretrained_model"]):
+            state_dict = torch.load(args["pretrained_model"], map_location=device)
+            model.load_state_dict(state_dict, strict=True)
+
     model = model.to(device)
     if args["classification"]:
         output = model(x)
