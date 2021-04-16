@@ -338,15 +338,16 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
 
 class ClassificationModel(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_classes, num_features=768, ):
+    def __init__(self, backbone, num_classes, num_features=768, train_backbone=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
         self.head = nn.Linear(self.num_features, num_classes)
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+        self.train_backbone = train_backbone
         self.init_weights()
 
-    def forward(self, x, labels=None):
+    def get_representations(self, x):
         if isinstance(self.backbone, FastFormerVisionModel):
             output = self.backbone(x, run_decoder=True)
             representation = torch.cat((output["second_block_hidden"][:, :self.backbone.cls_tokens].mean(1), output["third_block_hidden"][:, :self.backbone.cls_tokens].mean(1)), 2)
@@ -354,6 +355,15 @@ class ClassificationModel(FastFormerPreTrainedModel):
             representation = self.backbone(x)
             if len(representation.size()) == 3:
                 representation = representation[:, 0]
+        return representation
+
+    def forward(self, x, labels=None):
+        if self.train_backbone:
+            representation = self.get_representations(x)
+        else:
+            with torch.no_grad():
+                representation = self.get_representations(x)
+
         logits = self.head(representation)
         loss = 0
         predictions = logits.detach().argmax(dim=-1)

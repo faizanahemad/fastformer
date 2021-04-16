@@ -521,10 +521,15 @@ def get_image_augmetations(mode):
     import imgaug.augmenters as iaa
     import torchvision.transforms as transforms
 
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
     shape_transforms = []
     if mode == "validation":
         shape_transforms.append(transforms.Resize(256))
         shape_transforms.append(transforms.CenterCrop(224))
+        shape_transforms.append(to_tensor)
     else:
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
@@ -543,11 +548,6 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                             cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
-
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
 
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
 

@@ -171,21 +171,54 @@ class CLRDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
 
-def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1):
+class ImageNetValidation:
+    def __init__(self, model, location, batch_size, device, num_workers=8):
+        val_loader = build_dataloader(location, "validation", False, batch_size, 1, num_workers)
+        train_loader = build_dataloader(location, "validation", False, batch_size, 1, num_workers, split="train")
+        self.model = model
+        self.val_loader = val_loader
+        self.train_loader = train_loader
+        self.device = device
+        print("[Validation]: Time = %s, train length = %s, Val length = %s, batch size = %s" % (get_time_string(), len(train_loader), len(val_loader), batch_size))
+
+    def __call__(self, ):
+        model = self.model
+        device = self.device
+        train_loader = self.train_loader
+        val_loader = self.val_loader
+        predictions, labels = [], []
+        for x, label in tqdm(val_loader, desc="Validation", miniters=10, mininterval=10.0):
+            labels.extend(label.tolist())
+            x = x.to(device)
+            pred = model(x)["predictions"]
+            predictions.extend(pred.cpu().tolist())
+        val_acc = accuracy_score(labels, predictions)
+
+        predictions, labels = [], []
+        for x, label in tqdm(train_loader, desc="Train", miniters=10, mininterval=10.0):
+            labels.extend(label.tolist())
+            x = x.to(device)
+            pred = model(x)["predictions"]
+            predictions.extend(pred.cpu().tolist())
+        train_acc = accuracy_score(labels, predictions)
+
+        print("[Validation]: Time = %s, Train Acc = %.5f, Val Acc = %.5f" % (get_time_string(), train_acc, val_acc))
+
+def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None):
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
 
+    split = split if split is not None else ("val" if mode == "validation" else "train")
     image_transforms = get_image_augmetations(mode)
 
     if "imagenet" in location.lower():
-        dataset = ImageNet(location, "val" if mode == "validation" else "train", transform=image_transforms["shape_transforms"])
+        dataset = ImageNet(location, split, transform=image_transforms["shape_transforms"])
     elif "cifar10" in location.lower():
-        dataset = CIFAR10(root=location, train=mode != "validation", download=True, transform=image_transforms["shape_transforms"])
+        dataset = CIFAR10(root=location, train=split != "val", download=True, transform=image_transforms["shape_transforms"])
 
     if mode == "clr":
 
         dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"])
-
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
@@ -240,7 +273,7 @@ def train(local_rank, args):
     group = "%s-%s-%sN-%s" % (ds_name, args["model_config"], args["nodes"], time_string)
     set_seeds(args["seed"])
     model_size = args["model_config"]
-    batch_size = get_vision_batch_size(args["model_config"], not args["no_autocast"])
+    batch_size = get_vision_batch_size(args["model_config"], not args["no_autocast"], args["mode"])
     config = vision_config_dict[model_size]
 
     optimizer_config.lr = args["lr"]
@@ -269,7 +302,7 @@ def train(local_rank, args):
         else:
             model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
-        model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1]).to(device)
+        model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1], train_backbone=True if "full_train" else False).to(device)
     else:
         raise ValueError
 
@@ -284,10 +317,15 @@ def train(local_rank, args):
         except:
             try:
                 model.load_state_dict(state_dict, strict=False)
-            except:
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
                 model.backbone.load_state_dict(state_dict["backbone"] if "backbone" in state_dict else state_dict, strict=True)
     model = model_train_validation_switch(model, args, train=True)
-    if args["mode"] == "validation":
+    if args["mode"] == "validation" and local_rank == 0:
+        assert args["world_size"] == 1
+        assert isinstance(model, ClassificationModel)
+        ImageNetValidation(model, args["dataset"], batch_size, args["num_workers"])()
         return
 
     ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
@@ -434,6 +472,10 @@ def train(local_rank, args):
     state_dict = ddp_model.state_dict()
     if local_rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+    if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
+        assert isinstance(model, ClassificationModel)
+        ImageNetValidation(model, args["dataset"], batch_size, args["num_workers"])()
+
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,):
