@@ -338,14 +338,19 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
 
 class ClassificationModel(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_classes, num_features=768, train_backbone=False):
+    def __init__(self, backbone, num_classes, num_features=768, train_backbone=False, reinit_backbone=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
         self.head = nn.Linear(self.num_features, num_classes)
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
-        self.init_weights()
+        if reinit_backbone:
+            self.init_weights()
+        else:
+            fan_out, fan_in = self.head.weight.shape
+            std = np.sqrt(1.0 / float(fan_in + fan_out))
+            nn.init.normal_(self.head.weight, std=std)
 
     def get_representations(self, x):
         if isinstance(self.backbone, FastFormerVisionModel):
