@@ -294,7 +294,7 @@ def train(local_rank, args):
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     if args["deit"]:
-        batch_size = (16 if args["no_autocast"] else 32) if args["mode"] == "clr" else (24 if args["no_autocast"] else 48)
+        batch_size = (16 if args["no_autocast"] else 32) if args["mode"] == "clr" else (48 if args["no_autocast"] else 64)
         backbone = get_pretrained_deit()
     else:
         backbone = FastFormerVisionModel(config)
