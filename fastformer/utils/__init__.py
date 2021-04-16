@@ -524,7 +524,7 @@ def get_image_augmetations(mode):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    if mode == "patchclr":
+    if mode == "clr":
         to_tensor = transforms.Compose([transforms.Resize(224), transforms.ToTensor(), normalize])
     else:
         to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
@@ -534,7 +534,7 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.Resize(256))
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
-    elif mode == "patchclr":
+    elif mode == "clr":
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.15))
         shape_transforms.append(transforms.RandomRotation(30))

@@ -429,7 +429,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             out_2 = b2.reshape(-1, self.num_features)  # BxS , D
 
             c1 = torch.cat((out_1, out_2), 0)
-            c1 = c1 / (c1.norm(2, -1, True).detach() + self.eps)
+            c1 = c1 / (c1.norm(2, -1, True) + self.eps)  # .detach()
             # b2 = torch.cat((out_2, out_1), 0)
             contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
             contrastive_matrix_store = contrastive_matrix
@@ -464,7 +464,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 b1s = b1[:, 0]
                 b2s = b2[:, 0]
             sc1 = torch.cat((b1s, b2s), 0)
-            sc1 = sc1 / (sc1.norm(2, -1, True).detach() + self.eps)
+            sc1 = sc1 / (sc1.norm(2, -1, True) + self.eps)  # .detach()
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None:

@@ -466,7 +466,7 @@ def train(local_rank, args):
                     optimizer.zero_grad(set_to_none=True)
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
-                assert args["mode"] != "patchclr" or extra_negative_repr_simclr is not None
+                assert args["mode"] != "clr" or extra_negative_repr_simclr is not None
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
