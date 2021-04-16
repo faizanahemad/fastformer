@@ -876,6 +876,7 @@ def train(local_rank, args):
             pos_emb = state_dict["funnel.embeddings.position_embeddings.weight"]
             state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[-5:]), 0)
             model.load_state_dict(state_dict, strict=False)
+        del state_dict
 
     if args["test_only"]:
         _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
@@ -1016,12 +1017,14 @@ def train(local_rank, args):
                 torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 if "checkpoint" in args and isinstance(args["checkpoint"], str) and len(args["checkpoint"].strip()) > 0:
                     save(args["checkpoint"], ddp_model, optimizer, scheduler, None, {"step": step, "samples_processed": samples_processed, "world_size": args["world_size"]})
+            del state_dict
         if (step + 1) % validate_every_steps == 0:
             state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
             model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
             model.load_state_dict(state_dict)
             _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
             del model
+            del state_dict
             clean_memory()
             barrier()
         record_accuracy = False
