@@ -22,11 +22,14 @@ from dataclasses_json import dataclass_json
 
 def get_vision_batch_size(size, autocast, mode):
     batch_size = 96*2
-    if not autocast:
-        batch_size = batch_size // 2
-
     if mode == "validation":
         batch_size = batch_size * 2
+    if mode == "linear_probe":
+        batch_size = batch_size + 32
+    if mode == "full_train":
+        batch_size = batch_size + 16
+    if not autocast:
+        batch_size = batch_size // 2
 
     if mode == "clr":
         batch_size = batch_size // 2

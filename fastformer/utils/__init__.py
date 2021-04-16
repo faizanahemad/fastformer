@@ -536,11 +536,14 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.1))
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.6, 1.4)))
-    elif mode == "full_train" or mode == "linear_probe":
+    elif mode == "full_train":
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.8, 1.2)))
+    elif mode == "linear_probe":
+        shape_transforms.append(transforms.Resize(256))
+        shape_transforms.append(transforms.CenterCrop(224))
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1),
@@ -558,7 +561,7 @@ def get_image_augmetations(mode):
     if mode == "full_train":
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     if mode == "linear_probe":
-        shape_transforms = transforms.Compose([shape_transforms, cut, to_tensor])
+        shape_transforms = transforms.Compose([shape_transforms, to_tensor])
 
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
 
