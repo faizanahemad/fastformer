@@ -306,6 +306,8 @@ def train(local_rank, args):
             model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False).to(device)
+        if args["mode"] == "linear_probe":
+            model.backbone = model.backbone.eval()
     else:
         raise ValueError
 
@@ -337,14 +339,19 @@ def train(local_rank, args):
         ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
         return
 
-    ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
-    # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in model.named_parameters() if v.requires_grad}))
+    if args["world_size"] > 1:
+        ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+        # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+        del model
+    else:
+        ddp_model = model
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
     except:
         print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
-    del model
+
     del backbone
     clean_memory()
     _ = model_train_validation_switch(ddp_model.module, args, train=True)
