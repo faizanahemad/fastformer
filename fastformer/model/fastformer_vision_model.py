@@ -471,7 +471,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()[:b1s.size(0)]), 0)
-                if extra_negative_repr_simclr.size(0) >= 32 * b1s.size(0):
+                if extra_negative_repr_simclr.size(0) >= 40 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
                 extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
