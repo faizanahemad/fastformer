@@ -88,6 +88,9 @@ def training_args():
     parser.add_argument('--deit', action="store_true", default=False,
                         help='DEIT')
 
+    parser.add_argument('--deit_classifier', action="store_true", default=False,
+                        help='DEIT')
+
     parser.add_argument('--no_autocast', action="store_true", default=False,
                         help='Avoid Autocast')
 
@@ -295,7 +298,7 @@ def train(local_rank, args):
     fsdp_wrapper(wrap_type=0, init=True)
     if args["deit"]:
         batch_size = get_vision_batch_size("vision_md_config", not args["no_autocast"], args["mode"])
-        backbone = get_pretrained_deit()
+        backbone = get_pretrained_deit(not args["deit_classifier"])
     else:
         backbone = FastFormerVisionModel(config)
 
@@ -306,6 +309,8 @@ def train(local_rank, args):
             model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False).to(device)
+        if args["deit"] and args["deit_classifier"]:
+            model.head = nn.Identity().to(device)
         if args["mode"] == "linear_probe":
             model.backbone = model.backbone.eval()
             for v in model.backbone.parameters():
