@@ -308,6 +308,8 @@ def train(local_rank, args):
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False).to(device)
         if args["mode"] == "linear_probe":
             model.backbone = model.backbone.eval()
+            for v in model.backbone.parameters():
+                v.requires_grad = False
     else:
         raise ValueError
 
