@@ -294,7 +294,7 @@ def train(local_rank, args):
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
     if args["deit"]:
-        assert args["mode"] == "clr"
+        batch_size = (16 if args["no_autocast"] else 32) if args["mode"] == "clr" else (24 if args["no_autocast"] else 48)
         backbone = get_pretrained_deit()
     else:
         backbone = FastFormerVisionModel(config)
@@ -305,7 +305,7 @@ def train(local_rank, args):
         else:
             model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
-        model = ClassificationModel(backbone, args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1], train_backbone=True if "full_train" else False).to(device)
+        model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False).to(device)
     else:
         raise ValueError
 
@@ -492,7 +492,7 @@ def train(local_rank, args):
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
     del ddp_model
     if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
-        model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], config.block_channel_size[0] + config.block_channel_size[1],
+        model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]),
                                     train_backbone=True if "full_train" else False).to(device)
         model.load_state_dict(state_dict, strict=True)
         assert isinstance(model, ClassificationModel)
