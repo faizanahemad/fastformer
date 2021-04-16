@@ -416,9 +416,15 @@ def train(local_rank, args):
             steps_done = epoch * len(dataloader) + step
             gen_batch_time = time.time() - start_time
             batch_times.append(gen_batch_time)
-            key = list(batch.keys())[0]
-            bs_size = list(batch[key].size())
-            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+            if isinstance(batch, dict):
+                key = list(batch.keys())[0]
+                bs_size = list(batch[key].size())
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+            else:
+                batch[0] = batch[0].to(device)
+                batch[1] = batch[1].to(device)
+                bs_size = list(batch[0].size())
+                key = 0
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
@@ -492,8 +498,8 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         x2 = batch["x2"]
         output = ddp_model(x1, x2, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
     elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
-        x = batch["x"]
-        labels = batch["labels"]
+        x = batch[0]
+        labels = batch[1]
         output = ddp_model(x, labels)
     else:
         raise ValueError
