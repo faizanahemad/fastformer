@@ -195,6 +195,7 @@ class ImageNetValidation:
             pred = model(x)["predictions"]
             predictions.extend(pred.cpu().tolist())
         val_acc = accuracy_score(labels, predictions)
+        print("[Validation]: Time = %s, Val Acc = %.5f" % (get_time_string(), val_acc))
 
         predictions, labels = [], []
         for x, label in tqdm(train_loader, desc="Train", miniters=10, mininterval=10.0):
