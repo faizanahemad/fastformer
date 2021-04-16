@@ -526,6 +526,8 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
             get_time_string(), None, loss, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
+    _ = output.pop("logits", None)
+    _ = output.pop("predictions", None)
     return dict(loss=loss, **output, zero_grad=len(zgradders), inf_grad=len(inf_gradders))
 
 
