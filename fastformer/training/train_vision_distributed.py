@@ -49,6 +49,8 @@ def training_args():
                         help='number of gpus per node')
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')
+    parser.add_argument('--num_classes', default=10000, type=int,
+                        help='Num Classes')
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
 
