@@ -327,7 +327,7 @@ def train(local_rank, args):
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
         assert isinstance(model, ClassificationModel)
-        ImageNetValidation(model, args["dataset"], batch_size, args["num_workers"])()
+        ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
         return
 
     ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
@@ -476,7 +476,7 @@ def train(local_rank, args):
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
     if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
         assert isinstance(model, ClassificationModel)
-        ImageNetValidation(model, args["dataset"], batch_size, args["num_workers"])()
+        ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
 
 
 
