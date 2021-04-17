@@ -387,7 +387,7 @@ def train(local_rank, args):
         ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
         return
 
-    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in model.named_parameters() if v.requires_grad}))
+    # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in model.named_parameters() if v.requires_grad}))
     if args["world_size"] > 1:
         ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
         # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
@@ -408,7 +408,7 @@ def train(local_rank, args):
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optimizer = torch.optim.AdamW(trainable_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                   betas=(optc["beta_1"], optc["beta_2"]))
-    print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
+    # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
