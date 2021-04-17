@@ -260,7 +260,7 @@ class TransformerLayer(nn.Module):
 
 
 class FastFormerVisionModel(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig):
+    def __init__(self, config: FastFormerConfig, reinit=True):
         super().__init__(config)
         self.config = config
         self.cls_tokens = config.num_highway_cls_tokens
@@ -288,7 +288,8 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
             self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
             self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
-        self.init_weights()
+        if reinit:
+            self.init_weights()
 
     def forward(self, x, run_decoder=False):
         config = self.config

@@ -295,15 +295,17 @@ def train(local_rank, args):
         optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
+    reinit = not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
+    print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
     fsdp_wrapper(wrap_type=0, init=True)
     if args["deit"]:
         batch_size = get_vision_batch_size("vision_md_config", not args["no_autocast"], args["mode"])
         backbone = get_pretrained_deit(not args["deit_classifier"])
     else:
-        backbone = FastFormerVisionModel(config)
+        backbone = FastFormerVisionModel(config, reinit=reinit)
 
-    reinit = not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
-    print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
+
+
     if args["mode"] == "clr":
         if args["deit"]:
             model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0,
