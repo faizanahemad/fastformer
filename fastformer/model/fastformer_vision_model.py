@@ -86,10 +86,13 @@ to_ntuple = _ntuple
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, num_highway_cls_tokens=1, hidden_dropout=0.1, layer_norm_eps=1e-4):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768,
+                 num_highway_cls_tokens=1, hidden_dropout=0.1, layer_norm_eps=1e-4,
+                 relative_attention=False, pos_dim=None):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
+        self.relative_attention = relative_attention
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
         self.height = img_size[0] // patch_size[0]
         self.width = img_size[1] // patch_size[1]
@@ -97,7 +100,14 @@ class PatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.num_patches = num_patches
         self.cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + num_highway_cls_tokens, embed_dim))
+        if relative_attention:
+            self.first_pos_embed = nn.Parameter(torch.zeros(1, embed_dim))
+            self.row_embed = nn.Parameter(torch.zeros(1, self.height * 2 + 1, pos_dim))
+            self.column_embed = nn.Parameter(torch.zeros(1, self.width * 2 + 1, pos_dim))
+
+        else:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+
         self.dropout = Dropout(hidden_dropout)
         self.layer_norm = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
@@ -108,12 +118,19 @@ class PatchEmbed(nn.Module):
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         x = self.proj(x).flatten(2).transpose(1, 2)
+        if self.relative_attention:
+            x[:, 0] = x[:, 0] + self.first_pos_embed
+            row_embed = self.row_embed
+            column_embed = self.column_embed
+        else:
+            x = x + self.pos_embed
+            row_embed = None
+            column_embed = None
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.pos_embed
         x = self.layer_norm(x)
         x = self.dropout(x)
-        return x
+        return x, row_embed, column_embed
 
 
 
@@ -142,25 +159,25 @@ class MultiheadAttention(nn.Module):
         assert d_model % (n_head * d_head) == 0
         self.attention_dropout = Dropout(config.attention_dropout)
         self.d_model = d_model
-        self.cls_tokens = self.config.num_highway_cls_tokens + 1
+        self.cls_tokens = self.config.num_highway_cls_tokens
 
         self.q_head = nn.Linear(d_model, n_head * d_head, bias=True)
         self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
         self.v_head = nn.Linear(d_model_initial, d_model_initial)
 
         if self.relative_attention:
-            self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head, bias=True)
-            self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head, bias=False)
+            self.pos_q_head = nn.Linear(config.embedding_size, n_head * d_head // 2, bias=True)
+            self.pos_k_head = nn.Linear(config.embedding_size, n_head * d_head // 2, bias=False)
 
         self.r_w_bias = nn.Parameter(torch.zeros([n_head, d_head]))
         self.layer_norm = nn.LayerNorm(config.block_channel_size[block_index], eps=config.layer_norm_eps)
-        self.scale_factor = 1 + (2 if self.relative_attention else 0)
+        self.scale_factor = 1 + (4 if self.relative_attention else 0)
         self.scale = 1.0 / ((d_head ** 0.5)*(self.scale_factor ** 0.5))
 
     def self_attention(self, query, key, value, attention_inputs):
         batch_size, seq_len, dim = query.shape
         initial_seq_len = seq_len
-        position_embeds, attention_mask = attention_inputs
+        (row_embed_q, column_embed_q,), attention_mask = attention_inputs
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
         # Shape batch_size x seq_len x n_head x d_head
@@ -177,18 +194,21 @@ class MultiheadAttention(nn.Module):
         # Shape n_head x d_head
         # Shapes batch_size x n_head x seq_len x context_len
         if self.relative_attention:
-            position_embeds = position_embeds[self.block_index]
-            position_embed_of_key, position_embed_of_query = position_embeds
-
-            pos_k_head = self.pos_k_head(position_embed_of_key)
-            pos_q_head = self.pos_q_head(position_embed_of_query)
+            row_embed_k, column_embed_k = self.pos_k_head(row_embed_q), self.pos_q_head(column_embed_q)
+            row_embed_q, column_embed_q = self.pos_q_head(row_embed_q), self.pos_q_head(column_embed_q)
             # print(query.size(), key.size(), position_embed_of_query.size(), position_embed_of_key.size())
-            nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2), None, pos_q_head, pos_k_head, self.scale_factor,
-                                             self.config.max_position_embeddings // (self.config.stride ** self.block_index),
-                                             (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if self.layer_index > 0 else ((self.config.max_position_embeddings // (self.config.stride ** max(self.block_index - 1, 0))) if self.is_encoder_layer else (self.config.max_position_embeddings // (self.config.stride ** (len(self.config.block_channel_size) - 1)))), n_head)
+            nc_score = disentangled_att_bias_2d(q_head[:, self.cls_tokens:].transpose(1, 2), k_head[:, self.cls_tokens:].transpose(1, 2),
+                                                row_embed_q, column_embed_q, row_embed_k, column_embed_k,
+                                                self.scale_factor,
+                                                self.config.max_position_embeddings,
+                                                self.config.max_position_embeddings,
+                                                n_head // 2,
+                                                query_stride=self.config.stride ** self.block_index,
+                                                key_stride=(self.config.stride ** self.block_index) if self.layer_index != 0 else (self.config.stride ** max(self.block_index - 1, 0)))
+
             nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
                                   torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
-                                             nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
+                                             nc_score), -1)), -2)
             attn_score = attn_score + nc_score
 
         # precision safe in case of mixed precision training
@@ -264,8 +284,10 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         super().__init__(config)
         self.config = config
         self.cls_tokens = config.num_highway_cls_tokens
+
         self.patch_embed = PatchEmbed(config.img_size, config.patch_size, config.in_chans, config.block_channel_size[0],
-                                      config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps)
+                                      config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps,
+                                      config.relative_attention, config.embedding_size)
         self.encoder_block_one = nn.ModuleList()
         for i in range(config.block_sizes[0]):
             self.encoder_block_one.append(TransformerLayer(config, 0, True, i))
@@ -294,12 +316,12 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
     def forward(self, x, run_decoder=False):
         config = self.config
         B, C, H, W = x.shape
-        x = self.patch_embed(x)
+        x, row_embed, column_embed = self.patch_embed(x)
         H, W = self.patch_embed.height, self.patch_embed.width
         initail_attention = torch.ones(x.shape[:2], device=x.device)
         hidden = x
         for layer in self.encoder_block_one:
-            hidden = layer(hidden, hidden, hidden, (None, initail_attention))
+            hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), initail_attention))
         first_block_hidden = hidden
         if config.block_channel_size[0] != config.block_channel_size[1]:
             hidden = self.dim_match(hidden)
@@ -317,7 +339,8 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             second_block_attention = torch.cat((cls_attention, second_block_attention), 1)
 
         for layer in self.encoder_block_two:
-            hidden = layer(hidden, hidden, hidden, (None, second_block_attention))
+
+            hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), second_block_attention))
         second_block_hidden = hidden
 
         upsampled_hidden = None
@@ -332,9 +355,11 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
             for i, layer in enumerate(self.decoder_block):
                 if i == 0:
-                    upsampled_hidden = layer(upsampled_hidden, hidden, hidden, (None, second_block_attention))
+                    upsampled_hidden = layer(upsampled_hidden, hidden, hidden,
+                                             ((row_embed, column_embed,), second_block_attention))
                 else:
-                    upsampled_hidden = layer(upsampled_hidden, upsampled_hidden, upsampled_hidden, (None, initail_attention))
+                    upsampled_hidden = layer(upsampled_hidden, upsampled_hidden, upsampled_hidden,
+                                             ((row_embed, column_embed,), initail_attention))
         return dict(first_block_hidden=first_block_hidden, second_block_hidden=second_block_hidden, third_block_hidden=upsampled_hidden)
 
 
@@ -531,7 +556,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_md_config',
+    ap.add_argument("--config", type=str, default='vision_md_rel_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -585,7 +610,7 @@ if __name__ == '__main__':
             pass
         else:
             model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0)
-    if "pretrained_model" in args:
+    if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
             args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
         if os.path.exists(args["pretrained_model"]):

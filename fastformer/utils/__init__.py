@@ -465,6 +465,113 @@ def disentangled_att_bias(query_layer, key_layer, relative_pos, query_embeddings
     return score
 
 
+def build_relative_position_2d(qs, ks, device, query_stride=1, key_stride=1):
+    """
+    Build relative position according to the query and key
+    We assume the absolute position of query :math:`P_q` is range from (0, query_size) and the absolute position of key
+    :math:`P_k` is range from (0, key_size), The relative positions from query to key is :math:`R_{q \\rightarrow k} =
+    P_q - P_k`
+    Args:
+        query_size (int): the length of query
+        key_size (int): the length of key
+    Return:
+        :obj:`torch.LongTensor`: A tensor with shape [1, query_size, key_size]
+    """
+    rel_pos_row_ids = build_relative_position(qs, ks, device, query_stride, key_stride).view(qs * ks, 1).repeat(1, ks).view(qs, ks ** 2).repeat(1, qs).view(qs ** 2, ks ** 2)
+    rel_pos_col_ids = build_relative_position(qs, ks, device, query_stride, key_stride).squeeze().repeat(1, ks).repeat(qs, 1)
+    rel_pos_row_ids = rel_pos_row_ids.unsqueeze(0).unsqueeze(1)
+    rel_pos_col_ids = rel_pos_col_ids.unsqueeze(0).unsqueeze(1)
+    return rel_pos_row_ids, rel_pos_col_ids
+
+
+def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q, row_embed_k, column_embed_k, scale_factor, query_max_relative_postions,
+                             key_max_relative_positions, heads, query_stride=1, key_stride=1):
+    # scale_factor =  5
+    assert heads == query_layer.size(1) or heads == query_layer.size(1)//2
+    half_head = heads == query_layer.size(1)//2
+
+    qs = int(math.sqrt(query_layer.size(-2)))
+    assert qs*qs == query_layer.size(-2)
+
+    ks = int(math.sqrt(key_layer.size(-2)))
+    assert ks * ks == key_layer.size(-2)
+
+    rel_pos_row_ids, rel_pos_col_ids = build_relative_position_2d(qs, ks, query_layer.device, query_stride=query_stride, key_stride=key_stride)
+
+    q_att_span = min(max(qs, ks), query_max_relative_postions)
+    row_embed_q = row_embed_q[
+        max(0, query_max_relative_postions - q_att_span): min(row_embed_q.size(0), query_max_relative_postions + q_att_span), :
+    ].unsqueeze(0)
+    column_embed_q = column_embed_q[
+                  max(0, query_max_relative_postions - q_att_span): min(column_embed_q.size(0), query_max_relative_postions + q_att_span), :
+                  ].unsqueeze(0)
+
+
+
+    att_span = min(max(qs, ks), key_max_relative_positions)
+    row_embed_k = row_embed_k[
+                     max(0, key_max_relative_positions - att_span): min(row_embed_k.size(0), key_max_relative_positions + att_span), :
+                     ].unsqueeze(0)
+    column_embed_k = row_embed_k[
+                  max(0, key_max_relative_positions - att_span): min(column_embed_k.size(0), key_max_relative_positions + att_span), :
+                  ].unsqueeze(0)
+
+    score = 0
+    # content->position
+
+
+    r_pos_key_layer = transpose_for_scores(row_embed_k, heads)
+    c_pos_key_layer = transpose_for_scores(column_embed_k, heads)
+    assert r_pos_key_layer.size(-1) == query_layer.size(-1) and c_pos_key_layer.size(-1) == query_layer.size(-1)
+
+    c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, r_pos_key_layer.transpose(-1, -2))
+    c2p_pos = torch.clamp(rel_pos_row_ids + att_span, 0, min(att_span * 2 - 1, r_pos_key_layer.size(0) - 1))
+    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, rel_pos_row_ids))
+
+    score += c2p_att
+
+    c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, c_pos_key_layer.transpose(-1, -2))
+    c2p_pos = torch.clamp(rel_pos_col_ids + att_span, 0, min(att_span * 2 - 1, c_pos_key_layer.size(0) - 1))
+    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, rel_pos_col_ids))
+    score += c2p_att
+    # position->content
+
+
+    r_pos_query_layer = transpose_for_scores(row_embed_q, heads)
+    c_pos_query_layer = transpose_for_scores(column_embed_q, heads)
+
+    r_pos_query_layer = r_pos_query_layer / math.sqrt(r_pos_query_layer.size(-1) * scale_factor)
+    c_pos_query_layer = c_pos_query_layer / math.sqrt(c_pos_query_layer.size(-1) * scale_factor)
+    if qs != ks:
+        r_pos, c_pos = build_relative_position_2d(ks, qs, query_layer.device, query_stride=key_stride, key_stride=key_stride)
+    else:
+        r_pos, c_pos = rel_pos_row_ids, rel_pos_col_ids
+
+    r_p2c_pos = torch.clamp(-r_pos + q_att_span, 0, min(q_att_span * 2 - 1, row_embed_q.size(0) - 1))
+    c_p2c_pos = torch.clamp(-c_pos + q_att_span, 0, min(q_att_span * 2 - 1, column_embed_q.size(0) - 1))
+    assert r_pos_query_layer.size(-1) == key_layer.size(-1) and c_pos_query_layer.size(-1) == key_layer.size(-1)
+
+    r_p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, r_pos_query_layer.transpose(-1, -2))
+    c_p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, c_pos_query_layer.transpose(-1, -2))
+
+    r_p2c_att = torch.gather(
+        r_p2c_att, dim=-1, index=p2c_dynamic_expand(r_p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
+    ).transpose(-1, -2)
+    c_p2c_att = torch.gather(
+        c_p2c_att, dim=-1,
+        index=p2c_dynamic_expand(c_p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
+    ).transpose(-1, -2)
+
+    if qs != ks:
+        r_pos_index = r_pos[:, :, :, 0].unsqueeze(-1)
+        c_pos_index = c_pos[:, :, :, 0].unsqueeze(-1)
+        r_p2c_att = torch.gather(r_p2c_att, dim=-2, index=pos_dynamic_expand(r_pos_index, r_p2c_att, key_layer[:, heads:] if half_head else key_layer))
+        c_p2c_att = torch.gather(c_p2c_att, dim=-2, index=pos_dynamic_expand(c_pos_index, c_p2c_att, key_layer[:, heads:] if half_head else key_layer))
+    score += (r_p2c_att + c_p2c_att)
+
+    return score
+
+
 def get_pretrained_deit(features_only=True):
     import types
     model = torch.hub.load('facebookresearch/deit:main', 'deit_base_patch16_224', pretrained=True)

@@ -304,8 +304,6 @@ def train(local_rank, args):
     else:
         backbone = FastFormerVisionModel(config, reinit=reinit)
 
-
-
     if args["mode"] == "clr":
         if args["deit"]:
             model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0,

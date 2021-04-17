@@ -461,9 +461,20 @@ class MultiheadAttention(nn.Module):
             content_score = torch.einsum("bind,bjnd->bnij", q_head, k_head)
             attn_score = content_score
             if self.relative_attention:
-                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2), None, pos_q_head, pos_k_head, self.scale_factor,
+                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2),
+                                                 None,
+                                                 pos_q_head, pos_k_head, self.scale_factor,
                                                  self.config.max_position_embeddings // (self.config.stride ** self.block_index),
-                                                 (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if layer_index > 0 else ((self.config.max_position_embeddings // (self.config.stride ** max(self.block_index - 1, 0))) if self.is_encoder_layer else (self.config.max_position_embeddings // (self.config.stride ** (len(self.config.block_channel_size) - 1)))), n_head)
+                                                 (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if layer_index > 0 else ((
+                                                                                                                                                                        self.config.max_position_embeddings // (
+                                                                                                                                                                            self.config.stride ** max(
+                                                                                                                                                                        self.block_index - 1,
+                                                                                                                                                                        0))) if self.is_encoder_layer else (
+                                                             self.config.max_position_embeddings // (
+                                                                 self.config.stride ** (len(self.config.block_channel_size) - 1)))),
+                                                 n_head,
+                                                 query_stride=self.config.stride if seq_len < context_len else 1,
+                                                 key_stride=self.config.stride if seq_len > context_len else 1)
                 nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
                                       torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
                                                  nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
@@ -842,6 +853,12 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.cls_token, std=std)
             if hasattr(module, "pos_embed"):
                 nn.init.normal_(module.pos_embed, std=std)
+            if hasattr(module, "column_embed"):
+                nn.init.normal_(module.column_embed, std=std)
+            if hasattr(module, "row_embed"):
+                nn.init.normal_(module.row_embed, std=std)
+            if hasattr(module, "first_pos_embed"):
+                nn.init.normal_(module.first_pos_embed, std=std)
 
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
