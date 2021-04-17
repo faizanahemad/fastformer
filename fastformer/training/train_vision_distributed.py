@@ -232,42 +232,6 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     return loader
 
 
-def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_config=None):
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
-    dog = to_tensor(Image.open("dog.jpg"))
-    cat = to_tensor(Image.open("cat.jpg"))
-    fox = to_tensor(Image.open("fox.jpg"))
-    grasshopper = to_tensor(Image.open("grasshopper.jpg"))
-    x = torch.stack([dog, cat, fox, grasshopper])
-    x = x.to(device)
-    if mode == "clr":
-        assert isinstance(model, PatchCLR)
-        output = model(x, x)
-        _ = output.pop("extra_negative_repr_simclr", None)
-        _ = output.pop("extra_negative_repr_patchclr", None)
-    else:
-        assert isinstance(model, ClassificationModel)
-        output = model(x)
-        _ = output.pop("logits", None)
-
-    print("[CHECK]: Time = %s, Output = %s" % (get_time_string(), output))
-
-    try:
-        model = FastFormerVisionModel(model_config)
-        model = PatchCLR(model, model_config.block_channel_size[0] if model_config.has_decoder else model_config.block_channel_size[1], 1e-7, simclr_w=1.0)
-        model = model.to("cpu")
-        x = x.to("cpu")
-        state_dict = torch.load(state_dict_location, map_location="cpu")
-        model.load_state_dict(state_dict, strict=True)
-        output = model(x, x)
-        print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
-    except Exception as e:
-        traceback.print_exc()
-
-
-
 def train(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP

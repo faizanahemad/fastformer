@@ -599,6 +599,7 @@ if __name__ == '__main__':
         exit()
 
     output = model(x, x)
+    check_patch_clr_acc(model, "clr", "cpu", args["pretrained_model"], config)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
