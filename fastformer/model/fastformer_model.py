@@ -800,7 +800,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
     base_model_prefix = "funnel"
 
     def _init_weights(self, module):
-        print("[WARN] [FastFormerPreTrainedModel]: Time = %s, Init Weights, self type = %s" % (get_time_string(), type(self)))
+        # print("[WARN] [FastFormerPreTrainedModel]: Time = %s, Init Weights, self type = %s" % (get_time_string(), type(self)))
         classname = module.__class__.__name__
         if classname.find("Linear") != -1:
             if getattr(module, "weight", None) is not None:
