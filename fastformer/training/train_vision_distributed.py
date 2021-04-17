@@ -360,7 +360,7 @@ def train(local_rank, args):
 
     del backbone
     clean_memory()
-    _ = model_train_validation_switch(ddp_model.module, args, train=True)
+    _ = model_train_validation_switch(ddp_model.module if hasattr(ddp_model, "module") else ddp_model, args, train=True)
     optc = optimizer_config.to_dict()
     optc["lr"] = (optc["lr"] * batch_size * args["world_size"]) / 512.0
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
