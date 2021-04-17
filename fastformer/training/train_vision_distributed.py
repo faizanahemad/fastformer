@@ -232,7 +232,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     return loader
 
 
-def check_patch_clr_acc(model, mode, device):
+def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_config=None):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
@@ -251,7 +251,21 @@ def check_patch_clr_acc(model, mode, device):
         assert isinstance(model, ClassificationModel)
         output = model(x)
         _ = output.pop("logits", None)
+
     print("[CHECK]: Time = %s, Output = %s" % (get_time_string(), output))
+
+    try:
+        model = FastFormerVisionModel(model_config)
+        model = PatchCLR(model, model_config.block_channel_size[0] if model_config.has_decoder else model_config.block_channel_size[1], 1e-7, simclr_w=1.0)
+        model = model.to("cpu")
+        x = x.to("cpu")
+        state_dict = torch.load(state_dict_location, map_location="cpu")
+        model.load_state_dict(state_dict, strict=True)
+        output = model(x, x)
+        print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
+    except:
+        pass
+
 
 
 def train(local_rank, args):
@@ -350,7 +364,7 @@ def train(local_rank, args):
     if local_rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
-    check_patch_clr_acc(model, args["mode"], device)
+    check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -365,7 +379,7 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    check_patch_clr_acc(model, args["mode"], device)
+    check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
