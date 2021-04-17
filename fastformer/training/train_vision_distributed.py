@@ -328,7 +328,7 @@ def train(local_rank, args):
     if local_rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
-    check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
+        check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -343,7 +343,8 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
+    if local_rank == 0:
+        check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
