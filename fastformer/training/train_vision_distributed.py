@@ -232,7 +232,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     return loader
 
 
-def check_patch_clr_acc(model, mode):
+def check_patch_clr_acc(model, mode, device):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
@@ -241,6 +241,7 @@ def check_patch_clr_acc(model, mode):
     fox = to_tensor(Image.open("fox.jpg"))
     grasshopper = to_tensor(Image.open("grasshopper.jpg"))
     x = torch.stack([dog, cat, fox, grasshopper])
+    x = x.to(device)
     if mode == "clr":
         assert isinstance(model, PatchCLR)
         output = model(x, x)
@@ -349,7 +350,7 @@ def train(local_rank, args):
     if local_rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
-    check_patch_clr_acc(model, args["mode"])
+    check_patch_clr_acc(model, args["mode"], device)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -364,7 +365,7 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    check_patch_clr_acc(model, args["mode"])
+    check_patch_clr_acc(model, args["mode"], device)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
