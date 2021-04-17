@@ -304,9 +304,11 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         if args["deit"]:
-            model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0).to(device)
+            model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0,
+                             reinit=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5).to(device)
+            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.5,
+                             reinit=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
