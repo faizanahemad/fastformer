@@ -263,8 +263,8 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
         model.load_state_dict(state_dict, strict=True)
         output = model(x, x)
         print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
-    except:
-        pass
+    except Exception as e:
+        traceback.print_exc()
 
 
 
