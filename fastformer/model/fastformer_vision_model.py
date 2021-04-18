@@ -459,7 +459,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
                 del topk_indices
                 extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
-                if extra_negative_repr_patchclr.size(0) >= 4 * out_1.size(0):
+                if extra_negative_repr_patchclr.size(0) >= 8 * out_1.size(0):
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[out_1.size(0):]
             else:
                 extra_negative_repr_patchclr = c1.detach()[:out_1.size(0)]
@@ -497,7 +497,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
-                if extra_negative_repr_simclr.size(0) >= 40 * b1s.size(0):
+                if extra_negative_repr_simclr.size(0) >= 64 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
                 extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
