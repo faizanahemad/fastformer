@@ -513,7 +513,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
-                if extra_negative_repr_simclr.size(0) >= 64 * b1s.size(0):
+                if extra_negative_repr_simclr.size(0) >= 80 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
                 extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
