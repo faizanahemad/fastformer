@@ -448,7 +448,7 @@ def disentangled_att_bias(query_layer, key_layer, relative_pos, query_embeddings
         pos_query_layer = transpose_for_scores(pos_query_layer, heads)
         pos_query_layer = pos_query_layer / math.sqrt(pos_query_layer.size(-1) * scale_factor)
         if query_layer.size(-2) != key_layer.size(-2):
-            r_pos = build_relative_position(key_layer.size(-2), query_layer.size(-2), query_layer.device, query_stride=key_stride, key_stride=key_stride)
+            r_pos = build_relative_position(key_layer.size(-2), query_layer.size(-2), query_layer.device, query_stride=key_stride, key_stride=query_stride)
         else:
             r_pos = relative_pos
         p2c_pos = torch.clamp(-r_pos + q_att_span, 0, min(q_att_span * 2 - 1, query_embeddings.size(0) - 1))
@@ -487,6 +487,7 @@ def build_relative_position_2d(qs, ks, device, query_stride=1, key_stride=1):
 def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q, row_embed_k, column_embed_k, scale_factor, query_max_relative_postions,
                              key_max_relative_positions, heads, query_stride=1, key_stride=1):
     # scale_factor =  5
+    row_qs, column_qs, row_ks, column_ks = row_embed_q.size(), column_embed_q.size(), row_embed_k.size(), column_embed_k.size()
     assert heads == query_layer.size(1) or heads == query_layer.size(1)//2
     half_head = heads == query_layer.size(1)//2
 
@@ -524,15 +525,16 @@ def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q
     c_pos_key_layer = transpose_for_scores(column_embed_k, heads)
     assert r_pos_key_layer.size(-1) == query_layer.size(-1) and c_pos_key_layer.size(-1) == query_layer.size(-1)
 
-    c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, r_pos_key_layer.transpose(-1, -2))
-    c2p_pos = torch.clamp(rel_pos_row_ids + att_span, 0, min(att_span * 2 - 1, r_pos_key_layer.size(0) - 1))
-    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, rel_pos_row_ids))
+    query_layer_early = query_layer[:, :heads] if half_head else query_layer
+    c2p_att = torch.matmul(query_layer_early, r_pos_key_layer.transpose(-1, -2))
+    c2p_pos = torch.clamp(rel_pos_row_ids + att_span, 0, min(att_span * 2 - 1, row_ks[0] - 1))
+    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer_early, rel_pos_row_ids))
 
     score += c2p_att
 
-    c2p_att = torch.matmul(query_layer[:, :heads] if half_head else query_layer, c_pos_key_layer.transpose(-1, -2))
-    c2p_pos = torch.clamp(rel_pos_col_ids + att_span, 0, min(att_span * 2 - 1, c_pos_key_layer.size(0) - 1))
-    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer[:, :heads] if half_head else query_layer, rel_pos_col_ids))
+    c2p_att = torch.matmul(query_layer_early, c_pos_key_layer.transpose(-1, -2))
+    c2p_pos = torch.clamp(rel_pos_col_ids + att_span, 0, min(att_span * 2 - 1, column_ks[0] - 1))
+    c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer_early, rel_pos_col_ids))
     score += c2p_att
     # position->content
 
@@ -543,30 +545,27 @@ def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q
     r_pos_query_layer = r_pos_query_layer / math.sqrt(r_pos_query_layer.size(-1) * scale_factor)
     c_pos_query_layer = c_pos_query_layer / math.sqrt(c_pos_query_layer.size(-1) * scale_factor)
     if qs != ks:
-        r_pos, c_pos = build_relative_position_2d(ks, qs, query_layer.device, query_stride=key_stride, key_stride=key_stride)
+        r_pos, c_pos = build_relative_position_2d(ks, qs, query_layer.device, query_stride=key_stride, key_stride=query_stride)
     else:
         r_pos, c_pos = rel_pos_row_ids, rel_pos_col_ids
 
-    r_p2c_pos = torch.clamp(-r_pos + q_att_span, 0, min(q_att_span * 2 - 1, row_embed_q.size(0) - 1))
-    c_p2c_pos = torch.clamp(-c_pos + q_att_span, 0, min(q_att_span * 2 - 1, column_embed_q.size(0) - 1))
+    r_p2c_pos = torch.clamp(-r_pos + q_att_span, 0, min(q_att_span * 2 - 1, row_qs[0] - 1))
+    c_p2c_pos = torch.clamp(-c_pos + q_att_span, 0, min(q_att_span * 2 - 1, column_qs[0] - 1))
     assert r_pos_query_layer.size(-1) == key_layer.size(-1) and c_pos_query_layer.size(-1) == key_layer.size(-1)
 
-    r_p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, r_pos_query_layer.transpose(-1, -2))
-    c_p2c_att = torch.matmul(key_layer[:, heads:] if half_head else key_layer, c_pos_query_layer.transpose(-1, -2))
+    key_layer = key_layer[:, heads:] if half_head else key_layer
+    query_layer = query_layer[:, heads:] if half_head else query_layer
+    r_p2c_att = torch.matmul(key_layer, r_pos_query_layer.transpose(-1, -2))
+    c_p2c_att = torch.matmul(key_layer, c_pos_query_layer.transpose(-1, -2))
 
     r_p2c_att = torch.gather(
-        r_p2c_att, dim=-1, index=p2c_dynamic_expand(r_p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
+        r_p2c_att, dim=-1, index=p2c_dynamic_expand(r_p2c_pos, query_layer, key_layer)
     ).transpose(-1, -2)
     c_p2c_att = torch.gather(
         c_p2c_att, dim=-1,
-        index=p2c_dynamic_expand(c_p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
+        index=p2c_dynamic_expand(c_p2c_pos, query_layer, key_layer)
     ).transpose(-1, -2)
 
-    if qs != ks:
-        r_pos_index = r_pos[:, :, :, 0].unsqueeze(-1)
-        c_pos_index = c_pos[:, :, :, 0].unsqueeze(-1)
-        r_p2c_att = torch.gather(r_p2c_att, dim=-2, index=pos_dynamic_expand(r_pos_index, r_p2c_att, key_layer[:, heads:] if half_head else key_layer))
-        c_p2c_att = torch.gather(c_p2c_att, dim=-2, index=pos_dynamic_expand(c_pos_index, c_p2c_att, key_layer[:, heads:] if half_head else key_layer))
     p2c_att = (r_p2c_att + c_p2c_att)
     if half_head:
         score = torch.cat((score, p2c_att), 1)
@@ -649,7 +648,11 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.15))
         shape_transforms.append(transforms.RandomRotation(30))
-        shape_transforms.append(transforms.RandomResizedCrop(480, scale=(0.6, 1.4)))
+        shape_transforms.append(transforms.RandomChoice([
+            transforms.RandomResizedCrop(480, scale=(0.6, 1.4)),
+            transforms.RandomResizedCrop(640, scale=(0.6, 1.4)),
+            transforms.RandomResizedCrop(360, scale=(0.6, 1.4)),
+        ]))
     elif mode == "full_train":
         shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
@@ -716,7 +719,7 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
     x = torch.stack([dog, cat, fox, grasshopper])
     x = x.to(device)
     if mode == "clr":
-        assert isinstance(model, PatchCLR)
+
         output = model(x, x)
         _ = output.pop("extra_negative_repr_simclr", None)
         _ = output.pop("extra_negative_repr_patchclr", None)

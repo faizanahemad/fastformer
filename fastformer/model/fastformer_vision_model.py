@@ -133,8 +133,6 @@ class PatchEmbed(nn.Module):
         return x, row_embed, column_embed
 
 
-
-
 class MultiheadAttention(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_encoder_layer, layer_index):
         super().__init__()
@@ -204,7 +202,7 @@ class MultiheadAttention(nn.Module):
                                                 self.config.max_position_embeddings,
                                                 n_head // 2,
                                                 query_stride=self.config.stride ** self.block_index,
-                                                key_stride=(self.config.stride ** self.block_index) if self.layer_index != 0 else (self.config.stride ** max(self.block_index - 1, 0)))
+                                                key_stride=(self.config.stride ** self.block_index) if self.layer_index != 0 else (self.config.stride ** max(self.block_index - 1, 0) if self.is_encoder_layer else self.config.stride ** (len(self.config.block_sizes) - 1)))
 
             nc_score = F.pad(nc_score, (self.cls_tokens, 0, self.cls_tokens, 0, 0, 0, 0, 0))
             attn_score = attn_score + nc_score
@@ -315,6 +313,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), initail_attention))
         first_block_hidden = hidden
         hidden = self.dim_match(hidden)
+        second_block_init = hidden
         if self.stride > 1:
             assert H % self.stride == 0 and W % self.stride == 0
             cls, hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
@@ -322,20 +321,25 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             hidden = F.avg_pool2d(hidden, self.stride, self.stride).flatten(2).permute(0, 2, 1)
             hidden = torch.cat((cls, hidden), 1)
 
-        for layer in self.encoder_block_two:
-            hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), second_block_attention))
+        for i, layer in enumerate(self.encoder_block_two):
+            if i == 0:
+                hidden = layer(hidden, second_block_init, second_block_init, ((row_embed, column_embed,), second_block_attention))
+            else:
+                hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), second_block_attention))
         second_block_hidden = hidden
 
         upsampled_hidden = None
         if run_decoder and self.has_decoder:
             hidden = self.dim_match_decoder_ln(self.dim_match_decoder_linear(hidden))
-            cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
-            stride_factor = (config.stride ** (len(config.block_sizes) - 1))
-            upsampled_hidden = upsampled_hidden.reshape(B, H // stride_factor, W // stride_factor, config.block_channel_size[0])
-            upsampled_hidden = upsampled_hidden.repeat_interleave(stride_factor, -2).repeat_interleave(stride_factor, -3)
-            upsampled_hidden = upsampled_hidden.view(B, -1, config.block_channel_size[0])
-            upsampled_hidden = torch.cat((cls, upsampled_hidden), 1)
-            upsampled_hidden = upsampled_hidden + first_block_hidden
+            upsampled_hidden = hidden
+            if self.stride > 1:
+                cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+                stride_factor = (config.stride ** (len(config.block_sizes) - 1))
+                upsampled_hidden = upsampled_hidden.reshape(B, H // stride_factor, W // stride_factor, config.block_channel_size[0])
+                upsampled_hidden = upsampled_hidden.repeat_interleave(stride_factor, -2).repeat_interleave(stride_factor, -3)
+                upsampled_hidden = upsampled_hidden.view(B, -1, config.block_channel_size[0])
+                upsampled_hidden = torch.cat((cls, upsampled_hidden), 1)
+                upsampled_hidden = upsampled_hidden + first_block_hidden
 
             for i, layer in enumerate(self.decoder_block):
                 if i == 0:
@@ -540,7 +544,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_md_rel_config',
+    ap.add_argument("--config", type=str, default='vision_md_rel_funnel_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
