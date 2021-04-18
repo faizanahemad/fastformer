@@ -395,8 +395,8 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4,
-                 patchclr_w=1.0, contrastive_temperature=1e-2,
-                 simclr_w=1.0, clustering_w=1.0, gap_bias_w=1.0, reinit=False):
+                 patchclr_w=1.0, contrastive_temperature=5e-2,
+                 simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
