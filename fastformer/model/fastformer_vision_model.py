@@ -490,9 +490,12 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None:
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = sc1.detach()[:b1s.size(0)]
-                topk_indices = torch.topk(sc1_det.mm(extra_negative_repr_simclr.t()).mean(0), 16*b1s.size(0), dim=0).indices
-                simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
-                del topk_indices
+                if extra_negative_repr_simclr.size(0) >= 16 * b1s.size(0):
+                    topk_indices = torch.topk(sc1_det.mm(extra_negative_repr_simclr.t()).mean(0), 16*b1s.size(0), dim=0).indices
+                    simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
+                    del topk_indices
+                else:
+                    simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
                 if extra_negative_repr_simclr.size(0) >= 40 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
