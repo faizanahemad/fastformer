@@ -512,7 +512,7 @@ def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q
     row_embed_k = row_embed_k[
                      max(0, key_max_relative_positions - att_span): min(row_embed_k.size(0), key_max_relative_positions + att_span), :
                      ].unsqueeze(0)
-    column_embed_k = row_embed_k[
+    column_embed_k = column_embed_k[
                   max(0, key_max_relative_positions - att_span): min(column_embed_k.size(0), key_max_relative_positions + att_span), :
                   ].unsqueeze(0)
 
@@ -567,7 +567,11 @@ def disentangled_att_bias_2d(query_layer, key_layer, row_embed_q, column_embed_q
         c_pos_index = c_pos[:, :, :, 0].unsqueeze(-1)
         r_p2c_att = torch.gather(r_p2c_att, dim=-2, index=pos_dynamic_expand(r_pos_index, r_p2c_att, key_layer[:, heads:] if half_head else key_layer))
         c_p2c_att = torch.gather(c_p2c_att, dim=-2, index=pos_dynamic_expand(c_pos_index, c_p2c_att, key_layer[:, heads:] if half_head else key_layer))
-    score += (r_p2c_att + c_p2c_att)
+    p2c_att = (r_p2c_att + c_p2c_att)
+    if half_head:
+        score = torch.cat((score, p2c_att), 1)
+    else:
+        score += p2c_att
 
     return score
 

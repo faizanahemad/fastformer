@@ -475,9 +475,8 @@ class MultiheadAttention(nn.Module):
                                                  n_head,
                                                  query_stride=self.config.stride if seq_len < context_len else 1,
                                                  key_stride=self.config.stride if seq_len > context_len else 1)
-                nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
-                                      torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
-                                                 nc_score[..., self.cls_tokens:, self.cls_tokens:]), -1)), -2)
+
+                nc_score = F.pad(nc_score, (self.cls_tokens, 0, self.cls_tokens, 0, 0, 0, 0, 0))
                 attn_score = attn_score + nc_score
 
             # precision safe in case of mixed precision training

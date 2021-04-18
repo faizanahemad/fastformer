@@ -102,8 +102,8 @@ class PatchEmbed(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens, embed_dim))
         if relative_attention:
             self.first_pos_embed = nn.Parameter(torch.zeros(1, embed_dim))
-            self.row_embed = nn.Parameter(torch.zeros(1, self.height * 2 + 1, pos_dim))
-            self.column_embed = nn.Parameter(torch.zeros(1, self.width * 2 + 1, pos_dim))
+            self.row_embed = nn.Parameter(torch.zeros(self.height * 2 + 1, pos_dim))
+            self.column_embed = nn.Parameter(torch.zeros(self.width * 2 + 1, pos_dim))
 
         else:
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
@@ -206,22 +206,13 @@ class MultiheadAttention(nn.Module):
                                                 query_stride=self.config.stride ** self.block_index,
                                                 key_stride=(self.config.stride ** self.block_index) if self.layer_index != 0 else (self.config.stride ** max(self.block_index - 1, 0)))
 
-            nc_score = torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), self.cls_tokens, nc_score.size(-1)),
-                                  torch.cat((nc_score.new_zeros(nc_score.size(0), nc_score.size(1), nc_score.size(-2) - self.cls_tokens, self.cls_tokens),
-                                             nc_score), -1)), -2)
+            nc_score = F.pad(nc_score, (self.cls_tokens, 0, self.cls_tokens, 0, 0, 0, 0, 0))
             attn_score = attn_score + nc_score
 
         # precision safe in case of mixed precision training
-        dtype = attn_score.dtype
         # attn_score = attn_score.float()
         # perform masking
-        if attention_mask is not None:
-            # TODO: handle attention mask's pooling for qk pooling
-            if len(attention_mask.size()) == 2:
-                attention_mask = attention_mask[:, None, None].float()
-            attn_score = attn_score - INF * (1 - attention_mask)
-        # attention probability
-        attn_prob = torch.softmax(attn_score, dim=-1, dtype=dtype)
+        attn_prob = torch.softmax(attn_score, dim=-1, dtype=attn_score.dtype)
         attn_prob = self.attention_dropout(attn_prob)
 
         # attention output, shape batch_size x seq_len x n_head x d_head
@@ -298,7 +289,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
         self.stride = config.stride
         self.decoder_block = nn.ModuleList()
-
+        self.dim_match = nn.Identity()
         if config.block_channel_size[0] != config.block_channel_size[1]:
             self.dim_match = nn.Sequential(nn.Linear(config.block_channel_size[0],config.block_channel_size[1], bias=False),
                                            nn.LayerNorm(config.block_channel_size[1], eps=config.layer_norm_eps))
@@ -307,8 +298,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         if config.has_decoder:
             for i in range(config.num_decoder_layers):
                 self.decoder_block.append(TransformerLayer(config, 0, False, i))
-            self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1],config.block_channel_size[0], bias=False)
-            self.dim_match_decoder = nn.ConvTranspose2d(config.block_channel_size[1], config.block_channel_size[0], config.stride ** (len(config.block_sizes) - 1), self.config.stride ** (len(self.config.block_sizes) - 1))
+            self.dim_match_decoder_linear = nn.Linear(config.block_channel_size[1], config.block_channel_size[0], bias=False)
             self.dim_match_decoder_ln = nn.LayerNorm(config.block_channel_size[0], eps=config.layer_norm_eps)
         if reinit:
             self.init_weights()
@@ -318,40 +308,34 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         B, C, H, W = x.shape
         x, row_embed, column_embed = self.patch_embed(x)
         H, W = self.patch_embed.height, self.patch_embed.width
-        initail_attention = torch.ones(x.shape[:2], device=x.device)
+        initail_attention = None
+        second_block_attention = initail_attention
         hidden = x
         for layer in self.encoder_block_one:
             hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), initail_attention))
         first_block_hidden = hidden
-        if config.block_channel_size[0] != config.block_channel_size[1]:
-            hidden = self.dim_match(hidden)
-        second_block_attention = initail_attention
+        hidden = self.dim_match(hidden)
         if self.stride > 1:
             assert H % self.stride == 0 and W % self.stride == 0
             cls, hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
             hidden = hidden.reshape(B, H, W, config.block_channel_size[1]).permute(0, 3, 1, 2)
-            cls_attention, second_block_attention = second_block_attention.split([config.num_highway_cls_tokens, second_block_attention.shape[1] - config.num_highway_cls_tokens], 1)
-            second_block_attention = second_block_attention.reshape(B, H, W).unsqueeze(-1).permute(0, 3, 1, 2)
-
             hidden = F.avg_pool2d(hidden, self.stride, self.stride).flatten(2).permute(0, 2, 1)
             hidden = torch.cat((cls, hidden), 1)
-            second_block_attention = F.max_pool2d(second_block_attention, self.stride, self.stride).permute(0, 2, 3, 1).flatten(1)
-            second_block_attention = torch.cat((cls_attention, second_block_attention), 1)
 
         for layer in self.encoder_block_two:
-
             hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), second_block_attention))
         second_block_hidden = hidden
 
         upsampled_hidden = None
         if run_decoder and self.has_decoder:
-            cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
-            cls = self.dim_match_decoder_linear(cls)
-            upsampled_hidden = upsampled_hidden.reshape(B, H // (config.stride ** (len(config.block_sizes) - 1)), W // (config.stride ** (len(config.block_sizes) - 1)), config.block_channel_size[1]).permute(0, 3, 1, 2)
-            upsampled_hidden = self.dim_match_decoder(upsampled_hidden).flatten(2).permute(0, 2, 1)
-            upsampled_hidden = self.dim_match_decoder_ln(torch.cat((cls, upsampled_hidden), 1))
-            upsampled_hidden = upsampled_hidden + first_block_hidden
             hidden = self.dim_match_decoder_ln(self.dim_match_decoder_linear(hidden))
+            cls, upsampled_hidden = hidden.split([config.num_highway_cls_tokens, hidden.shape[1] - config.num_highway_cls_tokens], 1)
+            stride_factor = (config.stride ** (len(config.block_sizes) - 1))
+            upsampled_hidden = upsampled_hidden.reshape(B, H // stride_factor, W // stride_factor, config.block_channel_size[0])
+            upsampled_hidden = upsampled_hidden.repeat_interleave(stride_factor, -2).repeat_interleave(stride_factor, -3)
+            upsampled_hidden = upsampled_hidden.view(B, -1, config.block_channel_size[0])
+            upsampled_hidden = torch.cat((cls, upsampled_hidden), 1)
+            upsampled_hidden = upsampled_hidden + first_block_hidden
 
             for i, layer in enumerate(self.decoder_block):
                 if i == 0:
