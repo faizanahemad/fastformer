@@ -39,7 +39,7 @@ def get_vision_batch_size(size, autocast, mode):
     if size == "vision_lg_config":
         batch_size = batch_size // 4
     if "_rel_" in size:
-        batch_size = batch_size - 4
+        batch_size = batch_size - 8
     return batch_size
 
 
