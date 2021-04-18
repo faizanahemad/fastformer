@@ -730,14 +730,15 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
 
     print("[CHECK]: Time = %s, Output = %s" % (get_time_string(), output))
 
-    try:
-        model = FastFormerVisionModel(model_config)
-        model = PatchCLR(model, model_config.block_channel_size[0] if model_config.has_decoder else model_config.block_channel_size[1], 1e-7, simclr_w=1.0)
-        model = model.to("cpu")
-        x = x.to("cpu")
-        state_dict = torch.load(state_dict_location, map_location="cpu")
-        model.load_state_dict(state_dict, strict=True)
-        output = model(x, x)
-        print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
-    except Exception as e:
-        traceback.print_exc()
+    if state_dict_location is not None:
+        try:
+            model = FastFormerVisionModel(model_config)
+            model = PatchCLR(model, model_config.block_channel_size[0] if model_config.has_decoder else model_config.block_channel_size[1], 1e-7, simclr_w=1.0)
+            model = model.to("cpu")
+            x = x.to("cpu")
+            state_dict = torch.load(state_dict_location, map_location="cpu")
+            model.load_state_dict(state_dict, strict=True)
+            output = model(x, x)
+            print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
+        except Exception as e:
+            traceback.print_exc()
