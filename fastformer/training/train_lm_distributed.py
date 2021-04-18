@@ -853,8 +853,10 @@ def train(local_rank, args):
 
     if args["world_size"] != 128:
         optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
+    config.eps = 1e-4
     if args["no_autocast"]:
         optimizer_config.eps = 1e-7
+        config.layer_norm_eps = 1e-7
         config.eps = 1e-7
         optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 

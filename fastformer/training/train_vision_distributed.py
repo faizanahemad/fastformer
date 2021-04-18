@@ -289,8 +289,10 @@ def train(local_rank, args):
 
     if args["world_size"] != 128:
         optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
+    config.eps = 1e-4
     if args["no_autocast"]:
         optimizer_config.eps = 1e-7
+        config.layer_norm_eps = 1e-7
         config.eps = 1e-7
         optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 
@@ -306,10 +308,10 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         if args["deit"]:
-            model = PatchCLR(backbone, 768, 1e-7, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0,
+            model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=1.0, simclr_w=1.0, clustering_w=1.0,
                              reinit=reinit).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.1,
+            model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=0.5, simclr_w=1.0, clustering_w=0.5, gap_bias_w=0.1,
                              reinit=reinit).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False,
