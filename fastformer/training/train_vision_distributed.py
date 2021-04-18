@@ -56,6 +56,14 @@ def training_args():
 
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+
+    parser.add_argument('--batch_size', default=8, type=int,
+                        help='Batch Size')
+    parser.add_argument('--patch_negatives', default=4, type=int,
+                        help='Patch Negatives')
+    parser.add_argument('--simclr_negatives', default=32, type=int,
+                        help='SimCLR Negatives')
+
     parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
                         help='warmup_steps')
     parser.add_argument('--lr', default=optimizer_config.lr, type=float,

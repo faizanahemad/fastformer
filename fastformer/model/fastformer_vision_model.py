@@ -454,8 +454,11 @@ class PatchCLR(FastFormerPreTrainedModel):
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None:
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()[:out_1.size(0)]), 0)
+                c1_det = c1.detach()[:out_1.size(0)]
+                topk_indices = torch.topk(c1_det.mm(extra_negative_repr_patchclr.t()).mean(0), out_1.size(0), dim=0).indices
+                patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
+                del topk_indices
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
                 if extra_negative_repr_patchclr.size(0) >= 4 * out_1.size(0):
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[out_1.size(0):]
             else:
@@ -486,8 +489,11 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_negative = None
             if extra_negative_repr_simclr is not None:
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()[:b1s.size(0)]), 0)
+                sc1_det = sc1.detach()[:b1s.size(0)]
+                topk_indices = torch.topk(sc1_det.mm(extra_negative_repr_simclr.t()).mean(0), 16*b1s.size(0), dim=0).indices
+                simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
+                del topk_indices
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
                 if extra_negative_repr_simclr.size(0) >= 40 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
