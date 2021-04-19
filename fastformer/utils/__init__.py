@@ -720,7 +720,7 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
     x = x.to(device)
     if mode == "clr":
 
-        output = model(x, x)
+        output = model(x, x, torch.tensor([True] * x.size(0)).to(device))
         _ = output.pop("extra_negative_repr_simclr", None)
         _ = output.pop("extra_negative_repr_patchclr", None)
     else:
@@ -738,7 +738,7 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
             x = x.to("cpu")
             state_dict = torch.load(state_dict_location, map_location="cpu")
             model.load_state_dict(state_dict, strict=True)
-            output = model(x, x)
+            output = model(x, x, torch.tensor([True] * x.size(0)).to(device))
             print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
         except Exception as e:
             traceback.print_exc()
