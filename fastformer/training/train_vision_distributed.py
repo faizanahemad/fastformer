@@ -183,7 +183,7 @@ class CLRDataset(torch.utils.data.Dataset):
         else:
             x1 = self.to_tensor(x)
 
-        if random.random() < 0.5:
+        if random.random() < 0.25:
             patch_clr_or_not = True
             x = self.small_shape_transforms(x) if random.random() < 0.75 else x
             if self.x2_transform:
