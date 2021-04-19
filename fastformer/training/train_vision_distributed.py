@@ -505,7 +505,7 @@ def train(local_rank, args):
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
                         extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
-                        print("extra_negative_repr_simclr = %s" % extra_negative_repr_simclr.size())
+                        print("extra_negative_repr_simclr = %s" % (extra_negative_repr_simclr.size(),))
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
