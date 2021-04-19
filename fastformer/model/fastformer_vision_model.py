@@ -443,6 +443,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         if isinstance(b1, dict):
             b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
+        b1 = b1 / (b1.norm(2, -1, True) + self.eps)
+        b2 = b2 / (b2.norm(2, -1, True) + self.eps)
         return b1, b2
 
     def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
@@ -459,7 +461,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
 
             c1 = torch.cat((out_1, out_2), 0)
-            c1 = c1 / (c1.norm(2, -1, True) + self.eps)  # .detach()
+
             # b2 = torch.cat((out_2, out_1), 0)
             contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
             contrastive_matrix_store = contrastive_matrix
@@ -470,7 +472,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 if extra_negative_repr_patchclr.size(0) > 4 * bs:
-                    c1_det = c1.detach()[:out_1.size(0)]
+                    c1_det = out_1.detach()
                     selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
@@ -487,7 +489,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
 
             else:
-                extra_negative_repr_patchclr = c1.detach()[:bs]
+                extra_negative_repr_patchclr = out_1.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
@@ -501,26 +503,28 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         simclr_loss = 0.0
         simclr_accuracy = None
-        if self.simclr_w > 0:
-            b1s = b1[:, 0]
-            b2s = b2[:, 0]
+        simclr_or_not = ~patch_clr_or_not
+        del patch_clr_or_not
+        if self.simclr_w > 0 and simclr_or_not.sum() > 0:
+            b1s = b1[simclr_or_not, 0]
+            b2s = b2[simclr_or_not, 0]
             sc1 = torch.cat((b1s, b2s), 0)
-            sc1 = sc1 / (sc1.norm(2, -1, True) + self.eps)  # .detach()
+
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None:
-                if extra_negative_repr_simclr.size(0) >= 128 * b1s.size(0):
-                    extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
+                if extra_negative_repr_simclr.size(0) >= 128 * b:
+                    extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = sc1.detach()[:b1s.size(0)]
-                if extra_negative_repr_simclr.size(0) >= 48 * b1s.size(0):
+                if extra_negative_repr_simclr.size(0) >= 48 * b:
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
-                    topk_indices_max = torch.topk(selector_mat.max(0).values, 16 * b1s.size(0), dim=0).indices
-                    topk_indices_mean = torch.topk(selector_mat.mean(0), 16 * b1s.size(0), dim=0).indices
-                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 16 * b1s.size(0), dim=0).indices
-                    most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 16 * b1s.size(0), extra_negative_repr_simclr.size(0), device=sc1.device)
-                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (32 * b1s.size(0),), device=sc1.device)
+                    topk_indices_max = torch.topk(selector_mat.max(0).values, 16 * b, dim=0).indices
+                    topk_indices_mean = torch.topk(selector_mat.mean(0), 16 * b, dim=0).indices
+                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 16 * b, dim=0).indices
+                    most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 16 * b, extra_negative_repr_simclr.size(0), device=sc1.device)
+                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (32 * b,), device=sc1.device)
 
                     topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean, rand_indices, topk_indices_mean_select, most_recent_indices)))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
@@ -545,11 +549,9 @@ class PatchCLR(FastFormerPreTrainedModel):
         if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
             p1s = b1[:, 1:].mean(1)
             p2s = b2[:, 1:].mean(1)
-
-            pc1 = torch.cat((p1s, p2s), 0)
-            pc1 = pc1 / (pc1.norm(2, -1, True).detach() + self.eps)
-
-            gap_bias = torch.cat((sc1, pc1), 0)
+            b1s = b1[:, 0]
+            b2s = b2[:, 0]
+            gap_bias = torch.cat((b1s, b2s, p1s, p2s), 0)
             contrastive_matrix = gap_bias.mm(gap_bias.t()) * (1 - torch.eye(gap_bias.size(0), gap_bias.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None:
