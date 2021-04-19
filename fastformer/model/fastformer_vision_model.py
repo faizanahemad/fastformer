@@ -438,8 +438,16 @@ class PatchCLR(FastFormerPreTrainedModel):
         return b1, b2
 
     def forward(self, x1, x2, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
-        
-        b1, b2 = self.build_representations(x1, x2)
+        one_eight = max(x1.size(0) // 8, 4)
+        assert x1.size(0) % one_eight == 0
+
+        x1_grad, x2_grad = x1[:one_eight], x2[:one_eight]
+        b1_grad, b2_grad = self.build_representations(x1_grad, x2_grad)
+
+        with torch.no_grad():
+            x1_no_grad, x2_no_grad = x1[one_eight:], x2[one_eight:]
+            b1_no_grad, b2_no_grad = self.build_representations(x1_no_grad, x2_no_grad)
+        b1, b2 = torch.cat((b1_grad, b1_no_grad), 0), torch.cat((b2_grad, b2_no_grad), 0)
 
         b, s = b1.shape[:2]
         bs = b * s
