@@ -545,6 +545,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_loss = self.simclr_w * simclr_loss
 
         gap_bias_loss = 0.0
+        gap_bias_accuracy = 0.0
         if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
             p1s = b1[:, 1:].mean(1)
             p2s = b2[:, 1:].mean(1)
