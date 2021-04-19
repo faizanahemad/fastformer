@@ -445,16 +445,18 @@ class PatchCLR(FastFormerPreTrainedModel):
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
         return b1, b2
 
-    def forward(self, x1, x2, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
+    def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
         b1, b2 = self.build_representations(x1, x2)
         b, s = b1.shape[:2]
         bs = b * s
 
         patchclr_loss = 0.0
         patchclr_accuracy = None
-        if self.patchclr_w > 0:
-            out_1 = b1.reshape(-1, self.num_features)  # BxS , D
-            out_2 = b2.reshape(-1, self.num_features)  # BxS , D
+        if self.patchclr_w > 0 and patch_clr_or_not.sum() > 0:
+            b1p = b1[patch_clr_or_not]
+            b2p = b2[patch_clr_or_not]
+            out_1 = b1p.reshape(-1, self.num_features)  # BxS , D
+            out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
 
             c1 = torch.cat((out_1, out_2), 0)
             c1 = c1 / (c1.norm(2, -1, True) + self.eps)  # .detach()
@@ -464,14 +466,14 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None:
-                if extra_negative_repr_patchclr.size(0) > 8 * out_1.size(0):
-                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[out_1.size(0):]
+                if extra_negative_repr_patchclr.size(0) > 8 * bs:
+                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                c1_det = c1.detach()[:out_1.size(0)]
+                c1_det = c1.detach()[:bs]
                 selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                 topk_indices_argmax = selector_mat.argmax(1)
-                topk_indices_max = torch.topk(selector_mat.max(0).values, out_1.size(0), dim=0).indices
-                topk_indices_mean = torch.topk(selector_mat.mean(0), out_1.size(0), dim=0).indices
+                topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
+                topk_indices_mean = torch.topk(selector_mat.mean(0), bs, dim=0).indices
                 topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
                 patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
                 del topk_indices_mean
@@ -482,7 +484,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
 
             else:
-                extra_negative_repr_patchclr = c1.detach()[:out_1.size(0)]
+                extra_negative_repr_patchclr = c1.detach()[:bs]
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)

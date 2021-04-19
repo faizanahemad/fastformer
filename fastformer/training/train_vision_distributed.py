@@ -166,19 +166,29 @@ class CLRDataset(torch.utils.data.Dataset):
         self.to_tensor = to_tensor
 
     def __getitem__(self, item):
-        item, label = self.dataset[item]
+
+        x, label = self.dataset[item]
         # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
         if self.x1_transform and random.random() < 0.75:
-            x1 = self.to_tensor(self.x1_transform(item.copy()))
+            x1 = self.to_tensor(self.x1_transform(x.copy()))
         else:
-            x1 = self.to_tensor(item)
+            x1 = self.to_tensor(x)
 
-        if self.x2_transform:
-            x2 = self.to_tensor(self.x2_transform(item.copy()))
+        if random.random() < 0.5:
+            patch_clr_or_not = True
+            if self.x2_transform:
+                x2 = self.to_tensor(self.x2_transform(x.copy()))
+            else:
+                x2 = self.to_tensor(x)
         else:
-            x2 = self.to_tensor(item)
+            patch_clr_or_not = False
+            x, label = self.dataset[item]
+            if self.x2_transform:
+                x2 = self.to_tensor(self.x2_transform(x.copy()))
+            else:
+                x2 = self.to_tensor(x)
 
-        return dict(x1=x1, x2=x2)
+        return dict(x1=x1, x2=x2, patch_clr_or_not=patch_clr_or_not)
 
     def __len__(self):
         return len(self.dataset)
@@ -547,7 +557,8 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     if args["mode"] == "clr":
         x1 = batch["x1"]
         x2 = batch["x2"]
-        output = ddp_model(x1, x2, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
+        patch_clr_or_not = batch["patch_clr_or_not"]
+        output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
     elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
         x = batch[0]
         labels = batch[1]
