@@ -483,6 +483,14 @@ def train(local_rank, args):
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
+
+                    extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
+                    most_recent_simclr = extra_negative_repr_simclr[max(extra_negative_repr_simclr.size(0) - (max(128 // args["world_size"], iter_size) * bs_size), 0): extra_negative_repr_simclr.size(0)].to(device)
+                    tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in args["world_size"]]
+                    torch.distributed.all_gather(tensor_list, most_recent_simclr)
+                    extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
+                    output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
                 assert args["mode"] != "clr" or extra_negative_repr_simclr is not None
