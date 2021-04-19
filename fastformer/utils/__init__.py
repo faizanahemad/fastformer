@@ -647,7 +647,7 @@ def get_image_augmetations(mode):
         shape_transforms.append(to_tensor)
     elif mode == "clr":
         shape_transforms.append(transforms.RandomHorizontalFlip())
-        shape_transforms.append(transforms.RandomAffine(10, 0.05, (0.9, 1.1), 10))
+        shape_transforms.append(transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10))
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.15))
         shape_transforms.append(transforms.RandomRotation(30))
         shape_transforms.append(transforms.RandomChoice([
@@ -657,7 +657,7 @@ def get_image_augmetations(mode):
         ]))
     elif mode == "full_train" or mode == "linear_probe":
         shape_transforms.append(transforms.RandomHorizontalFlip())
-        shape_transforms.append(transforms.RandomAffine(10, 0.05, (0.9, 1.1), 10))
+        shape_transforms.append(transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10))
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.8, 1.2)))
