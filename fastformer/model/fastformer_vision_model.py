@@ -453,6 +453,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             with torch.no_grad():
                 x1_no_grad, x2_no_grad = x1[one_eight:], x2[one_eight:]
                 b1_no_grad, b2_no_grad = self.build_representations(x1_no_grad, x2_no_grad, True)
+                b1_no_grad, b2_no_grad = b1_no_grad.detach(), b2_no_grad.detach()
             b1, b2 = torch.cat((b1_grad, b1_no_grad), 0), torch.cat((b2_grad, b2_no_grad), 0)
 
         else:
