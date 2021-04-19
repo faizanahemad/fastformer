@@ -484,13 +484,15 @@ def train(local_rank, args):
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
 
+
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                    start = max(extra_negative_repr_simclr.size(0) - (max(128 // args["world_size"], iter_size) * bs_size[0]), 0)
-                    most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
-                    tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
-                    torch.distributed.all_gather(tensor_list, most_recent_simclr)
-                    extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
-                    output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+                    if extra_negative_repr_simclr is not None:
+                        start = max(extra_negative_repr_simclr.size(0) - (max(128 // args["world_size"], iter_size) * bs_size[0]), 0)
+                        most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
+                        tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
+                        torch.distributed.all_gather(tensor_list, most_recent_simclr)
+                        extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
+                        output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
