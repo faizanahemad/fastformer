@@ -504,7 +504,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_loss = 0.0
         simclr_accuracy = None
         simclr_or_not = ~patch_clr_or_not
-        del patch_clr_or_not
         if self.simclr_w > 0 and simclr_or_not.sum() > 0:
             b1s = b1[simclr_or_not, 0]
             b2s = b2[simclr_or_not, 0]
