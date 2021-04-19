@@ -529,9 +529,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 16 * b1s.size(0), dim=0).indices
                     topk_indices_mean = torch.topk(selector_mat.mean(0), 16 * b1s.size(0), dim=0).indices
                     topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 16 * b1s.size(0), dim=0).indices
-                    rand_indices = torch.randint(0, 32 * b1s.size(0), (16 * b1s.size(0),), device=sc1.device)
+                    most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 16 * b1s.size(0), extra_negative_repr_simclr.size(0), device=sc1.device)
+                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (32 * b1s.size(0),), device=sc1.device)
 
-                    topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean, rand_indices, topk_indices_mean_select)))
+                    topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean, rand_indices, topk_indices_mean_select, most_recent_indices)))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
                     del topk_indices_mean
                     del topk_indices_max
@@ -540,6 +541,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del topk_indices
                     del rand_indices
                     del topk_indices_mean_select
+                    del most_recent_indices
                 else:
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
