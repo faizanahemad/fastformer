@@ -639,6 +639,7 @@ def get_image_augmetations(mode):
     else:
         to_tensor = transforms.Compose([transforms.ToTensor(), normalize])
     shape_transforms = []
+    small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(0.75, 0.05)
     if mode == "validation":
         shape_transforms.append(transforms.Resize(256))
@@ -646,6 +647,7 @@ def get_image_augmetations(mode):
         shape_transforms.append(to_tensor)
     elif mode == "clr":
         shape_transforms.append(transforms.RandomHorizontalFlip())
+        shape_transforms.append(transforms.RandomAffine(10, 0.05, (0.9, 1.1), 10))
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.15))
         shape_transforms.append(transforms.RandomRotation(30))
         shape_transforms.append(transforms.RandomChoice([
@@ -653,14 +655,12 @@ def get_image_augmetations(mode):
             transforms.RandomResizedCrop(640, scale=(0.6, 1.4)),
             transforms.RandomResizedCrop(360, scale=(0.6, 1.4)),
         ]))
-    elif mode == "full_train":
+    elif mode == "full_train" or mode == "linear_probe":
         shape_transforms.append(transforms.RandomHorizontalFlip())
+        shape_transforms.append(transforms.RandomAffine(10, 0.05, (0.9, 1.1), 10))
         shape_transforms.append(transforms.RandomPerspective(distortion_scale=0.05))
         shape_transforms.append(transforms.RandomRotation(15))
         shape_transforms.append(transforms.RandomResizedCrop(224, scale=(0.8, 1.2)))
-    elif mode == "linear_probe":
-        shape_transforms.append(transforms.Resize(256))
-        shape_transforms.append(transforms.CenterCrop(224))
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [
@@ -701,7 +701,7 @@ def get_image_augmetations(mode):
     if mode == "linear_probe":
         shape_transforms = transforms.Compose([shape_transforms, to_tensor])
 
-    return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms)
+    return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms)
 
 
 def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_config=None):

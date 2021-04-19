@@ -164,6 +164,7 @@ class CLRDataset(torch.utils.data.Dataset):
         self.x1_transform = x1_transform
         self.x2_transform = x2_transform
         self.to_tensor = to_tensor
+        self.small_shape_transforms = transforms.RandomAffine(10, (0.1, 0.1), (0.8, 1.2), 5)
 
     def __getitem__(self, item):
 
@@ -176,6 +177,7 @@ class CLRDataset(torch.utils.data.Dataset):
 
         if random.random() < 0.5:
             patch_clr_or_not = True
+            x = self.small_shape_transforms(x) if random.random() < 0.5 else x
             if self.x2_transform:
                 x2 = self.to_tensor(self.x2_transform(x.copy()))
             else:
@@ -503,6 +505,7 @@ def train(local_rank, args):
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
                         extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+                        print("extra_negative_repr_simclr = %s" % extra_negative_repr_simclr.size())
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
