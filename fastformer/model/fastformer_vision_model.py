@@ -512,18 +512,18 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None:
-                if extra_negative_repr_simclr.size(0) > 128 * b:
+                if extra_negative_repr_simclr.size(0) > 256 * b:
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = b1s.detach()
-                if extra_negative_repr_simclr.size(0) >= 48 * b:
+                if extra_negative_repr_simclr.size(0) >= 64 * b:
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 16 * b, dim=0).indices
                     topk_indices_mean = torch.topk(selector_mat.mean(0), 16 * b, dim=0).indices
-                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 16 * b, dim=0).indices
-                    most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 16 * b, extra_negative_repr_simclr.size(0), device=sc1.device)
-                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (32 * b,), device=sc1.device)
+                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 32 * b, dim=0).indices
+                    most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 32 * b, extra_negative_repr_simclr.size(0), device=sc1.device)
+                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (16 * b,), device=sc1.device)
 
                     topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean, rand_indices, topk_indices_mean_select, most_recent_indices)))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
