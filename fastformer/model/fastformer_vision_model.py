@@ -425,7 +425,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def forward(self, x1, x2, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
+    def build_representations(self, x1, x2):
         if isinstance(self.backbone, FastFormerVisionModel):
             b1 = self.backbone(x1, run_decoder=True)
             b2 = self.backbone(x2, run_decoder=True)
@@ -435,6 +435,11 @@ class PatchCLR(FastFormerPreTrainedModel):
         if isinstance(b1, dict):
             b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
             b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
+        return b1, b2
+
+    def forward(self, x1, x2, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
+        
+        b1, b2 = self.build_representations(x1, x2)
 
         b, s = b1.shape[:2]
         bs = b * s
