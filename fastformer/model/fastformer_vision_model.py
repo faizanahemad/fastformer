@@ -455,19 +455,18 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_patchclr is not None:
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 c1_det = c1.detach()[:out_1.size(0)]
-                selector_mat = c1.mm(extra_negative_repr_patchclr.t())
+                selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                 topk_indices_argmax = selector_mat.argmax(1)
                 topk_indices_max = torch.topk(selector_mat.max(0).values, out_1.size(0), dim=0).indices
                 topk_indices_mean = torch.topk(selector_mat.mean(0), out_1.size(0), dim=0).indices
                 topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
-                patchclr_negative = selector_mat[:, topk_indices].contiguous()
+                patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
                 del topk_indices_mean
                 del topk_indices_max
                 del topk_indices_argmax
                 del selector_mat
                 del topk_indices
                 extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
-                del c1_det
                 if extra_negative_repr_patchclr.size(0) >= 8 * out_1.size(0):
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[out_1.size(0):]
             else:
@@ -500,12 +499,12 @@ class PatchCLR(FastFormerPreTrainedModel):
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = sc1.detach()[:b1s.size(0)]
                 if extra_negative_repr_simclr.size(0) >= 16 * b1s.size(0):
-                    selector_mat = sc1.mm(extra_negative_repr_simclr.t())
+                    selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 16 * b1s.size(0), dim=0).indices
-                    topk_indices_mean = torch.topk(selector_mat.mean(0), 16 * b1s.size(0), dim=0).indices
+                    topk_indices_mean = torch.topk(selector_mat.mean(0), 16*b1s.size(0), dim=0).indices
                     topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
-                    simclr_negative = selector_mat[:, topk_indices].contiguous()
+                    simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
                     del topk_indices_mean
                     del topk_indices_max
                     del topk_indices_argmax
@@ -514,7 +513,6 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
-                del sc1_det
                 if extra_negative_repr_simclr.size(0) >= 80 * b1s.size(0):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b1s.size(0):]
             else:
