@@ -57,7 +57,7 @@ def training_args():
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
 
-    parser.add_argument('--batch_size', default=8, type=int,
+    parser.add_argument('--batch_size', required=False, type=int,
                         help='Batch Size')
     parser.add_argument('--patch_negatives', default=4, type=int,
                         help='Patch Negatives')
@@ -313,6 +313,8 @@ def train(local_rank, args):
         backbone = get_pretrained_deit(not args["deit_classifier"])
     else:
         backbone = FastFormerVisionModel(config, reinit=reinit)
+
+    batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
 
     if args["mode"] == "clr":
         if args["deit"]:
