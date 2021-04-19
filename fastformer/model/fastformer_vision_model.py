@@ -425,7 +425,11 @@ class PatchCLR(FastFormerPreTrainedModel):
         accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def build_representations(self, x1, x2):
+    def build_representations(self, x1, x2, eval=False):
+        if eval:
+            _ = self.eval()
+            _ = self.backbone.eval()
+            _ = self.ffn.eval()
         if isinstance(self.backbone, FastFormerVisionModel):
             b1 = self.backbone(x1, run_decoder=True)
             b2 = self.backbone(x2, run_decoder=True)
@@ -448,7 +452,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             with torch.no_grad():
                 x1_no_grad, x2_no_grad = x1[one_eight:], x2[one_eight:]
-                b1_no_grad, b2_no_grad = self.build_representations(x1_no_grad, x2_no_grad)
+                b1_no_grad, b2_no_grad = self.build_representations(x1_no_grad, x2_no_grad, True)
             b1, b2 = torch.cat((b1_grad, b1_no_grad), 0), torch.cat((b2_grad, b2_no_grad), 0)
 
         else:
