@@ -516,7 +516,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 if extra_negative_repr_simclr.size(0) >= 128 * b:
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                sc1_det = sc1.detach()[:b1s.size(0)]
+                sc1_det = b1s.detach()
                 if extra_negative_repr_simclr.size(0) >= 48 * b:
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
@@ -540,7 +540,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
             else:
-                extra_negative_repr_simclr = sc1.detach()[:b1s.size(0)]
+                extra_negative_repr_simclr = b1s.detach()
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
@@ -569,7 +569,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         loss = patchclr_loss + clustering_loss + simclr_loss + gap_bias_loss
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss,
                     patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, 
-                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu(), extra_negative_repr_simclr=extra_negative_repr_simclr.detach().cpu())
+                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu() if extra_negative_repr_patchclr is not None else None,
+                    extra_negative_repr_simclr=extra_negative_repr_simclr.detach().cpu() if extra_negative_repr_simclr is not None else None)
 
 
 if __name__ == '__main__':
