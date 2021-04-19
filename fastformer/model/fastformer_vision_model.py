@@ -361,10 +361,14 @@ class ClassificationModel(FastFormerPreTrainedModel):
         self.train_backbone = train_backbone
         if reinit_backbone:
             self.init_weights()
-        else:
-            fan_out, fan_in = self.head.weight.shape
-            std = np.sqrt(1.0 / float(fan_in + fan_out))
-            nn.init.normal_(self.head.weight, std=std)
+
+        for module in self.head:
+            if hasattr(module, "weight"):
+                fan_out, fan_in = module.weight.shape
+                std = np.sqrt(1.0 / float(fan_in + fan_out))
+                nn.init.normal_(module.weight, std=std)
+            if hasattr(module, "bias"):
+                nn.init.constant_(module.bias, 0.0)
 
     def get_representations(self, x):
         if isinstance(self.backbone, FastFormerVisionModel):
