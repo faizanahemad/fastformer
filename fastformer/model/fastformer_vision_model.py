@@ -557,7 +557,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None:
                 simclr_negative = gap_bias.mm(extra_negative_repr_simclr.t())
 
-            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, pc1.shape[0], simclr_negative)
+            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative)
             gap_bias_loss = self.gap_bias_w * gap_bias_loss
 
         # TODO: GAP bias SIMCLR
