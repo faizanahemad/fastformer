@@ -504,16 +504,15 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_loss = 0.0
         simclr_accuracy = None
         simclr_or_not = ~patch_clr_or_not.detach()
-        print(simclr_or_not)
-        if self.simclr_w > 0 and simclr_or_not.sum() > 0:
-            b1s = b1[simclr_or_not, 0]
-            b2s = b2[simclr_or_not, 0]
+        if self.simclr_w > 0:
+            b1s = b1[:, 0]
+            b2s = b2[:, 0]
             sc1 = torch.cat((b1s, b2s), 0)
 
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None:
-                if extra_negative_repr_simclr.size(0) >= 128 * b:
+                if extra_negative_repr_simclr.size(0) > 128 * b:
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = b1s.detach()
