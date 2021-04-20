@@ -507,7 +507,7 @@ def train(local_rank, args):
 
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                     if extra_negative_repr_simclr is not None:
-                        start = max(extra_negative_repr_simclr.size(0) - (max(512 // args["world_size"], iter_size) * bs_size[0]), 0)
+                        start = max(extra_negative_repr_simclr.size(0) - (max(1024 // args["world_size"], iter_size) * bs_size[0]), 0)
                         most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
