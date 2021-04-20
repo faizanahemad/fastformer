@@ -368,6 +368,9 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
 
 vision_base_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False, hidden_dropout=0.0, attention_dropout=0.0)
 
+vision_base_rel_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False,
+                                          hidden_dropout=0.0, attention_dropout=0.0, max_position_embeddings=14, relative_attention=True)
+
 vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[4, 6], num_highway_cls_tokens=2)
 
 vision_md_rel_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768],
@@ -388,7 +391,7 @@ config_dict = dict(tg_config=tg_config, md_config=md_config, sm_config=sm_config
 vision_config_dict = dict(vision_md_config=vision_md_config, vision_lg_config=vision_lg_config,
                           vision_md_rel_config=vision_md_rel_config, vision_md_rel_funnel_config=vision_md_rel_funnel_config,
                           vision_md_funnel_config=vision_md_funnel_config, vision_lg_funnel_config=vision_lg_funnel_config,
-                          vision_base_config=vision_base_config)
+                          vision_base_config=vision_base_config, vision_base_rel_config=vision_base_rel_config)
 
 
 # 20 % -> expand_dim_before_pooling=True, char_rnn=True
