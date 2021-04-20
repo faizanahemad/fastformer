@@ -427,7 +427,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             # rnd_idx = random.randint(0, ens)
             # en1, en2 = extra_negatives.split([rnd_idx, ens - rnd_idx], 1)
             # contrastive_matrix = torch.cat((en1, contrastive_matrix, en2), 1)
-            print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
+            # print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
             contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
 
         labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths + rnd_idx, torch.arange(label_lengths, device=contrastive_matrix.device) + rnd_idx))
