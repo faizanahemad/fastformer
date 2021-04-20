@@ -457,9 +457,6 @@ def disentangled_att_bias(query_layer, key_layer, relative_pos, query_embeddings
         p2c_att = torch.gather(
             p2c_att, dim=-1, index=p2c_dynamic_expand(p2c_pos, query_layer[:, heads:] if half_head else query_layer, key_layer[:, heads:] if half_head else key_layer)
         ).transpose(-1, -2)
-        if query_layer.size(-2) != key_layer.size(-2):
-            pos_index = relative_pos[:, :, :, 0].unsqueeze(-1)
-            p2c_att = torch.gather(p2c_att, dim=-2, index=pos_dynamic_expand(pos_index, p2c_att, key_layer[:, heads:] if half_head else key_layer))
         score += p2c_att
 
     return score

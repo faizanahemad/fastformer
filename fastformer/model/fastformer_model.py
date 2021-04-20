@@ -173,113 +173,6 @@ class Embeddings(nn.Module):
         return embeddings, self.LayerNormPosEmb(self.position_embeddings.weight if self.config.relative_attention else position_embeddings.squeeze(0)) if position_embeddings is not None else None
 
 
-class AttentionStructure(nn.Module):
-    """
-    Contains helpers for `MultiheadAttention `.
-    """
-
-    def __init__(self, config: FastFormerConfig):
-        super().__init__()
-        self.config = config
-        # Track where we are at in terms of pooling from the original input, e.g., by how much the sequence length was
-        # dividide.
-        self.cls_tokens_total = self.config.num_highway_cls_tokens + 1
-        self.stride = self.config.stride
-        self.separate_content_and_position_attention = self.config.separate_content_and_position_attention
-        self.relative_attention = self.config.relative_attention
-
-    def init_attention_inputs(self, inputs_embeds, position_embeds, attention_mask=None):
-        """ Returns the attention inputs associated to the inputs of the model. """
-        # inputs_embeds has shape batch_size x seq_len x d_model
-        # attention_mask and token_type_ids have shape batch_size x seq_len
-        self.seq_len = seq_len = inputs_embeds.size(1)
-        if self.separate_content_and_position_attention:
-            position_embeds = self.get_position_embeds(seq_len, position_embeds, inputs_embeds.dtype, inputs_embeds.device)
-            return (position_embeds, attention_mask)
-        else:
-            return (None, attention_mask)
-
-    def get_position_embeds(self, seq_len, pos_embed, dtype, device):
-        """
-        Create and cache inputs related to relative position encoding. Those are very different depending on whether we
-        are using the factorized or the relative shift attention:
-
-        For the factorized attention, it returns the matrices (phi, pi, psi, omega) used in the paper, appendix A.2.2,
-        final formula.
-
-        For the relative shif attention, it returns all possible vectors R used in the paper, appendix A.2.1, final
-        formula.
-
-        Paper link: https://arxiv.org/abs/2006.03236
-        """
-        stride = self.stride
-        # Notations from the paper, appending A.2.1, final formula.
-        # We need to create and return all the possible vectors R for all blocks and shifts.
-
-        pos = torch.arange(0, pos_embed.size(0) if self.relative_attention else seq_len, dtype=dtype, device=device)
-
-        position_embeds_list = []
-        for block_index in range(0, self.config.num_blocks):
-            # For each block with block_index > 0, we need two types position embeddings:
-            #   - Attention(pooled-q, unpooled-kv)
-            #   - Attention(pooled-q, pooled-kv)
-            # For block_index = 0 we only need the second one and leave the first one as None.
-
-            # First type
-            if block_index == 0:
-                position_embeds_pooling = pos_embed
-                position_embeds_no_pooling = pos_embed
-            else:
-                pooled_pos = self.stride_pool_pos(pos, block_index, stride)
-                # pooled_pos = pooled_pos[:2 * (pooled_pos.size(0) // 2)]
-                ppos = pooled_pos[:, None].expand(pooled_pos.size(0), pos_embed.size(1)).type(torch.long)
-                position_embeds_pooling = torch.gather(pos_embed, 0, ppos)
-                if block_index == 1:
-                    position_embeds_no_pooling = pos_embed
-                else:
-                    apos = pos[:, None].expand(pos.size(0), pos_embed.size(1)).type(torch.long)
-                    position_embeds_no_pooling = torch.gather(pos_embed, 0, apos)
-                pos = pooled_pos
-
-            position_embeds_list.append([position_embeds_no_pooling, position_embeds_pooling])
-        return position_embeds_list
-
-    def stride_pool_pos(self, pos_id, block_index, stride):
-        """
-        Pool `pos_id` while keeping the cls token separate (if `config.separate_cls=True`).
-        """
-
-        # Under separate <cls>, we treat the <cls> as the first token in
-        # the previous block of the 1st real block. Since the 1st real
-        # block always has position 1, the position of the previous block
-        # will be at `1 - 2 ** block_index`.
-        cls_pos = pos_id[:self.cls_tokens_total]
-        pooled_pos_id = pos_id[self.cls_tokens_total:]
-        tensor = torch.cat([cls_pos, pooled_pos_id[::stride]], 0)
-        ts = tensor.size()
-        padding_extra = 8 * math.ceil(ts[0] / 8) - ts[0]
-        if len(ts) == 3:
-            tensor = nn.functional.pad(tensor, (0, 0, 0, padding_extra), mode="constant")
-        elif len(ts) == 2:
-            tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
-        elif len(ts) == 1:
-            tensor = nn.functional.pad(tensor, (0, padding_extra), mode="constant")
-        return tensor
-
-    def pool_tensor(self, tensor, mode="mean", stride=2):
-        return pool_tensor(tensor, self.cls_tokens_total, mode, stride)
-
-    def post_attention_pooling(self, attention_inputs, block_index):
-        """ Pool the proper parts of `attention_inputs` after the attention layer. """
-        position_embeds, attention_mask = attention_inputs
-        attention_mask = self.pool_tensor(attention_mask, mode="min", stride=self.stride)
-        if self.separate_content_and_position_attention:
-            position_embeds = [list(pos_block) for pos_block in position_embeds]
-            position_embeds[block_index][0] = position_embeds[block_index][1]
-        attention_inputs = (position_embeds, attention_mask)
-        return attention_inputs
-
-
 class MultiheadAttention(nn.Module):
     def __init__(self, config: FastFormerConfig, block_index, is_last_layer_of_block, is_first_layer_of_block, is_encoder_layer, layer_index,
                  last_layer_index=None, force_no_sdconv=False):
@@ -416,11 +309,12 @@ class MultiheadAttention(nn.Module):
         scale = self.scale
         q_head = q_head + self.r_w_bias
         q_head = q_head * scale
+        key_stride = (self.config.stride ** self.block_index) if layer_index != 0 else (
+            self.config.stride ** max(self.block_index - 1, 0) if self.is_encoder_layer else self.config.stride ** (len(self.config.block_sizes) - 1))
         # Shape n_head x d_head
         # Shapes batch_size x n_head x seq_len x context_len
         if self.relative_attention:
-            position_embeds = position_embeds[self.block_index]
-            position_embed_of_key, position_embed_of_query = position_embeds
+            position_embed_of_query = position_embed_of_key = position_embeds
             if need_query_compress:
                 position_embed_of_query = pool_tensor(position_embed_of_query.unsqueeze(0), self.cls_tokens, mode='mean',
                                                       stride=self.config.compressed_query_attention_stride).squeeze()
@@ -461,20 +355,14 @@ class MultiheadAttention(nn.Module):
             content_score = torch.einsum("bind,bjnd->bnij", q_head, k_head)
             attn_score = content_score
             if self.relative_attention:
-                nc_score = disentangled_att_bias(q_head.transpose(1, 2), k_head.transpose(1, 2),
+                nc_score = disentangled_att_bias(q_head[:, self.cls_tokens:].transpose(1, 2), k_head[:, self.cls_tokens:].transpose(1, 2),
                                                  None,
                                                  pos_q_head, pos_k_head, self.scale_factor,
-                                                 self.config.max_position_embeddings // (self.config.stride ** self.block_index),
-                                                 (self.config.max_position_embeddings // (self.config.stride ** self.block_index)) if layer_index > 0 else ((
-                                                                                                                                                                        self.config.max_position_embeddings // (
-                                                                                                                                                                            self.config.stride ** max(
-                                                                                                                                                                        self.block_index - 1,
-                                                                                                                                                                        0))) if self.is_encoder_layer else (
-                                                             self.config.max_position_embeddings // (
-                                                                 self.config.stride ** (len(self.config.block_channel_size) - 1)))),
+                                                 self.config.max_position_embeddings,
+                                                 self.config.max_position_embeddings,
                                                  n_head,
-                                                 query_stride=self.config.stride if seq_len < context_len else 1,
-                                                 key_stride=self.config.stride if seq_len > context_len else 1)
+                                                 query_stride=self.config.stride ** self.block_index,
+                                                 key_stride=key_stride)
 
                 nc_score = F.pad(nc_score, (self.cls_tokens, 0, self.cls_tokens, 0, 0, 0, 0, 0))
                 attn_score = attn_score + nc_score
@@ -484,6 +372,8 @@ class MultiheadAttention(nn.Module):
             # attn_score = attn_score.float()
             # perform masking
             if attention_mask is not None:
+                if key_stride > 1:
+                    attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=key_stride)
                 # TODO: handle attention mask's pooling for qk pooling
                 if need_key_compress:
                     attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=self.config.compressed_query_attention_stride)
@@ -569,7 +459,6 @@ class TransformerEncoder(nn.Module):
     def __init__(self, config: FastFormerConfig):
         super().__init__()
         self.config = config
-        self.attention_structure = AttentionStructure(config)
 
         block_channel_size = config.block_channel_size
         self.blocks = nn.ModuleList()
@@ -641,8 +530,6 @@ class TransformerEncoder(nn.Module):
                 layer_index += 1
                 hidden = layer_output[0]
                 pre_ffn = layer_output[1]
-                if do_pooling:
-                    attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index)
 
                 if output_attentions:
                     all_attentions = all_attentions + layer_output[1:]
@@ -663,11 +550,7 @@ class TransformerEncoder(nn.Module):
         # The pooling is not implemented on long tensors, so we convert this mask.
         assert inputs_embeds.size(1) > 0
         attention_mask = attention_mask.type_as(inputs_embeds)
-        attention_inputs = self.attention_structure.init_attention_inputs(
-            inputs_embeds,
-            position_embeds,
-            attention_mask=attention_mask,
-        )
+        attention_inputs = position_embeds, attention_mask
         hidden = inputs_embeds
 
         all_hidden_states = (inputs_embeds,) if output_hidden_states else None
@@ -962,13 +845,6 @@ class FastFormerModel(FastFormerPreTrainedModel):
         if hasattr(self, "decoder") and (run_decoder or run_answering):
             block_attention_inputs = encoder_outputs[-2]
             final_hidden_attention_inputs = list(block_attention_inputs[-1])
-            block_index = 0
-
-            if final_hidden_attention_inputs[0] is not None:
-                # We have relative positions
-                position_embeds = list(final_hidden_attention_inputs[0])
-                position_embeds[block_index][0] = position_embeds[-1][0]  # Take key position embed from last block.
-                final_hidden_attention_inputs[0] = position_embeds
             decoder_outputs = self.decoder(
                 final_hidden=final_hidden,
                 first_block_hidden=encoder_outputs[2][self.config.block_sizes[0]],
@@ -1682,7 +1558,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='md_config',
+    ap.add_argument("--config", type=str, default='md_config_relative',
                     help="Config")
     ap.add_argument("--texts", type=str, default='large_texts',
                     help="Text Set")
