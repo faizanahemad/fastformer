@@ -522,7 +522,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = b1s.detach()
-                if extra_negative_repr_simclr.size(0) >= 64 * b:
+                if extra_negative_repr_simclr.size(0) >= 128 * b:
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 32 * b, dim=0).indices
