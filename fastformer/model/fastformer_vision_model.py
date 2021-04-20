@@ -417,6 +417,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
+        extra_negatives = extra_negatives / self.contrastive_temperature
         mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e3)
         contrastive_matrix = contrastive_matrix - mask
         del mask
