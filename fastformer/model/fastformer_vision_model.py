@@ -420,10 +420,14 @@ class PatchCLR(FastFormerPreTrainedModel):
         mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e3)
         contrastive_matrix = contrastive_matrix - mask
         del mask
+        rnd_idx = 0
         if extra_negatives is not None:
-            contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
+            ens = extra_negatives.size(1)
+            rnd_idx = random.randint(0, ens)
+            en1, en2 = extra_negatives.split([rnd_idx, ens - rnd_idx])
+            contrastive_matrix = torch.cat((en1, contrastive_matrix, en2), 1)
 
-        labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths, torch.arange(label_lengths, device=contrastive_matrix.device)))
+        labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths + rnd_idx, torch.arange(label_lengths, device=contrastive_matrix.device) + rnd_idx))
         loss = self.loss_ce(contrastive_matrix, labels)
         predictions = contrastive_matrix.detach().argmax(dim=-1)
         accuracy = (predictions == labels).float().mean().item()
