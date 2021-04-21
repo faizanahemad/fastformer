@@ -78,6 +78,8 @@ def training_args():
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
+    parser.add_argument('--batch_size', required=False, type=int,
+                        help='Batch Size')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
@@ -843,6 +845,7 @@ def train(local_rank, args):
     config = config_dict[mconf.pop("model_size")]
     if any(config.relative_attention):
         size_dicts = {k: v - 4 for k, v in size_dicts.items()}
+    size_dicts = {1024: args["batch_size"]} if "batch_size" in args and isinstance(args["batch_size"], int) else size_dicts
     tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
     config.vocab_size = len(tokenizer) + 22
     config.tokenizer_length = 1024
