@@ -459,13 +459,7 @@ def train(local_rank, args):
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
     for epoch in range(args["epochs"]):
-        max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
-        if epoch < 0.1 * args["epochs"]:
-            max_batches_simclr = bs_size[0] // 2
-        elif epoch < 0.2 * args["epochs"]:
-            max_batches_simclr = 1 * bs_size[0]
-        elif epoch < 0.3 * args["epochs"]:
-            max_batches_simclr = 2 * bs_size[0]
+
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
             print("Time = %s [custom_batching_fn]: Distributed Sampler Epoch = %s" % (get_time_string(), epoch))
@@ -486,6 +480,13 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device)
                 bs_size = list(batch[0].size())
                 key = 0
+            max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
+            if epoch < 0.1 * args["epochs"]:
+                max_batches_simclr = bs_size[0] // 2
+            elif epoch < 0.2 * args["epochs"]:
+                max_batches_simclr = 1 * bs_size[0]
+            elif epoch < 0.3 * args["epochs"]:
+                max_batches_simclr = 2 * bs_size[0]
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
