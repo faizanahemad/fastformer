@@ -988,6 +988,7 @@ class PositionwiseFFN(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model, config.layer_norm_eps)
         if self.need_dim_match:
             self.layer_norm = nn.LayerNorm(d_next, config.layer_norm_eps)
+            self.dim_match_stride = int(np.ceil(d_model / self.diff))
         if groups > 1:
             assert d_model % groups == 0
             self.lin = nn.Linear(d_model, d_model)
@@ -1003,15 +1004,16 @@ class PositionwiseFFN(nn.Module):
         if dim_match:
             if self.config.identity_preserving_norm:
                 pre_ffn = h
-                dh = h[:, :, :self.diff]
+                dh = pool_tensor_basic(h.transpose(1, 2), stride=self.dim_match_stride).transpose(1, 2)[:, :, :self.diff]
                 h = torch.cat((h, dh), 2)
                 h = self.layer_norm(h)
                 hidden = nn.functional.pad(hidden, (0, self.diff, 0, 0, 0, 0))
                 h = hidden + h
             else:
-                dh = h[:, :, :self.diff] + hidden[:, :, :self.diff]
+                hplus = h + hidden
+                dh = pool_tensor_basic(hplus.transpose(1, 2), stride=self.dim_match_stride).transpose(1, 2)[:, :, :self.diff]
                 pre_ffn = h
-                h = self.layer_norm(torch.cat((h + hidden, dh), 2))
+                h = self.layer_norm(torch.cat((hplus, dh), 2))
         else:
             if self.config.identity_preserving_norm:
                 h = self.layer_norm(h)

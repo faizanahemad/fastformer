@@ -459,6 +459,13 @@ def train(local_rank, args):
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
     for epoch in range(args["epochs"]):
+        max_batches_simclr = (max(1024 // args["world_size"], iter_size) * bs_size[0])
+        if epoch < 0.1 * args["epochs"]:
+            max_batches_simclr = 1 * bs_size[0]
+        elif epoch < 0.2 * args["epochs"]:
+            max_batches_simclr = 2 * bs_size[0]
+        elif epoch < 0.3 * args["epochs"]:
+            max_batches_simclr = iter_size * bs_size[0]
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
             print("Time = %s [custom_batching_fn]: Distributed Sampler Epoch = %s" % (get_time_string(), epoch))
@@ -507,7 +514,7 @@ def train(local_rank, args):
 
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                     if extra_negative_repr_simclr is not None:
-                        start = max(extra_negative_repr_simclr.size(0) - (max(1024 // args["world_size"], iter_size) * bs_size[0]), 0)
+                        start = max(extra_negative_repr_simclr.size(0) - max_batches_simclr, 0)
                         most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)

@@ -73,10 +73,10 @@ class Embeddings(nn.Module):
         hidden_size = config.block_channel_size[0]
         self.hidden_size = hidden_size
         self.embedding_size = config.embedding_size
-        self.word_embeddings = nn.Embedding(config.vocab_size + config.num_highway_cls_tokens, self.embedding_size, padding_idx=pad_token_id)
+        self.word_embeddings = nn.Embedding(config.vocab_size, self.embedding_size, padding_idx=pad_token_id)
 
         self.position_biased_input = getattr(config, "position_biased_input", True)
-        self.position_embeddings = nn.Embedding(config.max_position_embeddings * (2 if config.relative_attention[0] else 1) + (config.num_highway_cls_tokens + (1 if config.relative_attention[0] else 0)) * (2 if config.relative_attention[0] else 1), self.embedding_size)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings * (2 if config.relative_attention[0] else 1) + (2 if config.relative_attention[0] else 0), self.embedding_size)
 
         if config.type_vocab_size > 0:
             self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
@@ -100,14 +100,12 @@ class Embeddings(nn.Module):
         self.dropout = Dropout(config.hidden_dropout)
         self.output_to_half = False
         self.config = config
+        self.highway_embeds = nn.Parameter(torch.zeros(1, config.num_highway_cls_tokens, self.hidden_size))
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings + config.num_highway_cls_tokens).expand((1, -1)))
-        if config.num_highway_cls_tokens > 0:
-            self.register_buffer("highway_position_ids", torch.arange(config.num_highway_cls_tokens).expand((1, -1)))
-            self.register_buffer("highway_cls_tokens", torch.arange(config.vocab_size, config.vocab_size + config.num_highway_cls_tokens).expand((1, -1)))
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
 
-    def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, position_ids=None, mask=None, char_ids=None, char_offsets=None,
+    def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, position_ids=None, char_ids=None, char_offsets=None,
                 use_embed_proj=True, use_highway_embeds=True):
         if inputs_embeds is None:
             input_shape = input_ids.size()
@@ -117,10 +115,6 @@ class Embeddings(nn.Module):
                 input_shape[1] = input_shape[1] + self.config.num_highway_cls_tokens
             input_shape = tuple(input_shape)
             inputs_embeds = self.word_embeddings(input_ids)
-        if self.config.num_highway_cls_tokens > 0 and use_highway_embeds:
-            highway_embeddings = self.word_embeddings(self.highway_cls_tokens).expand((inputs_embeds.size(0), -1, -1))
-            inputs_embeds = torch.cat((highway_embeddings, inputs_embeds), dim=1)
-        else:
             input_shape = inputs_embeds.size()
         seq_length = input_shape[1]
         embeddings = inputs_embeds
@@ -131,16 +125,11 @@ class Embeddings(nn.Module):
             char_offsets = char_offsets.flatten(1, 2).unsqueeze(-1).expand(input_shape[0], -1, self.embedding_size // (2 * self.char_div))
             char_embeds = self.char_rnn(self.char_embeddings(char_ids))
             char_embeds = torch.gather(char_embeds, 1, char_offsets).view(input_shape[0], initial_seq_len, 2, self.embedding_size // (2 * self.char_div)).mean(2)
-            if self.config.num_highway_cls_tokens > 0 and use_highway_embeds:
-                char_embeds = torch.cat((highway_embeddings[:, :, :char_embeds.size(-1)], char_embeds), dim=1)
             char_embeds = self.char_proj(char_embeds) if use_embed_proj else char_embeds
             embeddings = embeddings + char_embeds
 
         if position_ids is None:
             position_ids = self.position_ids[:, :seq_length]
-        elif use_highway_embeds and self.config.num_highway_cls_tokens > 0:
-            position_ids = torch.cat((self.highway_position_ids.expand((position_ids.size(0), -1)), position_ids + self.config.num_highway_cls_tokens),
-                                     dim=1)
 
         position_embeddings = self.position_embeddings(position_ids.long())
         if self.position_biased_input:
@@ -149,28 +138,15 @@ class Embeddings(nn.Module):
         if self.config.type_vocab_size > 0:
             if token_type_ids is None:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
-            elif use_highway_embeds and self.config.num_highway_cls_tokens > 0:
-                token_type_ids = torch.cat(
-                    (torch.empty(input_shape[0], self.config.num_highway_cls_tokens, device=token_type_ids.device).fill_(token_type_ids[0][0]), token_type_ids),
-                    dim=1)
             token_type_embeddings = self.token_type_embeddings(token_type_ids)
             embeddings += (self.embed_proj(token_type_embeddings) if use_embed_proj else token_type_embeddings)
 
+        if self.config.num_highway_cls_tokens > 0 and use_highway_embeds:
+            embeddings = torch.cat((self.highway_embeds.expand(embeddings.size(0), -1, -1)[:, :embeddings.size(1)], embeddings), 1)
         embeddings = self.LayerNorm(embeddings) if use_embed_proj else embeddings
 
-        if mask is not None:
-            if mask.dim() != embeddings.dim():
-                if mask.dim() == 4:
-                    mask = mask.squeeze(1).squeeze(1)
-                if use_highway_embeds and self.config.num_highway_cls_tokens > 0:
-                    mask = torch.cat((torch.ones(mask.size(0), self.config.num_highway_cls_tokens, dtype=mask.dtype, device=mask.device), mask), dim=1)
-                mask = mask.unsqueeze(2)
-            mask = mask.to(embeddings.dtype)
-
-            embeddings = embeddings * mask
-
         embeddings = self.dropout(embeddings) if use_embed_proj else embeddings
-        return embeddings, self.LayerNormPosEmb(self.position_embeddings.weight if self.config.relative_attention else position_embeddings.squeeze(0)) if position_embeddings is not None else None
+        return embeddings, self.LayerNormPosEmb(self.position_embeddings.weight if self.config.relative_attention else None) if position_embeddings is not None else None
 
 
 class MultiheadAttention(nn.Module):
@@ -539,6 +515,26 @@ class TransformerEncoder(nn.Module):
 
         return hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs
 
+    def forward_first_block(self,
+                            inputs_embeds,
+                            position_embeds,
+                            attention_mask,):
+        assert inputs_embeds.size(1) > 0
+        attention_mask = attention_mask.type_as(inputs_embeds)
+        attention_inputs = position_embeds, attention_mask
+        hidden = inputs_embeds
+
+        all_hidden_states = (inputs_embeds,)
+        pre_ffn_states = (inputs_embeds,)
+        all_attentions = None
+        one_block_res = self.forward_one_block(0, hidden, attention_inputs, all_hidden_states, pre_ffn_states, all_attentions, False,
+                                                   True)
+        hidden, all_hidden_states, pre_ffn_states, all_attentions, attention_inputs = one_block_res
+
+        # attention_inputs = self.attention_structure.post_attention_pooling(attention_inputs, block_index) if self.config.stride > 1 else attention_inputs
+        # block_attention_masks.append(attention_inputs[1])
+        return hidden, pre_ffn_states[-1]
+
     def forward(
             self,
             inputs_embeds,
@@ -729,6 +725,8 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.token_type_embeddings.weight, std=std)
             if hasattr(module, "char_embeddings"):
                 nn.init.normal_(module.char_embeddings.weight, std=std)
+            if hasattr(module, "highway_embeds"):
+                nn.init.normal_(module.highway_embeds, std=std)
         elif classname == "PatchEmbed":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
             if hasattr(module, "cls_token"):
@@ -789,6 +787,32 @@ class FastFormerModel(FastFormerPreTrainedModel):
 
     def get_output_embeddings(self):
         return self.lm_head
+
+    def forward_lm_block(self, input_ids=None,
+                         attention_mask=None,
+                         token_type_ids=None,
+                         inputs_embeds=None,
+                         char_ids=None, char_offsets=None, ):
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+        assert input_shape[1] > 0
+
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        if attention_mask is None:
+            attention_mask = torch.ones(input_shape, device=device)
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+        if self.config.num_highway_cls_tokens > 0:
+            attention_mask = torch.cat([torch.ones(input_shape[0], self.config.num_highway_cls_tokens, device=device), attention_mask], dim=1)
+        inputs_embeds, position_embeds = self.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
+        return self.encoder.forward_first_block(inputs_embeds, position_embeds, attention_mask)
 
     def forward(
             self,
@@ -859,7 +883,7 @@ class FastFormerModel(FastFormerPreTrainedModel):
             assert hasattr(self, "embed_proj_transpose")
             assert hasattr(self, "decoder")
             answering_hidden = self.embed_proj_transpose(decoder_outputs[0][:, self.cls_tokens: self.cls_tokens + 128])
-            answering_logits = self.lm_head(answering_hidden)[:, :, :self.config.vocab_size]
+            answering_logits = self.lm_head(answering_hidden)
             outputs["answering_logits"] = answering_logits
             outputs["answering_hidden"] = answering_hidden
 
@@ -914,7 +938,7 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
                 last_hidden_state = self.funnel.embed_proj_transpose(last_hidden_state)
             prediction_logits = self.lm_head(last_hidden_state)
             loss_fct = self.loss_ce  # -100 index = padding token
-            masked_lm_loss = loss_fct(prediction_logits[:, :, :self.config.vocab_size].view(-1, self.config.vocab_size), labels.view(-1))
+            masked_lm_loss = loss_fct(prediction_logits.view(-1, self.config.vocab_size), labels.view(-1))
             predictions = prediction_logits.detach().argmax(dim=-1)
             labels = (labels == predictions).float()
             self.accuracy_hist["lm"].append(float(labels[active_loss].float().mean()))
@@ -1163,20 +1187,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         adv_loss = sent_order_post_kl + electra_post_kl + (lm_post_kl ** 2) + answering_lm_post_kl + contrastive_post_kl
         return self.adv_w * adv_loss
 
-    def get_emb(self, embedding_generation_params):
-        input_ids, token_type_ids, inputs_embeds, char_ids, char_offsets = embedding_generation_params
-        if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
-        elif input_ids is not None:
-            input_shape = input_ids.size()
-        elif inputs_embeds is not None:
-            input_shape = inputs_embeds.size()[:-1]
-        else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
-
-        inputs_embeds, position_embeds = self.funnel.embeddings(input_ids, inputs_embeds, token_type_ids, char_ids=char_ids, char_offsets=char_offsets, )
-        return inputs_embeds, position_embeds, input_shape
-
     def forward(
             self,
             input_ids=None,
@@ -1222,6 +1232,34 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         assert attention_mask is not None
         tokenizer_attn_mask = attention_mask
         # with autocast(enabled=kwargs.pop("autocast", False)):
+
+        masked_lm_loss = 0.0
+        if self.lm_loss_w > 0 or self.electra_loss_w > 0:
+            active_loss = tokenizer_attn_mask.bool()
+            first_block_hidden = self.funnel.forward_lm_block(input_ids=input_ids, attention_mask=attention_mask,
+                                                              token_type_ids=token_type_ids,
+                                                              inputs_embeds=inputs_embeds,
+                                                              char_ids=char_ids, char_offsets=char_offsets, )[1]
+            first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
+            prediction_logits = self.funnel.lm_head(first_block_hidden)
+
+            input_ids = prediction_logits.detach().argmax(dim=-1)
+
+
+            active_labels = labels.reshape(-1)
+            active_prediction_logits = prediction_logits.reshape(-1, self.config.vocab_size)
+            masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
+            labels = (labels == input_ids).detach().float()
+            if record_accuracy:
+                # predictions = prediction_logits.argmax(dim=-1)
+                # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
+                accuracy_hist["lm_accuracy"] = (float(labels.float().cpu().numpy().mean()))
+
+            et = time.time() - st
+            timing_dict.append(("lm_accuracy_loss", et))
+            et = time.time() - st
+            timing_dict.append(("decoder_outputs", et))
+
         funnel_outputs = self.funnel(**funnel_inputs)
         inputs_embeds = funnel_outputs["inputs_embeds"]
         inputs_embeds_cls = inputs_embeds[:, :self.funnel.cls_tokens]
@@ -1449,33 +1487,12 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         et = time.time() - st
         timing_dict.append(("highway_cls_ar_sentence_loss", et))
 
-        masked_lm_loss = 0.0
-        if self.lm_loss_w > 0 or self.electra_loss_w > 0:
-            active_loss = tokenizer_attn_mask.bool()
-            first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:][active_loss].contiguous())
-            prediction_logits = self.funnel.lm_head(first_block_hidden)[:, :self.config.vocab_size]
-            active_labels = labels[active_loss].reshape(-1)
-            active_prediction_logits = prediction_logits.reshape(-1, self.config.vocab_size)
-            masked_lm_loss = self.lm_loss_w * self.loss_ce(active_prediction_logits, active_labels)
-            labels = (active_labels == active_prediction_logits.detach().argmax(dim=-1)).detach().float()
-            if record_accuracy:
-                # predictions = prediction_logits.argmax(dim=-1)
-                # self.accuracy_hist["lm_preds"].append({"predictions": "".join(self.tokenizer.decode(predictions[0, 1:21].tolist())), "actuals": "".join(self.tokenizer.decode(labels[0, 1:21].tolist()))})
-                accuracy_hist["lm_accuracy"] = (float(labels.float().cpu().numpy().mean()))
-
-            et = time.time() - st
-            timing_dict.append(("lm_accuracy_loss", et))
-
-            decoder_outputs = funnel_outputs["decoder_outputs"]
-
-            et = time.time() - st
-            timing_dict.append(("decoder_outputs", et))
-
         loss = 0.0
         if self.electra_loss_w > 0:
+            decoder_outputs = funnel_outputs["decoder_outputs"]
             # cls_tokens = decoder_outputs[0][:, :self.cls_tokens + 1]
             # decoder_outputs = (decoder_outputs[0][:, self.cls_tokens + 1:], decoder_outputs[1:])
-            discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:][active_loss].contiguous()
+            discriminator_sequence_output = decoder_outputs[0][:, self.cls_tokens:].contiguous()
             logits = self.discriminator_predictions(discriminator_sequence_output)
             # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, discriminator_sequence_output = %s, logits = %s" % (get_time_string(), random.sample(discriminator_sequence_output.reshape(-1).tolist(), 8), random.sample(logits.reshape(-1).tolist(), 8)))
 
