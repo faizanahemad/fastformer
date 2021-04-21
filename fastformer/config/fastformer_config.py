@@ -101,9 +101,9 @@ class ModelConfig:
 model_config: ModelConfig = ModelConfig("bert", "md_config", aitm=False, alum=False,
                                         adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                                         adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
-                                        input_cls_orthogonal_w=0.0, first_block_cls_orthogonal_w=0.0,
-                                        electra_loss_w=0.0, lm_loss_w=0.0, sentence_order_prediction_w=0.0, contrastive_w=0.0, contrastive_temperature=1e-2,
-                                        answering_lm_w=2.0, additive_margin_softmax_w=0.1)
+                                        input_cls_orthogonal_w=0.01, first_block_cls_orthogonal_w=0.0,
+                                        electra_loss_w=1.0, lm_loss_w=0.5, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
+                                        answering_lm_w=2.0, additive_margin_softmax_w=0.2)
 
 
 @dataclass_json
