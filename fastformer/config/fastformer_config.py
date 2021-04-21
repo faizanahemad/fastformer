@@ -88,7 +88,6 @@ class ModelConfig:
     adv_w: float
     alum_aitm_alternate: bool
     input_cls_orthogonal_w: float
-    first_block_cls_orthogonal_w: float
     electra_loss_w: float
     lm_loss_w: float
     sentence_order_prediction_w: float
