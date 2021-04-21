@@ -143,7 +143,7 @@ if __name__ == "__main__":
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_qna_small_fastformer_5M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --log_every_steps 200 --num_workers 8 --validate_every_steps 100000 --save_every_steps 5000"
+    main_cmd += " --log_every_steps 100 --num_workers 8 --validate_every_steps 100000 --save_every_steps 5000"
     # main_cmd += " --wandb_dryrun"
 
     # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
