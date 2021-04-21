@@ -1010,7 +1010,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, model: FastFormerModel = None, tokenizer = None, aitm=False, alum=False,
                  adv_lm_w=1.0, adv_ascent_steps=1, aitm_clip_min=0.1, aitm_clip_max=0.9, adv_step_size=1e-3,
                  adv_epsilon=1e-2, aitm_noise_var=0.1, adv_w=1.0, alum_aitm_alternate=False,
-                 input_cls_orthogonal_w=0.5, first_block_cls_orthogonal_w=0.1,
+                 input_cls_orthogonal_w=0.5,
                  electra_loss_w=1.0, lm_loss_w=1.0, sentence_order_prediction_w=1.0, contrastive_w=1.0, contrastive_temperature=5e-2,
                 answering_lm_w=1.0, additive_margin_softmax_w=0.3):
         super().__init__(config)
@@ -1042,7 +1042,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         self.alum_aitm_alternate = alum_aitm_alternate
         self.lm_loss_w = lm_loss_w
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
-        self.first_block_cls_orthogonal_w = first_block_cls_orthogonal_w
         self.electra_loss_w = electra_loss_w
         self.reccord_loss = False
         self.record_accuracy = False
@@ -1234,12 +1233,14 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
         # with autocast(enabled=kwargs.pop("autocast", False)):
 
         masked_lm_loss = 0.0
+        first_block_cls = None
         if self.lm_loss_w > 0 or self.electra_loss_w > 0:
             active_loss = tokenizer_attn_mask.bool()
             first_block_hidden = self.funnel.forward_lm_block(input_ids=input_ids, attention_mask=attention_mask,
                                                               token_type_ids=token_type_ids,
                                                               inputs_embeds=inputs_embeds,
                                                               char_ids=char_ids, char_offsets=char_offsets, )[1]
+            first_block_cls = first_block_hidden[:, 1:self.cls_tokens + 1]
             first_block_hidden = self.funnel.embed_proj_transpose(first_block_hidden[:, self.cls_tokens:])
             prediction_logits = self.funnel.lm_head(first_block_hidden)
 
@@ -1294,8 +1295,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
                 score = accuracy_score(final_labels, final_predictions)
                 accuracy_hist["answering_lm_accuracy"] = score
 
-        first_block_hidden = encoder_outputs[1][self.config.block_sizes[0] - 1]
-        first_block_cls = first_block_hidden[:, :self.funnel.cls_tokens]
         # print("[FastFormerForFusedELECTRAPretraining]: Time = %s, first_block_hidden = %s, first_block_cls CLS = %s" % (get_time_string(), random.sample(first_block_hidden.reshape(-1).tolist(), 8), random.sample(first_block_cls.reshape(-1).tolist(), 8)))
         et = time.time() - st
         timing_dict.append(("lm_logits", et))
@@ -1309,11 +1308,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
             cls_orthogonal_loss += input_cls_orthogonal_loss
 
-        if self.first_block_cls_orthogonal_w > 0 and self.training:
-            first_block_cls = first_block_cls/(first_block_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
-            first_block_cls = first_block_cls.bmm(first_block_cls.transpose(1, 2))
-            first_block_cls_orthogonal_loss = self.first_block_cls_orthogonal_w * (first_block_cls ** 2).mean()
-            cls_orthogonal_loss += first_block_cls_orthogonal_loss
 
         et = time.time() - st
         timing_dict.append(("cls_orthogonal_loss", et))
@@ -1325,7 +1319,7 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             mx_labels = labels_segment_index.max(-1)[0].view(-1)
             first_cls = final_hidden[:, 0]
             lsi = labels_segment_index.view(-1)
-            sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1]  # + first_cls.unsqueeze(1)
+            sent_order_block_hidden_cls = final_hidden[:, 1:self.cls_tokens + 1]  + (first_block_cls if first_block_cls is not None else 0)
             sent_order_logits = self.sent_predict_fc(sent_order_block_hidden_cls).view(-1, (self.cls_tokens + 1))
             mx_label_pred = self.sent_predict_fc(first_cls)
             sent_order_loss = 0.5 * self.ce(sent_order_logits, lsi) + 0.01 * self.ce(mx_label_pred, mx_labels) + 0.5 * self.ignore_zero_ce(sent_order_logits, lsi)
