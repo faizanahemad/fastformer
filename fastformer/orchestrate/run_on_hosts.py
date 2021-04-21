@@ -133,17 +133,17 @@ if __name__ == "__main__":
     #
 
     cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/training"
-    main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config md_config_relative"""
+    main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config tg_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_50M"
-    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
+    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_fastformer_resampled_100M"
     # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_qna_medium_fastformer_5M"
-    main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_qna_small_fastformer_5M"
+    # main_cmd += " --train_dataset /home/ahemf/processed_datasets/train_qna_small_fastformer_5M"
 
     main_cmd += " --validation_dataset /home/ahemf/processed_datasets/validation_fastformer"
-    main_cmd += " --log_every_steps 100 --num_workers 8 --validate_every_steps 100000 --save_every_steps 4000"
+    main_cmd += " --log_every_steps 200 --num_workers 8 --validate_every_steps 100000 --save_every_steps 5000"
     # main_cmd += " --wandb_dryrun"
 
     # main_cmd += " --init_method=file --master_addr /home/ahemf/torch_distributed_init --master_port file-9999"
@@ -151,7 +151,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     # main_cmd += " --cpu"
     main_cmd += " --no_autocast"
     # main_cmd += " --detect_anomaly"
-    main_cmd += " --accumulation_steps 4" #  4096/(16*8*8)
+    main_cmd += " --accumulation_steps 1" #  4096/(16*8*8)
     main_cmd += " --shuffle_dataset"
     # main_cmd += " --backward_hook"
 
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
     vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 5000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --mode clr --shuffle_dataset --accumulation_steps 4 --epochs 300"
     vision_cmd += " --no_autocast"
-    vision_cmd += " --lr 0.0001"
+    vision_cmd += " --lr 0.00001"
     vision_cmd += " --batch_size 24"
 
     # vision_cmd += " --wandb_dryrun"
