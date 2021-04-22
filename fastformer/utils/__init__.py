@@ -634,7 +634,10 @@ def get_image_augmetations(mode):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    to_tensor = transforms.Compose([transforms.Resize(224), transforms.ToTensor(), normalize])
+    if mode == "validation":
+        to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+    else:
+        to_tensor = transforms.Compose([transforms.Resize(224), transforms.RandomCrop(224), transforms.ToTensor(), normalize])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
@@ -647,6 +650,7 @@ def get_image_augmetations(mode):
             transforms.RandomResizedCrop(480, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
             transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
+            transforms.RandomCrop(224),
         ]))
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
