@@ -634,10 +634,7 @@ def get_image_augmetations(mode):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    if mode == "validation":
-        to_tensor = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
-    else:
-        to_tensor = transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.ToTensor(), normalize])
+    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
@@ -696,18 +693,14 @@ def get_image_augmetations(mode):
                                 cut,
                                 get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.75, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                             cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
 
-    if mode == "full_train":
+    if mode == "full_train" or mode == "linear_probe":
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
-    if mode == "linear_probe":
-        shape_transforms = transforms.Compose([shape_transforms, to_tensor])
 
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms)
 
