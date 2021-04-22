@@ -660,7 +660,7 @@ def get_image_augmetations(mode):
     non_shape_transforms = [
                             
                             transforms.RandomChoice([
-                                identity,
+                                # identity,
                                 get_alb(alb.transforms.MedianBlur(p=1.0)),
                                 get_alb(alb.transforms.RandomGamma(p=1.0)),
                                 get_alb(alb.transforms.RGBShift(p=1.0)),
@@ -668,7 +668,7 @@ def get_image_augmetations(mode):
                                 transforms.GaussianBlur(11, sigma=(0.2, 1.0)),
                             ]),
                             transforms.RandomChoice([
-                                identity,
+                                # identity,
                                 get_alb(alb.transforms.ImageCompression(1, 100, 0, p=1.0, always_apply=True,)),
                                 get_alb(alb.transforms.ImageCompression(1, 100, 1, p=1.0, always_apply=True,)),
                                 get_alb(alb.transforms.Equalize(p=1.0, always_apply=True,)),
