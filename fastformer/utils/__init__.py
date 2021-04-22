@@ -622,7 +622,11 @@ class get_alb:
         self.aug = aug
 
     def __call__(self, image):
-        return Image.fromarray(self.aug(image=np.array(image, dtype=np.uint8))['image'])
+        try:
+            return Image.fromarray(self.aug(image=np.array(image, dtype=np.uint8))['image'])
+        except:
+            print(image)
+            return image
 
 
 def get_image_augmetations(mode):
