@@ -640,12 +640,9 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
     else:
-        shape_transforms.append(transforms.RandomHorizontalFlip())
         shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomCrop(224),
-            transforms.RandomResizedCrop(224, scale=(1.0, 2.0)),
-            transforms.RandomResizedCrop(480, scale=(0.4, 1.0)),
-            transforms.RandomResizedCrop(480, scale=(0.8, 1.2), ratio=(3 / 5, 5 / 3)),
+            transforms.RandomResizedCrop(480, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
+            transforms.RandomHorizontalFlip(p=1.0)
         ]))
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomAffine(0, (0.1, 0.1), (0.9, 1.1), 10),
@@ -661,6 +658,7 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.RandomGamma(p=1.0)),
                                 get_alb(alb.transforms.RGBShift(p=1.0)),
                                 get_alb(alb.transforms.MotionBlur(p=1.0)),
+                                transforms.GaussianBlur(11, sigma=(0.2, 1.0)),
                             ]),
                             transforms.RandomChoice([
                                 get_alb(alb.transforms.ImageCompression(95, p=1.0)),
