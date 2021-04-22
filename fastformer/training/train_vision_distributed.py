@@ -483,15 +483,13 @@ def train(local_rank, args):
             max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
             ddp_model.module.simclr_use_extra_negatives = True
             ddp_model.module.patchclr_use_extra_negatives = True
-            if epoch < 0.1 * args["epochs"]:
+            if epoch < 0.2 * args["epochs"]:
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
-            elif epoch < 0.2 * args["epochs"]:
-                max_batches_simclr = bs_size[0] // 2
             elif epoch < 0.3 * args["epochs"]:
-                max_batches_simclr = 1 * bs_size[0]
+                max_batches_simclr = bs_size[0] // 2
             elif epoch < 0.4 * args["epochs"]:
-                max_batches_simclr = 2 * bs_size[0]
+                max_batches_simclr = 1 * bs_size[0]
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
