@@ -693,8 +693,8 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
                                 cut,
                                 get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
+                                # get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                # get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                             cut]
