@@ -650,7 +650,7 @@ def get_image_augmetations(mode):
             transforms.RandomResizedCrop(480, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
             transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
-            transforms.RandomCrop(224),
+            transforms.Compose([transforms.Resize(512), transforms.RandomCrop(448),]),
         ]))
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
