@@ -597,6 +597,9 @@ def get_pretrained_deit(features_only=True):
     return model
 
 
+def identity(x):
+    return x
+
 def get_cutout(cutout_proba, cutout_size):
     cut = transforms.Compose([
         transforms.ToTensor(),
@@ -634,7 +637,7 @@ def get_image_augmetations(mode):
     to_tensor = transforms.Compose([transforms.Resize(224), transforms.ToTensor(), normalize])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
-    cut = get_cutout(0.75, 0.05)
+    cut = get_cutout(1.0, 0.05)
     if mode == "validation":
         shape_transforms.append(transforms.Resize(256))
         shape_transforms.append(transforms.CenterCrop(224))
@@ -642,10 +645,11 @@ def get_image_augmetations(mode):
     else:
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomResizedCrop(480, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
-            transforms.RandomHorizontalFlip(p=1.0)
+            transforms.RandomHorizontalFlip(p=1.0),
+            transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
         ]))
         shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomAffine(0, (0.1, 0.1), (0.9, 1.1), 10),
+            transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
             transforms.RandomPerspective(distortion_scale=0.1),
             transforms.RandomRotation(30)
         ]))
@@ -654,30 +658,44 @@ def get_image_augmetations(mode):
     non_shape_transforms = [
                             
                             transforms.RandomChoice([
+                                identity,
                                 get_alb(alb.transforms.MedianBlur(p=1.0)),
                                 get_alb(alb.transforms.RandomGamma(p=1.0)),
                                 get_alb(alb.transforms.RGBShift(p=1.0)),
-                                get_alb(alb.transforms.MotionBlur(p=1.0)),
+                                get_alb(alb.transforms.MotionBlur(17, p=1.0)),
                                 transforms.GaussianBlur(11, sigma=(0.2, 1.0)),
                             ]),
                             transforms.RandomChoice([
-                                get_alb(alb.transforms.ImageCompression(95, p=1.0)),
-                                get_alb(alb.transforms.Equalize(p=1.0)),
-                                get_alb(alb.transforms.Posterize(num_bits=4, always_apply=False, p=1.0)),
-                                get_alb(alb.transforms.Solarize(threshold=128, always_apply=False, p=1.0)),
+                                identity,
+                                get_alb(alb.transforms.ImageCompression(1, 100, 0, p=1.0, always_apply=True,)),
+                                get_alb(alb.transforms.ImageCompression(1, 100, 1, p=1.0, always_apply=True,)),
+                                get_alb(alb.transforms.Equalize(p=1.0, always_apply=True,)),
+                                get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Posterize(num_bits=3, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Posterize(num_bits=2, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Posterize(num_bits=1, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Solarize(threshold=128, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Solarize(threshold=160, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Solarize(threshold=192, always_apply=True, p=1.0)),
+                                get_alb(alb.transforms.Solarize(threshold=224, always_apply=True, p=1.0)),
                                 get_imgaug(iaa.AllChannelsCLAHE()),
                                 get_imgaug(iaa.LogContrast(gain=(0.6, 1.4))),
-                                get_imgaug(iaa.pillike.Autocontrast((10, 20), per_channel=True)),
-                                transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.2),
+                                get_imgaug(iaa.pillike.Autocontrast((5, 25), per_channel=True)),
+                                transforms.ColorJitter(brightness=0.3, contrast=0.2, saturation=0.1, hue=0.1),
                                 transforms.RandomGrayscale(p=1.0),
                             ]),
                             transforms.RandomChoice([
-                                get_imgaug(iaa.CoarseDropout((0.02, 0.05), size_percent=(0.25, 0.5), per_channel=0.5)),
-                                get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.01, 0.05), per_channel=True)),
+                                identity,
+                                get_imgaug(iaa.CoarseDropout((0.02, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
+                                get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.05, 0.1), per_channel=True)),
                                 get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
                                 cut,
                                 get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
+                                get_alb(alb.transforms.GridDropout(ratio=0.75, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                             cut]
     non_shape_transforms = transforms.Compose(non_shape_transforms)
