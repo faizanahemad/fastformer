@@ -643,12 +643,12 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
     else:
-        shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomResizedCrop(640, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
-            transforms.Compose([transforms.Resize(768), transforms.RandomCrop(672),]),
-        ]))
+        # shape_transforms.append(transforms.RandomChoice([
+        #     transforms.RandomResizedCrop(640, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
+        #     transforms.RandomHorizontalFlip(p=1.0),
+        #     transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
+        #     transforms.Compose([transforms.Resize(768), transforms.RandomCrop(672),]),
+        # ]))
         # shape_transforms.append(transforms.RandomChoice([
         #     transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
         #     transforms.RandomPerspective(distortion_scale=0.1),
