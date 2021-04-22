@@ -416,21 +416,22 @@ class PatchCLR(FastFormerPreTrainedModel):
             self.init_weights()
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
-        contrastive_matrix = contrastive_matrix / self.contrastive_temperature
-        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e3)
+
+        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e2)
         contrastive_matrix = contrastive_matrix - mask
         del mask
         rnd_idx = 0
+        labels = torch.arange(label_lengths, device=contrastive_matrix.device)
         if extra_negatives is not None:
-            extra_negatives = extra_negatives / self.contrastive_temperature
             # ens = extra_negatives.size(1)
             # rnd_idx = random.randint(0, ens)
             # en1, en2 = extra_negatives.split([rnd_idx, ens - rnd_idx], 1)
             # contrastive_matrix = torch.cat((en1, contrastive_matrix, en2), 1)
             # print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
             contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
-
-        labels = torch.cat((torch.arange(label_lengths, device=contrastive_matrix.device) + label_lengths + rnd_idx, torch.arange(label_lengths, device=contrastive_matrix.device) + rnd_idx))
+            labels = labels + rnd_idx
+        contrastive_matrix = contrastive_matrix / self.contrastive_temperature
+        labels = torch.cat((labels + label_lengths , labels))
         loss = self.loss_ce(contrastive_matrix, labels)
         predictions = contrastive_matrix.detach().argmax(dim=-1)
         accuracy = (predictions == labels).float().mean().item()
@@ -509,6 +510,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             clustering_loss = self.clustering_w * ((4*b - (2*b/s)) + cmm2.sum() - 2 * should_be_similar.sum()) / (math.prod(cmm2.size()) * 0.5)
 
         simclr_loss = 0.0
+        simclr_loss_simple = 0.0
         simclr_accuracy = None
         simclr_or_not = ~patch_clr_or_not.detach()
         if self.simclr_w > 0:
@@ -551,6 +553,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
 
+            simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
+            simclr_loss = self.simclr_w * (simclr_loss + simclr_loss_simple)
+
         gap_bias_loss = 0.0
         gap_bias_accuracy = 0.0
         if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
@@ -574,8 +579,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         # TODO: Additive Margin Softmax to make the task harder.
 
         loss = patchclr_loss + clustering_loss + simclr_loss + gap_bias_loss
-        return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss,
-                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, 
+        return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss, simclr_loss_simple=simclr_loss_simple,
+                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
                     extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu() if extra_negative_repr_patchclr is not None else None,
                     extra_negative_repr_simclr=extra_negative_repr_simclr.detach().cpu() if extra_negative_repr_simclr is not None else None)
 
