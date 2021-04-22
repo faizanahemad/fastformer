@@ -728,13 +728,14 @@ def custom_batching_fn(dataloader, batch_size_dict, continuous_iter=True):
     min_batch_size = gcd_array(batch_size)
     keep_iterating = True
     cur_iter = 1
+    rand_idx = 1031
     batch_cache = list()
     batch_age = list()
     maxlen = 100
     # If it can't be merged and can't be yielded then store.
     while keep_iterating:
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
-            dataloader.sampler.set_epoch(cur_iter)
+            dataloader.sampler.set_epoch(cur_iter + rand_idx)
             print("Time = %s [custom_batching_fn]: Distributed Sampler Epoch = %s" % (get_time_string(), cur_iter))
         else:
             print("Time = %s [custom_batching_fn]: Unable to set Epoch = %s" % (get_time_string(), cur_iter))

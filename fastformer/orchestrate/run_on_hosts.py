@@ -151,7 +151,7 @@ if __name__ == "__main__":
 
     # main_cmd += " --resume /home/ahemf/torch_distributed_init/fastformer_checkpoint"
 
-    # main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
+    main_cmd += " --pretrained_model /home/ahemf/model_save_dir/fastformer.pth"
 
     # main_cmd += " --validate_on_start --validate_only"
 
