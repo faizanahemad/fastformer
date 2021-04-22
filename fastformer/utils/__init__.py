@@ -635,9 +635,9 @@ def get_image_augmetations(mode):
                                      std=[0.229, 0.224, 0.225])
 
     if mode == "validation":
-        to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+        to_tensor = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
     else:
-        to_tensor = transforms.Compose([transforms.Resize(224), transforms.RandomCrop(224), transforms.ToTensor(), normalize])
+        to_tensor = transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.ToTensor(), normalize])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
