@@ -400,7 +400,8 @@ class ClassificationModel(FastFormerPreTrainedModel):
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4,
                  patchclr_w=1.0, contrastive_temperature=5e-2,
-                 simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, reinit=False):
+                 simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, simclr_use_extra_negatives=True, patchclr_use_extra_negatives=True,
+                 reinit=False, ):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
@@ -412,6 +413,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.clustering_w = clustering_w
         self.patchclr_w = patchclr_w
         self.gap_bias_w = gap_bias_w
+        self.simclr_use_extra_negatives = simclr_use_extra_negatives
+        self.patchclr_use_extra_negatives = patchclr_use_extra_negatives
         if reinit:
             self.init_weights()
 
@@ -460,7 +463,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         b, s = b1.shape[:2]
         bs = b * s
 
-        patchclr_loss = 0.0
+        loss = 0.0
+        patchclr_loss = None
         patchclr_accuracy = None
         if self.patchclr_w > 0 and patch_clr_or_not.sum() > 0:
             b1p = b1[patch_clr_or_not]
@@ -475,7 +479,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix_store = contrastive_matrix
 
             patchclr_negative=None
-            if extra_negative_repr_patchclr is not None:
+            if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
                 if extra_negative_repr_patchclr.size(0) > 8 * bs:
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
@@ -502,16 +506,19 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
             patchclr_loss = self.patchclr_w * patchclr_loss
-        clustering_loss = 0.0
+            loss += patchclr_loss
+        clustering_loss = None
         if self.clustering_w > 0 and self.patchclr_w > 0 and self.gap_bias_w == 0:
             cmm = contrastive_matrix_store.reshape(2, bs, 2, bs).transpose(1,2).reshape(4, bs, bs)
             cmm2 = cmm.reshape(4, b, s, b, s).transpose(2, 3).reshape(4, b, b, -1).mean(-1)
             should_be_similar = torch.diagonal(cmm2, dim1=1, dim2=2)
             clustering_loss = self.clustering_w * ((4*b - (2*b/s)) + cmm2.sum() - 2 * should_be_similar.sum()) / (math.prod(cmm2.size()) * 0.5)
+            loss += clustering_loss
 
-        simclr_loss = 0.0
-        simclr_loss_simple = 0.0
+        simclr_loss = None
+        simclr_loss_simple = None
         simclr_accuracy = None
+        simclr_accuracy_simple = None
         simclr_or_not = ~patch_clr_or_not.detach()
         if self.simclr_w > 0:
             b1s = b1[:, 0]
@@ -520,7 +527,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
-            if extra_negative_repr_simclr is not None:
+            if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
                 if extra_negative_repr_simclr.size(0) > 1024 * b:
                     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
@@ -552,12 +559,13 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
-
-            simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
+            if self.simclr_use_extra_negatives:
+                simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
             simclr_loss = self.simclr_w * (simclr_loss + simclr_loss_simple)
+            loss += simclr_loss
 
-        gap_bias_loss = 0.0
-        gap_bias_accuracy = 0.0
+        gap_bias_loss = None
+        gap_bias_accuracy = None
         if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
             p1s = b1[:, 1:].mean(1)
             p2s = b2[:, 1:].mean(1)
@@ -571,6 +579,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative)
             gap_bias_loss = self.gap_bias_w * gap_bias_loss
+            loss += gap_bias_loss
 
         # TODO: GAP bias SIMCLR
         # SimCLR Loss subset of patch clr
@@ -578,7 +587,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         # TODO: Reduce SIMCLR weight to zero slowly
         # TODO: Additive Margin Softmax to make the task harder.
 
-        loss = patchclr_loss + clustering_loss + simclr_loss + gap_bias_loss
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss, simclr_loss_simple=simclr_loss_simple,
                     patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
                     extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu() if extra_negative_repr_patchclr is not None else None,

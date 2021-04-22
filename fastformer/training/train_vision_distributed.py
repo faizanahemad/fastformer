@@ -338,10 +338,10 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         if args["deit"]:
-            model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=1.0, simclr_w=0.5, clustering_w=0.0, gap_bias_w=0.1,
+            model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=1.0, simclr_w=0.5, clustering_w=0.0, gap_bias_w=0.0,
                              reinit=reinit).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=1.0, simclr_w=0.5, clustering_w=0.0, gap_bias_w=0.1,
+            model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=1.0, simclr_w=0.5, clustering_w=0.0, gap_bias_w=0.0,
                              reinit=reinit).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False,
@@ -481,11 +481,16 @@ def train(local_rank, args):
                 bs_size = list(batch[0].size())
                 key = 0
             max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
+            ddp_model.module.simclr_use_extra_negatives = True
+            ddp_model.module.patchclr_use_extra_negatives = True
             if epoch < 0.1 * args["epochs"]:
-                max_batches_simclr = bs_size[0] // 2
+                ddp_model.module.simclr_use_extra_negatives = False
+                ddp_model.module.patchclr_use_extra_negatives = False
             elif epoch < 0.2 * args["epochs"]:
-                max_batches_simclr = 1 * bs_size[0]
+                max_batches_simclr = bs_size[0] // 2
             elif epoch < 0.3 * args["epochs"]:
+                max_batches_simclr = 1 * bs_size[0]
+            elif epoch < 0.4 * args["epochs"]:
                 max_batches_simclr = 2 * bs_size[0]
 
             if (steps_done + 1) % save_every_steps == 0:
@@ -512,7 +517,7 @@ def train(local_rank, args):
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
 
-                if (step + 1) % (4 * iter_size) != 0:
+                if (step + 1) % (2 * iter_size) != 0 and ddp_model.module.simclr_use_extra_negatives:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                     if extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - max_batches_simclr, 0)
