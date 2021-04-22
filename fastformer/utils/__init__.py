@@ -643,6 +643,7 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
     else:
+        pass
         # shape_transforms.append(transforms.RandomChoice([
         #     transforms.RandomResizedCrop(640, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
         #     transforms.RandomHorizontalFlip(p=1.0),
