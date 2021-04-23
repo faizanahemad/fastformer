@@ -386,7 +386,6 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
         # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
-        del model
     else:
         ddp_model = model
     try:
@@ -484,8 +483,8 @@ def train(local_rank, args):
             ddp_model.module.simclr_use_extra_negatives = False
             ddp_model.module.patchclr_use_extra_negatives = False
             if step > 20:
-                ddp_model.module.simclr_use_extra_negatives = True
-                ddp_model.module.patchclr_use_extra_negatives = True
+                model.simclr_use_extra_negatives = True
+                model.patchclr_use_extra_negatives = True
             if epoch < 0.2 * args["epochs"]:
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
