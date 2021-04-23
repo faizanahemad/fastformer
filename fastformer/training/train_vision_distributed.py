@@ -483,6 +483,9 @@ def train(local_rank, args):
             max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
             ddp_model.module.simclr_use_extra_negatives = False
             ddp_model.module.patchclr_use_extra_negatives = False
+            if step > 20:
+                ddp_model.module.simclr_use_extra_negatives = True
+                ddp_model.module.patchclr_use_extra_negatives = True
             if epoch < 0.2 * args["epochs"]:
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
