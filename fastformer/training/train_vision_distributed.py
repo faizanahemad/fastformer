@@ -482,7 +482,7 @@ def train(local_rank, args):
                 key = 0
             max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
             ddp_model.module.simclr_use_extra_negatives = True
-            ddp_model.module.patchclr_use_extra_negatives = True
+            ddp_model.module.patchclr_use_extra_negatives = False
             if epoch < 0.2 * args["epochs"]:
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
@@ -548,8 +548,8 @@ def train(local_rank, args):
                                    **output))
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps)))
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0

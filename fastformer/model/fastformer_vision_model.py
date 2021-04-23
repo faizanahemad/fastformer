@@ -559,10 +559,11 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
+            loss += simclr_loss
             if self.simclr_use_extra_negatives:
                 simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
-            simclr_loss = self.simclr_w * (simclr_loss + simclr_loss_simple)
-            loss += simclr_loss
+                simclr_loss_simple = self.simclr_w * simclr_loss_simple
+                loss += simclr_loss_simple
 
         gap_bias_loss = None
         gap_bias_accuracy = None
