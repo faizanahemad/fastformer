@@ -901,7 +901,6 @@ def train(local_rank, args):
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
     except:
         print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
-    del model
     clean_memory()
 
     optc = optimizer_config.to_dict()
@@ -1015,17 +1014,25 @@ def train(local_rank, args):
         #
         electra_loss_w = float(min(1.0, ((step + 1) / ((2 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["electra_loss_w"])
         ddp_model.module.electra_loss_w = electra_loss_w
+        model.electra_loss_w = electra_loss_w
 
         answering_lm_w = float(min(1.0, ((step + 1) / ((10 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["answering_lm_w"])
         ddp_model.module.answering_lm_w = answering_lm_w
+        model.answering_lm_w = answering_lm_w
+
         sentence_order_prediction_w = float(min(1.0, ((step + 1) / ((10 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["sentence_order_prediction_w"])
         ddp_model.module.sentence_order_prediction_w = sentence_order_prediction_w
+        model.sentence_order_prediction_w = sentence_order_prediction_w
+
         contrastive_w = float(
             min(1.0, ((step + 1) / ((10 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["contrastive_w"])
         ddp_model.module.contrastive_w = contrastive_w
+        model.contrastive_w = contrastive_w
 
         input_cls_orthogonal_w = float(max(0.0, 1.0 - ((step + 1) / ((2 if args["no_autocast"] else 20) * optc["warmup_steps"]))) * mconf["input_cls_orthogonal_w"])
         ddp_model.module.input_cls_orthogonal_w = input_cls_orthogonal_w
+        model.input_cls_orthogonal_w = input_cls_orthogonal_w
+
         if (step + 1) % save_every_steps == 0:
             state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
             if local_rank == 0:
@@ -1035,10 +1042,10 @@ def train(local_rank, args):
             del state_dict
         if (step + 1) % validate_every_steps == 0:
             state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
-            model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-            model.load_state_dict(state_dict)
-            _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
-            del model
+            val_model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+            val_model.load_state_dict(state_dict)
+            _ = LargeValidator(args["validation_dataset"], val_model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+            del val_model
             del state_dict
             clean_memory()
             barrier()
