@@ -482,15 +482,15 @@ def train(local_rank, args):
             total_samples_simclr = 8192 # args["world_size"] to max
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = True
-            model.patchclr_use_extra_negatives = False
+            model.patchclr_use_extra_negatives = True
             ddp_model.module.simclr_use_extra_negatives = True
-            ddp_model.module.patchclr_use_extra_negatives = False
+            ddp_model.module.patchclr_use_extra_negatives = True
 
             if epoch < 0.2 * args["epochs"]:
-                model.simclr_use_extra_negatives = False
-                model.patchclr_use_extra_negatives = False
-                ddp_model.module.simclr_use_extra_negatives = False
-                ddp_model.module.patchclr_use_extra_negatives = False
+                model.simclr_use_extra_negatives = True
+                model.patchclr_use_extra_negatives = True
+                ddp_model.module.simclr_use_extra_negatives = True
+                ddp_model.module.patchclr_use_extra_negatives = True
             else:
                 samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (epoch - (0.2 * args["epochs"])) / (0.8 * args["epochs"])))
                 model.simclr_use_extra_negatives = True
