@@ -401,7 +401,7 @@ def train(local_rank, args):
     optc = optimizer_config.to_dict()
     optc["lr"] = (optc["lr"] * batch_size * args["world_size"]) / 512.0
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
-    optimizer = torch.optim.AdamW(trainable_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+    optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                   betas=(optc["beta_1"], optc["beta_2"]))
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
     optimizer.zero_grad(set_to_none=True)
