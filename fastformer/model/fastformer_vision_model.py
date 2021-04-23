@@ -481,8 +481,8 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-                # if extra_negative_repr_patchclr.size(0) > 8 * bs:
-                #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
+                if extra_negative_repr_patchclr.size(0) > 4 * bs:
+                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 c1_det = out_1.detach()
                 if extra_negative_repr_patchclr.size(0) > 4 * bs and self.priority_clr:
@@ -500,7 +500,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[bs:], c1_det), 0)
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
 
             else:
                 extra_negative_repr_patchclr = out_1.detach()
