@@ -415,6 +415,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.gap_bias_w = gap_bias_w
         self.simclr_use_extra_negatives = simclr_use_extra_negatives
         self.patchclr_use_extra_negatives = patchclr_use_extra_negatives
+        self.priority_clr = False
         if reinit:
             self.init_weights()
 
@@ -480,11 +481,11 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-                if extra_negative_repr_patchclr.size(0) > 8 * bs:
-                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
+                # if extra_negative_repr_patchclr.size(0) > 8 * bs:
+                #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                if extra_negative_repr_patchclr.size(0) > 4 * bs:
-                    c1_det = out_1.detach()
+                c1_det = out_1.detach()
+                if extra_negative_repr_patchclr.size(0) > 4 * bs and self.priority_clr:
                     selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
@@ -496,9 +497,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del topk_indices_argmax
                     del selector_mat
                     del topk_indices
-                    extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
                 else:
+                    print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[bs:], c1_det), 0)
 
             else:
                 extra_negative_repr_patchclr = out_1.detach()
@@ -528,11 +530,11 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
-                if extra_negative_repr_simclr.size(0) > 1024 * b:
-                    extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
+                # if extra_negative_repr_simclr.size(0) > 1024 * b:
+                #     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 sc1_det = b1s.detach()
-                if extra_negative_repr_simclr.size(0) >= 160 * b:
+                if extra_negative_repr_simclr.size(0) >= 160 * b and self.priority_clr:
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 72 * b, dim=0).indices
@@ -552,8 +554,9 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del topk_indices_mean_select
                     del most_recent_indices
                 else:
+                    print("SimCLR negative size = %s, in-batch size = %s" % (extra_negative_repr_simclr.size(), sc1.size()))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1_det), 0)
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b:], sc1_det), 0)
             else:
                 extra_negative_repr_simclr = b1s.detach()
 

@@ -342,7 +342,7 @@ def train(local_rank, args):
                              reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False).to(device)
         else:
             model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=0.5, simclr_w=2.0, clustering_w=0.0, gap_bias_w=0.0,
-                             reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False).to(device)
+                             reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
@@ -479,7 +479,8 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device)
                 bs_size = list(batch[0].size())
                 key = 0
-            max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
+            total_samples_simclr = 8192 # args["world_size"] to max
+            samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = True
             model.patchclr_use_extra_negatives = False
             ddp_model.module.simclr_use_extra_negatives = True
@@ -491,10 +492,12 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                max_batches_simclr = int(max_batches_simclr * max(0, (epoch - (0.2 * args["epochs"])) / (0.8 * args["epochs"])))
+                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (epoch - (0.2 * args["epochs"])) / (0.8 * args["epochs"])))
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
 
+            samples_per_machine_simclr = total_samples_simclr // args["world_size"]
+            samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0])
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
@@ -520,10 +523,10 @@ def train(local_rank, args):
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
 
-                if (step + 1) % (2 * iter_size) != 0 and ddp_model.module.simclr_use_extra_negatives and max_batches_simclr >= 1:
+                if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                     if extra_negative_repr_simclr is not None:
-                        start = max(extra_negative_repr_simclr.size(0) - max_batches_simclr, 0)
+                        start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
                         most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
