@@ -481,19 +481,20 @@ def train(local_rank, args):
                 key = 0
             max_batches_simclr = (max(1024 // args["world_size"], 4) * bs_size[0])
             model.simclr_use_extra_negatives = True
-            model.patchclr_use_extra_negatives = True
+            model.patchclr_use_extra_negatives = False
             ddp_model.module.simclr_use_extra_negatives = True
-            ddp_model.module.patchclr_use_extra_negatives = True
+            ddp_model.module.patchclr_use_extra_negatives = False
 
             if epoch < 0.2 * args["epochs"]:
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
-            elif epoch < 0.3 * args["epochs"]:
-                max_batches_simclr = bs_size[0] // 2
-            elif epoch < 0.4 * args["epochs"]:
-                max_batches_simclr = 1 * bs_size[0]
+            else:
+                max_batches_simclr = int(max_batches_simclr * max(0, (epoch - (0.2 * args["epochs"])) / (0.8 * args["epochs"])))
+                model.simclr_use_extra_negatives = True
+                ddp_model.module.simclr_use_extra_negatives = True
+
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
@@ -519,7 +520,7 @@ def train(local_rank, args):
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
 
-                if (step + 1) % (2 * iter_size) != 0 and ddp_model.module.simclr_use_extra_negatives:
+                if (step + 1) % (2 * iter_size) != 0 and ddp_model.module.simclr_use_extra_negatives and max_batches_simclr >= 1:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                     if extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - max_batches_simclr, 0)
