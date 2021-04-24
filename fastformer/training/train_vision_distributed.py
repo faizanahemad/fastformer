@@ -492,14 +492,14 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
+            total_samples_simclr = iter_size * bs_size[0] * args["world_size"] * (4 if args["moco"] else 1)  # args["world_size"] to max
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
             ddp_model.module.simclr_use_extra_negatives = False
             ddp_model.module.patchclr_use_extra_negatives = False
 
-            if pct_done < pct_simclr_simple:
+            if pct_done < pct_simclr_simple and not args["moco"]:
                 samples_per_machine_simclr = 0
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
@@ -513,8 +513,10 @@ def train(local_rank, args):
                 ddp_model.module.patchclr_use_extra_negatives = True
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
-            samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0])
+            samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
             cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
+            if args["moco"]:
+                cur_total_samples = total_samples_simclr
             cur_total_samples = 8 * (cur_total_samples // 8)
 
             if (steps_done + 1) % save_every_steps == 0:
