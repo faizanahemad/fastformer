@@ -457,7 +457,7 @@ def train(local_rank, args):
     extra_negative_repr_simclr = None
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
-    pct_simclr_simple = 0.1
+    pct_simclr_simple = 0.05
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -469,6 +469,8 @@ def train(local_rank, args):
         start_time = time.time()
         for step, batch in enumerate(dataloader):
             steps_done = epoch * len(dataloader) + step
+            steps_remaining = total_steps - steps_done
+            pct_done = (100 * steps_done / total_steps)
             gen_batch_time = time.time() - start_time
             batch_times.append(gen_batch_time)
             if isinstance(batch, dict):
@@ -487,7 +489,7 @@ def train(local_rank, args):
             ddp_model.module.simclr_use_extra_negatives = False
             ddp_model.module.patchclr_use_extra_negatives = False
 
-            if epoch < pct_simclr_simple * args["epochs"]:
+            if pct_done < pct_simclr_simple:
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
                 ddp_model.module.simclr_use_extra_negatives = False
