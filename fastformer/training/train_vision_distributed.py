@@ -457,7 +457,7 @@ def train(local_rank, args):
     extra_negative_repr_simclr = None
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
-    pct_simclr_simple = 0.05
+    pct_simclr_simple = 5
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
