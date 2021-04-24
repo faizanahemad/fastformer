@@ -498,9 +498,9 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del selector_mat
                     del topk_indices
                 else:
-                    print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
+                    # print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr[bs:], c1_det), 0)
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
 
             else:
                 extra_negative_repr_patchclr = out_1.detach()
@@ -554,7 +554,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del topk_indices_mean_select
                     del most_recent_indices
                 else:
-                    print("SimCLR negative size = %s, in-batch size = %s" % (extra_negative_repr_simclr.size(), sc1.size()))
+                    # print("SimCLR negative size = %s, in-batch size = %s" % (extra_negative_repr_simclr.size(), sc1.size()))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b:], sc1_det), 0)
             else:
@@ -563,10 +563,10 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
             loss += simclr_loss
-            if self.simclr_use_extra_negatives:
-                simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
-                simclr_loss_simple = self.simclr_w * simclr_loss_simple
-                loss += simclr_loss_simple
+            # if self.simclr_use_extra_negatives:
+            #     simclr_loss_simple, simclr_accuracy_simple = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], None)
+            #     simclr_loss_simple = self.simclr_w * simclr_loss_simple
+            #     loss += simclr_loss_simple
 
         gap_bias_loss = None
         gap_bias_accuracy = None
