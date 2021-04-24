@@ -495,7 +495,7 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (pct_done - pct_simclr_simple) / (100 - pct_simclr_simple)))
+                samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
@@ -503,7 +503,8 @@ def train(local_rank, args):
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0])
-            cur_total_samples = int(total_samples_simclr * max(0, (pct_done - pct_simclr_simple) / (100 - pct_simclr_simple)))
+            cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
+            cur_total_samples = 8 * (cur_total_samples // 8)
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
