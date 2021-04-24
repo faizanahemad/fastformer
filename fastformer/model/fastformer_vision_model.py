@@ -442,19 +442,21 @@ class PatchCLR(FastFormerPreTrainedModel):
         return loss, accuracy
 
     def build_representations(self, x1, x2, eval=False):
+        backbone = self.backbone
+        ffn = self.ffn
         if eval:
             _ = self.eval()
-            _ = self.backbone.eval()
-            _ = self.ffn.eval()
+            _ = backbone.eval()
+            _ = ffn.eval()
         if isinstance(self.backbone, FastFormerVisionModel):
-            b1 = self.backbone(x1, run_decoder=True)
-            b2 = self.backbone(x2, run_decoder=True)
+            b1 = backbone(x1, run_decoder=True)
+            b2 = backbone(x2, run_decoder=True)
         else:
-            b1 = self.ffn(self.backbone(x1))
-            b2 = self.ffn(self.backbone(x2))
+            b1 = ffn(backbone(x1))
+            b2 = ffn(backbone(x2))
         if isinstance(b1, dict):
-            b1 = self.ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
-            b2 = self.ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
+            b1 = ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
+            b2 = ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
         b1 = b1 / (b1.norm(2, -1, True) + self.eps)
         b2 = b2 / (b2.norm(2, -1, True) + self.eps)
         return b1, b2
