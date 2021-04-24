@@ -238,6 +238,7 @@ class ImageNetValidation:
 
         print("[Validation]: Time = %s, Train Acc = %.5f, Val Acc = %.5f" % (get_time_string(), train_acc, val_acc))
 
+
 def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None):
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
