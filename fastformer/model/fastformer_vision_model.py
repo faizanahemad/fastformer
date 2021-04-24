@@ -417,6 +417,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.patchclr_use_extra_negatives = patchclr_use_extra_negatives
         self.priority_clr = priority_clr
         self.moco = moco
+        self.key_ffn = None
+        self.key_backbone = None
         if reinit:
             self.init_weights()
 
@@ -442,28 +444,50 @@ class PatchCLR(FastFormerPreTrainedModel):
         accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def build_representations(self, x1, x2, eval=False):
+    def _build_rep(self, x, backbone, ffn):
+        if isinstance(self.backbone, FastFormerVisionModel):
+            b = backbone(x, run_decoder=True)
+        else:
+            b = ffn(backbone(x))
+        if isinstance(b, dict):
+            b = ffn(b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"])  # B,S,D
+        b = b / (b.norm(2, -1, True) + self.eps)
+        return b
+
+    def build_representations(self, x1, x2, eval=False, use_key_enc=False):
         backbone = self.backbone
         ffn = self.ffn
         if eval:
             _ = self.eval()
             _ = backbone.eval()
             _ = ffn.eval()
-        if isinstance(self.backbone, FastFormerVisionModel):
-            b1 = backbone(x1, run_decoder=True)
-            b2 = backbone(x2, run_decoder=True)
+
+            with torch.no_grad():
+                b1 = self._build_rep(x1, backbone, ffn)
+                if use_key_enc:
+                    backbone = self.key_backbone
+                    ffn = self.key_ffn
+                b2 = self._build_rep(x2, backbone, ffn)
+
         else:
-            b1 = ffn(backbone(x1))
-            b2 = ffn(backbone(x2))
-        if isinstance(b1, dict):
-            b1 = ffn(b1["third_block_hidden"] if b1["third_block_hidden"] is not None else b1["second_block_hidden"])  # B,S,D
-            b2 = ffn(b2["third_block_hidden"] if b2["third_block_hidden"] is not None else b2["second_block_hidden"])  # B,S,D
-        b1 = b1 / (b1.norm(2, -1, True) + self.eps)
-        b2 = b2 / (b2.norm(2, -1, True) + self.eps)
+            _ = self.train()
+            _ = backbone.train()
+            _ = ffn.train()
+            b1 = self._build_rep(x1, backbone, ffn)
+            if use_key_enc:
+                backbone = self.key_backbone
+                ffn = self.key_ffn
+                _ = backbone.eval()
+                _ = ffn.eval()
+                with torch.no_grad():
+                    b2 = self._build_rep(x2, backbone, ffn)
+            else:
+                b2 = self._build_rep(x2, backbone, ffn)
+
         return b1, b2
 
     def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
-        b1, b2 = self.build_representations(x1, x2)
+        b1, b2 = self.build_representations(x1, x2, use_key_enc=self.moco)
         b, s = b1.shape[:2]
         bs = b * s
 
@@ -503,10 +527,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     # print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1_det), 0)
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
 
             else:
-                extra_negative_repr_patchclr = out_1.detach()
+                extra_negative_repr_patchclr = out_2.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
@@ -559,9 +583,9 @@ class PatchCLR(FastFormerPreTrainedModel):
                 else:
                     # print("SimCLR negative size = %s, in-batch size = %s" % (extra_negative_repr_simclr.size(), sc1.size()))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b:], sc1_det), 0)
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr[b:], b2s.detach()), 0)
             else:
-                extra_negative_repr_simclr = b1s.detach()
+                extra_negative_repr_simclr = b2s.detach()
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss
