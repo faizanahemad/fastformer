@@ -457,6 +457,7 @@ def train(local_rank, args):
     extra_negative_repr_simclr = None
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
+    pct_simclr_simple = 0.1
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -486,13 +487,13 @@ def train(local_rank, args):
             ddp_model.module.simclr_use_extra_negatives = False
             ddp_model.module.patchclr_use_extra_negatives = False
 
-            if epoch < 0.2 * args["epochs"]:
+            if epoch < pct_simclr_simple * args["epochs"]:
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (epoch - (0.2 * args["epochs"])) / (0.8 * args["epochs"])))
+                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (epoch - (pct_simclr_simple * args["epochs"])) / ((1-pct_simclr_simple) * args["epochs"])))
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
@@ -527,12 +528,21 @@ def train(local_rank, args):
 
                 if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                    if extra_negative_repr_simclr is not None:
+                    cur_total_samples = int(total_samples_simclr * max(0, (epoch - (pct_simclr_simple * args["epochs"])) / ((1-pct_simclr_simple) * args["epochs"])))
+                    if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
+                        start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
+                        extra_negative_repr_simclr = extra_negative_repr_simclr[start: ]
+                        output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+                    elif extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
-                        most_recent_simclr = extra_negative_repr_simclr[start: extra_negative_repr_simclr.size(0)].to(device)
+                        most_recent_simclr = extra_negative_repr_simclr[start:].to(device)
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
+
                         extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
+
+                        start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
+                        extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
