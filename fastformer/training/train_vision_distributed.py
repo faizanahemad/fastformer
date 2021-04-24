@@ -495,7 +495,7 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (epoch - (pct_simclr_simple * args["epochs"])) / ((1-pct_simclr_simple) * args["epochs"])))
+                samples_per_machine_simclr = int(samples_per_machine_simclr * max(0, (pct_done - pct_simclr_simple) / (1-pct_simclr_simple)))
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
@@ -530,7 +530,7 @@ def train(local_rank, args):
 
                 if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                    cur_total_samples = int(total_samples_simclr * max(0, (epoch - (pct_simclr_simple * args["epochs"])) / ((1-pct_simclr_simple) * args["epochs"])))
+                    cur_total_samples = int(total_samples_simclr * max(0, (pct_done - pct_simclr_simple) / (1-pct_simclr_simple)))
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
                         extra_negative_repr_simclr = extra_negative_repr_simclr[start: ]
