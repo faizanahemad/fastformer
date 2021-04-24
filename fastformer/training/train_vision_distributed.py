@@ -366,7 +366,7 @@ def train(local_rank, args):
         key_ffn = copy.deepcopy(model.ffn).to(device)
         key_ffn.load_state_dict(copy.deepcopy(model.ffn.state_dict()))
 
-    if local_rank == 0:
+    if local_rank == 0 and not args["moco"]:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
         check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
@@ -384,7 +384,7 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    if local_rank == 0:
+    if local_rank == 0 and not args["moco"]:
         check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
