@@ -169,7 +169,7 @@ class CLRDataset(torch.utils.data.Dataset):
             transforms.RandomChoice([
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomPerspective(distortion_scale=0.1),
-                transforms.RandomResizedCrop(360, scale=(0.6, 1.4)),
+                transforms.RandomResizedCrop(360, scale=(0.6, 1.0)),
             ])
 
         ])
@@ -183,7 +183,7 @@ class CLRDataset(torch.utils.data.Dataset):
         else:
             x1 = self.to_tensor(x)
 
-        if random.random() < 0.2:
+        if random.random() < 0.25:
             patch_clr_or_not = True
             x = self.small_shape_transforms(x) if random.random() < 0.5 else x
             if self.x2_transform:
@@ -482,7 +482,7 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = 8192 # args["world_size"] to max
+            total_samples_simclr = iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
@@ -490,6 +490,7 @@ def train(local_rank, args):
             ddp_model.module.patchclr_use_extra_negatives = False
 
             if pct_done < pct_simclr_simple:
+                samples_per_machine_simclr = 0
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
                 ddp_model.module.simclr_use_extra_negatives = False
@@ -503,6 +504,7 @@ def train(local_rank, args):
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0])
+            cur_total_samples = int(total_samples_simclr * max(0, (pct_done - pct_simclr_simple) / (1 - pct_simclr_simple)))
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
@@ -530,7 +532,7 @@ def train(local_rank, args):
 
                 if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                    cur_total_samples = int(total_samples_simclr * max(0, (pct_done - pct_simclr_simple) / (1-pct_simclr_simple)))
+
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
                         extra_negative_repr_simclr = extra_negative_repr_simclr[start: ]
@@ -572,8 +574,8 @@ def train(local_rank, args):
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives))
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, cur_total_samples = %s, total_samples_simclr = %s" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives, samples_per_machine_simclr, cur_total_samples, total_samples_simclr))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0
