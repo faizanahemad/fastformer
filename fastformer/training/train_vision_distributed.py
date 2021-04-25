@@ -508,7 +508,8 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
+                if not args["moco"]:
+                    samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
