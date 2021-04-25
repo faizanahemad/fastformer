@@ -585,19 +585,21 @@ def train(local_rank, args):
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
             if (steps_done + 1) % log_every_steps == 0:
                 if local_rank == 0:
+                    simclr_negative = extra_negative_repr_simclr.size(0) if extra_negative_repr_simclr is not None else 0
                     steps_remaining = total_steps - steps_done
                     output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
                     wandb_log = dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
                                    batch_times=np.mean(batch_times), full_times=np.mean(full_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                                     simclr_negative=simclr_negative,
                                    **{k: v for k, v in output.items() if v is not None})
                     print(wandb_log)
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, cur_total_samples = %s, total_samples_simclr = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives, samples_per_machine_simclr, cur_total_samples, total_samples_simclr))
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, cur_total_samples = %s, total_samples_simclr = %s, simclr_negative = %s" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives, samples_per_machine_simclr, cur_total_samples, total_samples_simclr, simclr_negative))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0
