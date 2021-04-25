@@ -493,6 +493,8 @@ def train(local_rank, args):
                 bs_size = list(batch[0].size())
                 key = 0
             total_samples_simclr = iter_size * bs_size[0] * args["world_size"] * (4 if args["moco"] else 1)  # args["world_size"] to max
+            if not args["moco"]:
+                total_samples_simclr = min(total_samples_simclr, 8192)
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
