@@ -516,7 +516,7 @@ def train(local_rank, args):
                 ddp_model.module.patchclr_use_extra_negatives = True
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
-            samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
+            # samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
             cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
             if args["moco"]:
                 cur_total_samples = total_samples_simclr
@@ -566,7 +566,7 @@ def train(local_rank, args):
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
 
-                        extra_negative_repr_simclr = torch.cat(tensor_list, 0).to("cpu")
+                        extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], extra_negative_repr_simclr.size(-1)).to("cpu")
 
                         start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
                         extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
