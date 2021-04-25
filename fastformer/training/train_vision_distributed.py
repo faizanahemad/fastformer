@@ -594,7 +594,7 @@ def train(local_rank, args):
                                    batch_times=np.mean(batch_times), full_times=np.mean(full_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                                      simclr_negative=simclr_negative,
                                    **{k: v for k, v in output.items() if v is not None})
-                    print(wandb_log)
+
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
