@@ -507,8 +507,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         loss = 0.0
         patchclr_loss = None
         patchclr_accuracy = None
-        if self.patchclr_w > 0 and patch_clr_or_not.sum() > 0:
-            if self.simclr_w > 0:
+        if self.patchclr_w > 0:
+            if self.simclr_w > 0 and patch_clr_or_not.sum() > 0:
                 b1p = b1[patch_clr_or_not]
                 b2p = b2[patch_clr_or_not]
             else:
