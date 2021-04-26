@@ -566,7 +566,7 @@ def train(local_rank, args):
                         key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
                                                       zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items())})
 
-                if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1:
+                if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1 and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
