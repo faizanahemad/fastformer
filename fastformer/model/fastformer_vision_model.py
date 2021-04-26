@@ -531,7 +531,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             else:
                 extra_negative_repr_patchclr = out_2.detach()
-            extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach().cpu()
+            extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
             patchclr_loss = self.patchclr_w * patchclr_loss
@@ -620,8 +620,8 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss, simclr_loss_simple=simclr_loss_simple,
                     patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach().cpu() if extra_negative_repr_patchclr is not None else None,
-                    extra_negative_repr_simclr=extra_negative_repr_simclr.detach().cpu() if extra_negative_repr_simclr is not None else None)
+                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach() if extra_negative_repr_patchclr is not None else None,
+                    extra_negative_repr_simclr=extra_negative_repr_simclr.detach() if extra_negative_repr_simclr is not None else None)
 
 
 if __name__ == '__main__':
