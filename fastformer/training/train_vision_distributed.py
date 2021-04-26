@@ -148,6 +148,7 @@ def training_args():
 
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
+    args.moco = False if args.simclr_moco else args.moco
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -371,7 +372,7 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-    if args["moco"] and args["mode"] == "clr":
+    if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
         key_backbone = copy.deepcopy(backbone).to(device)
         key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
         key_ffn = copy.deepcopy(model.ffn).to(device)
@@ -523,6 +524,9 @@ def train(local_rank, args):
             else:
                 if not args["moco"]:
                     samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
+                if args["simclr_moco"]:
+                    model.moco = True
+                    ddp_model.module.moco = True
                 model.simclr_use_extra_negatives = True
                 ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
@@ -547,9 +551,11 @@ def train(local_rank, args):
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
-            if args["moco"]:
+            if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
                 ddp_model.module.key_backbone = key_backbone
                 ddp_model.module.key_ffn = key_ffn
+                model.key_backbone = key_backbone
+                model.key_ffn = key_ffn
             try:
                 if no_sync and (step + 1) % iter_size != 0:
                     with ddp_model.no_sync():
@@ -561,9 +567,9 @@ def train(local_rank, args):
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
-                    if args["moco"]:
-                        key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items())})
-                        key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
+                    if args["moco"] or args["simclr_moco"]:
+                        key_backbone.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items())})
+                        key_ffn.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in
                                                       zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items())})
 
                 if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1 and simclr_w > 0:
