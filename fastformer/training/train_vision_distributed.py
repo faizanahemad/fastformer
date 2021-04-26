@@ -396,7 +396,7 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    if local_rank == 0 and not args["moco"]:
+    if local_rank == 0 and not (args["moco"] or args["simclr_moco"]):
         check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
@@ -505,7 +505,7 @@ def train(local_rank, args):
                 bs_size = list(batch[0].size())
                 key = 0
             total_samples_simclr = iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
-            if not args["moco"]:
+            if not (args["moco"] or args["simclr_moco"]):
                 total_samples_simclr = min(total_samples_simclr, 8192)
             elif total_samples_simclr < 8192:
                 total_samples_simclr = 8192
@@ -552,6 +552,8 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
+                key_backbone = key_backbone.eval()
+                key_ffn = key_ffn.eval()
                 ddp_model.module.key_backbone = key_backbone
                 ddp_model.module.key_ffn = key_ffn
                 model.key_backbone = key_backbone
