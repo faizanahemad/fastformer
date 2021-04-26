@@ -448,9 +448,11 @@ class PatchCLR(FastFormerPreTrainedModel):
         if isinstance(self.backbone, FastFormerVisionModel):
             b = backbone(x, run_decoder=True)
         else:
-            b = ffn(backbone(x))
+            b = backbone(x)
         if isinstance(b, dict):
-            b = ffn(b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"])  # B,S,D
+            b = b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"]
+
+        b = ffn(b) if self.patchclr_w > 0 else ffn(b[:, 0:1])
         b = b / (b.norm(2, -1, True) + self.eps)
         return b
 
