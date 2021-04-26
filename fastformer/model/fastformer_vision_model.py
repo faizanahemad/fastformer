@@ -401,7 +401,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4,
                  patchclr_w=1.0, contrastive_temperature=5e-2,
                  simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, simclr_use_extra_negatives=True, patchclr_use_extra_negatives=True,
-                 reinit=False, priority_clr=False, moco=False):
+                 reinit=False, priority_clr=False, moco=False, channel_dropout=0.0):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
@@ -412,6 +412,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.simclr_w = simclr_w
         self.clustering_w = clustering_w
         self.patchclr_w = patchclr_w
+        self.channel_dropout = channel_dropout
+        self.dropout = nn.Dropout2d(channel_dropout)
         self.gap_bias_w = gap_bias_w
         self.simclr_use_extra_negatives = simclr_use_extra_negatives
         self.patchclr_use_extra_negatives = patchclr_use_extra_negatives
@@ -443,6 +445,15 @@ class PatchCLR(FastFormerPreTrainedModel):
         predictions = contrastive_matrix.detach().argmax(dim=-1)
         accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
+
+    def _channel_dropout(self, x1, x2):
+        if self.channel_dropout > 0:
+            b = x1.size(0)
+            x = torch.cat((x1, x2), 0).unsqueeze(-1).unsqueeze(-1)
+            x = self.dropout(x).squeeze()
+            x1 = x[:b]
+            x2 = x[b:]
+        return x1, x2
 
     def _build_rep(self, x, backbone, ffn):
         if isinstance(self.backbone, FastFormerVisionModel):
