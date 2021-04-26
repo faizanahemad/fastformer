@@ -564,7 +564,7 @@ def train(local_rank, args):
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
                     elif extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
-                        most_recent_simclr = extra_negative_repr_simclr[start:].to(device)
+                        most_recent_simclr = extra_negative_repr_simclr[start:].to(device).contiguous()
                         tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
 
