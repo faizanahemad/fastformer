@@ -383,7 +383,9 @@ def train(local_rank, args):
     if local_rank == 0 and not args["moco"]:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
-        check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
+        print(model)
+        if "pretrained_model" in args and args["pretrained_model"] is not None:
+            check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
