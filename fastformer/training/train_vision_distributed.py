@@ -676,7 +676,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
         if len(inf_gradders):
             print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
-        print([name for name, params in ddp_model.named_parameters() if params.grad is None])
+    print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     if not no_sync:
         ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
         optimizer.step()
