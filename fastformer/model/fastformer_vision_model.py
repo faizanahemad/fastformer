@@ -565,7 +565,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_loss_simple = None
         simclr_accuracy = None
         simclr_accuracy_simple = None
-        simclr_or_not = ~patch_clr_or_not.detach()
         if self.simclr_w > 0:
             b1s = b1[:, 0]
             b2s = b2[:, 0]
