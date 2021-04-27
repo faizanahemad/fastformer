@@ -173,17 +173,19 @@ def model_train_validation_switch(model, args, train=True):
 
 
 class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, x1_transform, x2_transform, to_tensor):
+    def __init__(self, dataset, x1_transform, x2_transform, to_tensor, simclr_w, patchclr_w):
         self.dataset = dataset
         self.x1_transform = x1_transform
         self.x2_transform = x2_transform
         self.to_tensor = to_tensor
+        self.patchclr_proba = 0.9 if simclr_w == 0 else 0.25
+        self.patchclr_proba = 0.0 if patchclr_w == 0 else self.patchclr_proba
         self.small_shape_transforms = transforms.Compose([
-            transforms.RandomAffine(15, (0.1, 0.1), (0.75, 1.25), 5),
+            transforms.RandomAffine(15, (0.05, 0.05), (0.9, 1.1), 5),
             transforms.RandomChoice([
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomPerspective(distortion_scale=0.1),
-                transforms.RandomResizedCrop(360, scale=(0.6, 1.0)),
+                # transforms.RandomHorizontalFlip(),
+                transforms.RandomPerspective(distortion_scale=0.05),
+                transforms.RandomResizedCrop(360, scale=(0.8, 1.0)),
             ])
 
         ])
@@ -197,7 +199,7 @@ class CLRDataset(torch.utils.data.Dataset):
         else:
             x1 = self.to_tensor(x)
 
-        if random.random() < 0.25:
+        if random.random() < self.patchclr_proba:
             patch_clr_or_not = True
             x = self.small_shape_transforms(x) if random.random() < 0.5 else x
             if self.x2_transform:
@@ -253,7 +255,7 @@ class ImageNetValidation:
         print("[Validation]: Time = %s, Train Acc = %.5f, Val Acc = %.5f" % (get_time_string(), train_acc, val_acc))
 
 
-def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None):
+def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None, simclr_w=None, patchclr_w=None):
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
 
@@ -267,7 +269,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
 
     if mode == "clr":
         print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
-        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"])
+        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"], simclr_w=simclr_w, patchclr_w=patchclr_w)
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
@@ -434,7 +436,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["mode"], args["shuffle_dataset"], batch_size,
-                                  world_size=args["world_size"], num_workers=args["num_workers"])
+                                  world_size=args["world_size"], num_workers=args["num_workers"], simclr_w=simclr_w, patchclr_w=patchclr_w)
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)

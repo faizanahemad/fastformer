@@ -174,6 +174,7 @@ if __name__ == "__main__":
     vision_cmd += " --lr 0.000002"
     vision_cmd += " --batch_size 24"
     # vision_cmd += " --moco"
+    # vision_cmd += " --simclr_moco"
     vision_cmd += " --simclr_w 0.0 --patchclr_w 1.0"
 
     # vision_cmd += " --wandb_dryrun"
