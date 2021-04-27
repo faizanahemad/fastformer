@@ -434,7 +434,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
 
         mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e2)
-        assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
+        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
         contrastive_matrix = contrastive_matrix - mask
         del mask
         rnd_idx = 0
@@ -447,9 +447,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             # print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
             contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
             labels = labels + rnd_idx
-        assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
+        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
-        assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
+        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
         labels = torch.cat((labels + label_lengths, labels))
         loss = self.loss_ce(contrastive_matrix, labels)
         if not torch.isfinite(loss):
@@ -475,16 +475,16 @@ class PatchCLR(FastFormerPreTrainedModel):
         if isinstance(b, dict):
             b = b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"]
 
-        assert torch.all(torch.isfinite(b.detach())).item()
+        # assert torch.all(torch.isfinite(b.detach())).item()
 
         b = ffn(b) if self.patchclr_w > 0 else ffn(b[:, 0:1])
 
-        assert torch.all(torch.isfinite(b.detach())).item()
+        # assert torch.all(torch.isfinite(b.detach())).item()
 
-        assert torch.all(torch.isfinite(b.norm(2, -1, True).detach())).item()
+        # assert torch.all(torch.isfinite(b.norm(2, -1, True).detach())).item()
         b = b / (b.norm(2, -1, True) + self.eps)
 
-        assert torch.all(torch.isfinite(b.detach())).item()
+        # assert torch.all(torch.isfinite(b.detach())).item()
         return b
 
     def build_representations(self, x1, x2, eval=False, use_key_enc=False):
