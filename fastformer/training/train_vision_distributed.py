@@ -569,7 +569,7 @@ def train(local_rank, args):
                 model.key_backbone = key_backbone
                 model.key_ffn = key_ffn
             try:
-                if no_sync and (step + 1) % iter_size != 0:
+                if no_sync and (step + 1) % iter_size != 0 and hasattr(ddp_model, "no_sync"):
                     with ddp_model.no_sync():
                         output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
