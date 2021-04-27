@@ -123,7 +123,7 @@ def numel(m: torch.nn.Module, only_trainable: bool = True):
 
 def set_seeds(seed=0):
     torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.deterministic = True
     random.seed(seed)
     np.random.seed(seed)
     torch.backends.cudnn.benchmark = True

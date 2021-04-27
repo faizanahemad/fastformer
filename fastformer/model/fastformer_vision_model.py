@@ -423,6 +423,13 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.key_backbone = None
         if reinit:
             self.init_weights()
+        for module in self.ffn:
+            if hasattr(module, "weight"):
+                fan_out, fan_in = module.weight.shape
+                std = np.sqrt(1.0 / float(fan_in + fan_out))
+                nn.init.normal_(module.weight, std=std)
+            if hasattr(module, "bias"):
+                nn.init.constant_(module.bias, 0.0)
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
 
