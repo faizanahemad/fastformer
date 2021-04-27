@@ -440,7 +440,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
             labels = labels + rnd_idx
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
-        labels = torch.cat((labels + label_lengths , labels))
+        labels = torch.cat((labels + label_lengths, labels))
         loss = self.loss_ce(contrastive_matrix, labels)
         predictions = contrastive_matrix.detach().argmax(dim=-1)
         accuracy = (predictions == labels).float().mean().item()

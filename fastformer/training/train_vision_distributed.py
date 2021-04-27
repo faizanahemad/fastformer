@@ -518,15 +518,17 @@ def train(local_rank, args):
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
-            ddp_model.module.simclr_use_extra_negatives = False
-            ddp_model.module.patchclr_use_extra_negatives = False
+            if hasattr(ddp_model, "module"):
+                ddp_model.module.simclr_use_extra_negatives = False
+                ddp_model.module.patchclr_use_extra_negatives = False
 
             if pct_done < pct_simclr_simple and not args["moco"]:
                 samples_per_machine_simclr = 0
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
-                ddp_model.module.simclr_use_extra_negatives = False
-                ddp_model.module.patchclr_use_extra_negatives = False
+                if hasattr(ddp_model, "module"):
+                    ddp_model.module.simclr_use_extra_negatives = False
+                    ddp_model.module.patchclr_use_extra_negatives = False
             else:
                 if not args["moco"]:
                     samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
@@ -534,9 +536,10 @@ def train(local_rank, args):
                     model.moco = True
                     ddp_model.module.moco = True
                 model.simclr_use_extra_negatives = True
-                ddp_model.module.simclr_use_extra_negatives = True
                 model.patchclr_use_extra_negatives = True
-                ddp_model.module.patchclr_use_extra_negatives = True
+                if hasattr(ddp_model, "module"):
+                    ddp_model.module.simclr_use_extra_negatives = True
+                    ddp_model.module.patchclr_use_extra_negatives = True
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             # samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
@@ -560,8 +563,9 @@ def train(local_rank, args):
             if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
                 key_backbone = key_backbone.eval()
                 key_ffn = key_ffn.eval()
-                ddp_model.module.key_backbone = key_backbone
-                ddp_model.module.key_ffn = key_ffn
+                if hasattr(ddp_model, "module"):
+                    ddp_model.module.key_backbone = key_backbone
+                    ddp_model.module.key_ffn = key_ffn
                 model.key_backbone = key_backbone
                 model.key_ffn = key_ffn
             try:
@@ -576,11 +580,11 @@ def train(local_rank, args):
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
                     if args["moco"] or args["simclr_moco"]:
-                        key_backbone.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items())})
+                        key_backbone.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
                         key_ffn.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in
-                                                      zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items())})
+                                                      zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
 
-                if (step + 1) % iter_size != 0 and ddp_model.module.simclr_use_extra_negatives and samples_per_machine_simclr >= 1 and simclr_w > 0:
+                if (step + 1) % iter_size != 0 and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
@@ -627,7 +631,7 @@ def train(local_rank, args):
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                     print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, cur_total_samples = %s, total_samples_simclr = %s, simclr_negative = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives, samples_per_machine_simclr, cur_total_samples, total_samples_simclr, simclr_negative))
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives, samples_per_machine_simclr, cur_total_samples, total_samples_simclr, simclr_negative))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0
