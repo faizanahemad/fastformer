@@ -366,7 +366,7 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              )
 
 vision_base_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False,
-                                      hidden_dropout=0.0, attention_dropout=0.0, max_position_embeddings=196,)
+                                      hidden_dropout=0.0, attention_dropout=0.0, max_position_embeddings=196, relative_attention=False)
 
 vision_base_rel_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=1, has_decoder=False,
                                           hidden_dropout=0.0, attention_dropout=0.0, max_position_embeddings=14, relative_attention=True)
