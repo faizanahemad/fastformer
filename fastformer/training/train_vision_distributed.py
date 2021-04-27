@@ -349,7 +349,7 @@ def train(local_rank, args):
         batch_size = get_vision_batch_size("vision_md_config", not args["no_autocast"], args["mode"])
         backbone = get_pretrained_deit(not args["deit_classifier"])
     else:
-        backbone = FastFormerVisionModel(config, reinit=reinit)
+        backbone = FastFormerVisionModel(config, reinit=True)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     simclr_w = args["simclr_w"] if "simclr_w" in args else 2.0
