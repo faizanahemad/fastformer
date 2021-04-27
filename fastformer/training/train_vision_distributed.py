@@ -374,11 +374,6 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-    if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
-        key_backbone = copy.deepcopy(backbone).to(device)
-        key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
-        key_ffn = copy.deepcopy(model.ffn).to(device)
-        key_ffn.load_state_dict(copy.deepcopy(model.ffn.state_dict()))
 
     if local_rank == 0 and not args["moco"]:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
