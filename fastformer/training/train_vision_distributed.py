@@ -273,7 +273,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
 
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
-                        prefetch_factor=8, num_workers=num_workers, pin_memory=True)
+                        prefetch_factor=8, num_workers=num_workers, pin_memory=True, worker_init_fn=worker_init_fn)
     return loader
 
 
@@ -433,12 +433,14 @@ def train(local_rank, args):
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
+    set_seeds(args["seed"] + rank)
     if local_rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["mode"], args["shuffle_dataset"], batch_size,
-                                  world_size=args["world_size"], num_workers=args["num_workers"], simclr_w=simclr_w, patchclr_w=patchclr_w)
+                                  world_size=args["world_size"], num_workers=args["num_workers"],
+                                  simclr_w=simclr_w, patchclr_w=patchclr_w)
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)

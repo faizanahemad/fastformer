@@ -750,3 +750,7 @@ def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_con
             print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
         except Exception as e:
             traceback.print_exc()
+
+
+def worker_init_fn(worker_id):
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
