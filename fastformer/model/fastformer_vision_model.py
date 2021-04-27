@@ -367,7 +367,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
                 fan_out, fan_in = module.weight.shape
                 std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
-            if hasattr(module, "bias"):
+            if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
     def get_representations(self, x):
@@ -428,7 +428,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 fan_out, fan_in = module.weight.shape
                 std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
-            if hasattr(module, "bias"):
+            if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
