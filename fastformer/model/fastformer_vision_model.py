@@ -276,7 +276,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
         self.patch_embed = PatchEmbed(config.img_size, config.patch_size, config.in_chans, config.block_channel_size[0],
                                       config.num_highway_cls_tokens, config.hidden_dropout, config.layer_norm_eps,
-                                      config.relative_attention, config.embedding_size)
+                                      config.relative_attention[0], config.embedding_size)
         self.encoder_block_one = nn.ModuleList()
         for i in range(config.block_sizes[0]):
             self.encoder_block_one.append(TransformerLayer(config, 0, True, i))
@@ -656,7 +656,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_md_rel_funnel_config',
+    ap.add_argument("--config", type=str, default='vision_base_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -723,7 +723,8 @@ if __name__ == '__main__':
         print(output.argmax(-1))
         exit()
 
-    output = model(x, x)
+    patch_clr_or_not = torch.ones(x.size(0)).to(device)
+    output = model(x, x, patch_clr_or_not)
     check_patch_clr_acc(model, "clr", "cpu", args["pretrained_model"], config)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -751,7 +752,7 @@ if __name__ == '__main__':
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(x, x)
+                    output = model(x, x, patch_clr_or_not)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
                     get_unused_params(model)
@@ -761,7 +762,7 @@ if __name__ == '__main__':
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(x, x)
+                output = model(x, x, patch_clr_or_not)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 get_unused_params(model)
@@ -772,11 +773,11 @@ if __name__ == '__main__':
             if fp16:
                 with autocast():
                     with torch.no_grad():
-                        output = model(x, x)
+                        output = model(x, x, patch_clr_or_not)
 
             else:
                 with torch.no_grad():
-                    output = model(x, x)
+                    output = model(x, x, patch_clr_or_not)
             return output
         return output
 
