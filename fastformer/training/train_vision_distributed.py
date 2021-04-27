@@ -433,7 +433,7 @@ def train(local_rank, args):
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
-    set_seeds(args["seed"] + rank)
+
     if local_rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
