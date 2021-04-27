@@ -739,6 +739,16 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.row_embed, std=std)
             if hasattr(module, "first_pos_embed"):
                 nn.init.normal_(module.first_pos_embed, std=std)
+            if hasattr(module, "proj"):
+                if getattr(module.proj, "weight", None) is not None:
+                    if self.config.initializer_std is None:
+                        fan_out, fan_in = module.proj.weight.shape[:2]
+                        fan_out, fan_in = fan_out, fan_in
+                        std = np.sqrt(1.0 / float(fan_in + fan_out))
+                    else:
+                        std = self.config.initializer_std
+                    nn.init.normal_(module.proj.weight, std=std)
+
 
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
