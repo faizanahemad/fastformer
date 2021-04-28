@@ -424,7 +424,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         if reinit:
             self.init_weights()
         for module in self.ffn:
-            if hasattr(module, "weight"):
+            if hasattr(module, "weight") and len(module.weight.shape) == 2:
                 fan_out, fan_in = module.weight.shape
                 std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
