@@ -392,9 +392,18 @@ def train(local_rank, args):
             model.load_state_dict(state_dict, strict=True)
             load_type = "strict"
         except:
-
-            model.load_state_dict(state_dict, strict=False)
-            load_type = "not_strict"
+            try:
+                model.load_state_dict(state_dict, strict=False)
+                load_type = "not_strict"
+            except:
+                try:
+                    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                    model.load_state_dict(state_dict, strict=True)
+                    load_type = "strict-from-ddp"
+                except:
+                    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                    model.load_state_dict(state_dict, strict=False)
+                    load_type = "not_strict-from-ddp"
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
