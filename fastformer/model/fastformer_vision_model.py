@@ -405,7 +405,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
-        self.ffn = nn.Sequential(nn.Linear(num_features, 128), nn.GELU(), nn.Linear(128, 64, bias=False))
+        self.ffn = nn.Sequential(nn.LayerNorm(num_features, eps=self.eps), nn.Linear(num_features, 128), nn.GELU(), nn.Linear(128, 64, bias=False))
         self.num_features = 64
         self.eps = eps
         self.contrastive_temperature = contrastive_temperature

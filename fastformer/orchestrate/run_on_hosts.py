@@ -173,8 +173,8 @@ if __name__ == "__main__":
     vision_cmd += " --no_autocast"
     vision_cmd += " --lr 0.000002"
     vision_cmd += " --batch_size 32"
-    vision_cmd += " --moco"
-    # vision_cmd += " --simclr_moco"
+    # vision_cmd += " --moco"
+    vision_cmd += " --simclr_moco"
     vision_cmd += " --simclr_w 1.0 --patchclr_w 0.0"
     # vision_cmd += " --detect_anomaly"
 
