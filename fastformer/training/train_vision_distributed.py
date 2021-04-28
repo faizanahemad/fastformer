@@ -62,6 +62,8 @@ def training_args():
 
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+    parser.add_argument('--pct_simclr_simple', default=20, type=int,
+                        help='pct_simclr_simple')
 
     parser.add_argument('--batch_size', required=False, type=int,
                         help='Batch Size')
@@ -511,7 +513,7 @@ def train(local_rank, args):
     extra_negative_repr_simclr = None
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
-    pct_simclr_simple = 20
+    pct_simclr_simple = args["pct_simclr_simple"]
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
