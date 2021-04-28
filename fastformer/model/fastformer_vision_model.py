@@ -550,31 +550,31 @@ class PatchCLR(FastFormerPreTrainedModel):
             contrastive_matrix_store = contrastive_matrix
 
             patchclr_negative=None
-            # if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-            #     if extra_negative_repr_patchclr.size(0) > 4 * bs:
-            #         extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
-            #     extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-            #     c1_det = out_1.detach()
-            #     if extra_negative_repr_patchclr.size(0) > 4 * bs and self.priority_clr:
-            #         selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
-            #         topk_indices_argmax = selector_mat.argmax(1)
-            #         topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
-            #         topk_indices_mean = torch.topk(selector_mat.mean(0), bs, dim=0).indices
-            #         topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
-            #         patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
-            #         del topk_indices_mean
-            #         del topk_indices_max
-            #         del topk_indices_argmax
-            #         del selector_mat
-            #         del topk_indices
-            #     else:
-            #         # print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
-            #         patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
-            #     extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
-            #
-            # else:
-            #     extra_negative_repr_patchclr = out_2.detach()
-            # extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
+            if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
+                if extra_negative_repr_patchclr.size(0) > 4 * bs:
+                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
+                extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
+                c1_det = out_1.detach()
+                if extra_negative_repr_patchclr.size(0) > 4 * bs and self.priority_clr:
+                    selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
+                    topk_indices_argmax = selector_mat.argmax(1)
+                    topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
+                    topk_indices_mean = torch.topk(selector_mat.mean(0), bs, dim=0).indices
+                    topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
+                    patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
+                    del topk_indices_mean
+                    del topk_indices_max
+                    del topk_indices_argmax
+                    del selector_mat
+                    del topk_indices
+                else:
+                    # print("Patchclr negative size = %s, in-batch size = %s" % (extra_negative_repr_patchclr.size(), c1.size()))
+                    patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
+
+            else:
+                extra_negative_repr_patchclr = out_2.detach()
+            extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
             patchclr_loss = self.patchclr_w * patchclr_loss

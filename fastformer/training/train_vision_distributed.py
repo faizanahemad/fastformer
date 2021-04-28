@@ -433,7 +433,6 @@ def train(local_rank, args):
     clean_memory()
     _ = model_train_validation_switch(ddp_model.module if hasattr(ddp_model, "module") else ddp_model, args, train=True)
     optc = optimizer_config.to_dict()
-    optc["lr"] = (optc["lr"] * batch_size * args["world_size"]) / 512.0
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                   betas=(optc["beta_1"], optc["beta_2"]))
@@ -530,7 +529,7 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
 
-            if pct_done < pct_simclr_simple or (not args["moco"] and not args["simclr_moco"]):
+            if pct_done < pct_simclr_simple:
                 samples_per_machine_simclr = 0
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
@@ -618,6 +617,7 @@ def train(local_rank, args):
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
                 print(es)
                 torch.save(batch, os.path.join(os.getcwd(), "error-input.pth"))
+
                 reraise(e, es)
             full_time = time.time() - start_time
             full_times.append(full_time)
@@ -651,7 +651,7 @@ def train(local_rank, args):
             del bs_size
             start_time = time.time()
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    state_dict = ddp_model.state_dict()
+    state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
     if local_rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
     del ddp_model
