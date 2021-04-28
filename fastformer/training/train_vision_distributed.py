@@ -41,6 +41,11 @@ from collections import Counter
 from fastformer.model.fastformer_vision_model import FastFormerVisionModel, PatchCLR, ClassificationModel
 import torchvision.transforms as transforms
 
+try:
+    from torch.cuda.amp import GradScaler, autocast
+except:
+    pass
+
 
 def training_args():
     parser = argparse.ArgumentParser()
@@ -672,21 +677,28 @@ def train(local_rank, args):
         ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
 
 
-def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,):
-    if args["mode"] == "clr":
-        x1 = batch["x1"]
-        x2 = batch["x2"]
-        patch_clr_or_not = batch["patch_clr_or_not"]
-        output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
-    elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
-        x = batch[0]
-        labels = batch[1]
-        output = ddp_model(x, labels)
-    else:
-        raise ValueError
+def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
+                     no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,
+                     scaler=None):
+    is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
+    with autocast(is_fp16):
+        if args["mode"] == "clr":
+            x1 = batch["x1"]
+            x2 = batch["x2"]
+            patch_clr_or_not = batch["patch_clr_or_not"]
+            output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
+        elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
+            x = batch[0]
+            labels = batch[1]
+            output = ddp_model(x, labels)
+        else:
+            raise ValueError
 
     loss = output.pop("loss") / iter_size
-    loss.backward()
+    if is_fp16:
+        scaler.scale(loss).backward()
+    else:
+        loss.backward()
     _ = output.pop("predictions", None)
     zgradders = []
     inf_gradders = []
@@ -699,9 +711,16 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
     # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     if not no_sync:
-        ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
-        optimizer.step()
-        scheduler.step()
+        if is_fp16:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+        else:
+            ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            optimizer.step()
+            scheduler.step()
 
     if np.isnan(loss.detach().cpu().item()):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (

@@ -551,7 +551,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-                if extra_negative_repr_patchclr.size(0) > 4 * bs:
+                if extra_negative_repr_patchclr.size(0) > 2 * bs:
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 c1_det = out_1.detach()
