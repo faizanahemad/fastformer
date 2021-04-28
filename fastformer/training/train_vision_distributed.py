@@ -429,7 +429,7 @@ def train(local_rank, args):
     else:
         ddp_model = model
 
-    if args["moco"] or args["simclr_moco"]:
+    if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
         print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
         if isinstance(ddp_model, DDP):
             key_backbone = copy.deepcopy(ddp_model.module.backbone).to(device)
