@@ -178,8 +178,8 @@ class CLRDataset(torch.utils.data.Dataset):
         self.x1_transform = x1_transform
         self.x2_transform = x2_transform
         self.to_tensor = to_tensor
-        self.patchclr_proba = 0.9 if simclr_w == 0 else 0.25
-        self.patchclr_proba = 0.0 if patchclr_w == 0 else self.patchclr_proba
+        self.patchclr_proba = 0.9 if simclr_w is not None and simclr_w == 0 else 0.25
+        self.patchclr_proba = 0.0 if patchclr_w is not None and patchclr_w == 0 else self.patchclr_proba
         self.small_shape_transforms = transforms.Compose([
             transforms.RandomAffine(15, (0.05, 0.05), (0.9, 1.1), 5),
             transforms.RandomChoice([
@@ -527,7 +527,7 @@ def train(local_rank, args):
                 ddp_model.module.simclr_use_extra_negatives = False
                 ddp_model.module.patchclr_use_extra_negatives = False
 
-            if pct_done < pct_simclr_simple and not args["moco"]:
+            if pct_done < pct_simclr_simple or (not args["moco"] and not args["simclr_moco"]):
                 samples_per_machine_simclr = 0
                 model.simclr_use_extra_negatives = False
                 model.patchclr_use_extra_negatives = False
@@ -584,12 +584,12 @@ def train(local_rank, args):
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
-                    if args["moco"] or args["simclr_moco"]:
+                    if args["mode"] == "clr" and (args["moco"] or args["simclr_moco"]):
                         key_backbone.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
                         key_ffn.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in
                                                       zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
 
-                if (step + 1) % iter_size != 0 and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w > 0:
+                if args["mode"] == "clr" and (step + 1) % iter_size != 0 and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
