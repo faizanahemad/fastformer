@@ -425,14 +425,18 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
         ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
-        if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
+
+    else:
+        ddp_model = model
+
+    if args["moco"] or args["simclr_moco"]:
+        print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
+        if isinstance(ddp_model, DDP):
             key_backbone = copy.deepcopy(ddp_model.module.backbone).to(device)
             key_backbone.load_state_dict(copy.deepcopy(ddp_model.module.backbone.state_dict()))
             key_ffn = copy.deepcopy(ddp_model.module.ffn).to(device)
             key_ffn.load_state_dict(copy.deepcopy(ddp_model.module.ffn.state_dict()))
-    else:
-        ddp_model = model
-        if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
+        else:
             key_backbone = copy.deepcopy(backbone).to(device)
             key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
             key_ffn = copy.deepcopy(model.ffn).to(device)
