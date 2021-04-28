@@ -363,7 +363,7 @@ def train(local_rank, args):
             model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
                              reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True, moco=args["moco"]).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
-        model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]), train_backbone=True if "full_train" else False,
+        model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
         if args["deit"] and args["deit_classifier"]:
             model.head = nn.Identity().to(device)
@@ -653,7 +653,7 @@ def train(local_rank, args):
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
     del ddp_model
     if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
-        model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], 768 if args["deit"] else (config.block_channel_size[0] + config.block_channel_size[1]),
+        model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], 768 if args["deit"] else config.block_channel_size[1],
                                     train_backbone=True if "full_train" else False).to(device)
         model.load_state_dict(state_dict, strict=True)
         assert isinstance(model, ClassificationModel)

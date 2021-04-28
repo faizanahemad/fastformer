@@ -372,8 +372,8 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
     def get_representations(self, x):
         if isinstance(self.backbone, FastFormerVisionModel):
-            output = self.backbone(x, run_decoder=True)
-            representation = torch.cat((output["second_block_hidden"][:, 0], output["third_block_hidden"][:, 0]), 1)
+            output = self.backbone(x, run_decoder=False)
+            representation = output["second_block_hidden"][:, 0]
         else:
             representation = self.backbone(x)
             if len(representation.size()) == 3:
