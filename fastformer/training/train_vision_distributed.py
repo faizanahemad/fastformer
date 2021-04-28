@@ -77,6 +77,9 @@ def training_args():
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
 
+    parser.add_argument('--patchclr_heads', default=1, type=int,
+                        help='Patchclr heads')
+
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
 
@@ -110,7 +113,7 @@ def training_args():
                         help='DEIT')
 
     parser.add_argument('--deit_classifier', action="store_true", default=False,
-                        help='DEIT')
+                        help='DEIT Classifier')
 
     parser.add_argument('--no_autocast', action="store_true", default=False,
                         help='Avoid Autocast')
@@ -358,10 +361,10 @@ def train(local_rank, args):
     if args["mode"] == "clr":
         if args["deit"]:
             model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
-                             reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False, moco=args["moco"]).to(device)
+                             reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
         else:
             model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
-                             reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True, moco=args["moco"]).to(device)
+                             reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
