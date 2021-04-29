@@ -26,6 +26,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
+from fastformer.optimizers import Novograd, RangerLars
 from fastformer.data.dataset import datadict_iterator
 from fastformer.utils import *
 from fastformer.model import *
@@ -133,6 +134,9 @@ def training_args():
 
     parser.add_argument('--init_method', required=False, type=str, default="tcp",
                         help='init_method')
+
+    parser.add_argument('--optimizer', required=False, type=str, default="adamw",
+                        help='optimizer')
 
     parser.add_argument('--num_workers', required=False, type=int, default=0,
                         help='Dataloader workers')
@@ -453,8 +457,15 @@ def train(local_rank, args):
     _ = model_train_validation_switch(ddp_model.module if hasattr(ddp_model, "module") else ddp_model, args, train=True)
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
-    optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
-                                  betas=(optc["beta_1"], optc["beta_2"]))
+    if args["optimizer"] == "adamw":
+        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+                                      betas=(optc["beta_1"], optc["beta_2"]))
+    elif args["optimizer"] == "novograd":
+        optimizer = Novograd(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
+    elif args["optimizer"] == "rangerlars":
+        optimizer = RangerLars(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
+    else:
+        raise ValueError
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
