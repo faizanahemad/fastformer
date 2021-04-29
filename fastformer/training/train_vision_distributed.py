@@ -543,8 +543,8 @@ def train(local_rank, args):
                 bs_size = list(batch[key].size())
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             else:
-                batch[0] = batch[0].to(device)
-                batch[1] = batch[1].to(device)
+                batch[0] = batch[0].to(device, non_blocking=True)
+                batch[1] = batch[1].to(device, non_blocking=True)
                 bs_size = list(batch[0].size())
                 key = 0
             total_samples_simclr = iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
@@ -626,13 +626,14 @@ def train(local_rank, args):
 
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
-                        extra_negative_repr_simclr = extra_negative_repr_simclr[start: ]
+                        extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
                     elif extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
-                        most_recent_simclr = extra_negative_repr_simclr[start:].to(device).contiguous()
-                        tensor_list = [most_recent_simclr.new_empty(most_recent_simclr.size()) for _ in range(args["world_size"])]
-                        torch.distributed.all_gather(tensor_list, most_recent_simclr)
+                        most_recent_simclr = extra_negative_repr_simclr[start:].to(device, non_blocking=True)
+                        empty_size = most_recent_simclr.size()
+                        tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
+                        torch.distributed.all_gather(tensor_list, most_recent_simclr.contiguous())
 
                         extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], extra_negative_repr_simclr.size(-1))
 
