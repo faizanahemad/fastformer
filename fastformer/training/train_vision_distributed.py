@@ -255,7 +255,7 @@ class ImageNetValidation:
         print("[Validation]: Time = %s, Val Acc = %.5f" % (get_time_string(), val_acc))
 
         predictions, labels = [], []
-        for x, label in tqdm(train_loader, desc="Train", miniters=10, mininterval=10.0):
+        for x, label in tqdm(train_loader, desc="Train", miniters=100, mininterval=100.0):
             labels.extend(label.tolist())
             x = x.to(device)
             pred = model(x)["predictions"]
@@ -384,13 +384,12 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-
     if local_rank == 0 and not args["moco"]:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
         print(model)
-        if "pretrained_model" in args and args["pretrained_model"] is not None:
-            check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
+        # if "pretrained_model" in args and args["pretrained_model"] is not None and args["mode"] == "clr":
+        #     check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -414,8 +413,8 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    if local_rank == 0 and not (args["moco"] or args["simclr_moco"]):
-        check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
+    # if local_rank == 0 and not (args["moco"] or args["simclr_moco"]):
+    #     check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
