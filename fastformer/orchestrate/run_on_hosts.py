@@ -173,10 +173,10 @@ if __name__ == "__main__":
     vision_cmd += " --mode clr"
     vision_cmd += " --no_autocast"
     vision_cmd += " --lr 0.0001"
-    vision_cmd += " --batch_size 32"
+    vision_cmd += " --batch_size 24"
     vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
-    vision_cmd += " --simclr_w 1.0 --patchclr_w 0.0"
+    vision_cmd += " --simclr_w 1.0 --patchclr_w 0.5"
     vision_cmd += " --pct_simclr_simple 0"
     # vision_cmd += " --detect_anomaly"
 
