@@ -547,7 +547,7 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device, non_blocking=True)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
+            total_samples_simclr = 4 * iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
             if not (args["moco"] or args["simclr_moco"]):
                 total_samples_simclr = min(total_samples_simclr, 8192)
             elif total_samples_simclr < 8192:
