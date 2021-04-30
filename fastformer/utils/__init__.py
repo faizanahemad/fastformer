@@ -649,16 +649,16 @@ def get_image_augmetations(mode):
     elif mode == "linear_probe":
         shape_transforms.append(transforms.RandomChoice([
             identity,
-            transforms.RandomResizedCrop(640, scale=(0.8, 1.0), ratio=(3 / 4, 4 / 3)),
+            transforms.RandomResizedCrop(416, scale=(0.8, 1.0), ratio=(3 / 4, 4 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.7, 1.0), 0),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), ]),
+            transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0), 0),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), ]),
         ]))
         shape_transforms.append(transforms.RandomChoice([
             identity,
-            transforms.RandomAffine(0, (0.05, 0.05), (0.9, 1.1), 5),
-            transforms.RandomPerspective(distortion_scale=0.05),
-            transforms.RandomRotation(15)
+            transforms.RandomAffine(0, (0.02, 0.02), (0.9, 1.1), 5),
+            transforms.RandomPerspective(distortion_scale=0.02),
+            transforms.RandomRotation(10)
         ]))
         shape_transforms.append(transforms.Resize(384))
     else:
@@ -724,8 +724,9 @@ def get_image_augmetations(mode):
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     elif mode == "linear_probe":
-        _ = non_shape_transforms.pop()
-        non_shape_transforms.append(identity)
+        # _ = non_shape_transforms.pop()
+        # non_shape_transforms.append(identity)
+        non_shape_transforms = [cut, identity]
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     else:
