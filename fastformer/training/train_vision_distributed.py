@@ -192,8 +192,8 @@ class CLRDataset(torch.utils.data.Dataset):
         self.x1_transform = x1_transform
         self.x2_transform = x2_transform
         self.to_tensor = to_tensor
-        self.patchclr_proba = 0.9 if simclr_w is not None and simclr_w == 0 else 0.25
-        self.patchclr_proba = 0.0 if patchclr_w is not None and patchclr_w == 0 else self.patchclr_proba
+        self.patchclr_proba = 0.9 if simclr_w is None or simclr_w == 0 else 0.2
+        self.patchclr_proba = 0.0 if patchclr_w is None or patchclr_w == 0 else self.patchclr_proba
         self.small_shape_transforms = transforms.Compose([
             transforms.RandomAffine(15, (0.05, 0.05), (0.9, 1.1), 5),
             transforms.RandomChoice([
