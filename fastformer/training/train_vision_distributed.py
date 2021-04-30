@@ -70,7 +70,7 @@ def training_args():
                         help='Batch Size')
     parser.add_argument('--patch_negatives', default=4, type=int,
                         help='Patch Negatives')
-    parser.add_argument('--simclr_negatives', default=32, type=int,
+    parser.add_argument('--total_samples_simclr', default=98_304, type=int,
                         help='SimCLR Negatives')
 
     parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
@@ -547,7 +547,7 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device, non_blocking=True)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = 4 * max(iter_size, 4) * bs_size[0] * args["world_size"]  # args["world_size"] to max
+            total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (16 * bs_size[0] * args["world_size"])  # args["world_size"] to max
             if not (args["moco"] or args["simclr_moco"]):
                 total_samples_simclr = min(total_samples_simclr, 8192)
             elif total_samples_simclr < 8192:
@@ -640,6 +640,7 @@ def train(local_rank, args):
                         start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
                         extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
