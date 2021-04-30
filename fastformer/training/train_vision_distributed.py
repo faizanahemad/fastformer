@@ -486,7 +486,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else len(dataloader))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
-                                                    div_factor=1e3, three_phase=False, pct_start=0.3, anneal_strategy="linear")
+                                                    div_factor=1e2, three_phase=False, pct_start=0.3, anneal_strategy="linear")
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
           (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
@@ -547,7 +547,7 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device, non_blocking=True)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = 4 * iter_size * bs_size[0] * args["world_size"]  # args["world_size"] to max
+            total_samples_simclr = 4 * max(iter_size, 4) * bs_size[0] * args["world_size"]  # args["world_size"] to max
             if not (args["moco"] or args["simclr_moco"]):
                 total_samples_simclr = min(total_samples_simclr, 8192)
             elif total_samples_simclr < 8192:
