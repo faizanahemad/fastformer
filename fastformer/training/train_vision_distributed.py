@@ -380,7 +380,7 @@ def train(local_rank, args):
             model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
                              reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
         else:
-            model = PatchCLR(backbone, config.block_channel_size[0], config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
+            model = PatchCLR(backbone, config.block_channel_size[-1], config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
                              reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
