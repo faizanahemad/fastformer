@@ -357,6 +357,8 @@ class ClassificationModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_classes, num_features=768, train_backbone=False, reinit_backbone=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
+        if isinstance(self.backbone, FastFormerVisionModel):
+            num_features = num_features * 2
         self.num_features = num_features
         self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
@@ -375,7 +377,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
     def get_representations(self, x):
         if isinstance(self.backbone, FastFormerVisionModel):
             output = self.backbone(x, run_decoder=False)
-            representation = output["second_block_hidden"][:, 0]
+            representation = torch.cat((output["second_block_hidden"][:, 0], output["second_block_hidden"][:, 1:].mean(1)), 1)
         else:
             representation = self.backbone(x)
             if len(representation.size()) == 3:
