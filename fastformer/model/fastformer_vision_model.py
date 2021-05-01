@@ -356,14 +356,14 @@ class ClassificationModel(FastFormerPreTrainedModel):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.num_features = num_features
-        self.head = nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
+        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
         if reinit_backbone:
             self.init_weights()
 
         for module in self.head:
-            if hasattr(module, "weight"):
+            if hasattr(module, "weight") and len(module.weight.shape) == 2:
                 fan_out, fan_in = module.weight.shape
                 std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
