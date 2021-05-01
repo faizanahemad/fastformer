@@ -551,11 +551,11 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             patchclr_negative=None
             if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-                if extra_negative_repr_patchclr.size(0) > 2 * bs:
-                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
-                extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                c1_det = out_1.detach()
+                # if extra_negative_repr_patchclr.size(0) > 2 * bs:
+                #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
+                # extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
                 if extra_negative_repr_patchclr.size(0) > 4 * bs and self.priority_clr:
+                    c1_det = out_1.detach()
                     selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
@@ -601,9 +601,9 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
                 # if extra_negative_repr_simclr.size(0) > 1024 * b:
                 #     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
-                extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                sc1_det = b1s.detach()
+                # extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
                 if extra_negative_repr_simclr.size(0) >= 160 * b and self.priority_clr:
+                    sc1_det = b1s.detach()
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
                     topk_indices_max = torch.topk(selector_mat.max(0).values, 72 * b, dim=0).indices

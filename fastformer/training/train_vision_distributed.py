@@ -547,6 +547,7 @@ def train(local_rank, args):
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
     total_samples_simclr = 8 * (total_samples_simclr // 8)
     cur_total_samples = total_samples_simclr
+    total_samples_patchclr = args["total_samples_patchclr"]
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -666,6 +667,8 @@ def train(local_rank, args):
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
+                if extra_negative_repr_patchclr.size(0) > total_samples_patchclr:
+                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[extra_negative_repr_patchclr.size(0) - total_samples_patchclr:]
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
