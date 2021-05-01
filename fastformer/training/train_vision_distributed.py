@@ -619,7 +619,7 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
-                if step == 0 and "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None and (epoch % warm_restart_key_encoder == 0):
+                if step == 0 and "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None and (epoch % args["warm_restart_key_encoder"] == 0):
                     key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
                     key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
                     extra_negative_repr_patchclr = None
