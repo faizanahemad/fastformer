@@ -686,7 +686,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_base_config',
+    ap.add_argument("--config", type=str, default='vision_md_rel_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
