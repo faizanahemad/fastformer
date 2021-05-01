@@ -288,9 +288,10 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         self.stride = config.stride
         self.decoder_block = nn.ModuleList()
         self.dim_match = nn.Identity()
+        self.dim_match_ln = nn.Identity()
         if config.block_channel_size[0] != config.block_channel_size[1]:
-            self.dim_match = nn.Sequential(nn.Linear(config.block_channel_size[0],config.block_channel_size[1], bias=False),
-                                           nn.LayerNorm(config.block_channel_size[1], eps=config.layer_norm_eps))
+            self.dim_match = nn.Linear(config.block_channel_size[0], config.block_channel_size[1], bias=False)
+            self.dim_match_ln = nn.LayerNorm(config.block_channel_size[1], eps=config.layer_norm_eps)
 
         self.has_decoder = config.has_decoder
         if config.has_decoder:
@@ -320,6 +321,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             hidden = hidden.reshape(B, H, W, config.block_channel_size[1]).permute(0, 3, 1, 2)
             hidden = F.avg_pool2d(hidden, self.stride, self.stride).flatten(2).permute(0, 2, 1)
             hidden = torch.cat((cls, hidden), 1)
+        hidden = self.dim_match_ln(hidden)
 
         for i, layer in enumerate(self.encoder_block_two):
             if i == 0:
@@ -381,6 +383,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
         return representation
 
     def forward(self, x, labels=None):
+        # TODO: GAP
         if self.train_backbone:
             representation = self.get_representations(x)
         else:
@@ -404,7 +407,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                  reinit=False, priority_clr=False, moco=False, channel_dropout=0.0, heads=1):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
-        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+        self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
         self.ffn_input_features = num_features // heads
         assert num_features % heads == 0
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
