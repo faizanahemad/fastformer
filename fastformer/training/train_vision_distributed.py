@@ -619,9 +619,11 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
-                if "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None:
+                if step == 0 and "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None and (epoch % warm_restart_key_encoder == 0):
                     key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
                     key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
+                    extra_negative_repr_patchclr = None
+                    extra_negative_repr_simclr = None
                 key_backbone = key_backbone.eval()
                 key_ffn = key_ffn.eval()
                 if hasattr(ddp_model, "module"):
@@ -652,7 +654,7 @@ def train(local_rank, args):
                             key_ffn.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in
                                                           zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
 
-                if args["mode"] == "clr" and (step + 1) % iter_size != 0 and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                if args["mode"] == "clr" and ((step + 1) % iter_size != 0 or iter_size == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
