@@ -399,7 +399,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4,
-                 patchclr_w=1.0, contrastive_temperature=5e-2,
+                 patchclr_w=1.0, contrastive_temperature=0.2,
                  simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, simclr_use_extra_negatives=True, patchclr_use_extra_negatives=True,
                  reinit=False, priority_clr=False, moco=False, channel_dropout=0.0, heads=1):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
@@ -407,7 +407,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features // heads
         assert num_features % heads == 0
-        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 128), nn.GELU(), nn.Linear(128, 64, bias=False))
+        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
         self.num_features = 64
         self.eps = eps
         self.contrastive_temperature = contrastive_temperature

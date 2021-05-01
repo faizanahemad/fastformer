@@ -68,9 +68,9 @@ def training_args():
 
     parser.add_argument('--batch_size', required=False, type=int,
                         help='Batch Size')
-    parser.add_argument('--patch_negatives', default=4, type=int,
+    parser.add_argument('--total_samples_patchclr', default=32_768, type=int,
                         help='Patch Negatives')
-    parser.add_argument('--total_samples_simclr', default=98_304, type=int,
+    parser.add_argument('--total_samples_simclr', default=131_072, type=int,
                         help='SimCLR Negatives')
 
     parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
@@ -403,17 +403,34 @@ def train(local_rank, args):
             load_type = "strict"
         except:
             try:
-                model.load_state_dict(state_dict, strict=False)
-                load_type = "not_strict"
+                try:
+                    model.load_state_dict(state_dict, strict=False)
+                    load_type = "not_strict"
+                except:
+                    state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                    model.load_state_dict(state_dict, strict=False)
+                    load_type = "not_strict_no_ffn"
             except:
                 try:
-                    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                    model.load_state_dict(state_dict, strict=True)
-                    load_type = "strict-from-ddp"
+                    try:
+                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                        model.load_state_dict(state_dict, strict=True)
+                        load_type = "strict-from-ddp"
+                    except:
+                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                        model.load_state_dict(state_dict, strict=True)
+                        load_type = "strict-from-ddp-no-ffn"
                 except:
-                    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                    model.load_state_dict(state_dict, strict=False)
-                    load_type = "not_strict-from-ddp"
+                    try:
+                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                        model.load_state_dict(state_dict, strict=False)
+                        load_type = "not_strict-from-ddp"
+                    except:
+                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                        model.load_state_dict(state_dict, strict=False)
+                        load_type = "not_strict-from-ddp-no-ffn"
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
