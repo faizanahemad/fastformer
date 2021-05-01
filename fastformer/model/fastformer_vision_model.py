@@ -408,7 +408,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.ffn_input_features = num_features // heads
         assert num_features % heads == 0
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
-        self.num_features = 64
+        self.num_features = 128
         self.eps = eps
         self.contrastive_temperature = contrastive_temperature
         self.simclr_w = simclr_w
