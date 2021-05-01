@@ -543,6 +543,10 @@ def train(local_rank, args):
     pct_simclr_simple = args["pct_simclr_simple"]
     assert not args["moco"] or pct_simclr_simple == 0
     assert not args["simclr_moco"] or pct_simclr_simple > 0
+    total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
+                16 * batch_size * args["world_size"])  # args["world_size"] to max
+    total_samples_simclr = 8 * (total_samples_simclr // 8)
+    cur_total_samples = total_samples_simclr
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -566,7 +570,7 @@ def train(local_rank, args):
                 batch[1] = batch[1].to(device, non_blocking=True)
                 bs_size = list(batch[0].size())
                 key = 0
-            total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (16 * bs_size[0] * args["world_size"])  # args["world_size"] to max
+
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
@@ -595,10 +599,9 @@ def train(local_rank, args):
 
             # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             # samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
-            cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
-            if args["moco"]:
-                cur_total_samples = total_samples_simclr
-            cur_total_samples = 8 * (cur_total_samples // 8)
+            if not args["moco"] and not args["simclr_moco"]:
+                cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
+                cur_total_samples = 8 * (cur_total_samples // 8)
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
