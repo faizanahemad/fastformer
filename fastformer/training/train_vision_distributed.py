@@ -66,9 +66,11 @@ def training_args():
     parser.add_argument('--pct_simclr_simple', default=20, type=int,
                         help='pct_simclr_simple')
 
-    parser.add_argument('--batch_size', required=False, type=int,
+    parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
-    parser.add_argument('--total_samples_patchclr', default=32_768, type=int,
+    parser.add_argument('--warm_restart_key_encoder', required=False, type=int,
+                        help='Warm Restarts Epochs for Key Encoder')
+    parser.add_argument('--total_samples_patchclr', default=131_072, type=int,
                         help='Patch Negatives')
     parser.add_argument('--total_samples_simclr', default=131_072, type=int,
                         help='SimCLR Negatives')
@@ -541,6 +543,7 @@ def train(local_rank, args):
     extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
     pct_simclr_simple = args["pct_simclr_simple"]
+    assert pct_simclr_simple * 4 <= 50
     assert not args["moco"] or pct_simclr_simple == 0
     assert not args["simclr_moco"] or pct_simclr_simple > 0
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
@@ -587,9 +590,8 @@ def train(local_rank, args):
                     ddp_model.module.simclr_use_extra_negatives = False
                     ddp_model.module.patchclr_use_extra_negatives = False
             else:
-                if not args["moco"]:
-                    samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
                 if args["simclr_moco"]:
+                    samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / ((pct_simclr_simple * 4) - pct_simclr_simple))))
                     model.moco = True
                     ddp_model.module.moco = True
                 model.simclr_use_extra_negatives = True
@@ -617,11 +619,17 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
+                if "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None:
+                    key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
+                    key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
                 key_backbone = key_backbone.eval()
                 key_ffn = key_ffn.eval()
                 if hasattr(ddp_model, "module"):
                     ddp_model.module.key_backbone = key_backbone
                     ddp_model.module.key_ffn = key_ffn
+                else:
+                    ddp_model.key_backbone = key_backbone
+                    ddp_model.key_ffn = key_ffn
                 model.key_backbone = key_backbone
                 model.key_ffn = key_ffn
             try:
