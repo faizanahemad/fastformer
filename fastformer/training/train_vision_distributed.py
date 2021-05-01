@@ -667,7 +667,7 @@ def train(local_rank, args):
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
-                if extra_negative_repr_patchclr.size(0) > total_samples_patchclr:
+                if extra_negative_repr_patchclr is not None and extra_negative_repr_patchclr.size(0) > total_samples_patchclr:
                     extra_negative_repr_patchclr = extra_negative_repr_patchclr[extra_negative_repr_patchclr.size(0) - total_samples_patchclr:]
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
