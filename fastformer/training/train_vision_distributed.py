@@ -135,7 +135,7 @@ def training_args():
     parser.add_argument('--init_method', required=False, type=str, default="tcp",
                         help='init_method')
 
-    parser.add_argument('--optimizer', required=False, type=str, default="adamw",
+    parser.add_argument('--optimizer', required=False, type=str, default="rangerlars",
                         help='optimizer')
 
     parser.add_argument('--num_workers', required=False, type=int, default=0,
