@@ -406,7 +406,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=384, eps=1e-4,
                  patchclr_w=1.0, contrastive_temperature=0.2,
                  simclr_w=1.0, clustering_w=1.0, gap_bias_w=0.1, simclr_use_extra_negatives=True, patchclr_use_extra_negatives=True,
-                 reinit=False, priority_clr=False, moco=False, channel_dropout=0.0, heads=1):
+                 reinit=False, priority_clr=True, moco=False, channel_dropout=0.0, heads=1):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
@@ -563,8 +563,8 @@ class PatchCLR(FastFormerPreTrainedModel):
                     c1_det = out_1.detach()
                     selector_mat = c1_det.mm(extra_negative_repr_patchclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
-                    topk_indices_max = torch.topk(selector_mat.max(0).values, bs, dim=0).indices
-                    topk_indices_mean = torch.topk(selector_mat.mean(0), bs, dim=0).indices
+                    topk_indices_max = torch.topk(selector_mat.max(0).values, extra_negative_repr_patchclr.size(0) // 8, dim=0).indices
+                    topk_indices_mean = torch.topk(selector_mat.mean(0), extra_negative_repr_patchclr.size(0) // 8, dim=0).indices
                     topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean)))
                     patchclr_negative = c1.mm(extra_negative_repr_patchclr[topk_indices].contiguous().t())
                     del topk_indices_mean
@@ -611,11 +611,11 @@ class PatchCLR(FastFormerPreTrainedModel):
                     sc1_det = b1s.detach()
                     selector_mat = sc1_det.mm(extra_negative_repr_simclr.t())
                     topk_indices_argmax = selector_mat.argmax(1)
-                    topk_indices_max = torch.topk(selector_mat.max(0).values, 72 * b, dim=0).indices
-                    topk_indices_mean = torch.topk(selector_mat.mean(0), 72 * b, dim=0).indices
-                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), 72 * b, dim=0).indices
+                    topk_indices_max = torch.topk(selector_mat.max(0).values, extra_negative_repr_simclr.size(0) // 8, dim=0).indices
+                    topk_indices_mean = torch.topk(selector_mat.mean(0), extra_negative_repr_simclr.size(0) // 8, dim=0).indices
+                    topk_indices_mean_select = torch.topk(torch.topk(selector_mat, 4, dim=0).values.mean(0), extra_negative_repr_simclr.size(0) // 8, dim=0).indices
                     most_recent_indices = torch.arange(extra_negative_repr_simclr.size(0) - 32 * b, extra_negative_repr_simclr.size(0), device=sc1.device)
-                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (32 * b,), device=sc1.device)
+                    rand_indices = torch.randint(0, extra_negative_repr_simclr.size(0), (extra_negative_repr_simclr.size(0) // 8,), device=sc1.device)
 
                     topk_indices = torch.unique(torch.cat((topk_indices_argmax, topk_indices_max, topk_indices_mean, rand_indices, topk_indices_mean_select, most_recent_indices)))
                     simclr_negative = sc1.mm(extra_negative_repr_simclr[topk_indices].contiguous().t())
