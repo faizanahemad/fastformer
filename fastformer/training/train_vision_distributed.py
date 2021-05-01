@@ -567,10 +567,6 @@ def train(local_rank, args):
                 bs_size = list(batch[0].size())
                 key = 0
             total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (16 * bs_size[0] * args["world_size"])  # args["world_size"] to max
-            if not (args["moco"] or args["simclr_moco"]):
-                total_samples_simclr = min(total_samples_simclr, 8192)
-            elif total_samples_simclr < 8192:
-                total_samples_simclr = 8192
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
