@@ -688,7 +688,7 @@ def get_image_augmetations(mode):
             transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
             transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
             transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
-            transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
+
         ]))
     else:
         shape_transforms.append(identity)
@@ -712,7 +712,6 @@ def get_image_augmetations(mode):
         #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
         #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
         #     transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
-        #     transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
         # ]))
     shape_transforms = transforms.Compose(shape_transforms)
 
@@ -751,8 +750,8 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
                                 cut,
                                 get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.75, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
-                                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),
+                                transforms.Compose([transforms.Resize(512), get_alb(alb.transforms.GridDropout(ratio=0.75, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)),]),
+                                transforms.Compose([transforms.Resize(512), get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)), ]),
                                 get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
