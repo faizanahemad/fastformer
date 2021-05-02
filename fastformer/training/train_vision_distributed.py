@@ -553,7 +553,6 @@ def train(local_rank, args):
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
     total_samples_simclr = 8 * (total_samples_simclr // 8)
-    cur_total_samples = total_samples_simclr
     total_samples_patchclr = args["total_samples_patchclr"]
     for epoch in range(args["epochs"]):
 
@@ -603,12 +602,6 @@ def train(local_rank, args):
                 if hasattr(ddp_model, "module"):
                     ddp_model.module.simclr_use_extra_negatives = True
                     ddp_model.module.patchclr_use_extra_negatives = True
-
-            # samples_per_machine_simclr = total_samples_simclr // args["world_size"]
-            # samples_per_machine_simclr = min(samples_per_machine_simclr, iter_size * bs_size[0] * (4 if args["moco"] else 1))
-            if not args["moco"] and not args["simclr_moco"]:
-                cur_total_samples = int(total_samples_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / (80 - pct_simclr_simple))))
-                cur_total_samples = 8 * (cur_total_samples // 8)
 
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
@@ -661,11 +654,7 @@ def train(local_rank, args):
                 if args["mode"] == "clr" and ((step + 1) % iter_size != 0 or iter_size == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
-                    if cur_total_samples < bs_size[0] and extra_negative_repr_simclr is not None:
-                        start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
-                        extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
-                        output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
-                    elif extra_negative_repr_simclr is not None:
+                    if extra_negative_repr_simclr is not None:
                         start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
                         most_recent_simclr = extra_negative_repr_simclr[start:].to(device, non_blocking=True)
                         empty_size = most_recent_simclr.size()
@@ -673,9 +662,6 @@ def train(local_rank, args):
                         torch.distributed.all_gather(tensor_list, most_recent_simclr.contiguous())
 
                         extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], extra_negative_repr_simclr.size(-1))
-
-                        start = max(extra_negative_repr_simclr.size(0) - cur_total_samples, 0)
-                        extra_negative_repr_simclr = extra_negative_repr_simclr[start:]
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
 
 
@@ -710,9 +696,9 @@ def train(local_rank, args):
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, cur_total_samples = %s, total_samples_simclr = %s, simclr_negative = %s, patchclr_negative = %s" % (
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s, patchclr_negative = %s" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives,
-                    samples_per_machine_simclr, cur_total_samples, total_samples_simclr, simclr_negative, patchclr_negative))
+                    samples_per_machine_simclr, total_samples_simclr, simclr_negative, patchclr_negative))
                 batch_times = []
                 full_times = []
                 samples_processed_this_log_iter = 0
