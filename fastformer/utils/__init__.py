@@ -702,8 +702,8 @@ def get_image_augmetations(mode):
             transforms.RandomPerspective(distortion_scale=0.1),
             shape_transforms.append(transforms.RandomChoice([
                 transforms.RandomRotation(30),
-                DefinedRotation(90),
-                DefinedRotation(180),
+                # DefinedRotation(90),
+                # DefinedRotation(180),
             ])),
         ]))
         shape_transforms.append(transforms.RandomChoice([
