@@ -177,7 +177,7 @@ if __name__ == "__main__":
     vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
     vision_cmd += " --warm_restart_key_encoder 20"
-    vision_cmd += " --simclr_w 1.0 --patchclr_w 0.1"
+    vision_cmd += " --simclr_w 1.0 --patchclr_w 0.05"
     vision_cmd += " --pct_simclr_simple 0"
     # vision_cmd += " --detect_anomaly"
 
