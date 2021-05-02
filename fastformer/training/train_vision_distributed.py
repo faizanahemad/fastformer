@@ -655,12 +655,18 @@ def train(local_rank, args):
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
-                        if epoch == 0 and step <= iter_size:
-                            start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
-                            most_recent_simclr = extra_negative_repr_simclr[start:]
+                        if (epoch == 0 or (args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0))) and step <= iter_size:
+                            most_recent_simclr = extra_negative_repr_simclr
                         else:
-                            start = max(extra_negative_repr_simclr.size(0) - samples_per_machine_simclr, 0)
-                            most_recent_simclr = extra_negative_repr_simclr[start:]
+                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - iter_size * batch_size, iter_size * batch_size])
+                            samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
+                            if samples_per_machine_simclr <= 0:
+                                most_recent_simclr = mrs
+                            else:
+                                samples_per_machine_simclr = min(samples_per_machine_simclr, extra_negative_repr_simclr.size(0) // args["world_size"])
+                                start = rank * samples_per_machine_simclr
+                                end = (rank + 1) * samples_per_machine_simclr
+                                most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
                         empty_size = most_recent_simclr.size()
                         tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr.contiguous())
@@ -684,7 +690,7 @@ def train(local_rank, args):
             full_times.append(full_time)
             if step == 0 and epoch == 0:
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
-            if (steps_done + 1) % log_every_steps == 0:
+            if (steps_done + 1) % log_every_steps == 0 or step == 0:
                 if local_rank == 0:
                     simclr_negative = extra_negative_repr_simclr.size(0) if extra_negative_repr_simclr is not None else 0
                     patchclr_negative = extra_negative_repr_patchclr.size(0) if extra_negative_repr_patchclr is not None else 0
