@@ -7,6 +7,8 @@ import gc
 import datetime
 import time
 from datetime import datetime, timedelta
+
+import torchvision
 from pytz import timezone
 import time
 from torch import nn
@@ -629,6 +631,22 @@ class get_alb:
             return image
 
 
+class DefinedRotation(torchvision.transforms.RandomRotation):
+    def __init__(self, degrees):
+        super().__init__(degrees)
+
+    @staticmethod
+    def get_params(degrees):
+        """Get parameters for ``rotate`` for a random rotation.
+        Returns:
+            sequence: params to be passed to ``rotate`` for random rotation.
+        """
+
+        angle = random.sample(list(degrees), k=1)[0]
+
+        return angle
+
+
 def get_image_augmetations(mode):
     from PIL import Image
     from albumentations import augmentations as alb
@@ -649,31 +667,50 @@ def get_image_augmetations(mode):
     elif mode == "linear_probe":
         shape_transforms.append(transforms.RandomChoice([
             identity,
-            transforms.RandomResizedCrop(416, scale=(0.8, 1.0), ratio=(3 / 4, 4 / 3)),
+            transforms.RandomResizedCrop(416, scale=(0.6, 1.0), ratio=(3 / 4, 4 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0), 0),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), ]),
+            transforms.RandomAffine(0, (0.0, 0.0), (0.6, 1.0), 0),
         ]))
         shape_transforms.append(transforms.RandomChoice([
             identity,
-            transforms.RandomAffine(0, (0.02, 0.02), (0.9, 1.1), 5),
-            transforms.RandomPerspective(distortion_scale=0.02),
-            transforms.RandomRotation(10)
+            transforms.RandomAffine(0, (0.05, 0.05), (0.8, 1.2), 5),
+            transforms.RandomPerspective(distortion_scale=0.05),
+            shape_transforms.append(transforms.RandomChoice([
+                transforms.RandomRotation(30),
+                DefinedRotation(90),
+                DefinedRotation(180),
+            ])),
         ]))
-        shape_transforms.append(transforms.Resize(384))
+        shape_transforms.append(transforms.RandomChoice([
+            identity,
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
+            transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
+            transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
+        ]))
     else:
         shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomResizedCrop(640, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
+            transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
             transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
-            transforms.Compose([transforms.Resize(768), transforms.RandomCrop(672),]),
         ]))
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
             transforms.RandomPerspective(distortion_scale=0.1),
-            transforms.RandomRotation(30)
+            shape_transforms.append(transforms.RandomChoice([
+                transforms.RandomRotation(30),
+                DefinedRotation(90),
+                DefinedRotation(180),
+            ])),
         ]))
-        shape_transforms.append(transforms.Resize(512))
+        shape_transforms.append(transforms.RandomChoice([
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
+            transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
+            transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
+        ]))
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [
@@ -724,9 +761,9 @@ def get_image_augmetations(mode):
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     elif mode == "linear_probe":
-        # _ = non_shape_transforms.pop()
-        # non_shape_transforms.append(identity)
-        non_shape_transforms = [cut, identity]
+        _ = non_shape_transforms.pop()
+        non_shape_transforms.append(identity)
+        # non_shape_transforms = [cut, identity]
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     else:
