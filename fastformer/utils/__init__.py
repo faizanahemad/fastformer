@@ -660,6 +660,7 @@ def get_image_augmetations(mode):
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
+    bigcut = get_cutout(1.0, 0.1)
     if mode == "validation":
         shape_transforms.append(transforms.Resize(224))
         shape_transforms.append(transforms.CenterCrop(224))
@@ -755,13 +756,18 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
-                            cut]
+                            transforms.RandomChoice([
+                                cut, bigcut
+                            ])]
 
     if mode == "full_train":
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     elif mode == "linear_probe":
         _ = non_shape_transforms.pop()
+        non_shape_transforms.append(transforms.RandomChoice([
+            cut, bigcut, identity
+        ]))
         non_shape_transforms.append(identity)
         # non_shape_transforms = [cut, identity]
         non_shape_transforms = transforms.Compose(non_shape_transforms)
