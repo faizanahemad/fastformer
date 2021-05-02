@@ -675,8 +675,9 @@ def train(local_rank, args):
                         empty_size = most_recent_simclr.size()
                         del extra_negative_repr_simclr
 
+                        most_recent_simclr = most_recent_simclr.contiguous()
                         tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
-                        torch.distributed.all_gather(tensor_list, most_recent_simclr.contiguous())
+                        torch.distributed.all_gather(tensor_list, most_recent_simclr)
 
                         extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], most_recent_simclr.size(-1))
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
