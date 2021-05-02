@@ -458,7 +458,9 @@ class PatchCLR(FastFormerPreTrainedModel):
         # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
         # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        if not self.moco:
+        if self.moco:
+            labels = labels + label_lengths
+        else:
             labels = torch.cat((labels + label_lengths, labels))
         loss = self.loss_ce(contrastive_matrix, labels)
         if not torch.isfinite(loss):
@@ -549,11 +551,12 @@ class PatchCLR(FastFormerPreTrainedModel):
 
 
             # b2 = torch.cat((out_2, out_1), 0)
+
+
+            c1 = torch.cat((out_1, out_2), 0)
+            contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
             if self.moco:
-                contrastive_matrix = out_1.mm(torch.cat((out_2, out_1), 0).t())
-            else:
-                c1 = torch.cat((out_1, out_2), 0)
-                contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
+                contrastive_matrix = contrastive_matrix[:out_1.size(0)]
             contrastive_matrix_store = contrastive_matrix
 
             patchclr_negative=None
@@ -603,11 +606,10 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1s = b1[:, 0]
             b2s = b2[:, 0]
 
+            sc1 = torch.cat((b1s, b2s), 0)
+            contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
             if self.moco:
-                contrastive_matrix = b1s.mm(torch.cat((b2s, b1s), 0).t())
-            else:
-                sc1 = torch.cat((b1s, b2s), 0)
-                contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
+                contrastive_matrix = contrastive_matrix[:b1s.size(0)]
             simclr_negative = None
             if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
                 # if extra_negative_repr_simclr.size(0) > 1024 * b:
