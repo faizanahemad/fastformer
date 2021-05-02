@@ -692,11 +692,11 @@ def get_image_augmetations(mode):
         ]))
     else:
         shape_transforms.append(identity)
-        # shape_transforms.append(transforms.RandomChoice([
-        #     transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
-        #     transforms.RandomHorizontalFlip(p=1.0),
-        #     transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
-        # ]))
+        shape_transforms.append(transforms.RandomChoice([
+            transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
+            transforms.RandomHorizontalFlip(p=1.0),
+            transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
+        ]))
         # shape_transforms.append(transforms.RandomChoice([
         #     identity,
         #     transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
