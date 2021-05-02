@@ -697,16 +697,16 @@ def get_image_augmetations(mode):
             transforms.RandomHorizontalFlip(p=1.0),
             transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
         ]))
-        # shape_transforms.append(transforms.RandomChoice([
-        #     identity,
-        #     transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
-        #     transforms.RandomPerspective(distortion_scale=0.1),
-        #     shape_transforms.append(transforms.RandomChoice([
-        #         transforms.RandomRotation(30),
-        #         # DefinedRotation(90),
-        #         # DefinedRotation(180),
-        #     ])),
-        # ]))
+        shape_transforms.append(transforms.RandomChoice([
+            identity,
+            transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
+            transforms.RandomPerspective(distortion_scale=0.1),
+            shape_transforms.append(transforms.RandomChoice([
+                transforms.RandomRotation(30),
+                # DefinedRotation(90),
+                # DefinedRotation(180),
+            ])),
+        ]))
         # shape_transforms.append(transforms.RandomChoice([
         #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
         #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
