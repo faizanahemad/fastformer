@@ -661,7 +661,7 @@ def get_image_augmetations(mode):
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
     if mode == "validation":
-        shape_transforms.append(transforms.Resize(256))
+        shape_transforms.append(transforms.Resize(224))
         shape_transforms.append(transforms.CenterCrop(224))
         shape_transforms.append(to_tensor)
     elif mode == "linear_probe":
@@ -693,10 +693,11 @@ def get_image_augmetations(mode):
         shape_transforms.append(transforms.RandomChoice([
             transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.5, 1.0), 0),
+            transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
         ]))
         shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomAffine(0, (0.1, 0.1), (0.75, 1.25), 10),
+            identity,
+            transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
             transforms.RandomPerspective(distortion_scale=0.1),
             shape_transforms.append(transforms.RandomChoice([
                 transforms.RandomRotation(30),
@@ -714,7 +715,6 @@ def get_image_augmetations(mode):
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [
-                            
                             transforms.RandomChoice([
                                 identity,
                                 get_alb(alb.transforms.MedianBlur(p=1.0)),
