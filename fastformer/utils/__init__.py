@@ -691,28 +691,29 @@ def get_image_augmetations(mode):
             transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
         ]))
     else:
-        shape_transforms.append(transforms.RandomChoice([
-            transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
-            transforms.RandomPerspective(distortion_scale=0.1),
-            shape_transforms.append(transforms.RandomChoice([
-                transforms.RandomRotation(30),
-                # DefinedRotation(90),
-                # DefinedRotation(180),
-            ])),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
-            transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
-            transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
-        ]))
+        shape_transforms.append(identity)
+        # shape_transforms.append(transforms.RandomChoice([
+        #     transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
+        #     transforms.RandomHorizontalFlip(p=1.0),
+        #     transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
+        # ]))
+        # shape_transforms.append(transforms.RandomChoice([
+        #     identity,
+        #     transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
+        #     transforms.RandomPerspective(distortion_scale=0.1),
+        #     shape_transforms.append(transforms.RandomChoice([
+        #         transforms.RandomRotation(30),
+        #         # DefinedRotation(90),
+        #         # DefinedRotation(180),
+        #     ])),
+        # ]))
+        # shape_transforms.append(transforms.RandomChoice([
+        #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
+        #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
+        #     transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
+        #     transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
+        #     transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.Resize(224)]),
+        # ]))
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [
