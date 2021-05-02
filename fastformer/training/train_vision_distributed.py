@@ -672,6 +672,7 @@ def train(local_rank, args):
                                 start = rank * samples_per_machine_simclr
                                 end = (rank + 1) * samples_per_machine_simclr
                                 most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
+                                print(most_recent_simclr.size(), mrs.size())
                         empty_size = most_recent_simclr.size()
                         del extra_negative_repr_simclr
 
