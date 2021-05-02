@@ -526,6 +526,7 @@ def train(local_rank, args):
 
     full_times = []
     batch_times = []
+    model_times = []
     ddp_model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
@@ -567,8 +568,6 @@ def train(local_rank, args):
         for step, batch in enumerate(dataloader):
             steps_done = epoch * len(dataloader) + step
             pct_done = (100 * steps_done / total_steps)
-            gen_batch_time = time.time() - start_time
-            batch_times.append(gen_batch_time)
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
                 bs_size = list(batch[key].size())
@@ -579,6 +578,8 @@ def train(local_rank, args):
                 bs_size = list(batch[0].size())
                 key = 0
 
+            gen_batch_time = time.time() - start_time
+            batch_times.append(gen_batch_time)
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             model.simclr_use_extra_negatives = False
             model.patchclr_use_extra_negatives = False
@@ -633,16 +634,19 @@ def train(local_rank, args):
                 model.key_backbone = key_backbone
                 model.key_ffn = key_ffn
             try:
+                model_start = time.time()
                 if no_sync and (step + 1) % iter_size != 0 and hasattr(ddp_model, "no_sync"):
                     with ddp_model.no_sync():
                         output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
                                                   no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
+                    model_times.append(time.time() - model_start)
                 else:
                     output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
                     optimizer.zero_grad(set_to_none=True)
+                    model_times.append(time.time() - model_start)
                     if args["mode"] == "clr" and (args["moco"] or args["simclr_moco"]):
                         if pct_done < pct_simclr_simple:
                             key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
@@ -700,18 +704,19 @@ def train(local_rank, args):
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
                     wandb_log = dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                                   batch_times=np.mean(batch_times), full_times=np.mean(full_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                                   batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                                      simclr_negative=simclr_negative, patchclr_negative=patchclr_negative,
                                    **{k: v for k, v in output.items() if v is not None})
 
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s, patchclr_negative = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives,
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s, patchclr_negative = %s" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives,
                     samples_per_machine_simclr, total_samples_simclr, simclr_negative, patchclr_negative))
                 batch_times = []
                 full_times = []
+                model_times = []
                 samples_processed_this_log_iter = 0
 
                 clean_memory()
