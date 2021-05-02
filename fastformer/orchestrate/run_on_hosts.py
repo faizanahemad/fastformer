@@ -173,7 +173,7 @@ if __name__ == "__main__":
     vision_cmd += " --mode clr"
     vision_cmd += " --no_autocast"
     vision_cmd += " --lr 0.0005"
-    vision_cmd += " --batch_size 4"
+    vision_cmd += " --batch_size 8"
     vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
     vision_cmd += " --warm_restart_key_encoder 20"
