@@ -172,7 +172,7 @@ if __name__ == "__main__":
     vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 1000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --shuffle_dataset --accumulation_steps 1 --epochs 300"
     vision_cmd += " --mode clr"
     vision_cmd += " --no_autocast"
-    vision_cmd += " --lr 0.0001"
+    vision_cmd += " --lr 0.001"
     vision_cmd += " --batch_size 8"
     vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
