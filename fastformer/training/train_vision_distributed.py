@@ -673,10 +673,12 @@ def train(local_rank, args):
                                 end = (rank + 1) * samples_per_machine_simclr
                                 most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
                         empty_size = most_recent_simclr.size()
+                        del extra_negative_repr_simclr
+                        del output["extra_negative_repr_simclr"]
                         tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr.contiguous())
 
-                        extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], extra_negative_repr_simclr.size(-1))
+                        extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], most_recent_simclr.size(-1))
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
 
 
