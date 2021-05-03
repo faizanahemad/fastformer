@@ -70,7 +70,7 @@ def training_args():
                         help='Batch Size')
     parser.add_argument('--warm_restart_key_encoder', required=False, type=int,
                         help='Warm Restarts Epochs for Key Encoder')
-    parser.add_argument('--total_samples_patchclr', default=65536 * 2, type=int,
+    parser.add_argument('--total_samples_patchclr', default=65536, type=int,
                         help='Patch Negatives')
     parser.add_argument('--total_samples_simclr', default=65536 * 2, type=int,
                         help='SimCLR Negatives')
