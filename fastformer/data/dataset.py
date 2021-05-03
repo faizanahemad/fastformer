@@ -13,9 +13,12 @@ import os
 
 from fastformer.utils import squeeze_after, get_time_string, recursive_op, gcd_array
 from collections import deque
+from functools import partial
 
-char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
-char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
+def get_char_to_id():
+    char_to_id = sorted([k for k, v in AutoTokenizer.from_pretrained("bert-base-uncased").get_vocab().items() if len(k) == 1]) + [" ", "\n"]
+    char_to_id = dict(zip(char_to_id, range(2, len(char_to_id) + 2)))
+    return char_to_id
 
 
 from torch.utils.data import Dataset, DataLoader
@@ -211,7 +214,7 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
     return " ".join(new_tokens)
 
 
-def char_mapper(x):
+def char_mapper(char_to_id, x):
     x = x.lower()
     # ud = list(unidecode.unidecode(x.lower()).lower())
     # if len(ud) == 0:
@@ -231,7 +234,7 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     offset_mapping = F.relu(offset_mapping)
     # offset_mapping[:, -1] = 1
     char_list = list(text)
-    char_lists = list(map(char_mapper, char_list))
+    char_lists = list(map(partial(char_mapper, char_to_id), char_list))
 
     # assert len(char_list) == len(char_lists)
     mxlen = offset_mapping.max().item()
