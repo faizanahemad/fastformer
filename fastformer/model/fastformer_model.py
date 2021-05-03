@@ -1632,7 +1632,7 @@ if __name__ == "__main__":
             texts += texts
     dataset = SmallTextDataset(texts)
     config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
-    dataset = TokenizerDataset(config, tokenizer, char_to_id,
+    dataset = TokenizerDataset(config, tokenizer, get_char_to_id(),
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length),
                                # sentence_jumble_proba=((1024, 0.1),), word_noise_proba=((1024, 0.1),),
                                max_jumbling_span_length=2,

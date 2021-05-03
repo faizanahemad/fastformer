@@ -217,7 +217,7 @@ class SuperGlueTest:
 
         train = None
         if "train" in dataset:
-            train = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+            train = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                      dataset["train"])
             train.training = False
@@ -226,14 +226,14 @@ class SuperGlueTest:
 
         validation = None
         if "validation" in dataset:
-            validation = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+            validation = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                           dataset["validation"])
             validation.training = False
             validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2,
                                     shuffle=False)
 
-        test = TokenizerDataset(model.config, model.tokenizer, char_to_id,
+        test = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
                                 dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
                                 dataset["test"])
         test.training = False
@@ -486,7 +486,7 @@ class SuperGlueTest:
                 clean_memory()
                 sg_dataset = super_glue[k]
                 idx = [sg_dataset[i]["idx"] for i in range(len(sg_dataset))]
-                dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
+                dataset = TokenizerDataset(self.config, tokenizer, get_char_to_id(),
                                            dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                            dataset)
                 dataset.training = False
@@ -630,7 +630,7 @@ class LargeValidator:
             predictions = []
             if 'answer' in cns:
                 labels = [dataset[i]["answer"] for i in range(len(dataset))]
-            dataset = TokenizerDataset(self.config, tokenizer, char_to_id,
+            dataset = TokenizerDataset(self.config, tokenizer, get_char_to_id(),
                                        dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
                                        dataset)
             dataset.training = False
@@ -715,7 +715,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     kwargs = dict(prefetch_factor=prefetch_factor) if num_workers > 0 else dict()
     try:
         train_dataset = Dataset.load_from_disk(location)
-        train_dataset = TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
+        train_dataset = TokenizerDataset(config, tokenizer, get_char_to_id(), dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), train_dataset)
 
         train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(train_dataset, shuffle=shuffle_dataset),
                                   batch_size=min_size, collate_fn=collate_fn, shuffle=shuffle_dataset and single_node,
@@ -728,7 +728,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
         train_dataset_sampling_proba = {k: len(v) ** sampling_fraction for k, v in train_dataset.items()}
         lsum = sum(train_dataset_sampling_proba.values())
         train_dataset_sampling_proba = {k: v / lsum for k, v in train_dataset_sampling_proba.items()}
-        train_dataset = {k: TokenizerDataset(config, tokenizer, char_to_id, dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
+        train_dataset = {k: TokenizerDataset(config, tokenizer, get_char_to_id(), dict(padding="max_length", truncation=True, return_tensors="pt", max_length=config.tokenizer_length), v) for k, v in train_dataset.items()}
         # for v in train_dataset.values():
         #     v.training = False
 
