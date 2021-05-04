@@ -263,6 +263,7 @@ class ImageNetValidation:
             predictions.extend(pred.cpu().tolist())
         val_acc = accuracy_score(labels, predictions)
         print("[Validation]: Time = %s, Val Acc = %.5f" % (get_time_string(), val_acc))
+        wandb.log({"validation_acc": val_acc})
 
         predictions, labels = [], []
         for x, label in tqdm(train_loader, desc="Train", miniters=100, mininterval=100.0):
@@ -271,6 +272,7 @@ class ImageNetValidation:
             pred = model(x)["predictions"]
             predictions.extend(pred.cpu().tolist())
         train_acc = accuracy_score(labels, predictions)
+        wandb.log({"train_acc": train_acc})
 
         print("[Validation]: Time = %s, Train Acc = %.5f, Val Acc = %.5f" % (get_time_string(), train_acc, val_acc))
 
