@@ -623,23 +623,23 @@ def train(local_rank, args):
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
                     
-                if args["mode"] == "clr" and (args["moco"] or args["simclr_moco"]) and (step + 1) % iter_size == 0:
+                if args["mode"] == "clr" and (args["moco"] or args["simclr_moco"]) and (step + 1) % (4 * iter_size) == 0:
                     if pct_done < pct_simclr_simple:
                         key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
                         key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
                     else:
-                        key_backbone.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
-                        key_ffn.load_state_dict({k_key: 0.99 * v_key + 0.01 * v_query for (k_key, v_key), (k_query, v_query) in
+                        key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
+                        key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
                                                       zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
 
-                if args["mode"] == "clr" and ((step + 1) % (1 * iter_size) == 0 or (1 * iter_size) == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                if args["mode"] == "clr" and ((step + 1) % (4 * iter_size) == 0 or (4 * iter_size) == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
-                        if (epoch == 0 or (args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0))) and step <= (1 * iter_size):
+                        if (epoch == 0 or (args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0))) and step <= (4 * iter_size):
                             most_recent_simclr = extra_negative_repr_simclr
                         else:
-                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (1 * iter_size) * batch_size, (1 * iter_size) * batch_size])
+                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
                             samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
                             if samples_per_machine_simclr <= 0:
                                 most_recent_simclr = mrs
