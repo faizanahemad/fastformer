@@ -260,7 +260,7 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
 
     if mode == "clr":
         # print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
-        dataset = CLRDataset(dataset, image_transforms["non_shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"], simclr_w=simclr_w, patchclr_w=patchclr_w)
+        dataset = CLRDataset(dataset)
 
     kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
     loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
