@@ -439,13 +439,13 @@ class PatchCLR(FastFormerPreTrainedModel):
             if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None):
+    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None, calculate_accuracy=False):
 
-        mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e2)
+        # mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e2)
         # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        contrastive_matrix = contrastive_matrix - mask
-        del mask
-        rnd_idx = 0
+        # contrastive_matrix = contrastive_matrix - mask
+        # del mask
+        # rnd_idx = 0
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
         if extra_negatives is not None:
             # ens = extra_negatives.size(1)
@@ -454,19 +454,16 @@ class PatchCLR(FastFormerPreTrainedModel):
             # contrastive_matrix = torch.cat((en1, contrastive_matrix, en2), 1)
             # print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
             contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
-            labels = labels + rnd_idx
+            # labels = labels + rnd_idx
         # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
         contrastive_matrix = contrastive_matrix / self.contrastive_temperature
         # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        if self.moco:
-            labels = labels + label_lengths
-        else:
-            labels = torch.cat((labels + label_lengths, labels))
+        labels = torch.cat((labels + label_lengths, labels))
         loss = self.loss_ce(contrastive_matrix, labels)
-        if not torch.isfinite(loss):
-            print(contrastive_matrix)
-        predictions = contrastive_matrix.detach().argmax(dim=-1)
-        accuracy = (predictions == labels).float().mean().item()
+        accuracy = 0
+        if calculate_accuracy:
+            predictions = contrastive_matrix.detach().argmax(dim=-1)
+            accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
     def _channel_dropout(self, x1, x2):
@@ -504,30 +501,33 @@ class PatchCLR(FastFormerPreTrainedModel):
     def build_representations(self, x1, x2, eval=False, use_key_enc=False):
         backbone = self.backbone
         ffn = self.ffn
+        encoder_x = torch.cat((x1, x2))
         if eval:
             _ = self.eval()
             _ = backbone.eval()
             _ = ffn.eval()
 
             with torch.no_grad():
-                b1 = self._build_rep(x1, backbone, ffn)
+                b1 = self._build_rep(encoder_x, backbone, ffn)
                 if use_key_enc:
                     backbone = self.key_backbone
                     ffn = self.key_ffn
-                b2 = self._build_rep(x2, backbone, ffn)
+                    b2 = self._build_rep(encoder_x, backbone, ffn)
+                else:
+                    b2 = b1
 
         else:
             _ = self.train()
             _ = backbone.train()
             _ = ffn.train()
-            b1 = self._build_rep(x1, backbone, ffn)
+            b1 = self._build_rep(encoder_x, backbone, ffn)
             if use_key_enc:
                 backbone = self.key_backbone
                 ffn = self.key_ffn
                 with torch.no_grad():
-                    b2 = self._build_rep(x2, backbone, ffn)
+                    b2 = self._build_rep(encoder_x, backbone, ffn)
             else:
-                b2 = self._build_rep(x2, backbone, ffn)
+                b2 = b1
 
         return b1, b2
 
@@ -540,23 +540,15 @@ class PatchCLR(FastFormerPreTrainedModel):
         patchclr_loss = None
         patchclr_accuracy = None
         if self.patchclr_w > 0:
-            if self.simclr_w > 0 and patch_clr_or_not.sum() > 0 and not self.patchclr_use_extra_negatives:
-                b1p = b1[patch_clr_or_not]
-                b2p = b2[patch_clr_or_not]
-            else:
-                b1p = b1
-                b2p = b2
+            b1p = b1
+            b2p = b2
             out_1 = b1p.reshape(-1, self.num_features)  # BxS , D
             out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
-
-
             # b2 = torch.cat((out_2, out_1), 0)
 
 
             c1 = torch.cat((out_1, out_2), 0)
             contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
-            if self.moco:
-                contrastive_matrix = contrastive_matrix[:out_1.size(0)]
             contrastive_matrix_store = contrastive_matrix
 
             patchclr_negative=None
@@ -564,10 +556,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 # if extra_negative_repr_patchclr.size(0) > 2 * bs:
                 #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 # extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                if self.moco:
-                    patchclr_negative = out_1.mm(extra_negative_repr_patchclr.t())
-                else:
-                    patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
+                patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
                 if extra_negative_repr_patchclr.size(0) > 32 * bs and self.priority_clr:
                     selector_mat = patchclr_negative
                     topk_indices_argmax = selector_mat.argmax(1)
@@ -581,10 +570,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del selector_mat
                     del topk_indices
 
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()), 0)
 
             else:
-                extra_negative_repr_patchclr = out_2.detach()
+                extra_negative_repr_patchclr = c1.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
@@ -608,17 +597,12 @@ class PatchCLR(FastFormerPreTrainedModel):
 
             sc1 = torch.cat((b1s, b2s), 0)
             contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
-            if self.moco:
-                contrastive_matrix = contrastive_matrix[:b1s.size(0)]
             simclr_negative = None
             if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
                 # if extra_negative_repr_simclr.size(0) > 1024 * b:
                 #     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 # extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                if self.moco:
-                    simclr_negative = b1s.mm(extra_negative_repr_simclr.t())
-                else:
-                    simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
+                simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
                 if extra_negative_repr_simclr.size(0) >= 160 * b and self.priority_clr:
                     selector_mat = simclr_negative
                     select_elems = max(1, extra_negative_repr_simclr.size(0) // 16)
@@ -644,9 +628,9 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del most_recent_indices
 
 
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()), 0)
             else:
-                extra_negative_repr_simclr = b2s.detach()
+                extra_negative_repr_simclr = sc1.detach()
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
             simclr_loss = self.simclr_w * simclr_loss

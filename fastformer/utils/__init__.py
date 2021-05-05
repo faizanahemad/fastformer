@@ -692,8 +692,8 @@ def get_image_augmetations(mode):
 
         ]))
     else:
-        shape_transforms.append(identity)
         shape_transforms.append(transforms.RandomChoice([
+            identity,
             transforms.RandomResizedCrop(416, scale=(0.4, 1.0), ratio=(3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=1.0),
             transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
@@ -710,10 +710,12 @@ def get_image_augmetations(mode):
             DefinedRotation(180),
         ]))
         shape_transforms.append(transforms.RandomChoice([
+            identity,
             transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
+            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(256), transforms.Resize(416)]),
             transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
             transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
-            transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
+            transforms.Compose([transforms.Resize(512), transforms.RandomCrop(256), transforms.Resize(416)]),
         ]))
     shape_transforms = transforms.Compose(shape_transforms)
 
@@ -759,20 +761,22 @@ def get_image_augmetations(mode):
                                 get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
                                 get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                             transforms.RandomChoice([
-                                cut, bigcut
+                                identity, cut, bigcut
                             ])]
 
-    if mode == "full_train":
+    if mode == "full_train" or mode == "clr":
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     elif mode == "linear_probe":
-        _ = non_shape_transforms.pop()
-        non_shape_transforms.append(transforms.RandomChoice([
-            cut, bigcut, identity
-        ]))
-        non_shape_transforms.append(identity)
         # non_shape_transforms = [cut, identity]
-        non_shape_transforms = transforms.Compose(non_shape_transforms)
+        non_shape_transforms = transforms.RandomChoice([identity, cut, bigcut,
+                                                        get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
+                                                        transforms.GaussianBlur(11, sigma=(0.2, 1.0)),
+                                                        get_alb(alb.transforms.Equalize(p=1.0, always_apply=True, )),
+                                                        get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
+                                                        get_alb(alb.transforms.Solarize(threshold=128, always_apply=True, p=1.0)),
+                                                        get_alb(alb.transforms.Solarize(threshold=160, always_apply=True, p=1.0)),
+                                                        get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)), ])
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     else:
         non_shape_transforms = transforms.Compose(non_shape_transforms)

@@ -79,6 +79,8 @@ def training_args():
                         help='warmup_steps')
     parser.add_argument('--lr', default=optimizer_config.lr, type=float,
                         help='lr')
+    parser.add_argument('--lr_steps', default=5, type=int,
+                        help='lr_steps')
     parser.add_argument('--weight_decay', default=optimizer_config.weight_decay, type=float,
                         help='weight_decay')
     parser.add_argument('--gradient_clipping', default=optimizer_config.gradient_clipping, type=float,
@@ -193,48 +195,15 @@ def model_train_validation_switch(model, args, train=True):
 
 
 class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, x1_transform, x2_transform, to_tensor, simclr_w, patchclr_w):
+    def __init__(self, dataset):
         self.dataset = dataset
-        self.x1_transform = x1_transform
-        self.x2_transform = x2_transform
-        self.to_tensor = to_tensor
-        self.patchclr_proba = 0.9 if simclr_w is None or simclr_w == 0 else 0.2
-        self.patchclr_proba = 0.0 if patchclr_w is None or patchclr_w == 0 else self.patchclr_proba
-        self.small_shape_transforms = transforms.Compose([
-            transforms.RandomAffine(15, (0.05, 0.05), (0.9, 1.1), 5),
-            transforms.RandomChoice([
-                # transforms.RandomHorizontalFlip(),
-                transforms.RandomPerspective(distortion_scale=0.05),
-                transforms.RandomResizedCrop(360, scale=(0.8, 1.0)),
-            ])
-
-        ])
 
     def __getitem__(self, item):
 
-        x, label = self.dataset[item]
+        x1, _ = self.dataset[item]
         # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
-        if self.x1_transform and random.random() < 0.75:
-            x1 = self.to_tensor(self.x1_transform(x.copy()))
-        else:
-            x1 = self.to_tensor(x)
-
-        if random.random() < self.patchclr_proba:
-            patch_clr_or_not = True
-            x = self.small_shape_transforms(x) if random.random() < 0.5 else x
-            if self.x2_transform:
-                x2 = self.to_tensor(self.x2_transform(x.copy()))
-            else:
-                x2 = self.to_tensor(x)
-        else:
-            patch_clr_or_not = False
-            x, label = self.dataset[item]
-            if self.x2_transform:
-                x2 = self.to_tensor(self.x2_transform(x.copy()))
-            else:
-                x2 = self.to_tensor(x)
-
-        return dict(x1=x1, x2=x2, patch_clr_or_not=patch_clr_or_not)
+        x2, label = self.dataset[item]
+        return dict(x1=x1, x2=x2, patch_clr_or_not=True)
 
     def __len__(self):
         return len(self.dataset)
@@ -513,7 +482,7 @@ def train(local_rank, args):
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else len(dataloader))
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
     #                                                 div_factor=1e2, three_phase=False, pct_start=0.3, anneal_strategy="linear")
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps_per_epoch * (args["epochs"] // 6), gamma=0.4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps_per_epoch * (args["epochs"] // args["lr_steps"]), gamma=0.4)
 
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
