@@ -543,7 +543,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1p = b1
             b2p = b2
             out_1 = b1p.reshape(-1, self.num_features)  # BxS , D
-            out_2 = b2p.reshape(-1, self.num_features)  # BxS , Dit 
+            out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
             # b2 = torch.cat((out_2, out_1), 0)
 
 
