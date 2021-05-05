@@ -574,7 +574,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 extra_negative_repr_patchclr = out_2.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
-            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative, calculate_accuracy=calculate_accuracy)
+            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0] // 2, patchclr_negative, calculate_accuracy=calculate_accuracy)
             patchclr_loss = self.patchclr_w * patchclr_loss
             loss += patchclr_loss
         clustering_loss = None
@@ -628,7 +628,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             else:
                 extra_negative_repr_simclr = b2s.detach()
 
-            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
+            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0] // 2, simclr_negative, calculate_accuracy=calculate_accuracy)
             simclr_loss = self.simclr_w * simclr_loss
             loss += simclr_loss
             # if self.simclr_use_extra_negatives:
