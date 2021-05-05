@@ -726,7 +726,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             x1 = batch["x1"]
             x2 = batch["x2"]
             patch_clr_or_not = batch["patch_clr_or_not"]
-            output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr)
+            output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync)
         elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
             x = batch[0]
             labels = batch[1]

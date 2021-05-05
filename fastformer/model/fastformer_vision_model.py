@@ -531,7 +531,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return b1, b2
 
-    def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None):
+    def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None, calculate_accuracy=False):
         b1, b2 = self.build_representations(x1, x2, use_key_enc=self.moco)
         b, s = b1.shape[:2]
         bs = b * s
@@ -576,7 +576,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 extra_negative_repr_patchclr = c1.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
-            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative)
+            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative, calculate_accuracy=calculate_accuracy)
             patchclr_loss = self.patchclr_w * patchclr_loss
             loss += patchclr_loss
         clustering_loss = None
@@ -632,7 +632,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             else:
                 extra_negative_repr_simclr = sc1.detach()
 
-            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative)
+            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
             simclr_loss = self.simclr_w * simclr_loss
             loss += simclr_loss
             # if self.simclr_use_extra_negatives:
@@ -653,7 +653,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             if extra_negative_repr_simclr is not None:
                 simclr_negative = gap_bias.mm(extra_negative_repr_simclr.t())
 
-            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative)
+            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
             gap_bias_loss = self.gap_bias_w * gap_bias_loss
             loss += gap_bias_loss
 
