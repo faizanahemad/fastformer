@@ -546,9 +546,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
             # b2 = torch.cat((out_2, out_1), 0)
 
-
-            c1 = torch.cat((out_1, out_2), 0)
-            contrastive_matrix = c1.mm(c1.t()) * (1 - torch.eye(c1.size(0), c1.size(0), device=c1.device))
+            contrastive_matrix = out_1.mm(out_2.t()) * (1 - torch.eye(out_1.size(0), out_1.size(0), device=out_1.device))
             contrastive_matrix_store = contrastive_matrix
 
             patchclr_negative=None
@@ -556,7 +554,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 # if extra_negative_repr_patchclr.size(0) > 2 * bs:
                 #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
                 # extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                patchclr_negative = c1.mm(extra_negative_repr_patchclr.t())
+                patchclr_negative = out_1.mm(extra_negative_repr_patchclr.t())
                 if extra_negative_repr_patchclr.size(0) > 32 * bs and self.priority_clr:
                     selector_mat = patchclr_negative
                     topk_indices_argmax = selector_mat.argmax(1)
@@ -570,10 +568,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del selector_mat
                     del topk_indices
 
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, c1.detach()), 0)
+                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
 
             else:
-                extra_negative_repr_patchclr = c1.detach()
+                extra_negative_repr_patchclr = out_2.detach()
             extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
 
             patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0], patchclr_negative, calculate_accuracy=calculate_accuracy)
@@ -595,14 +593,13 @@ class PatchCLR(FastFormerPreTrainedModel):
             b1s = b1[:, 0]
             b2s = b2[:, 0]
 
-            sc1 = torch.cat((b1s, b2s), 0)
-            contrastive_matrix = sc1.mm(sc1.t()) * (1 - torch.eye(sc1.size(0), sc1.size(0), device=sc1.device))
+            contrastive_matrix = b1s.mm(b2s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
             simclr_negative = None
             if extra_negative_repr_simclr is not None and self.simclr_use_extra_negatives:
                 # if extra_negative_repr_simclr.size(0) > 1024 * b:
                 #     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
                 # extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                simclr_negative = sc1.mm(extra_negative_repr_simclr.t())
+                simclr_negative = b1s.mm(extra_negative_repr_simclr.t())
                 if extra_negative_repr_simclr.size(0) >= 160 * b and self.priority_clr:
                     selector_mat = simclr_negative
                     select_elems = max(1, extra_negative_repr_simclr.size(0) // 16)
@@ -627,10 +624,9 @@ class PatchCLR(FastFormerPreTrainedModel):
                     del topk_indices_mean_select
                     del most_recent_indices
 
-
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, sc1.detach()), 0)
+                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
             else:
-                extra_negative_repr_simclr = sc1.detach()
+                extra_negative_repr_simclr = b2s.detach()
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
             simclr_loss = self.simclr_w * simclr_loss
@@ -684,7 +680,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_md_rel_config',
+    ap.add_argument("--config", type=str, default='vision_base_rel_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -710,12 +706,19 @@ if __name__ == '__main__':
     device = torch.device(device)
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
-    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+    to_tensor = transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.ToTensor(), normalize])
     dog = to_tensor(Image.open("dog.jpg"))
     cat = to_tensor(Image.open("cat.jpg"))
     fox = to_tensor(Image.open("fox.jpg"))
     grasshopper = to_tensor(Image.open("grasshopper.jpg"))
-    x = torch.stack([dog, cat, fox, grasshopper])
+    x1 = torch.stack([dog, cat, fox, grasshopper])
+
+    dog = to_tensor(Image.open("dog.jpg"))
+    cat = to_tensor(Image.open("cat.jpg"))
+    fox = to_tensor(Image.open("fox.jpg"))
+    grasshopper = to_tensor(Image.open("grasshopper.jpg"))
+    x2 = torch.stack([dog, cat, fox, grasshopper])
+    x = x1
     
 
     # x = torch.randn(batch_size, 3, 224, 224, device=device)
@@ -752,7 +755,7 @@ if __name__ == '__main__':
         exit()
 
     patch_clr_or_not = torch.ones(x.size(0)).to(device)
-    output = model(x, x, patch_clr_or_not)
+    output = model(x1, x2, patch_clr_or_not)
     check_patch_clr_acc(model, "clr", "cpu", args["pretrained_model"], config)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))

@@ -173,7 +173,7 @@ if __name__ == "__main__":
     vision_cmd += " --accumulation_steps 1 --epochs 50"
     vision_cmd += " --mode linear_probe"
     vision_cmd += " --no_autocast"
-    vision_cmd += " --lr 0.003"
+    vision_cmd += " --lr 0.001"
     vision_cmd += " --batch_size 32"
     # vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
