@@ -246,7 +246,8 @@ def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     # assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
     tokenizer_outputs["input_ids"] = tokenizer_outputs["input_ids"].squeeze()
     tokenizer_outputs["attention_mask"] = tokenizer_outputs["attention_mask"].squeeze()
-    tokenizer_outputs["token_type_ids"] = tokenizer_outputs["token_type_ids"].squeeze()
+    if "token_type_ids" in tokenizer_outputs:
+        tokenizer_outputs["token_type_ids"] = tokenizer_outputs["token_type_ids"].squeeze()
     del tokenizer_outputs["offset_mapping"]
     return tokenizer_outputs
 
@@ -262,7 +263,7 @@ class TokenizerDataset(Dataset):
                  max_span_length: int = 1, max_jumbling_span_length: int = 2, n_anchors: int = 4, n_positives: int = 2):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.min_segments = 2
-        self.cls_tokens = config.num_highway_cls_tokens
+        self.cls_tokens = config.num_highway_cls_tokens if config is not None else 0
         self.tokenizer = copy.deepcopy(tokenizer)
         self.tokenizer_args = tokenizer_args
         labels_pet_text_tokenizer_args = dict(**self.tokenizer_args)
@@ -482,7 +483,7 @@ class TokenizerDataset(Dataset):
                 segments[idx] = seq
 
             text = seg_sep_token.join(segments)
-        text = ("" if len(pet_query) > 0 else tokenizer.no_question_token) + text
+        text = ("" if len(pet_query) > 0 else (tokenizer.no_question_token if hasattr(tokenizer, "no_question_token") else "")) + text
         # assert len(text.strip()) > 0
 
         for i, (q, a) in enumerate(zip(pet_query, pet_answer)):
@@ -1314,7 +1315,7 @@ def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tupl
     return mapper
 
 
-def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expanduser("~"), "processed_datasets/superglue_test")):
+def superglue_test(test_only=True, pet_dataset=True, dataset_location=os.path.join(os.path.expanduser("~"), "processed_datasets/superglue_test")):
     import datasets
     import re
     import numpy as np
@@ -1339,6 +1340,8 @@ def superglue_test(test_only=True, dataset_location=os.path.join(os.path.expandu
         sglue_proc = DatasetDict.load_from_disk(dataset_location)
         super_glue = DatasetDict({k: v['test'] for k, v in super_glue.items()})
         return super_glue, sglue_proc
+    elif not pet_dataset:
+        return super_glue, None
 
     sglue_proc = dict()
 

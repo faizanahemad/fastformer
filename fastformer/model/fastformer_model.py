@@ -180,23 +180,6 @@ class MultiheadAttention(nn.Module):
         self.block_index = block_index
         self.layer_index = layer_index
         self.is_encoder_layer = is_encoder_layer
-        query_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index + 1)]).intersection(
-            set(config.compressed_query_attention_layers))
-        self.query_compression_layers = query_compression_layers
-        compress_query = is_encoder_layer and len(query_compression_layers) > 0 and config.compressed_query_attention_stride != 1
-
-        key_compression_layers = set([(block_index, ll) for ll in range(layer_index, last_layer_index + 1)]).intersection(
-            set(config.compressed_key_attention_layers))
-        compress_key = is_encoder_layer and len(key_compression_layers) > 0 and config.compressed_query_attention_stride != 1
-        self.key_compression_layers = key_compression_layers
-
-        if config.compress_query_method is None:
-            compress_query = False
-            compress_key = False
-        else:
-            assert not compress_query and not compress_key
-
-        assert not (is_first_layer_of_block and compress_query and block_index != 0)
 
         assert d_model % d_head == 0
         assert d_model % n_head == 0
@@ -215,25 +198,12 @@ class MultiheadAttention(nn.Module):
             self.k_head = Conv1d(
                 in_channels=d_model, out_channels=n_head * d_head, kernel_size=1, groups=qkv_transform_groups, bias=False)
 
-            if compress_query:
-                self.q_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
-
-
-            if compress_key:
-                self.k_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
-
-
             self.v_head = Conv1d(in_channels=d_model_initial, out_channels=d_model_initial, kernel_size=1, groups=qkv_transform_groups)
 
         else:
             self.q_head = nn.Linear(d_model, n_head * d_head, bias=False)
             self.k_head = nn.Linear(d_model, n_head * d_head, bias=False)
 
-            if compress_query:
-                self.q_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
-
-            if compress_key:
-                self.k_head_compress = CompressSeqMeanPooling(config, block_index, d_model, n_head)
 
             self.v_head = nn.Linear(d_model_initial, d_model_initial)
 
@@ -242,7 +212,6 @@ class MultiheadAttention(nn.Module):
 
         if self.approximate_attention:
             self.attn = FastAttention(dim_heads=d_head, nb_features=n_head * d_head, )
-            assert not compress_key
         if self.relative_attention:
             if qkv_transform_groups > 1:
                 self.pos_q_head = Conv1d(in_channels=config.embedding_size, out_channels=n_head * d_head, kernel_size=1,
@@ -263,19 +232,6 @@ class MultiheadAttention(nn.Module):
         position_embeds, attention_mask = attention_inputs
         context_len = key.shape[1]
         n_head, d_head = self.n_head, self.config.d_head[self.block_index]
-        need_query_compress = (self.block_index, layer_index) in self.query_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
-        need_key_compress = (self.block_index, layer_index) in self.key_compression_layers and self.config.compressed_query_attention_stride != 1 and self.is_encoder_layer and self.config.compress_query_method is not None
-        if need_query_compress:
-            query = self.q_head_compress(query)
-            seq_len = (2 * int(
-                np.ceil(
-                    (seq_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_query_compress else seq_len
-        if need_key_compress:
-            key = self.k_head_compress(key)
-            value = pool_tensor(value, self.cls_tokens, mode='mean', stride=self.config.compressed_query_attention_stride)
-            context_len = (2 * int(
-                np.ceil(
-                    (context_len - self.cls_tokens) / self.config.compressed_query_attention_stride) // 2) + self.cls_tokens) if need_key_compress else context_len
         # Shape batch_size x seq_len x n_head x d_head
         q_head = self.q_head(query).view(batch_size, seq_len, n_head, d_head)
         # Shapes batch_size x context_len x n_head x d_head
@@ -291,12 +247,6 @@ class MultiheadAttention(nn.Module):
         # Shapes batch_size x n_head x seq_len x context_len
         if self.relative_attention:
             position_embed_of_query = position_embed_of_key = position_embeds
-            if need_query_compress:
-                position_embed_of_query = pool_tensor(position_embed_of_query.unsqueeze(0), self.cls_tokens, mode='mean',
-                                                      stride=self.config.compressed_query_attention_stride).squeeze()
-            if need_key_compress:
-                position_embed_of_key = pool_tensor(position_embed_of_key.unsqueeze(0), self.cls_tokens, mode='mean',
-                                                    stride=self.config.compressed_query_attention_stride).squeeze()
             if self.relative_attention:
                 pos_k_head = self.pos_k_head(position_embed_of_key)
                 pos_q_head = self.pos_q_head(position_embed_of_query)
@@ -351,8 +301,6 @@ class MultiheadAttention(nn.Module):
                 if key_stride > 1:
                     attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=key_stride)
                 # TODO: handle attention mask's pooling for qk pooling
-                if need_key_compress:
-                    attention_mask = pool_tensor(attention_mask, self.cls_tokens, mode='min', stride=self.config.compressed_query_attention_stride)
                 if len(attention_mask.size()) == 2:
                     attention_mask = attention_mask[:, None, None].float()
                 attn_score = attn_score - INF * (1 - attention_mask)
@@ -365,8 +313,6 @@ class MultiheadAttention(nn.Module):
         attn_out = attn_vec.reshape(batch_size, seq_len, self.d_model)
         # Shape shape batch_size x seq_len x d_model
 
-        if need_query_compress:
-            attn_out = upsample(attn_out, self.config.compressed_query_attention_kernel_size, initial_seq_len, self.cls_tokens)
         return attn_out, attn_prob
 
     def forward(self, query, key, value, attention_inputs, layer_index, output_attentions=False):
@@ -959,18 +905,34 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 
 
 class FastFormerForClassification(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None, additive_margin_softmax_w=0.3):
-        super().__init__(config)
+    def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None, additive_margin_softmax_w=0.3, reinit_backbone=False):
+        if isinstance(config, FastFormerConfig):
+            super().__init__(config)
+        elif model is not None and hasattr(model, "config"):
+            super().__init__(model.config)
+        else:
+            raise ValueError
+
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         if num_classes == 1:
             self.ce = BCELossFocal()
         else:
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
-        self.classifier = nn.Linear(config.block_channel_size[-1], num_classes)
-        self.cls_tokens = config.num_highway_cls_tokens
+        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else 768
+        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, self.num_features), nn.GELU(),
+                                  nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
-        self.init_weights()
+        if reinit_backbone:
+            self.init_weights()
+
+        for module in self.head:
+            if hasattr(module, "weight") and len(module.weight.shape) == 2:
+                fan_out, fan_in = module.weight.shape
+                std = np.sqrt(1.0 / float(fan_in + fan_out))
+                nn.init.normal_(module.weight, std=std)
+            if hasattr(module, "bias") and module.bias is not None:
+                nn.init.constant_(module.bias, 0.0)
 
     def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
         funnel_inputs = dict(input_ids=input_ids,
@@ -979,9 +941,14 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                              char_ids=char_ids, char_offsets=char_offsets,
                              run_decoder=False,
                              run_answering=False)
-        funnel_outputs = self.funnel(**funnel_inputs)
-        funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
-        logits = self.classifier(funnel_outputs)
+        if isinstance(self.funnel, (FastFormerModel)):
+            funnel_outputs = self.funnel(**funnel_inputs)
+            funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
+        else:
+            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,)
+            funnel_outputs = funnel_outputs["last_hidden_state"][:, 0]
+
+        logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
             loss = self.ce(logits.squeeze(), label.float() if self.num_classes == 1 else label.long())

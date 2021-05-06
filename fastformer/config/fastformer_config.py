@@ -141,11 +141,6 @@ class FastFormerConfig(PretrainedConfig):
             separate_content_and_position_attention=False,
             relative_attention=False,
             approximate_attention=False,
-            compress_query_method=None,
-            compressed_query_attention_kernel_size=3,
-            compressed_query_attention_stride=2,
-            compressed_query_attention_layers=[],
-            compressed_key_attention_layers=[],
             sdconv=[False, False, False],
             sdconv_kernel_size=[5, 7, 9],
             full_channel_separation=[False, False, False],
@@ -158,7 +153,6 @@ class FastFormerConfig(PretrainedConfig):
             char_rnn_vocab_size=1024,
             char_rnn_window_size=512,
             char_rnn_window_overlap=64,
-            
             img_size=224,
             patch_size=16,
             in_chans=3,
@@ -210,12 +204,7 @@ class FastFormerConfig(PretrainedConfig):
             "learn_sdconv",
             'learn_rnn',
         ], f"Got {pooling_type} for `pooling_type` but only 'mean' and 'max' are supported."
-        assert compress_query_method in [
-            None,
-            "mean",
-        ], f"Got {pooling_type} for `compress_query_method`"
         self.pooling_type = pooling_type
-        self.compress_query_method = compress_query_method
         self.expand_dim_before_pooling = expand_dim_before_pooling
         self.ffn_groups = ffn_groups
         self.ffn_layers = ffn_layers
@@ -224,12 +213,6 @@ class FastFormerConfig(PretrainedConfig):
         self.position_biased_input = position_biased_input
         self.num_highway_cls_tokens = num_highway_cls_tokens
         self.approximate_attention = approximate_attention
-        assert compressed_query_attention_kernel_size in [3, 5, 7, 9]
-        self.compressed_query_attention_kernel_size = compressed_query_attention_kernel_size
-        assert compressed_query_attention_stride in [1, 2, 4]
-        self.compressed_query_attention_stride = compressed_query_attention_stride
-        self.compressed_query_attention_layers = compressed_query_attention_layers
-        self.compressed_key_attention_layers = compressed_key_attention_layers
         self.separate_content_and_position_attention = separate_content_and_position_attention
         assert separate_content_and_position_attention or position_biased_input
         self.stride = stride
@@ -287,15 +270,6 @@ sm_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              separate_compressiion_layer=False,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 7, 9],
-                             compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                             compressed_query_attention_layers=[(0, 3), (0, 4),
-                                                                # (1, 2), (1, 3), (1, 4),
-                                                                # (2, 2), (2, 3), (2, 4)
-                                                                ],
-                             compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                              # (1, 1), (1, 2), (1, 3), (1, 4),
-                                                              # (2, 1), (2, 2), (2, 3), (2, 4)
-                                                              ],
                              n_head=[(8, 0, 0), (8, 0, 0), (12, 0, 0)],
                              block_channel_size=[384, 512, 768], no_v_head=True, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
@@ -308,15 +282,6 @@ md_config = FastFormerConfig(separate_content_and_position_attention=True, pooli
                              separate_compressiion_layer=True,
                              sdconv=[True, True, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 5, 3],
-                             compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                             compressed_query_attention_layers=[(0, 3), (0, 4),
-                                                                # (1, 2), (1, 3), (1, 4),
-                                                                # (2, 2), (2, 3), (2, 4)
-                                                                ],
-                             compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                              # (1, 1), (1, 2), (1, 3), (1, 4),
-                                                              # (2, 1), (2, 2), (2, 3), (2, 4)
-                                                              ],
                              n_head=[(4, 4, 0), (4, 4, 0), (12, 0, 0)],
                              block_channel_size=[384, 512, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,
@@ -328,15 +293,6 @@ md_config_relative = FastFormerConfig(separate_content_and_position_attention=Tr
                                       separate_compressiion_layer=True,
                                       sdconv=[True, True, False], full_channel_separation=True,
                                       sdconv_kernel_size=[5, 5, 3],
-                                      compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                                      compressed_query_attention_layers=[(0, 3), (0, 4),
-                                                                         # (1, 2), (1, 3), (1, 4),
-                                                                         # (2, 2), (2, 3), (2, 4)
-                                                                         ],
-                                      compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                                       # (1, 1), (1, 2), (1, 3), (1, 4),
-                                                                       # (2, 1), (2, 2), (2, 3), (2, 4)
-                                                                       ],
                                       n_head=[(4, 4, 0), (4, 4, 0), (12, 0, 0)],
                                       block_channel_size=[384, 512, 768], no_v_head=False, expand_dim_before_pooling=False, char_rnn=True,
                                       char_rnn_window_overlap=64,
@@ -351,15 +307,6 @@ tg_config = FastFormerConfig(separate_content_and_position_attention=False, pool
                              separate_compressiion_layer=True,
                              sdconv=[False, False, False], full_channel_separation=True,
                              sdconv_kernel_size=[5, 5, 3],
-                             compress_query_method=None, compressed_query_attention_stride=2, compressed_query_attention_kernel_size=3,
-                             compressed_query_attention_layers=[(0, 3), (0, 4),
-                                                                # (1, 2), (1, 3), (1, 4),
-                                                                # (2, 2), (2, 3), (2, 4)
-                                                                ],
-                             compressed_key_attention_layers=[(0, 1), (0, 2), (0, 3), (0, 4),
-                                                              # (1, 1), (1, 2), (1, 3), (1, 4),
-                                                              # (2, 1), (2, 2), (2, 3), (2, 4)
-                                                              ],
                              n_head=[(8, 0, 0), (12, 0, 0), (16, 0, 0)],
                              block_channel_size=[512, 768, 1024], no_v_head=False, expand_dim_before_pooling=True, char_rnn=True, char_rnn_window_overlap=64,
                              char_rnn_window_size=128,

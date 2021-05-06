@@ -197,28 +197,36 @@ class SuperGlueTest:
 
     def prepare_classifier(self, model, dataset, device, num_classes, reinit=True):
         size_dicts = self.size_dicts
-        model = model.train()
-        optimizer_config.eps = 1e-7
-        model.config.eps = 1e-7
+        if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
+            model = model.train()
+            optimizer_config.eps = 1e-5
+            model.config.eps = 1e-5
+            tokenizer = model.tokenizer
+        elif isinstance(model, str):
+            from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
+            from transformers.models.deberta import DebertaModel
+            tokenizer = AutoTokenizer.from_pretrained(model)
+            model = AutoModel.from_pretrained(model)
+            model = model.train()
+            optimizer_config.eps = 1e-5
 
         if reinit or not isinstance(model, FastFormerForClassification):
-            classifier = FastFormerForClassification(model.config, num_classes, model, model.tokenizer)
-            classifier.funnel = model.funnel
+            classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
+            classifier.funnel = model.funnel if hasattr(model, "funnel") else model
             classifier = classifier.to(device)
             del model
             model = classifier
-        collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, model.tokenizer.pad_token_id)
+        collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
         optc = optimizer_config.to_dict()
         optimizer = torch.optim.AdamW(model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
         scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
 
-
         train = None
         if "train" in dataset:
-            train = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
-                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+            train = TokenizerDataset(None, tokenizer, get_char_to_id(),
+                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                      dataset["train"])
             train.training = False
             train = DataLoader(train, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
@@ -226,15 +234,15 @@ class SuperGlueTest:
 
         validation = None
         if "validation" in dataset:
-            validation = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
-                                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+            validation = TokenizerDataset(None, tokenizer, get_char_to_id(),
+                                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
             validation.training = False
             validation = DataLoader(validation, sampler=None, batch_size=min(size_dicts.values()) * 2, collate_fn=collate_fn, prefetch_factor=2, num_workers=2,
                                     shuffle=False)
 
-        test = TokenizerDataset(model.config, model.tokenizer, get_char_to_id(),
-                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=model.config.tokenizer_length),
+        test = TokenizerDataset(None, tokenizer, get_char_to_id(),
+                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                 dataset["test"])
         test.training = False
         test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
@@ -434,102 +442,42 @@ class SuperGlueTest:
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
-        model = self.model.to(self.device)
+        model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
         size_dicts = self.size_dicts
 
-        model = model.eval()
-        collate_fn = get_collate_fn(self.config.num_highway_cls_tokens, tokenizer.pad_token_id)
+        super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
+        keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
+        for idx, dk in enumerate(keys):
+            while idx >= self.world_size:
+                idx -= self.world_size
+            if idx != self.rank:
+                continue
+            dataset = super_glue[dk]
+            if dk == "boolq":
+                final_predictions = self.boolq(model, dataset, self.device)
+            elif dk == "cb":
+                final_predictions = self.cb(model, dataset, self.device)
+            elif dk == "copa":
+                final_predictions = self.copa(model, dataset, self.device)
+            elif dk == "multirc":
+                final_predictions = self.multirc(model, dataset, self.device)
+            elif dk == "record":
+                final_predictions = self.record(model, dataset, self.device)
+            elif dk == "wic":
+                final_predictions = self.wic(model, dataset, self.device)
+            elif dk == "wsc.fixed":
+                final_predictions = self.wsc(model, dataset, self.device)
+            elif dk == "rte":
+                final_predictions, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device)
 
-        if self.finetune:
-            super_glue, _ = superglue_test(test_only=False)
-            keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
-            for idx, dk in enumerate(keys):
-                while idx >= self.world_size:
-                    idx -= self.world_size
-                if idx != self.rank:
-                    continue
-                dataset = super_glue[dk]
-                if dk == "boolq":
-                    final_predictions = self.boolq(model, dataset, self.device)
-                elif dk == "cb":
-                    final_predictions = self.cb(model, dataset, self.device)
-                elif dk == "copa":
-                    final_predictions = self.copa(model, dataset, self.device)
-                elif dk == "multirc":
-                    final_predictions = self.multirc(model, dataset, self.device)
-                elif dk == "record":
-                    final_predictions = self.record(model, dataset, self.device)
-                elif dk == "wic":
-                    final_predictions = self.wic(model, dataset, self.device)
-                elif dk == "wsc.fixed":
-                    final_predictions = self.wsc(model, dataset, self.device)
-                elif dk == "rte":
-                    final_predictions, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device)
+            with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
+                writer.write_all(final_predictions)
+            if dk == "rte":
+                with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
+                    writer.write_all(final_predictions_axb)
+                with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
+                    writer.write_all(final_predictions_axg)
 
-                with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
-                    writer.write_all(final_predictions)
-                if dk == "rte":
-                    with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
-                        writer.write_all(final_predictions_axb)
-                    with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
-                        writer.write_all(final_predictions_axg)
-
-
-
-        else:
-            super_glue, datadict = superglue_test(test_only=True)
-            for idx, (k, dataset) in enumerate(sorted(datadict.items())):
-                while idx >= self.world_size:
-                    idx -= self.world_size
-                if idx != self.rank:
-                    continue
-                clean_memory()
-                sg_dataset = super_glue[k]
-                idx = [sg_dataset[i]["idx"] for i in range(len(sg_dataset))]
-                dataset = TokenizerDataset(self.config, tokenizer, get_char_to_id(),
-                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=self.config.tokenizer_length),
-                                           dataset)
-                dataset.training = False
-                predictions = []
-                loader = DataLoader(dataset, sampler=None, batch_size=min(size_dicts.values()), collate_fn=collate_fn, prefetch_factor=2, num_workers=4)
-                for pt_batch in loader:
-                    pt_batch["record_accuracy"] = False
-                    pt_batch = {k: v.to(self.device) if hasattr(v, "to") else v for k, v in pt_batch.items()}
-                    with torch.no_grad():
-                        funnel_inputs = dict(input_ids=pt_batch["input_ids"],
-                                             attention_mask=pt_batch["attention_mask"],
-                                             token_type_ids=pt_batch["token_type_ids"] if "token_type_ids" in pt_batch else None,
-                                             inputs_embeds=None,
-                                             char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
-                                             run_decoder=False,
-                                             run_answering=True)
-                        output = model.funnel(**funnel_inputs)
-                        # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
-                        answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
-                    # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
-                    # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
-                    answering_predictions = answer_decoder(answering_predictions, tokenizer)
-                    predictions.extend(answering_predictions)
-                final_predictions = [(i, str(prd[0]).lower() if len(prd) > 0 else "none") for i, prd in zip(idx, predictions)]
-                word_map = self.task_word_map[k]
-                print(k, len([p for _, p in final_predictions if p not in word_map]), len(idx))
-                final_predictions = [dict(idx=i, label=word_map[p] if p in word_map else (list(word_map.values())[0] if len(word_map) > 0 else p)) for i, p in
-                                     final_predictions]
-                if k == "multirc":
-                    mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-                    for pd in final_predictions:
-                        mrcp[pd["idx"]["paragraph"]][pd["idx"]["question"]][pd["idx"]["answer"]] = pd["label"]
-                    mrcp = [{"idx": k, "passage": {
-                        "questions": [{"idx": m, "answers": [{"idx": o, "label": p} for o, p in sorted(n.items())]} for m, n in sorted(v.items())]}} for k, v in
-                            sorted(mrcp.items())]
-                    final_predictions = mrcp
-
-                if k == "record":
-                    final_predictions = [dict(idx=pr["idx"]["query"], label=pr["label"]) for pr in final_predictions]
-
-                with jsonlines.open(self.superglue_file_names[k], mode='w') as writer:
-                    writer.write_all(final_predictions)
-        model = model.train()
 
 
 class LargeValidator:
@@ -876,6 +824,8 @@ def train(local_rank, args):
             state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[-5:]), 0)
             model.load_state_dict(state_dict, strict=False)
         del state_dict
+    elif args["pretrained_model"] is not None and args["test_only"]:
+        model = args["pretrained_model"]
 
     if args["test_only"]:
         _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
