@@ -575,7 +575,7 @@ class get_collate_fn:
                 continue
 
             step_size = 8
-            while bool(v[:, -step_size:].sum() == 0) and v.shape[1] > step_size:
+            while len(v[:, -step_size:].unique()) == 1 and v[:, -step_size:].unique().item() == padding_index and v.shape[1] > step_size:
                 v = v[:, :-step_size]
             if k != "labels_pet_input_ids":  # Because this don't get highway_cls tokens added.
                 required_len = int(step_size * np.ceil(v.shape[1]/step_size))
