@@ -258,26 +258,13 @@ class SuperGlueTest:
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
             iter_size = 4
+            epochs = 0
 
             cur_val_loss = 1e8
             prev_val_loss = 1e8
 
-            while cur_val_loss <= prev_val_loss:
+            while cur_val_loss <= prev_val_loss or epochs <= 2:
                 prev_val_loss = cur_val_loss
-                model = model.train()
-                for step, batch in enumerate(classifier_data["train"]):
-                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-
-                    label = batch.pop("label")
-                    output = model(**batch, label=label)
-                    loss = output["loss"] / iter_size
-                    loss.backward()
-                    if (step + 1) % iter_size == 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
-                        optimizer.step()
-                        scheduler.step()
-                        optimizer.zero_grad(set_to_none=True)
-
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
                 for step, batch in enumerate(classifier_data["validation"]):
@@ -294,6 +281,22 @@ class SuperGlueTest:
                 all_val_loss.append(cur_val_loss)
                 val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                 all_val_acc.append(val_acc)
+
+                model = model.train()
+                for step, batch in enumerate(classifier_data["train"]):
+                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+
+                    label = batch.pop("label")
+                    output = model(**batch, label=label)
+                    loss = output["loss"] / iter_size
+                    loss.backward()
+                    if (step + 1) % iter_size == 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                        optimizer.step()
+                        scheduler.step()
+                        optimizer.zero_grad(set_to_none=True)
+
+                epochs += 1
         else:
             val_acc = 0.0
         predictions = []
