@@ -229,7 +229,7 @@ class SuperGlueTest:
                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                      dataset["train"])
             train.training = False
-            train = DataLoader(train, sampler=None, batch_size=batch_size, collate_fn=collate_fn, # prefetch_factor=2, num_workers=8,
+            train = DataLoader(train, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
                                shuffle=True)
 
         validation = None
@@ -238,7 +238,7 @@ class SuperGlueTest:
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, # prefetch_factor=2, num_workers=8,
+            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
                                     shuffle=False)
 
         test = TokenizerDataset(None, tokenizer, get_char_to_id(),
@@ -246,7 +246,7 @@ class SuperGlueTest:
                                 dataset["test"])
         test.training = False
         test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-        test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, # prefetch_factor=2, num_workers=8,
+        test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
                           shuffle=False)
 
         return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes)
