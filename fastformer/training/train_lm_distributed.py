@@ -268,8 +268,6 @@ class SuperGlueTest:
             iter_size = 8
             epochs = 0
 
-            cur_val_loss = 1e8
-
             while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 10:
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
@@ -471,6 +469,7 @@ class SuperGlueTest:
                 idx -= self.world_size
             if idx != self.rank:
                 continue
+            print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
             dataset = super_glue[dk]
             if dk == "boolq":
                 final_predictions, pred_data = self.boolq(model, dataset, self.device)
