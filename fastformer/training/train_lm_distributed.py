@@ -501,6 +501,8 @@ class SuperGlueTest:
             # print(pd.DataFrame.from_records(pred_datas))
         print(pred_datas)
         print(tabulate(pred_datas, headers="keys", tablefmt="grid"))
+        with open('validation.txt', 'a') as f:
+            print(str(pred_datas), file=f)
 
 
 
@@ -766,6 +768,8 @@ def train(local_rank, args):
     # gpu_device = 0
     gpu_device = local_rank
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    import warnings
+    warnings.simplefilter("ignore")
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
