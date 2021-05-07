@@ -839,11 +839,9 @@ def train(local_rank, args):
     fsdp_wrapper(wrap_type=0, init=True)
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
 
-    model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
-    if rank == 0:
-        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
-        print(model)
+    model = None
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
+        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
 
         try:
@@ -866,6 +864,12 @@ def train(local_rank, args):
         clean_memory()
         if args["validate_only"]:
             return
+
+    if model is None:
+        model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
+    if rank == 0:
+        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+        print(model)
 
     ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
     # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
