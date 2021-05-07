@@ -13,6 +13,8 @@
 # import multiprocessing as mp
 # ctx = mp.get_context()
 # ctx.reducer = pickle4reducer.Pickle4Reducer()
+import warnings
+warnings.simplefilter("ignore")
 import shutil
 import sys
 import traceback
