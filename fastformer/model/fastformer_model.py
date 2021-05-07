@@ -954,9 +954,9 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             loss = self.ce(logits.squeeze(), label.float() if self.num_classes == 1 else label.long())
 
         if self.num_classes > 1:
-            predictions = logits.argmax(-1)
+            predictions = logits.argmax(-1).squeeze()
         else:
-            predictions = torch.sigmoid(logits.detach())
+            predictions = torch.sigmoid(logits.detach()).squeeze()
         return dict(predictions=predictions, loss=loss)
 
 

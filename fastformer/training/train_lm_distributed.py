@@ -265,7 +265,7 @@ class SuperGlueTest:
             cur_val_loss = 1e8
             prev_val_loss = 1e8
 
-            while cur_val_loss <= prev_val_loss or epochs <= 2:
+            while (cur_val_loss <= prev_val_loss or epochs <= 2) and epochs <= 10:
                 prev_val_loss = cur_val_loss
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
@@ -324,7 +324,7 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s, all_val_acc = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
-        print(classifier_results["predictions"])
+        # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions
 
