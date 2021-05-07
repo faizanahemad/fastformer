@@ -265,13 +265,13 @@ class SuperGlueTest:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
-            iter_size = 4
+            iter_size = 8
             epochs = 0
 
             cur_val_loss = 1e8
             prev_val_loss = 1e8
 
-            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 3:
+            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 10:
                 prev_val_loss = cur_val_loss
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
