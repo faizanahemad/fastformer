@@ -99,7 +99,8 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
-        self.cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens, embed_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.extra_cls_token = nn.Parameter(torch.zeros(1, max(3, num_highway_cls_tokens - 1), embed_dim))
         if relative_attention:
             self.first_pos_embed = nn.Parameter(torch.zeros(1, embed_dim))
             self.row_embed = nn.Parameter(torch.zeros(self.height * 2 + 1, pos_dim))
@@ -127,7 +128,8 @@ class PatchEmbed(nn.Module):
             row_embed = None
             column_embed = None
         cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        extra_cls_token = self.extra_cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, extra_cls_token, x), dim=1)
         x = self.layer_norm(x)
         x = self.dropout(x)
         return x, row_embed, column_embed
@@ -410,7 +412,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
-        self.ffn_input_features = num_features // heads
+        self.ffn_input_features = (num_features // heads) * 4
         assert num_features % heads == 0
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
         self.num_features = 128
@@ -590,8 +592,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_accuracy = None
         simclr_accuracy_simple = None
         if self.simclr_w > 0:
-            b1s = b1[:, 0]
-            b2s = b2[:, 0]
+            b1s = torch.cat((b1[:, 0], b1[:, 1]), -1)
+            b2s = torch.cat((b2[:, 0], b2[:, 1]), -1)
 
             contrastive_matrix = b1s.mm(b2s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
             simclr_negative = None

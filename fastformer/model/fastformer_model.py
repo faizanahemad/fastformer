@@ -919,8 +919,8 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             self.ce = BCELossFocal()
         else:
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
-        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else 768
-        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, self.num_features), nn.GELU(),
+        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else 768 * 4
+        self.head = nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(),
                                   nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
@@ -947,8 +947,9 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = self.funnel(**funnel_inputs)
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
-            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, )
-            funnel_outputs = funnel_outputs["last_hidden_state"][:, 0]
+            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
+            funnel_outputs = torch.cat((funnel_outputs["pooler_output"], funnel_outputs["hidden_states"][-2][:, 0],
+                                        funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
