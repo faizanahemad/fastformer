@@ -355,7 +355,7 @@ class SuperGlueTest:
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s, all_val_acc = %s" % ("rte", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"], classifier_results["all_val_acc"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
-        axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["hypothesis", "premise"])
+        axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         test_idx = classifier_data["test_idx"]
