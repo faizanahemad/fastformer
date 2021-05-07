@@ -411,8 +411,12 @@ class PatchCLR(FastFormerPreTrainedModel):
                  reinit=False, priority_clr=False, moco=False, channel_dropout=0.0, heads=1):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
+        self.patchclr_w = patchclr_w
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
-        self.ffn_input_features = (num_features // heads) * 4
+        if self.patchclr_w == 0:
+            self.ffn_input_features = (num_features // heads) * 4
+        else:
+            self.ffn_input_features = (num_features // heads)
         assert num_features % heads == 0
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
         self.num_features = 128
@@ -420,7 +424,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.contrastive_temperature = contrastive_temperature
         self.simclr_w = simclr_w
         self.clustering_w = clustering_w
-        self.patchclr_w = patchclr_w
         self.channel_dropout = channel_dropout
         self.dropout = nn.Dropout2d(channel_dropout)
         self.gap_bias_w = gap_bias_w
@@ -490,7 +493,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         if self.heads > 1 and self.patchclr_w > 0:
             b = b.reshape(b.size(0), -1, self.ffn_input_features)
-        b = ffn(b) if self.patchclr_w > 0 else ffn(b[:, 0:1])
+        b = ffn(b) if self.patchclr_w > 0 else ffn(b[:, 0:4].view(x.size(0), -1))
 
         # assert torch.all(torch.isfinite(b.detach())).item()
 
@@ -592,8 +595,12 @@ class PatchCLR(FastFormerPreTrainedModel):
         simclr_accuracy = None
         simclr_accuracy_simple = None
         if self.simclr_w > 0:
-            b1s = torch.cat((b1[:, 0], b1[:, 1]), -1)
-            b2s = torch.cat((b2[:, 0], b2[:, 1]), -1)
+            if self.patchclr_w > 0:
+                b1s = b1[:, 0:4].view(b, -1)
+                b2s = b2[:, 0:4].view(b, -1)
+            else:
+                b1s = b1.view(b, -1)
+                b2s = b2.view(b, -1)
 
             contrastive_matrix = b1s.mm(b2s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
             simclr_negative = None
@@ -640,26 +647,21 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         gap_bias_loss = None
         gap_bias_accuracy = None
-        if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
-            p1s = b1[:, 1:].mean(1)
-            p2s = b2[:, 1:].mean(1)
-            b1s = b1[:, 0]
-            b2s = b2[:, 0]
-            gap_bias = torch.cat((b1s, b2s, p1s, p2s), 0)
-            contrastive_matrix = gap_bias.mm(gap_bias.t()) * (1 - torch.eye(gap_bias.size(0), gap_bias.size(0), device=b1s.device))
-            simclr_negative = None
-            if extra_negative_repr_simclr is not None:
-                simclr_negative = gap_bias.mm(extra_negative_repr_simclr.t())
+        # if self.gap_bias_w > 0 and self.simclr_w > 0 and self.patchclr_w > 0:
+        #     p1s = b1[:, 1:].mean(1)
+        #     p2s = b2[:, 1:].mean(1)
+        #     b1s = b1[:, 0]
+        #     b2s = b2[:, 0]
+        #     gap_bias = torch.cat((b1s, b2s, p1s, p2s), 0)
+        #     contrastive_matrix = gap_bias.mm(gap_bias.t()) * (1 - torch.eye(gap_bias.size(0), gap_bias.size(0), device=b1s.device))
+        #     simclr_negative = None
+        #     if extra_negative_repr_simclr is not None:
+        #         simclr_negative = gap_bias.mm(extra_negative_repr_simclr.t())
+        #
+        #     gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
+        #     gap_bias_loss = self.gap_bias_w * gap_bias_loss
+        #     loss += gap_bias_loss
 
-            gap_bias_loss, gap_bias_accuracy = self.calculate_contrastive_loss(contrastive_matrix, p1s.shape[0] + p2s.shape[0], simclr_negative, calculate_accuracy=calculate_accuracy)
-            gap_bias_loss = self.gap_bias_w * gap_bias_loss
-            loss += gap_bias_loss
-
-        # TODO: GAP bias SIMCLR
-        # SimCLR Loss subset of patch clr
-        # TODO: patch clr with previous batch vectors
-        # TODO: Reduce SIMCLR weight to zero slowly
-        # TODO: Additive Margin Softmax to make the task harder.
 
         return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss, simclr_loss_simple=simclr_loss_simple,
                     patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
