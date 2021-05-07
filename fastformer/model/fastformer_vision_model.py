@@ -418,7 +418,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         else:
             self.ffn_input_features = (num_features // heads)
         assert num_features % heads == 0
-        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, self.ffn_input_features * 2), nn.GELU(), nn.Linear(self.ffn_input_features * 2, 128, bias=False))
+        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(), nn.Linear(2048, 128, bias=False))
         self.num_features = 128
         self.eps = eps
         self.contrastive_temperature = contrastive_temperature
@@ -733,8 +733,7 @@ if __name__ == '__main__':
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0)
-        print(model)
+            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, patchclr_w=0.0)
     else:
         model = FastFormerVisionModel(config)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -744,7 +743,7 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0)
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0, patchclr_w=0.0)
     if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
             args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
@@ -752,6 +751,7 @@ if __name__ == '__main__':
             state_dict = torch.load(args["pretrained_model"], map_location=device)
             model.load_state_dict(state_dict, strict=True)
 
+    print(model)
     model = model.to(device)
     if args["classification"]:
         output = model(x)
