@@ -499,6 +499,7 @@ class SuperGlueTest:
             pred_datas.append(pred_data)
             # import pandas as pd
             # print(pd.DataFrame.from_records(pred_datas))
+        print(pred_datas)
         print(tabulate(pred_datas, headers="keys", tablefmt="grid"))
 
 
