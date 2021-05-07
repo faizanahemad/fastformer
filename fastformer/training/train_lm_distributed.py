@@ -302,7 +302,7 @@ class SuperGlueTest:
                         optimizer.step()
                         scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
-                train_acc = accuracy_score(labels, (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+                train_acc = accuracy_score(train_labels, (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                 all_train_acc.append(train_acc)
                 epochs += 1
         else:
