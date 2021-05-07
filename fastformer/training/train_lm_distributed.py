@@ -271,7 +271,7 @@ class SuperGlueTest:
             cur_val_loss = 1e8
             prev_val_loss = 1e8
 
-            while cur_val_loss <= prev_val_loss or epochs <= 3:
+            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 3:
                 prev_val_loss = cur_val_loss
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []

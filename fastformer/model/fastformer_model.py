@@ -905,7 +905,8 @@ class FastFormerForMaskedLM(FastFormerPreTrainedModel):
 
 
 class FastFormerForClassification(FastFormerPreTrainedModel):
-    def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None, additive_margin_softmax_w=0.3, reinit_backbone=False):
+    def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None,
+                 additive_margin_softmax_w=0.3, reinit_backbone=False, train_backbone=True):
         if isinstance(config, FastFormerConfig):
             super().__init__(config)
         elif model is not None and hasattr(model, "config"):
@@ -923,6 +924,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                                   nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
+        self.train_backbone = train_backbone
         if reinit_backbone:
             self.init_weights()
 
@@ -934,7 +936,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
+    def get_representations(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None):
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
                              token_type_ids=token_type_ids,
@@ -945,9 +947,16 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = self.funnel(**funnel_inputs)
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
-            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids,)
+            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, )
             funnel_outputs = funnel_outputs["last_hidden_state"][:, 0]
+        return funnel_outputs
 
+    def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
+        if self.train_backbone:
+            funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
+        else:
+            with torch.no_grad():
+                funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
         logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
