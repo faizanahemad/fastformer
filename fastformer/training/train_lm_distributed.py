@@ -269,10 +269,8 @@ class SuperGlueTest:
             epochs = 0
 
             cur_val_loss = 1e8
-            prev_val_loss = 1e8
 
             while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 10:
-                prev_val_loss = cur_val_loss
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
                 for step, batch in enumerate(classifier_data["validation"]):
