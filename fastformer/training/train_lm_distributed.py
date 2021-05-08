@@ -539,6 +539,8 @@ class SuperGlueTest:
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
         with open('validation.txt') as f:
             my_list = [eval(x.rstrip()) for x in f]
+            if self.rank == 0:
+                print(my_list)
         processed_datasets = [one['dataset'] for one in my_list]
         keys = [k for k in keys if k not in processed_datasets]
         # keys = ['copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
