@@ -661,62 +661,25 @@ def get_image_augmetations(mode, teacher=True):
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     cut = get_cutout(1.0, 0.05)
     bigcut = get_cutout(1.0, 0.1)
+    if mode == "linear_probe":
+        teacher = True
     if mode == "validation":
-        shape_transforms.append(transforms.Resize(224))
-        shape_transforms.append(transforms.CenterCrop(224))
-        shape_transforms.append(to_tensor)
-    elif mode == "linear_probe":
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomResizedCrop(416, scale=(0.6, 1.0), ratio=(3 / 4, 4 / 3)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.6, 1.0), 0),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomAffine(0, (0.05, 0.05), (0.8, 1.2), 5),
-            transforms.RandomPerspective(distortion_scale=0.05),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomRotation(15),
-            DefinedRotation(90),
-            DefinedRotation(180),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
-            transforms.Compose([transforms.Resize(320), transforms.RandomCrop(256), transforms.Resize(256)]),
-
-        ]))
+        shape_transforms = to_tensor
     else:
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomResizedCrop(416, scale=(0.4, 1.0) if teacher else (0.2, 0.6), ratio=(3 / 5, 5 / 3)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.RandomAffine(0, (0.0, 0.0), (0.4, 1.0), 0),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomAffine(0, (0.2, 0.2), (0.75, 1.25), 10),
-            transforms.RandomPerspective(distortion_scale=0.1),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.RandomRotation(30),
-            DefinedRotation(90),
-            DefinedRotation(180),
-        ]))
-        shape_transforms.append(transforms.RandomChoice([
-            identity,
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(416), transforms.Resize(416)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(256), transforms.Resize(416)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(384), transforms.Resize(384)]),
-            transforms.Compose([transforms.Resize(448), transforms.RandomCrop(320), transforms.Resize(320)]),
-            transforms.Compose([transforms.Resize(512), transforms.RandomCrop(256), transforms.Resize(416)]),
-        ]))
+        shape_transforms = transforms.Compose([
+            transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 10 if teacher else 20),
+            transforms.RandomPerspective(distortion_scale=0.1 if teacher else 0.2),
+            transforms.RandomChoice([
+                identity,
+                transforms.RandomRotation(15 if teacher else 45),
+                DefinedRotation(90),
+                DefinedRotation(180),
+            ]),
+            transforms.RandomResizedCrop(416, scale=(0.6, 1.0) if teacher else (0.2, 0.8), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            # transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0) if teacher else (0.6, 1.0), 0),
+
+        ])
     shape_transforms = transforms.Compose(shape_transforms)
 
     non_shape_transforms = [

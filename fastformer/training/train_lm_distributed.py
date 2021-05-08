@@ -250,7 +250,7 @@ class SuperGlueTest:
                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                      dataset["train"])
             train.training = False
-            train = DataLoader(train, sampler=None if self.world_size==1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
+            train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
                                collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1)
 
         validation = None
@@ -337,6 +337,8 @@ class SuperGlueTest:
                 all_train_acc.append(train_acc)
                 epochs += 1
 
+            if rank == 0:
+                pbar.close()
             if rank != 0:
                 return None
 
@@ -532,7 +534,7 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
-        keys = ['boolq']
+        keys = ['cb', 'copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
             dataset = super_glue[dk]
