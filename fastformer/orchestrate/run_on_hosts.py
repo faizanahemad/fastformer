@@ -171,7 +171,7 @@ if __name__ == "__main__":
     vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
     vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 2000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --shuffle_dataset"
     vision_cmd += " --accumulation_steps 1 --epochs 200"
-    vision_cmd += " --mode linear_probe"
+    vision_cmd += " --mode clr"
     vision_cmd += " --no_autocast"
     vision_cmd += " --lr 0.0015 --lr_steps 4"
     vision_cmd += " --batch_size 8"
