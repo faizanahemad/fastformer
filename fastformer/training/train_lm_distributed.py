@@ -566,8 +566,10 @@ class SuperGlueTest:
                     with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
                         writer.write_all(final_predictions_axg)
                 pred_datas.append(pred_data)
-                with open('validation.txt', 'a') as f:
-                    print(str(pred_data), file=f)
+                with jsonlines.open('validation.txt', mode='a') as writer:
+                    writer.write_all([pred_data])
+                # with open('validation.txt', 'a') as f:
+                #     print(str(pred_data), file=f)
             # import pandas as pd
             # print(pd.DataFrame.from_records(pred_datas))
         if self.rank == 0:
