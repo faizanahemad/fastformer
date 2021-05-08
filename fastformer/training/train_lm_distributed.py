@@ -266,26 +266,28 @@ class SuperGlueTest:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
+            optimizer.zero_grad(set_to_none=True)
             iter_size = 8
             epochs = 0
 
             while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or (epochs < 5 and epochs < max_allowed_epochs):
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
-                for step, batch in enumerate(classifier_data["validation"]):
-                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                    label = batch.pop("label")
-                    labels.extend(label.cpu().tolist())
-                    with torch.no_grad():
-                        output = model(**batch, label=label)
-                    val_loss = output["loss"].detach().cpu().item()
-                    val_preds = output["predictions"].cpu().tolist()
-                    predictions.extend(val_preds)
-                    val_losses.append(val_loss)
-                cur_val_loss = np.mean(val_losses)
-                all_val_loss.append(cur_val_loss)
-                val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-                all_val_acc.append(val_acc)
+                if epochs > 0:
+                    for step, batch in enumerate(classifier_data["validation"]):
+                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                        label = batch.pop("label")
+                        labels.extend(label.cpu().tolist())
+                        with torch.no_grad():
+                            output = model(**batch, label=label)
+                        val_loss = output["loss"].detach().cpu().item()
+                        val_preds = output["predictions"].cpu().tolist()
+                        predictions.extend(val_preds)
+                        val_losses.append(val_loss)
+                    cur_val_loss = np.mean(val_losses)
+                    all_val_loss.append(cur_val_loss)
+                    val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+                    all_val_acc.append(val_acc)
 
                 train_labels, train_predictions = [], []
                 model = model.train()
