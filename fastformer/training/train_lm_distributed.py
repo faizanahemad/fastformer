@@ -534,7 +534,7 @@ class SuperGlueTest:
         size_dicts = self.size_dicts
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
-        keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
+        keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
         # keys = ['copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
