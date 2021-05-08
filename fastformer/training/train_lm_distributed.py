@@ -251,7 +251,7 @@ class SuperGlueTest:
                                      dataset["train"])
             train.training = False
             train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
-                               collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1)
+                               collate_fn=collate_fn, prefetch_factor=2, num_workers=4, shuffle=self.world_size==1, persistent_workers=True)
 
         validation = None
         if "validation" in dataset and rank == 0:
@@ -259,7 +259,7 @@ class SuperGlueTest:
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                                     shuffle=False)
 
         test = None
@@ -270,7 +270,7 @@ class SuperGlueTest:
                                     dataset["test"])
             test.training = False
             test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                               shuffle=False)
 
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
