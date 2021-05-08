@@ -537,6 +537,10 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
+        with open('validation.txt') as f:
+            my_list = [eval(x.rstrip()) for x in f]
+        processed_datasets = [one['dataset'] for one in my_list]
+        keys = [k for k in keys if k not in processed_datasets]
         # keys = ['copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
