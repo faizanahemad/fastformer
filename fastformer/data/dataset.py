@@ -1,5 +1,6 @@
 from typing import List, Dict
 
+import transformers
 from seaborn import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 import numpy as np
@@ -228,27 +229,31 @@ def char_mapper(char_to_id, x):
 
 def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
     # Do padding myself
-    tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **tokenizer_args)
-    offset_mapping = tokenizer_outputs["offset_mapping"]
-    offset_mapping -= 1
-    offset_mapping = F.relu(offset_mapping)
-    # offset_mapping[:, -1] = 1
-    char_list = list(text)
-    char_lists = list(map(partial(char_mapper, char_to_id), char_list))
+    if isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
+        tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **tokenizer_args)
+        offset_mapping = tokenizer_outputs["offset_mapping"]
+        offset_mapping -= 1
+        offset_mapping = F.relu(offset_mapping)
+        # offset_mapping[:, -1] = 1
+        char_list = list(text)
+        char_lists = list(map(partial(char_mapper, char_to_id), char_list))
 
-    # assert len(char_list) == len(char_lists)
-    mxlen = offset_mapping.max().item()
-    # assert mxlen < len(char_list)
-    tokenizer_outputs["char_ids"] = char_lists[:(mxlen+1)]
-    # assert mxlen < len(char_lists)
-    assert mxlen < len(tokenizer_outputs["char_ids"])
-    tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
-    # assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
+        # assert len(char_list) == len(char_lists)
+        mxlen = offset_mapping.max().item()
+        # assert mxlen < len(char_list)
+        tokenizer_outputs["char_ids"] = char_lists[:(mxlen+1)]
+        # assert mxlen < len(char_lists)
+        assert mxlen < len(tokenizer_outputs["char_ids"])
+        tokenizer_outputs["char_offsets"] = offset_mapping.squeeze()
+        # assert tokenizer_outputs["input_ids"].shape[1] == tokenizer_args["max_length"]
+        del tokenizer_outputs["offset_mapping"]
+    else:
+        tokenizer_outputs = tokenizer(text, **tokenizer_args)
     tokenizer_outputs["input_ids"] = tokenizer_outputs["input_ids"].squeeze()
     tokenizer_outputs["attention_mask"] = tokenizer_outputs["attention_mask"].squeeze()
     if "token_type_ids" in tokenizer_outputs:
         tokenizer_outputs["token_type_ids"] = tokenizer_outputs["token_type_ids"].squeeze()
-    del tokenizer_outputs["offset_mapping"]
+
     return tokenizer_outputs
 
 
