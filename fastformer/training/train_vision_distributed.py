@@ -254,11 +254,11 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     image_transforms = get_image_augmetations(mode)
 
     if "imagenet" in location.lower():
-        dataset_student = ImageNet(location, split, transform=get_image_augmetations(mode)["shape_transforms", False])
-        dataset_teacher = ImageNet(location, split, transform=get_image_augmetations(mode)["shape_transforms", True])
+        dataset_student = ImageNet(location, split, transform=get_image_augmetations(mode, False)["shape_transforms"])
+        dataset_teacher = ImageNet(location, split, transform=get_image_augmetations(mode, True)["shape_transforms"])
     elif "cifar10" in location.lower():
-        dataset_student = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode)["shape_transforms", False])
-        dataset_teacher = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode)["shape_transforms", True])
+        dataset_student = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode, False)["shape_transforms"])
+        dataset_teacher = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode, True)["shape_transforms"])
 
     if mode == "clr":
         # print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
