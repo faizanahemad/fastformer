@@ -206,7 +206,7 @@ class CLRDataset(torch.utils.data.Dataset):
         return dict(x1=x1, x2=x2, patch_clr_or_not=True)
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset_student)
 
 
 class ImageNetValidation:
@@ -263,10 +263,11 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     if mode == "clr":
         # print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
         dataset = CLRDataset(dataset_student, dataset_teacher)
-
+    else:
+        dataset = dataset_student
     kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
-    loader = DataLoader(dataset_student, sampler=None if single_node else DistributedSampler(dataset_student, shuffle=shuffle_dataset),
-                        batch_size=batch_size, shuffle=shuffle_dataset and single_node,
+    loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
+                        batch_size=batch_size, shuffle=shuffle_dataset and single_node, persistent_workers=True,
                         num_workers=num_workers, pin_memory=True, worker_init_fn=worker_init_fn, **kwargs)
     return loader
 
