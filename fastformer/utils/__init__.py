@@ -711,7 +711,7 @@ def get_image_augmetations(mode, teacher=True):
                             ]),
                             transforms.RandomChoice([
                                 identity,
-                                identity if teacher else cut
+                                identity if teacher else cut,
                                 cut if teacher else bigcut,
                                 transforms.RandomChoice([identity] if teacher else [
                                     get_imgaug(iaa.CoarseDropout((0.02, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
