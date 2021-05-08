@@ -289,7 +289,7 @@ class SuperGlueTest:
 
                 train_labels, train_predictions = [], []
                 model = model.train()
-                for step, batch in enumerate(classifier_data["train"]):
+                for step, batch in enumerate(tqdm(classifier_data["train"])):
                     batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
                     label = batch.pop("label")
