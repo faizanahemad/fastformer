@@ -195,14 +195,14 @@ def model_train_validation_switch(model, args, train=True):
 
 
 class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset):
-        self.dataset = dataset
+    def __init__(self, dataset_student, dataset_teacher):
+        self.dataset_student, self.dataset_teacher = dataset_student, dataset_teacher
 
     def __getitem__(self, item):
 
-        x1, _ = self.dataset[item]
+        x1, _ = self.dataset_student[item]
         # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
-        x2, label = self.dataset[item]
+        x2, label = self.dataset_teacher[item]
         return dict(x1=x1, x2=x2, patch_clr_or_not=True)
 
     def __len__(self):
@@ -254,16 +254,18 @@ def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, 
     image_transforms = get_image_augmetations(mode)
 
     if "imagenet" in location.lower():
-        dataset = ImageNet(location, split, transform=image_transforms["shape_transforms"])
+        dataset_student = ImageNet(location, split, transform=get_image_augmetations(mode)["shape_transforms", False])
+        dataset_teacher = ImageNet(location, split, transform=get_image_augmetations(mode)["shape_transforms", True])
     elif "cifar10" in location.lower():
-        dataset = CIFAR10(root=location, train=split != "val", download=True, transform=image_transforms["shape_transforms"])
+        dataset_student = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode)["shape_transforms", False])
+        dataset_teacher = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode)["shape_transforms", True])
 
     if mode == "clr":
         # print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
-        dataset = CLRDataset(dataset)
+        dataset = CLRDataset(dataset_student, dataset_teacher)
 
     kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
-    loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
+    loader = DataLoader(dataset_student, sampler=None if single_node else DistributedSampler(dataset_student, shuffle=shuffle_dataset),
                         batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                         num_workers=num_workers, pin_memory=True, worker_init_fn=worker_init_fn, **kwargs)
     return loader
