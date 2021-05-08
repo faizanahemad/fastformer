@@ -199,7 +199,7 @@ class SuperGlueTest:
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
         self.epoch_per_dataset = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed'],
-                                          [5, 5, 5, 5, 5, 5, 5, 5]))
+                                          [15, 90, 45, 15, 2, 22, 20, 15]))
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
         self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
@@ -239,7 +239,7 @@ class SuperGlueTest:
             clean_memory()
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
         optc = optimizer_config.to_dict()
-        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=5e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
         scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
