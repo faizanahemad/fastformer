@@ -215,15 +215,25 @@ class SuperGlueTest:
             model = model.train()
             optimizer_config.eps = 1e-5
 
+        rnd = torch.tensor(int(time.time())).to(device)
+        dist.broadcast(rnd, 0)
+        set_seeds(rnd.item())
         if reinit or not isinstance(model, FastFormerForClassification):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
             classifier.funnel = model.funnel if hasattr(model, "funnel") else model
             classifier = classifier.to(device)
             del model
             model = classifier
+            ddp_model = DDP(model, device_ids=None if args["cpu"] else [self.device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+            try:
+                from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
+                ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
+            except:
+                print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
+            clean_memory()
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
         optc = optimizer_config.to_dict()
-        optimizer = torch.optim.AdamW(model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
         scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
@@ -234,11 +244,11 @@ class SuperGlueTest:
                                      dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                      dataset["train"])
             train.training = False
-            train = DataLoader(train, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
-                               shuffle=True)
+            train = DataLoader(train, sampler=None if self.world_size==1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
+                               collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1)
 
         validation = None
-        if "validation" in dataset:
+        if "validation" in dataset and rank == 0:
             validation = TokenizerDataset(None, tokenizer, get_char_to_id(),
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
@@ -246,15 +256,18 @@ class SuperGlueTest:
             validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
                                     shuffle=False)
 
-        test = TokenizerDataset(None, tokenizer, get_char_to_id(),
-                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
-                                dataset["test"])
-        test.training = False
-        test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-        test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
-                          shuffle=False)
+        test = None
+        test_idx = None
+        if rank == 0:
+            test = TokenizerDataset(None, tokenizer, get_char_to_id(),
+                                    dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
+                                    dataset["test"])
+            test.training = False
+            test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
+            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+                              shuffle=False)
 
-        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train,
+        return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
                     dataset_key=dataset_key, rank=rank)
 
@@ -275,23 +288,30 @@ class SuperGlueTest:
 
 
             optimizer.zero_grad(set_to_none=True)
-            iter_size = 8
+            iter_size = 2
             epochs = 0
-
-            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or (epochs < 5 and epochs < max_allowed_epochs):
+            # (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3]))
+            while epochs < 5 and epochs < max_allowed_epochs:
                 model = model.eval()
 
                 train_labels, train_predictions = [], []
                 model = model.train()
-                for step, batch in enumerate(tqdm(classifier_data["train"])):
+                trainer = tqdm(classifier_data["train"]) if rank == 0 else classifier_data["train"]
+                for step, batch in enumerate(trainer):
                     batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
                     label = batch.pop("label")
                     train_labels.extend(label.cpu().tolist())
                     # print(label.size(), batch['input_ids'].size())
-                    output = model(**batch, label=label)
-                    loss = output["loss"] / iter_size
-                    loss.backward()
+                    if (step + 1) % iter_size != 0:
+                        with model.no_sync():
+                            output = model(**batch, label=label)
+                            loss = output["loss"] / iter_size
+                            loss.backward()
+                    else:
+                        output = model(**batch, label=label)
+                        loss = output["loss"] / iter_size
+                        loss.backward()
                     preds = output["predictions"].cpu().tolist()
                     train_predictions.extend(preds)
                     if (step + 1) % iter_size == 0:
@@ -302,24 +322,27 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
-
-                labels, predictions, val_losses = [], [], []
-                for step, batch in enumerate(classifier_data["validation"]):
-                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                    label = batch.pop("label")
-                    labels.extend(label.cpu().tolist())
-                    with torch.no_grad():
-                        output = model(**batch, label=label)
-                    val_loss = output["loss"].detach().cpu().item()
-                    val_preds = output["predictions"].cpu().tolist()
-                    predictions.extend(val_preds)
-                    val_losses.append(val_loss)
-                cur_val_loss = np.mean(val_losses)
-                all_val_loss.append(cur_val_loss)
-                val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-                all_val_acc.append(val_acc)
-
                 epochs += 1
+
+            if rank != 0:
+                return None
+
+            labels, predictions, val_losses = [], [], []
+            for step, batch in enumerate(classifier_data["validation"]):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                label = batch.pop("label")
+                labels.extend(label.cpu().tolist())
+                with torch.no_grad():
+                    output = model(**batch, label=label)
+                val_loss = output["loss"].detach().cpu().item()
+                val_preds = output["predictions"].cpu().tolist()
+                predictions.extend(val_preds)
+                val_losses.append(val_loss)
+            cur_val_loss = np.mean(val_losses)
+            all_val_loss.append(cur_val_loss)
+            val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+            all_val_acc.append(val_acc)
+
         else:
             val_acc = 0.0
         predictions = []
@@ -334,62 +357,76 @@ class SuperGlueTest:
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs)
 
-    def boolq(self, model, boolq, device):
+    def boolq(self, model, boolq, device, dataset_key, rank):
         boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
-        classifier_data = self.prepare_classifier(model, boolq, device, 1)
+        classifier_data = self.prepare_classifier(model, boolq, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
 
-    def wic(self, model, wic, device):
+    def wic(self, model, wic, device, dataset_key, rank):
         wic = wic.map(lambda x: dict(text='sentence1: ' + x["sentence1"] + " sentence2: " + x["sentence2"] + " word: " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
-        classifier_data = self.prepare_classifier(model, wic, device, 1)
+        classifier_data = self.prepare_classifier(model, wic, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s," % ("wic", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
     
-    def cb(self, model, cb, device):
+    def cb(self, model, cb, device, dataset_key, rank):
         cb = cb.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, cb, device, 3)
+        classifier_data = self.prepare_classifier(model, cb, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("cb", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"])
 
-    def rte_axb_axg(self, model, rte, axb, axg, device):
+    def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         rte = rte.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, rte, device, 1)
+        classifier_data = self.prepare_classifier(model, rte, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("rte", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
         axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
-        classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, reinit=False)
+        classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
+        if rank != 0:
+            return None, None, None, None
         test_idx = classifier_data["test_idx"]
         final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         axg = axg.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, reinit=False)
+        classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
+        if rank != 0:
+            return None
         test_idx = classifier_data["test_idx"]
         final_predictions_axg = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in
                                  zip(test_idx, classifier_results["predictions"])]
 
         return final_predictions, rte_res, final_predictions_axb, final_predictions_axg
 
-    def multirc(self, model, multirc, device):
+    def multirc(self, model, multirc, device, dataset_key, rank):
         multirc = multirc.map(lambda x: dict(text="paragraph: " + x["paragraph"] + " question: " + x["question"] + "answer: " + x["answer"]), remove_columns=["paragraph", "question", "answer"])
-        classifier_data = self.prepare_classifier(model, multirc, device, 1)
+        classifier_data = self.prepare_classifier(model, multirc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("multirc", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=pred > 0.5) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -402,14 +439,16 @@ class SuperGlueTest:
         final_predictions = mrcp
         return final_predictions, dict(dataset="multirc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
 
-    def copa(self, model, copa, device):
+    def copa(self, model, copa, device, dataset_key, rank):
         copa_c1 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice1"], label=x["label"] == 0, choice=0), remove_columns=["premise", 'question', "choice1", "choice2"])
         copa_c2 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice2"], label=x["label"] == 1, choice=1),
                            remove_columns=["premise", 'question', "choice1", "choice2"])
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
-        classifier_data = self.prepare_classifier(model, copa, device, 1)
+        classifier_data = self.prepare_classifier(model, copa, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("copa", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
@@ -417,7 +456,7 @@ class SuperGlueTest:
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
         return final_predictions, dict(dataset="copa", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
 
-    def record(self, model, record, device):
+    def record(self, model, record, device, dataset_key, rank):
 
         def rproc(x):
             answers = x["answers"][0]
@@ -439,8 +478,10 @@ class SuperGlueTest:
 
         rtest = record["test"]
         record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
-        classifier_data = self.prepare_classifier(model, record, device, 1)
+        classifier_data = self.prepare_classifier(model, record, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("record", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
@@ -452,7 +493,7 @@ class SuperGlueTest:
         final_predictions = [dict(idx=fp["idx"], label=en[fp["choice"]]) for fp, en in zip(final_predictions, entities)]
         return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
 
-    def wsc(self, model, wsc, device):
+    def wsc(self, model, wsc, device, dataset_key, rank):
 
         def wsc_proc(x):
             words = x["text"].split()
@@ -462,8 +503,10 @@ class SuperGlueTest:
             return dict(text=text)
             
         wsc = wsc.map(wsc_proc, remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
-        classifier_data = self.prepare_classifier(model, wsc, device, 1)
+        classifier_data = self.prepare_classifier(model, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("wsc", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -485,36 +528,38 @@ class SuperGlueTest:
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
             dataset = super_glue[dk]
             if dk == "boolq":
-                final_predictions, pred_data = self.boolq(model, dataset, self.device)
+                final_predictions, pred_data = self.boolq(model, dataset, self.device, dk, self.rank)
             elif dk == "cb":
-                final_predictions, pred_data = self.cb(model, dataset, self.device)
+                final_predictions, pred_data = self.cb(model, dataset, self.device, dk, self.rank)
             elif dk == "copa":
-                final_predictions, pred_data = self.copa(model, dataset, self.device)
+                final_predictions, pred_data = self.copa(model, dataset, self.device, dk, self.rank)
             elif dk == "multirc":
-                final_predictions, pred_data = self.multirc(model, dataset, self.device)
+                final_predictions, pred_data = self.multirc(model, dataset, self.device, dk, self.rank)
             elif dk == "record":
-                final_predictions, pred_data = self.record(model, dataset, self.device)
+                final_predictions, pred_data = self.record(model, dataset, self.device, dk, self.rank)
             elif dk == "wic":
-                final_predictions, pred_data = self.wic(model, dataset, self.device)
+                final_predictions, pred_data = self.wic(model, dataset, self.device, dk, self.rank)
             elif dk == "wsc.fixed":
-                final_predictions, pred_data = self.wsc(model, dataset, self.device)
+                final_predictions, pred_data = self.wsc(model, dataset, self.device, dk, self.rank)
             elif dk == "rte":
-                final_predictions, pred_data, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device)
+                final_predictions, pred_data, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
 
-            with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
-                writer.write_all(final_predictions)
-            if dk == "rte":
-                with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
-                    writer.write_all(final_predictions_axb)
-                with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
-                    writer.write_all(final_predictions_axg)
-            pred_datas.append(pred_data)
+            if self.rank == 0:
+                with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
+                    writer.write_all(final_predictions)
+                if dk == "rte":
+                    with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
+                        writer.write_all(final_predictions_axb)
+                    with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
+                        writer.write_all(final_predictions_axg)
+                pred_datas.append(pred_data)
             # import pandas as pd
             # print(pd.DataFrame.from_records(pred_datas))
-        print(pred_datas)
-        print(tabulate(pred_datas, headers="keys", tablefmt="grid"))
-        with open('validation.txt', 'a') as f:
-            print(str(pred_datas), file=f)
+        if self.rank == 0:
+            print(pred_datas)
+            print(tabulate(pred_datas, headers="keys", tablefmt="grid"))
+            with open('validation.txt', 'a') as f:
+                print(str(pred_datas), file=f)
 
 
 
@@ -881,8 +926,8 @@ def train(local_rank, args):
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(model)
 
-    ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
-    # ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+    # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+    ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
