@@ -360,9 +360,9 @@ class ClassificationModel(FastFormerPreTrainedModel):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.backbone = backbone
         if isinstance(self.backbone, FastFormerVisionModel):
-            num_features = num_features * 2
+            num_features = num_features * (self.backbone.config.num_highway_cls_tokens + 1)
         self.num_features = num_features
-        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
+        self.head = nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
         if reinit_backbone:
@@ -377,9 +377,10 @@ class ClassificationModel(FastFormerPreTrainedModel):
                 nn.init.constant_(module.bias, 0.0)
 
     def get_representations(self, x):
+        b = x.size(0)
         if isinstance(self.backbone, FastFormerVisionModel):
             output = self.backbone(x, run_decoder=False)
-            representation = torch.cat((output["second_block_hidden"][:, 0], output["second_block_hidden"][:, 1:].mean(1)), 1)
+            representation = torch.cat((output["second_block_hidden"][:, 0:self.backbone.config.num_highway_cls_tokens].view(b, -1), output["second_block_hidden"][:, self.backbone.config.num_highway_cls_tokens:].mean(1)), 1)
         else:
             representation = self.backbone(x)
             if len(representation.size()) == 3:
