@@ -291,12 +291,17 @@ class SuperGlueTest:
             iter_size = 2
             epochs = 0
             # (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3]))
-            while epochs < 5 and epochs < max_allowed_epochs:
+            pbar = None
+            if rank == 0:
+                pbar = tqdm(total=max_allowed_epochs * len(classifier_data["train"]), desc="%s train" % dataset_key)
+            while epochs < max_allowed_epochs:
                 model = model.eval()
 
                 train_labels, train_predictions = [], []
                 model = model.train()
-                trainer = tqdm(classifier_data["train"]) if rank == 0 else classifier_data["train"]
+                trainer = classifier_data["train"]
+                if hasattr(trainer, "sampler") and hasattr(trainer.sampler, "set_epoch"):
+                    trainer.sampler.set_epoch(epochs)
                 for step, batch in enumerate(trainer):
                     batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
@@ -314,6 +319,8 @@ class SuperGlueTest:
                         loss.backward()
                     preds = output["predictions"].cpu().tolist()
                     train_predictions.extend(preds)
+                    if rank == 0:
+                        pbar.update()
                     if (step + 1) % iter_size == 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                         optimizer.step()
@@ -328,7 +335,7 @@ class SuperGlueTest:
                 return None
 
             labels, predictions, val_losses = [], [], []
-            for step, batch in enumerate(classifier_data["validation"]):
+            for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 label = batch.pop("label")
                 labels.extend(label.cpu().tolist())
@@ -346,7 +353,7 @@ class SuperGlueTest:
         else:
             val_acc = 0.0
         predictions = []
-        for step, batch in enumerate(classifier_data["test"]):
+        for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             _ = batch.pop("label", None)
             with torch.no_grad():
