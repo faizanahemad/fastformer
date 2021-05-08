@@ -948,7 +948,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
             funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-            funnel_outputs = torch.cat((funnel_outputs["pooler_output"], funnel_outputs["hidden_states"][-2][:, 0],
+            funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0],
                                         funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
         return funnel_outputs
 
