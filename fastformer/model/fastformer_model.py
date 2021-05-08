@@ -936,7 +936,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
 
-    def get_representations(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None):
+    def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
                              token_type_ids=token_type_ids,
@@ -952,7 +952,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                                         funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
         return funnel_outputs
 
-    def forward(self, input_ids, attention_mask, char_ids, char_offsets, label=None, token_type_ids=None, **kwargs):
+    def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):
         if self.train_backbone:
             funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
         else:
