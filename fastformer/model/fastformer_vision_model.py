@@ -362,19 +362,29 @@ class ClassificationModel(FastFormerPreTrainedModel):
         if isinstance(self.backbone, FastFormerVisionModel):
             num_features = num_features * (self.backbone.config.num_highway_cls_tokens + 1)
         self.num_features = num_features
-        self.head = nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
+        self.head = nn.Linear(self.num_features, num_classes)  # nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
         if reinit_backbone:
             self.init_weights()
 
-        for module in self.head:
+        if isinstance(self.head, nn.Sequential):
+            for module in self.head:
+                if hasattr(module, "weight") and len(module.weight.shape) == 2:
+                    fan_out, fan_in = module.weight.shape
+                    std = np.sqrt(1.0 / float(fan_in + fan_out))
+                    nn.init.normal_(module.weight, std=std)
+                if hasattr(module, "bias") and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
+        elif isinstance(self.head, nn.Linear):
+            module = self.head
             if hasattr(module, "weight") and len(module.weight.shape) == 2:
                 fan_out, fan_in = module.weight.shape
                 std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
             if hasattr(module, "bias") and module.bias is not None:
                 nn.init.constant_(module.bias, 0.0)
+
 
     def get_representations(self, x):
         b = x.size(0)

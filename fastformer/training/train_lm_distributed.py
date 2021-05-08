@@ -192,13 +192,15 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
+        self.epoch_per_dataset = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed'],
+                                          [5, 5, 5, 5, 5, 5, 5, 5]))
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
         self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def prepare_classifier(self, model, dataset, device, num_classes, reinit=True):
+    def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=True):
         batch_size = 8
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
@@ -252,7 +254,9 @@ class SuperGlueTest:
         test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
                           shuffle=False)
 
-        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train, validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes)
+        return dict(model=model, optimizer=optimizer, scheduler=scheduler, train=train,
+                    validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
+                    dataset_key=dataset_key, rank=rank)
 
     def train_classifier(self, model, device, classifier_data, predict_only=False):
         all_val_loss = []
@@ -261,11 +265,15 @@ class SuperGlueTest:
         val_acc = -1
         train_acc = -1
         epochs = -1
-        max_allowed_epochs = 1
+        rank = classifier_data["rank"]
+        dataset_key = classifier_data["dataset_key"]
+        max_allowed_epochs = self.epoch_per_dataset[dataset_key]
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
+
+
             optimizer.zero_grad(set_to_none=True)
             iter_size = 8
             epochs = 0
