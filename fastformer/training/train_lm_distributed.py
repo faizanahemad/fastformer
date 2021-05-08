@@ -177,6 +177,32 @@ def training_args():
     return vars(args)
 
 
+def rproc(x):
+    answers = x["answers"][0]
+    entities = x["entities"][0]
+    idx = x["idx"][0]["query"]
+    passage = x["passage"][0]
+    query = x["query"][0]
+
+    text = "passage: " + passage + " query: " + query
+    rd = defaultdict(list)
+    for i, e in enumerate(entities):
+        rd['idx'].append(idx)
+        rd['text'].append(text + " answer: " + e)
+        rd['choice'].append(i)
+        rd['label'].append(e in answers)
+        rd['entities'].append(entities)
+    return rd
+
+
+def wsc_proc(x):
+    words = x["text"].split()
+    words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + [
+        "[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
+    modified_text = " ".join(words)
+    text = "original: " + x["text"] + " modified: " + modified_text + " word1: " + words[x["span1_index"]] + " word2: " + words[x["span2_index"]]
+    return dict(text=text)
+
 class SuperGlueTest:
     def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False, finetune=True):
         self.location = location
@@ -199,7 +225,7 @@ class SuperGlueTest:
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
         self.epoch_per_dataset = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed'],
-                                          [15, 90, 45, 15, 2, 22, 20, 15]))
+                                          [15, 90, 45, 15, 5, 22, 20, 15]))
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
         self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
@@ -473,24 +499,6 @@ class SuperGlueTest:
 
     def record(self, model, record, device, dataset_key, rank):
 
-        def rproc(x):
-            answers = x["answers"][0]
-            entities = x["entities"][0]
-            idx = x["idx"][0]["query"]
-            passage = x["passage"][0]
-            query = x["query"][0]
-
-
-            text = "passage: " + passage + " query: " + query
-            rd = defaultdict(list)
-            for i, e in enumerate(entities):
-                rd['idx'].append(idx)
-                rd['text'].append(text + " answer: " + e)
-                rd['choice'].append(i)
-                rd['label'].append(e in answers)
-                rd['entities'].append(entities)
-            return rd
-
         rtest = record["test"]
         record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
         classifier_data = self.prepare_classifier(model, record, device, 1, dataset_key, rank)
@@ -509,13 +517,6 @@ class SuperGlueTest:
         return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
 
     def wsc(self, model, wsc, device, dataset_key, rank):
-
-        def wsc_proc(x):
-            words = x["text"].split()
-            words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + ["[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
-            modified_text = " ".join(words)
-            text = "original: " + x["text"] + " modified: " + modified_text + " word1: " + words[x["span1_index"]] + " word2: " + words[x["span2_index"]]
-            return dict(text=text)
             
         wsc = wsc.map(wsc_proc, remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
         classifier_data = self.prepare_classifier(model, wsc, device, 1, dataset_key, rank)
@@ -534,7 +535,7 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
-        keys = ['copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
+        # keys = ['copa', 'multirc', 'wic', 'wsc.fixed', 'rte']
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
             dataset = super_glue[dk]
