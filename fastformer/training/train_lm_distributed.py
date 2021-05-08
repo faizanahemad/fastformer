@@ -240,6 +240,8 @@ class SuperGlueTest:
             model.config.eps = 1e-5
             tokenizer = model.tokenizer
         elif isinstance(model, str):
+            if "deberta" in model.lower():
+                batch_size = 4
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             tokenizer = AutoTokenizer.from_pretrained(model)
