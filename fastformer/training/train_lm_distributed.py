@@ -261,6 +261,7 @@ class SuperGlueTest:
         val_acc = -1
         train_acc = -1
         epochs = -1
+        max_allowed_epochs = 1
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
@@ -268,7 +269,7 @@ class SuperGlueTest:
             iter_size = 8
             epochs = 0
 
-            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or epochs <= 10:
+            while (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3])) or (epochs < 5 and epochs < max_allowed_epochs):
                 model = model.eval()
                 labels, predictions, val_losses = [], [], []
                 for step, batch in enumerate(classifier_data["validation"]):
@@ -464,6 +465,7 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['boolq', 'cb', 'copa', 'multirc', 'record', 'wic', 'wsc.fixed', 'rte', ]  # 'axb', 'axg'
+        keys = ['record']
         for idx, dk in enumerate(keys):
             while idx >= self.world_size:
                 idx -= self.world_size
