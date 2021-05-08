@@ -61,6 +61,12 @@ from torch.utils.data.dataloader import DataLoader
 from collections import Counter
 import warnings
 warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore")
+
+def warn(*args, **kwargs):
+    pass
+
+warnings.warn = warn
 
 import logging
 
