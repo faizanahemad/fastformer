@@ -252,7 +252,7 @@ class SuperGlueTest:
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
-        set_seeds(17)
+        set_seeds(3431)
         if reinit or not isinstance(model, FastFormerForClassification):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
             classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
@@ -598,6 +598,7 @@ class SuperGlueTest:
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
             dataset = super_glue[dk]
+            torch.distributed.barrier()
             if dk == "boolq":
                 final_predictions, pred_data = self.boolq(model, dataset, self.device, dk, self.rank)
             elif dk == "cb":
