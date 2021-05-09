@@ -364,7 +364,7 @@ class SuperGlueTest:
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
 
-                if epochs % 4 == 0:
+                if epochs % 3 == 0:
                     model = model.eval()
                     labels, predictions, val_losses = [], [], []
                     for step, batch in enumerate(classifier_data["validation"]):
@@ -387,7 +387,7 @@ class SuperGlueTest:
                     val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                     all_val_acc.append(val_acc)
 
-                    if prev_val_loss is not None and cur_val_loss > prev_val_loss:
+                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3]:
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
                         break
@@ -401,7 +401,7 @@ class SuperGlueTest:
 
             model = model.eval()
             labels, predictions, val_losses = [], [], []
-            for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
+            for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key) if rank == 0 else classifier_data["validation"]):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 label = batch.pop("label")
                 labels.extend(label.cpu().tolist())
@@ -416,7 +416,7 @@ class SuperGlueTest:
             cur_val_loss = torch.tensor(cur_val_loss).to(device)
             tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
             torch.distributed.all_gather(tensor_list, cur_val_loss)
-            cur_val_loss = torch.stack(tensor_list).mean()
+            cur_val_loss = torch.stack(tensor_list).mean().item()
             all_val_loss.append(cur_val_loss)
             val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
             all_val_acc.append(val_acc)
