@@ -328,8 +328,8 @@ class SuperGlueTest:
             # (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3]))
             pbar = None
             if rank == 0:
-                pbar = tqdm(total=max_allowed_epochs * len(classifier_data["train"]), desc="%s train" % dataset_key)
-            while True:
+                pbar = tqdm(total=max_allowed_epochs * 4 * len(classifier_data["train"]), desc="%s train" % dataset_key)
+            while epochs < max_allowed_epochs * 4:
                 train_labels, train_predictions = [], []
                 model = model.train()
                 trainer = classifier_data["train"]
