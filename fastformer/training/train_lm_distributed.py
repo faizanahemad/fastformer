@@ -398,6 +398,8 @@ class SuperGlueTest:
                         continue_training = torch.tensor(0).to(device)
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
                         continue_training = torch.tensor(1).to(device)
+                        stored_state_val_acc = val_acc
+                        stored_state_val_loss = all_val_loss[-1]
 
                 epochs += 1
                 torch.distributed.barrier()
@@ -405,14 +407,11 @@ class SuperGlueTest:
                 if continue_training.item() == 0:
                     model.load_state_dict(stored_state)
                     optimizer.zero_grad(set_to_none=True)
-                    torch.distributed.barrier()
                     break
                 elif continue_training.item() == 1:
                     stored_state = model.state_dict()
-                    stored_state_val_acc = val_acc
-                    stored_state_val_loss = all_val_loss[-1]
 
-
+            torch.distributed.barrier()
             if rank == 0:
                 pbar.close()
 
