@@ -920,8 +920,10 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
         self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else 768 * 4
-        self.head = nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(),
-                                  nn.Linear(self.num_features, num_classes))
+        self.head = nn.Sequential(nn.Dropout(0.2), nn.Linear(self.num_features, 2048),
+                                  nn.GELU(),
+                                  nn.Dropout(0.2),
+                                  nn.Linear(2048, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
