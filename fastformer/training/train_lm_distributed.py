@@ -395,6 +395,7 @@ class SuperGlueTest:
             with torch.no_grad():
                 output = model(**batch, label=None)
             test_preds = output["predictions"].cpu().tolist()
+            test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
             predictions.extend(test_preds)
 
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
