@@ -459,6 +459,8 @@ class SuperGlueTest:
         clean_memory()
         if rank != 0:
             return None
+        print("Train, Val Acc for %s = %.4f, %.4f" % (dataset_key, train_acc, val_acc))
+        print("%s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken)
 
@@ -469,8 +471,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"],
-                                                                         classifier_results["all_val_loss"]))
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
@@ -483,7 +483,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s," % ("wic", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
                                        epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
@@ -495,7 +494,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("cb", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
@@ -507,7 +505,6 @@ class SuperGlueTest:
         if rank != 0:
             return None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("rte", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
@@ -538,7 +535,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("multirc", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=pred > 0.5) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         for pd in final_predictions:
@@ -561,7 +557,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("copa", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
@@ -577,7 +572,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("record", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(
@@ -596,7 +590,6 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("wsc", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wsc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
