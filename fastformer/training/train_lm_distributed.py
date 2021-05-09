@@ -420,7 +420,7 @@ class SuperGlueTest:
                     optimizer.zero_grad(set_to_none=True)
                     break
                 elif continue_training.item() == 1:
-                    stored_state = model.state_dict()
+                    stored_state = copy.deepcopy(model.state_dict().copy())
 
             torch.distributed.barrier()
             if rank == 0:
