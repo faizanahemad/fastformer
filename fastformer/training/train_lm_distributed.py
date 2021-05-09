@@ -486,7 +486,7 @@ class SuperGlueTest:
         classifier_data = self.prepare_classifier(model, rte, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
-            return None
+            return None, None, None, None
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
@@ -495,16 +495,12 @@ class SuperGlueTest:
         axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
-        if rank != 0:
-            return None, None, None, None
         test_idx = classifier_data["test_idx"]
         final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         axg = axg.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
-        if rank != 0:
-            return None
         test_idx = classifier_data["test_idx"]
         final_predictions_axg = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in
                                  zip(test_idx, classifier_results["predictions"])]
