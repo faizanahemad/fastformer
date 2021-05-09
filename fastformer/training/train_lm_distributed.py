@@ -496,7 +496,6 @@ class SuperGlueTest:
                     test_preds = output["predictions"].cpu().tolist()
                     test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
                     predictions.extend(test_preds)
-        torch.distributed.barrier()
 
         del model
         clean_memory()
