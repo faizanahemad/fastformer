@@ -590,7 +590,7 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
-        if os.path.exists('validation.txt'):
+        if os.path.exists(os.path.join(os.getcwd(), 'validation.txt')):
             with open('validation.txt') as f:
                 my_list = [eval(x.rstrip()) for x in f if len(x.rstrip()) > 0]
                 if self.rank == 0:
@@ -628,10 +628,10 @@ class SuperGlueTest:
                     with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
                         writer.write_all(final_predictions_axg)
                 pred_datas.append(pred_data)
-                with jsonlines.open('validation.txt', mode='a') as writer:
-                    writer.write_all([pred_data])
-                # with open('validation.txt', 'a') as f:
-                #     print(str(pred_data), file=f)
+                # with jsonlines.open('validation.txt', mode='a') as writer:
+                #     writer.write_all([pred_data])
+                with open('validation.txt', 'a') as f:
+                    print(str(pred_data), file=f)
             # import pandas as pd
             # print(pd.DataFrame.from_records(pred_datas))
         if self.rank == 0:
