@@ -381,7 +381,7 @@ class SuperGlueTest:
                     cur_val_loss = torch.tensor(cur_val_loss).to(device)
                     tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
                     torch.distributed.all_gather(tensor_list, cur_val_loss)
-                    cur_val_loss = torch.cat(tensor_list).mean().item()
+                    cur_val_loss = torch.stack(tensor_list).mean().item()
                     all_val_loss.append(cur_val_loss)
                     val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                     all_val_acc.append(val_acc)
@@ -416,7 +416,7 @@ class SuperGlueTest:
             cur_val_loss = torch.tensor(cur_val_loss).to(device)
             tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
             torch.distributed.all_gather(tensor_list, cur_val_loss)
-            cur_val_loss = torch.cat(tensor_list).mean()
+            cur_val_loss = torch.stack(tensor_list).mean()
             all_val_loss.append(cur_val_loss)
             val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
             all_val_acc.append(val_acc)
