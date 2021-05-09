@@ -65,6 +65,6 @@ set incsearch
 set hlsearch
 EOF
 
-wget https://repo.anaconda.com/archive/Anaconda3-2020.11-Linux-x86_64.sh
+wget https://repo.anaconda.com/archive/Anaconda3-2020.11-Linux-x86_64.sh > /dev/null
 sh Anaconda3-2020.11-Linux-x86_64.sh -b
 . ~/.zshrc

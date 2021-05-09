@@ -1,8 +1,18 @@
 sudo mkdir /home/ahemf
 sudo chown -R ahemf /home/ahemf
 
-sudo yum -y --skip-broken install ncurses-compat-libs gcc git vim-enhanced emacs xterm gpm-devel.x86_64 git yum-utils amazon-midway-init toolbox xauth lapack lapack-devel atlas tree cmake gcc-c++ yum-config-manager coreutils
+sudo yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+
+sudo yum -y install yum-config-manager
+sudo yum -y install yum-utils
+sudo yum-config-manager --disable al-amazon al-kernel-ac al-main al-acc al-updates
+
+sudo yum -y --disablerepo=al-acc --disablerepo=al-amazon --disablerepo=al-kernel-ac --disablerepo=al-main --disablerepo=al-updates install yum-config-manager
+sudo yum -y --disablerepo=al-acc --disablerepo=al-amazon --disablerepo=al-kernel-ac --disablerepo=al-main --disablerepo=al-updates install yum-utils
+sudo yum-config-manager --disable al-amazon al-kernel-ac al-main al-acc al-updates
 sudo yum-config-manager --enable extras
+
+sudo yum -y --skip-broken install ncurses-compat-libs gcc git vim-enhanced emacs xterm gpm-devel.x86_64 git yum-utils amazon-midway-init toolbox xauth lapack lapack-devel atlas tree cmake gcc-c++ coreutils
 sudo yum makecache
 sudo yum -y --skip-broken groupinstall 'Development Tools'
 sudo yum -y --skip-broken install pciutils libglvnd libglvnd-devel rdma libibverbs

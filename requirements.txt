@@ -1,3 +1,5 @@
+albumentations==0.5.2
+attrdict
 dataclasses==0.6
 dataclasses-json==0.5.2
 datasets==1.1.3
@@ -5,6 +7,7 @@ dill==0.3.3
 einops==0.3.0
 fairseq==0.10.1
 gpustat
+imgaug
 networkx==2.5
 nlpaug==1.1.1
 nltk==3.5
@@ -37,6 +40,7 @@ sentencepiece==0.1.91
 six @ file:///opt/concourse/worker/volumes/live/5b31cb27-1e37-4ca5-6e9f-86246eb206d2/volume/six_1605205320872/work
 snakeviz==2.1.0
 stringcase==1.2.0
+tabulate
 tokenizers==0.9.4
 torch==1.7.0
 torch-optimizer==0.0.1a16
