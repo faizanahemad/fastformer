@@ -367,20 +367,20 @@ class SuperGlueTest:
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
                 if epochs % 3 == 0 and rank == 0:
-                    model = model.eval()
+                    inner_model = model.module
                     labels, predictions, val_losses = [], [], []
-                    for step, batch in enumerate(classifier_data["validation"]):
-                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                        label = batch.pop("label")
-                        labels.extend(label.cpu().tolist())
-                        with model.no_sync():
+                    with model.no_sync():
+                        for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
+                            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                            label = batch.pop("label")
+                            labels.extend(label.cpu().tolist())
                             with torch.no_grad():
-                                output = model(**batch, label=label)
-                        val_loss = output["loss"].detach().cpu().item()
-                        val_preds = output["predictions"].cpu().tolist()
-                        val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
-                        predictions.extend(val_preds)
-                        val_losses.append(val_loss)
+                                output = inner_model(**batch, label=label)
+                            val_loss = output["loss"].detach().cpu().item()
+                            val_preds = output["predictions"].cpu().tolist()
+                            val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
+                            predictions.extend(val_preds)
+                            val_losses.append(val_loss)
                     cur_val_loss = np.mean(val_losses)
                     # cur_val_loss = torch.tensor(cur_val_loss).to(device)
                     # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
