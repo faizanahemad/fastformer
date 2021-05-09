@@ -427,7 +427,7 @@ class SuperGlueTest:
             val_acc = 0.0
         model = model.eval()
         with model.no_sync():
-            inner_model = ddp_model.module
+            inner_model = model.module
             predictions = []
             for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
