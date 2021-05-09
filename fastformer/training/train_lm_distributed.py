@@ -365,7 +365,7 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
-                continue_training = torch.tensor(1).to(device)
+                continue_training = torch.tensor(2).to(device)
                 if epochs % 3 == 0 and rank == 0:
                     model = model.eval()
                     labels, predictions, val_losses = [], [], []
@@ -402,13 +402,14 @@ class SuperGlueTest:
                         continue_training = torch.tensor(1).to(device)
 
                 epochs += 1
+                torch.distributed.barrier()
                 dist.broadcast(continue_training, 0)
                 if continue_training.item() == 0:
                     model.load_state_dict(stored_state)
                     optimizer.zero_grad(set_to_none=True)
                     torch.distributed.barrier()
                     break
-                else:
+                elif continue_training.item() == 1:
                     stored_state = model.state_dict()
                     stored_state_val_acc = val_acc
                     stored_state_val_loss = all_val_loss[-1]
