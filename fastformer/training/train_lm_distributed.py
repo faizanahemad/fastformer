@@ -249,7 +249,7 @@ class SuperGlueTest:
             model = model.train()
             optimizer_config.eps = 1e-5
 
-        rnd = torch.tensor(int(time.time())).to(device)
+        rnd = torch.tensor(int(time.time()) % 1000_000).to(device)
         dist.broadcast(rnd, 0)
         set_seeds(rnd.item())
         if reinit or not isinstance(model, FastFormerForClassification):
