@@ -277,10 +277,10 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
-            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=5e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
+            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=2e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
-            scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
+            scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
 
         train = None
