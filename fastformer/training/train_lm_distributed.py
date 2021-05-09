@@ -287,8 +287,8 @@ class SuperGlueTest:
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
-                                    shuffle=False)
+            validation = DataLoader(validation, sampler=None if self.world_size == 1 else DistributedSampler(validation, shuffle=False), batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+                                    shuffle=False, persistent_workers=True)
 
         test = None
         test_idx = None
@@ -314,13 +314,15 @@ class SuperGlueTest:
         epochs = -1
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
-        max_allowed_epochs = self.epoch_per_dataset[dataset_key]
+        max_allowed_epochs = self.epoch_per_dataset[dataset_key] * 2
+        broken = False
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
 
-
+            cur_val_loss = 0.0
+            prev_val_loss = None
             optimizer.zero_grad(set_to_none=True)
             iter_size = 2
             epochs = 0
@@ -329,8 +331,6 @@ class SuperGlueTest:
             if rank == 0:
                 pbar = tqdm(total=max_allowed_epochs * len(classifier_data["train"]), desc="%s train" % dataset_key)
             while epochs < max_allowed_epochs:
-                model = model.eval()
-
                 train_labels, train_predictions = [], []
                 model = model.train()
                 trainer = classifier_data["train"]
@@ -363,6 +363,37 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
+
+                if epoch % 2 == 0:
+                    model = model.eval()
+                    labels, predictions, val_losses = [], [], []
+                    for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
+                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                        label = batch.pop("label")
+                        labels.extend(label.cpu().tolist())
+                        with torch.no_grad():
+                            output = model(**batch, label=label)
+                        val_loss = output["loss"].detach().cpu().item()
+                        val_preds = output["predictions"].cpu().tolist()
+                        predictions.extend(val_preds)
+                        val_losses.append(val_loss)
+                    cur_val_loss = np.mean(val_losses)
+                    cur_val_loss = torch.tensor(cur_val_loss).to(device)
+                    tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
+                    torch.distributed.all_gather(tensor_list, cur_val_loss)
+                    cur_val_loss = torch.cat(cur_val_loss).mean().item()
+                    all_val_loss.append(cur_val_loss)
+                    val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+                    all_val_acc.append(val_acc)
+
+                    if prev_val_loss is not None and cur_val_loss > prev_val_loss:
+                        optimizer.zero_grad(set_to_none=True)
+                        broken = True
+                        break
+                    else:
+                        prev_val_loss = cur_val_loss
+
+
                 epochs += 1
 
             if rank == 0:
@@ -370,6 +401,7 @@ class SuperGlueTest:
             if rank != 0:
                 return None
 
+            model = model.eval()
             labels, predictions, val_losses = [], [], []
             for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
@@ -382,12 +414,17 @@ class SuperGlueTest:
                 predictions.extend(val_preds)
                 val_losses.append(val_loss)
             cur_val_loss = np.mean(val_losses)
+            cur_val_loss = torch.tensor(cur_val_loss).to(device)
+            tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
+            torch.distributed.all_gather(tensor_list, cur_val_loss)
+            cur_val_loss = torch.cat(cur_val_loss).mean()
             all_val_loss.append(cur_val_loss)
             val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
             all_val_acc.append(val_acc)
 
         else:
             val_acc = 0.0
+        model = model.eval()
         predictions = []
         for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
@@ -399,7 +436,7 @@ class SuperGlueTest:
             predictions.extend(test_preds)
 
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
-                    all_train_acc=all_train_acc, epochs=epochs)
+                    all_train_acc=all_train_acc, epochs=epochs, broken=broken)
 
     def boolq(self, model, boolq, device, dataset_key, rank):
         boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
@@ -411,7 +448,8 @@ class SuperGlueTest:
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
-        return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def wic(self, model, wic, device, dataset_key, rank):
         wic = wic.map(lambda x: dict(text='sentence1: ' + x["sentence1"] + " sentence2: " + x["sentence2"] + " word: " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
@@ -422,7 +460,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s," % ("wic", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
-        return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
+                                       epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
     
     def cb(self, model, cb, device, dataset_key, rank):
         cb = cb.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
@@ -433,7 +472,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("cb", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
-        return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"])
+        return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         rte = rte.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
@@ -445,7 +485,8 @@ class SuperGlueTest:
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("rte", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
-        rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
         axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
@@ -481,7 +522,8 @@ class SuperGlueTest:
             {"idx": k, "passage": {"questions": [{"idx": m, "answers": [{"idx": o, "label": p} for o, p in sorted(n.items())]} for m, n in sorted(v.items())]}}
             for k, v in sorted(mrcp.items())]
         final_predictions = mrcp
-        return final_predictions, dict(dataset="multirc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="multirc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], 
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def copa(self, model, copa, device, dataset_key, rank):
         copa_c1 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice1"], label=x["label"] == 0, choice=0), remove_columns=["premise", 'question', "choice1", "choice2"])
@@ -498,7 +540,8 @@ class SuperGlueTest:
         choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
-        return final_predictions, dict(dataset="copa", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="copa", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def record(self, model, record, device, dataset_key, rank):
 
@@ -517,7 +560,8 @@ class SuperGlueTest:
 
         entities = [rtest[i]["entities"] for i in range(len(rtest))]
         final_predictions = [dict(idx=fp["idx"], label=en[fp["choice"]]) for fp, en in zip(final_predictions, entities)]
-        return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def wsc(self, model, wsc, device, dataset_key, rank):
             
@@ -529,7 +573,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         print("Train, Val Acc for %s = %s, %s, all_val_loss = %s" % ("wsc", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
-        return final_predictions, dict(dataset="wsc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:])
+        return final_predictions, dict(dataset="wsc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
