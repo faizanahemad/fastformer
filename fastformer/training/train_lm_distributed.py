@@ -366,7 +366,8 @@ class SuperGlueTest:
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
-                if epochs % 3 == 0 and rank == 0:
+                per_epoch = 3 if max_allowed_epochs < 50 else 4
+                if epochs % per_epoch == 0 and rank == 0:
                     inner_model = model.module
                     labels, predictions, val_losses = [], [], []
                     with model.no_sync():
@@ -394,7 +395,7 @@ class SuperGlueTest:
                     # val_acc = torch.stack(tensor_list).mean().item()
                     all_val_acc.append(val_acc)
 
-                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(max_allowed_epochs / 4, 3):
+                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(max_allowed_epochs / 2, 3):
                         continue_training = torch.tensor(0).to(device)
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
                         continue_training = torch.tensor(1).to(device)
