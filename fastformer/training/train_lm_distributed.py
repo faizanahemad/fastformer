@@ -282,7 +282,7 @@ class SuperGlueTest:
                                collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1, persistent_workers=True)
 
         validation = None
-        if "validation" in dataset and rank == 0:
+        if "validation" in dataset:
             validation = TokenizerDataset(None, tokenizer, get_char_to_id(),
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
@@ -364,7 +364,7 @@ class SuperGlueTest:
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
 
-                if epochs % 2 == 0:
+                if epochs % 4 == 0:
                     model = model.eval()
                     labels, predictions, val_losses = [], [], []
                     for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
