@@ -606,7 +606,7 @@ class SuperGlueTest:
         rtest = record["test"]
         record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
         classifier_data = self.prepare_classifier(model, record, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=False)
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
