@@ -371,8 +371,9 @@ class SuperGlueTest:
                         batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                         label = batch.pop("label")
                         labels.extend(label.cpu().tolist())
-                        with torch.no_grad():
-                            output = model(**batch, label=label)
+                        with model.no_sync():
+                            with torch.no_grad():
+                                output = model(**batch, label=label)
                         val_loss = output["loss"].detach().cpu().item()
                         val_preds = output["predictions"].cpu().tolist()
                         predictions.extend(val_preds)
@@ -406,8 +407,9 @@ class SuperGlueTest:
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 label = batch.pop("label")
                 labels.extend(label.cpu().tolist())
-                with torch.no_grad():
-                    output = model(**batch, label=label)
+                with model.no_sync():
+                    with torch.no_grad():
+                        output = model(**batch, label=label)
                 val_loss = output["loss"].detach().cpu().item()
                 val_preds = output["predictions"].cpu().tolist()
                 predictions.extend(val_preds)
@@ -424,15 +426,18 @@ class SuperGlueTest:
         else:
             val_acc = 0.0
         model = model.eval()
-        predictions = []
-        for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
-            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-            _ = batch.pop("label", None)
-            with torch.no_grad():
-                output = model(**batch, label=None)
-            test_preds = output["predictions"].cpu().tolist()
-            test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
-            predictions.extend(test_preds)
+        with model.no_sync():
+            inner_model = ddp_model.module
+            predictions = []
+            for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                _ = batch.pop("label", None)
+                with torch.no_grad():
+                    output = inner_model(**batch, label=None)
+                test_preds = output["predictions"].cpu().tolist()
+                test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
+                predictions.extend(test_preds)
+
 
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken)
