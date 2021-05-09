@@ -13,6 +13,7 @@
 # import multiprocessing as mp
 # ctx = mp.get_context()
 # ctx.reducer = pickle4reducer.Pickle4Reducer()
+import copy
 import warnings
 warnings.simplefilter("ignore")
 import shutil
@@ -321,7 +322,6 @@ class SuperGlueTest:
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
 
-            cur_val_loss = 0.0
             prev_val_loss = None
             optimizer.zero_grad(set_to_none=True)
             iter_size = 2
@@ -398,8 +398,6 @@ class SuperGlueTest:
 
             if rank == 0:
                 pbar.close()
-            if rank != 0:
-                return None
 
             model = model.eval()
             labels, predictions, val_losses = [], [], []
@@ -426,21 +424,24 @@ class SuperGlueTest:
         else:
             val_acc = 0.0
         model = model.eval()
-        with model.no_sync():
-            inner_model = model.module
-            predictions = []
-            for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                _ = batch.pop("label", None)
-                with torch.no_grad():
-                    output = inner_model(**batch, label=None)
-                test_preds = output["predictions"].cpu().tolist()
-                test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
-                predictions.extend(test_preds)
-
+        if rank == 0:
+            with model.no_sync():
+                inner_model = model.module
+                predictions = []
+                for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
+                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                    _ = batch.pop("label", None)
+                    with torch.no_grad():
+                        output = inner_model(**batch, label=None)
+                    test_preds = output["predictions"].cpu().tolist()
+                    test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
+                    predictions.extend(test_preds)
+        torch.distributed.barrier()
 
         del model
         clean_memory()
+        if rank != 0:
+            return None
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken)
 
