@@ -961,16 +961,15 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
-            try:
-                loss = self.ce(logits.squeeze(-1) if logits.ndim > 2 or self.num_classes == 1 else logits, label.float() if self.num_classes == 1 else label.long())
-            except Exception as e:
-                print("EXCEPTION: %s, %s, %s" % (input_ids.size(), logits.size(), label.size()))
-                raise e
+            loss = self.ce(logits.squeeze(-1) if logits.ndim > 2 or self.num_classes == 1 else logits, label.float() if self.num_classes == 1 else label.long())
 
+        logits = logits.detach()
         if self.num_classes > 1:
-            predictions = logits.argmax(-1).squeeze()
+            predictions = logits.argmax(-1)
+            predictions = predictions.squeeze(-1) if predictions.ndim > 1 or self.num_classes == 1 else predictions
         else:
-            predictions = torch.sigmoid(logits.detach()).squeeze()
+            predictions = torch.sigmoid(logits)
+            predictions = predictions.squeeze(-1) if predictions.ndim > 1 or self.num_classes == 1 else predictions
         return dict(predictions=predictions, loss=loss)
 
 

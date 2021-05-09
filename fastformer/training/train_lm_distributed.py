@@ -375,6 +375,7 @@ class SuperGlueTest:
                                 output = model(**batch, label=label)
                         val_loss = output["loss"].detach().cpu().item()
                         val_preds = output["predictions"].cpu().tolist()
+                        val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
                         predictions.extend(val_preds)
                         val_losses.append(val_loss)
                     cur_val_loss = np.mean(val_losses)
@@ -414,6 +415,7 @@ class SuperGlueTest:
                         output = model(**batch, label=label)
                 val_loss = output["loss"].detach().cpu().item()
                 val_preds = output["predictions"].cpu().tolist()
+                val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
                 predictions.extend(val_preds)
                 val_losses.append(val_loss)
             cur_val_loss = np.mean(val_losses)
