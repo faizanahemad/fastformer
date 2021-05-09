@@ -249,6 +249,13 @@ class SuperGlueTest:
             model = AutoModel.from_pretrained(model)
             model = model.train()
             optimizer_config.eps = 1e-5
+        elif isinstance(model, DDP):
+            tokenizer = model.module.tokenizer
+            model = model.module
+            assert isinstance(model, FastFormerForClassification)
+        else:
+            print(type(model))
+            raise ValueError
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
@@ -573,7 +580,7 @@ class SuperGlueTest:
             return None, None
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
-        return final_predictions, dict(dataset="wsc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+        return final_predictions, dict(dataset="wsc.fixed", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def __call__(self, generate_test_predictions=True):
