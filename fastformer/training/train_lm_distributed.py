@@ -288,7 +288,7 @@ class SuperGlueTest:
                                           dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                           dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None if self.world_size == 1 else DistributedSampler(validation, shuffle=False), batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                                     shuffle=False, persistent_workers=True)
 
         test = None
@@ -365,8 +365,8 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
-
-                if epochs % 3 == 0:
+                continue_training = torch.tensor(1).to(device)
+                if epochs % 3 == 0 and rank == 0:
                     model = model.eval()
                     labels, predictions, val_losses = [], [], []
                     for step, batch in enumerate(classifier_data["validation"]):
@@ -382,30 +382,37 @@ class SuperGlueTest:
                         predictions.extend(val_preds)
                         val_losses.append(val_loss)
                     cur_val_loss = np.mean(val_losses)
-                    cur_val_loss = torch.tensor(cur_val_loss).to(device)
-                    tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
-                    torch.distributed.all_gather(tensor_list, cur_val_loss)
-                    cur_val_loss = torch.stack(tensor_list).mean().item()
+                    # cur_val_loss = torch.tensor(cur_val_loss).to(device)
+                    # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
+                    # torch.distributed.all_gather(tensor_list, cur_val_loss)
+                    # cur_val_loss = torch.stack(tensor_list).mean().item()
                     all_val_loss.append(cur_val_loss)
                     val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-                    val_acc = torch.tensor(val_acc).to(device)
-                    tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
-                    torch.distributed.all_gather(tensor_list, val_acc)
-                    val_acc = torch.stack(tensor_list).mean().item()
+                    # val_acc = torch.tensor(val_acc).to(device)
+                    # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
+                    # torch.distributed.all_gather(tensor_list, val_acc)
+                    # val_acc = torch.stack(tensor_list).mean().item()
                     all_val_acc.append(val_acc)
 
+                    torch.distributed.barrier()
+
                     if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(max_allowed_epochs / 4, 3):
-                        model.load_state_dict(stored_state)
-                        optimizer.zero_grad(set_to_none=True)
-                        broken = True
-                        torch.distributed.barrier()
-                        break
+                        continue_training = torch.tensor(0).to(device)
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
-                        stored_state = model.state_dict()
-                        stored_state_val_acc = val_acc
-                        stored_state_val_loss = all_val_loss[-1]
+                        continue_training = torch.tensor(1).to(device)
 
                 epochs += 1
+                dist.broadcast(continue_training, 0)
+                if continue_training.item() == 0:
+                    model.load_state_dict(stored_state)
+                    optimizer.zero_grad(set_to_none=True)
+                    torch.distributed.barrier()
+                    break
+                else:
+                    stored_state = model.state_dict()
+                    stored_state_val_acc = val_acc
+                    stored_state_val_loss = all_val_loss[-1]
+
 
             if rank == 0:
                 pbar.close()
@@ -414,33 +421,6 @@ class SuperGlueTest:
                 model.load_state_dict(stored_state)
                 stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                 model.module.load_state_dict(stored_state, strict=True)
-            model = model.eval()
-            model.zero_grad(set_to_none=True)
-            labels, predictions, val_losses = [], [], []
-            for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key) if rank == 0 else classifier_data["validation"]):
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                label = batch.pop("label")
-                labels.extend(label.cpu().tolist())
-                with model.no_sync():
-                    with torch.no_grad():
-                        output = model(**batch, label=label)
-                val_loss = output["loss"].detach().cpu().item()
-                val_preds = output["predictions"].cpu().tolist()
-                val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
-                predictions.extend(val_preds)
-                val_losses.append(val_loss)
-            cur_val_loss = np.mean(val_losses)
-            cur_val_loss = torch.tensor(cur_val_loss).to(device)
-            tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
-            torch.distributed.all_gather(tensor_list, cur_val_loss)
-            cur_val_loss = torch.stack(tensor_list).mean().item()
-            all_val_loss.append(cur_val_loss)
-            val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-            val_acc = torch.tensor(val_acc).to(device)
-            tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
-            torch.distributed.all_gather(tensor_list, val_acc)
-            val_acc = torch.stack(tensor_list).mean().item()
-            all_val_acc.append(val_acc)
 
         else:
             val_acc = 0.0
