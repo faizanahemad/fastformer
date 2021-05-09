@@ -249,9 +249,9 @@ class SuperGlueTest:
             model = model.train()
             optimizer_config.eps = 1e-5
 
-        rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
-        dist.broadcast(rnd, 0)
-        set_seeds(rnd.item())
+        # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
+        # dist.broadcast(rnd, 0)
+        set_seeds(17)
         if reinit or not isinstance(model, FastFormerForClassification):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
             classifier.funnel = model.funnel if hasattr(model, "funnel") else model
