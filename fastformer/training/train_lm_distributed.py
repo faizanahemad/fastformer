@@ -317,6 +317,7 @@ class SuperGlueTest:
         dataset_key = classifier_data["dataset_key"]
         max_allowed_epochs = self.epoch_per_dataset[dataset_key]
         broken = False
+        stored_state = None
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
@@ -396,7 +397,7 @@ class SuperGlueTest:
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
                         break
-                    else:
+                    elif all_val_loss[-1] <= all_val_loss[-2]:
                         stored_state = model.state_dict()
 
                 epochs += 1
