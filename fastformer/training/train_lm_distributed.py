@@ -311,6 +311,8 @@ class SuperGlueTest:
         all_val_acc = []
         all_train_acc = []
         val_acc = -1
+        stored_state_val_loss = -1
+        stored_state_val_acc = -1
         train_acc = -1
         epochs = -1
         rank = classifier_data["rank"]
@@ -400,6 +402,8 @@ class SuperGlueTest:
                         break
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
                         stored_state = model.state_dict()
+                        stored_state_val_acc = val_acc
+                        stored_state_val_loss = all_val_loss[-1]
 
                 epochs += 1
 
@@ -459,8 +463,8 @@ class SuperGlueTest:
         clean_memory()
         if rank != 0:
             return None
-        print("Train, Val Acc for %s = %.4f, %.4f" % (dataset_key, train_acc, val_acc))
-        print("%s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
+        print("For %s: Train = %.4f, Val = %.4f, stored_state_val_acc = %.4f, stored_state_val_loss = %.4f" % (dataset_key, train_acc, val_acc, stored_state_val_acc, stored_state_val_loss))
+        print("For %s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken)
 
