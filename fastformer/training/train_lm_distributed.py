@@ -364,7 +364,7 @@ class SuperGlueTest:
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
 
-                if epoch % 2 == 0:
+                if epochs % 2 == 0:
                     model = model.eval()
                     labels, predictions, val_losses = [], [], []
                     for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
@@ -392,7 +392,6 @@ class SuperGlueTest:
                         break
                     else:
                         prev_val_loss = cur_val_loss
-
 
                 epochs += 1
 
