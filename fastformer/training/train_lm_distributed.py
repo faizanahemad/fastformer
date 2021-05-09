@@ -260,6 +260,10 @@ class SuperGlueTest:
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
         set_seeds(3431)
+        optc = optimizer_config.to_dict()
+        optimizer = None
+        scheduler = None
+        ddp_model = model
         if reinit or not isinstance(model, FastFormerForClassification):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
             classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
@@ -273,12 +277,11 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
+            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=5e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
+                                          betas=(optc["beta_1"], optc["beta_2"]))
+            optimizer.zero_grad(set_to_none=True)
+            scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
-        optc = optimizer_config.to_dict()
-        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=5e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
-                                      betas=(optc["beta_1"], optc["beta_2"]))
-        optimizer.zero_grad(set_to_none=True)
-        scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 100)
 
         train = None
         if "train" in dataset:
@@ -427,6 +430,33 @@ class SuperGlueTest:
                 model.load_state_dict(stored_state)
                 stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                 model.module.load_state_dict(stored_state, strict=True)
+
+            inner_model = model.module
+            labels, predictions, val_losses = [], [], []
+            with model.no_sync():
+                for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
+                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                    label = batch.pop("label")
+                    labels.extend(label.cpu().tolist())
+                    with torch.no_grad():
+                        output = inner_model(**batch, label=label)
+                    val_loss = output["loss"].detach().cpu().item()
+                    val_preds = output["predictions"].cpu().tolist()
+                    val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
+                    predictions.extend(val_preds)
+                    val_losses.append(val_loss)
+            cur_val_loss = np.mean(val_losses)
+            # cur_val_loss = torch.tensor(cur_val_loss).to(device)
+            # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
+            # torch.distributed.all_gather(tensor_list, cur_val_loss)
+            # cur_val_loss = torch.stack(tensor_list).mean().item()
+            all_val_loss.append(cur_val_loss)
+            val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+            # val_acc = torch.tensor(val_acc).to(device)
+            # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
+            # torch.distributed.all_gather(tensor_list, val_acc)
+            # val_acc = torch.stack(tensor_list).mean().item()
+            all_val_acc.append(val_acc)
 
         else:
             val_acc = 0.0
