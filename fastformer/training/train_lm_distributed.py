@@ -397,7 +397,7 @@ class SuperGlueTest:
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
                         break
-                    elif all_val_loss[-1] <= all_val_loss[-2]:
+                    elif len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]:
                         stored_state = model.state_dict()
 
                 epochs += 1
