@@ -962,7 +962,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         loss = 0.0
         if label is not None and label.min() >= 0:
             try:
-                loss = self.ce(logits.squeeze() if logits.ndim > 2 or self.num_classes == 1 else logits, label.float() if self.num_classes == 1 else label.long())
+                loss = self.ce(logits.squeeze(-1) if logits.ndim > 2 or self.num_classes == 1 else logits, label.float() if self.num_classes == 1 else label.long())
             except Exception as e:
                 print("EXCEPTION: %s, %s, %s" % (input_ids.size(), logits.size(), label.size()))
                 raise e
