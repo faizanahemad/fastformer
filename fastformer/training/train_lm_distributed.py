@@ -394,8 +394,6 @@ class SuperGlueTest:
                     # val_acc = torch.stack(tensor_list).mean().item()
                     all_val_acc.append(val_acc)
 
-                    torch.distributed.barrier()
-
                     if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(max_allowed_epochs / 4, 3):
                         continue_training = torch.tensor(0).to(device)
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
