@@ -551,16 +551,19 @@ class SuperGlueTest:
         rtest = record["test"]
         record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
         classifier_data = self.prepare_classifier(model, record, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
         choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(
-            lambda x: x[x.label >= x.label.max()][["idx", "choice"]]).to_dict('records')
+            lambda x: x[x.label >= x.label.max()][["idx", "choice"]].head(1)).to_dict('records')
 
         entities = [rtest[i]["entities"] for i in range(len(rtest))]
+        for fp, en in zip(final_predictions, entities):
+            if len(en) - 1 < fp["choice"]:
+                print(en, fp["choice"], fp["idx"])
         final_predictions = [dict(idx=fp["idx"], label=en[fp["choice"]]) for fp, en in zip(final_predictions, entities)]
         return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
