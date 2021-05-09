@@ -539,7 +539,7 @@ class SuperGlueTest:
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
         with open('validation.txt') as f:
-            my_list = [eval(x.rstrip()) for x in f]
+            my_list = [eval(x.rstrip()) for x in f if len(x.rstrip()) > 0]
             if self.rank == 0:
                 print(my_list)
         processed_datasets = [one['dataset'] for one in my_list]
