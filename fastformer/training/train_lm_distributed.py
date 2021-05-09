@@ -432,7 +432,7 @@ class SuperGlueTest:
                 model.module.load_state_dict(stored_state, strict=True)
 
             if rank == 0:
-                inner_model = model.module
+                inner_model = copy.deepcopy(model.module)
                 if stored_state is not None:
                     stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                     inner_model.load_state_dict(stored_state, strict=True)
@@ -464,7 +464,7 @@ class SuperGlueTest:
 
                 # Test
                 with model.no_sync():
-                    inner_model = model.module
+                    inner_model = copy.deepcopy(model.module)
                     if stored_state is not None:
                         stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                         inner_model.load_state_dict(stored_state, strict=True)
@@ -483,7 +483,7 @@ class SuperGlueTest:
             val_acc = 0.0
             model = model.eval()
             if rank == 0:
-                inner_model = model.module
+                inner_model = model
                 if stored_state is not None:
                     stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                     inner_model.load_state_dict(stored_state, strict=True)
