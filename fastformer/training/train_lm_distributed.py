@@ -439,6 +439,8 @@ class SuperGlueTest:
                 predictions.extend(test_preds)
 
 
+        del model
+        clean_memory()
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken)
 
