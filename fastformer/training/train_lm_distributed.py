@@ -396,6 +396,7 @@ class SuperGlueTest:
                         model.load_state_dict(stored_state)
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
+                        torch.distributed.barrier()
                         break
                     elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
                         stored_state = model.state_dict()
@@ -405,7 +406,12 @@ class SuperGlueTest:
             if rank == 0:
                 pbar.close()
 
+            if stored_state is not None:
+                model.load_state_dict(stored_state)
+                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                model.module.load_state_dict(stored_state, strict=True)
             model = model.eval()
+            model.zero_grad(set_to_none=True)
             labels, predictions, val_losses = [], [], []
             for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key) if rank == 0 else classifier_data["validation"]):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
@@ -463,7 +469,8 @@ class SuperGlueTest:
         if rank != 0:
             return None, None
         test_idx = classifier_data["test_idx"]
-        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"], classifier_results["all_val_loss"]))
+        print("Train, Val Acc for %s = %.4f, %.4f, all_val_loss = %s" % ("boolq", classifier_results["train_acc"], classifier_results["val_acc"],
+                                                                         classifier_results["all_val_loss"]))
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
