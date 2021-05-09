@@ -299,7 +299,7 @@ class SuperGlueTest:
                                     dataset["test"])
             test.training = False
             test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=8,
+            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                               shuffle=False)
 
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
@@ -390,7 +390,7 @@ class SuperGlueTest:
                     val_acc = torch.stack(tensor_list).mean().item()
                     all_val_acc.append(val_acc)
 
-                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max_allowed_epochs / 2:
+                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(max_allowed_epochs / 4, 3):
                         model.load_state_dict(stored_state)
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
