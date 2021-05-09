@@ -255,7 +255,7 @@ class SuperGlueTest:
         set_seeds(17)
         if reinit or not isinstance(model, FastFormerForClassification):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
-            classifier.funnel = model.funnel if hasattr(model, "funnel") else model
+            classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
             classifier = classifier.to(device)
             del model
             model = classifier
@@ -322,7 +322,6 @@ class SuperGlueTest:
             scheduler = classifier_data["scheduler"]
             optimizer = classifier_data["optimizer"]
 
-            prev_val_loss = None
             optimizer.zero_grad(set_to_none=True)
             iter_size = 2
             epochs = 0
@@ -388,11 +387,12 @@ class SuperGlueTest:
                     all_val_acc.append(val_acc)
 
                     if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3]:
+                        model.load_state_dict(stored_state)
                         optimizer.zero_grad(set_to_none=True)
                         broken = True
                         break
                     else:
-                        prev_val_loss = cur_val_loss
+                        stored_state = model.state_dict()
 
                 epochs += 1
 
