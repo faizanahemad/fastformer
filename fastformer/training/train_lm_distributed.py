@@ -431,39 +431,62 @@ class SuperGlueTest:
                 stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                 model.module.load_state_dict(stored_state, strict=True)
 
-            inner_model = model.module
-            labels, predictions, val_losses = [], [], []
-            with model.no_sync():
-                for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
-                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                    label = batch.pop("label")
-                    labels.extend(label.cpu().tolist())
-                    with torch.no_grad():
-                        output = inner_model(**batch, label=label)
-                    val_loss = output["loss"].detach().cpu().item()
-                    val_preds = output["predictions"].cpu().tolist()
-                    val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
-                    predictions.extend(val_preds)
-                    val_losses.append(val_loss)
-            cur_val_loss = np.mean(val_losses)
-            # cur_val_loss = torch.tensor(cur_val_loss).to(device)
-            # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
-            # torch.distributed.all_gather(tensor_list, cur_val_loss)
-            # cur_val_loss = torch.stack(tensor_list).mean().item()
-            all_val_loss.append(cur_val_loss)
-            val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-            # val_acc = torch.tensor(val_acc).to(device)
-            # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
-            # torch.distributed.all_gather(tensor_list, val_acc)
-            # val_acc = torch.stack(tensor_list).mean().item()
-            all_val_acc.append(val_acc)
+            if rank == 0:
+                inner_model = model.module
+                if stored_state is not None:
+                    stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                    inner_model.load_state_dict(stored_state, strict=True)
+                labels, predictions, val_losses = [], [], []
+                with model.no_sync():
+                    for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
+                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                        label = batch.pop("label")
+                        labels.extend(label.cpu().tolist())
+                        with torch.no_grad():
+                            output = inner_model(**batch, label=label)
+                        val_loss = output["loss"].detach().cpu().item()
+                        val_preds = output["predictions"].cpu().tolist()
+                        val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
+                        predictions.extend(val_preds)
+                        val_losses.append(val_loss)
+                cur_val_loss = np.mean(val_losses)
+                # cur_val_loss = torch.tensor(cur_val_loss).to(device)
+                # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
+                # torch.distributed.all_gather(tensor_list, cur_val_loss)
+                # cur_val_loss = torch.stack(tensor_list).mean().item()
+                all_val_loss.append(cur_val_loss)
+                val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+                # val_acc = torch.tensor(val_acc).to(device)
+                # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
+                # torch.distributed.all_gather(tensor_list, val_acc)
+                # val_acc = torch.stack(tensor_list).mean().item()
+                all_val_acc.append(val_acc)
+
+                # Test
+                with model.no_sync():
+                    inner_model = model.module
+                    if stored_state is not None:
+                        stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                        inner_model.load_state_dict(stored_state, strict=True)
+                    predictions = []
+                    for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
+                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                        _ = batch.pop("label", None)
+                        with torch.no_grad():
+                            output = inner_model(**batch, label=None)
+                        test_preds = output["predictions"].cpu().tolist()
+                        test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
+                        predictions.extend(test_preds)
+            torch.distributed.barrier()
 
         else:
             val_acc = 0.0
-        model = model.eval()
-        if rank == 0:
-            with model.no_sync():
+            model = model.eval()
+            if rank == 0:
                 inner_model = model.module
+                if stored_state is not None:
+                    stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                    inner_model.load_state_dict(stored_state, strict=True)
                 predictions = []
                 for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
                     batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
