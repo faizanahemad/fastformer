@@ -225,7 +225,7 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
-        self.epoch_per_dataset = {"boolq": 15, 'cb': 50, 'copa': 40, 'multirc': 15, 'record': 1, 'rte': 22, 'wic': 25, 'wsc.fixed': 25}
+        self.epoch_per_dataset = {"boolq": 15, 'cb': 50, 'copa': 40, 'multirc': 15, 'record': 1, 'rte': 22, 'wic': 25, 'wsc.fixed': 50}
         self.lr_per_dataset = {"boolq": 2e-5, 'cb': 2e-5, 'copa': 2e-5, 'multirc': 2e-5, 'record': 2e-5, 'rte': 2e-5, 'wic': 2e-5, 'wsc.fixed': 2e-5}
 
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
