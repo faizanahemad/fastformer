@@ -915,10 +915,15 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             raise ValueError
 
         self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
+        # if num_classes == 1:
+        #     self.ce = BCELossFocal()
+        # else:
+        #     self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
+
         if num_classes == 1:
-            self.ce = BCELossFocal()
+            self.ce = nn.BCEWithLogitsLoss()
         else:
-            self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
+            self.ce = CrossEntropyLoss(ignore_index=-100)
         self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else 768 * 4
         self.head = nn.Sequential(nn.Dropout(0.2), nn.Linear(self.num_features, 2048),
                                   nn.GELU(),

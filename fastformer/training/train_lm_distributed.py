@@ -225,8 +225,9 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
-        self.epoch_per_dataset = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed'],
-                                          [15, 90, 45, 15, 1, 22, 20, 25]))
+        self.epoch_per_dataset = {"boolq": 15, 'cb': 50, 'copa': 40, 'multirc': 15, 'record': 1, 'rte': 22, 'wic': 25, 'wsc.fixed': 25}
+        self.lr_per_dataset = {"boolq": 2e-5, 'cb': 2e-5, 'copa': 2e-5, 'multirc': 2e-5, 'record': 2e-5, 'rte': 2e-5, 'wic': 2e-5, 'wsc.fixed': 2e-5}
+
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
         self.superglue_file_names = dict(zip(['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg'],
@@ -243,6 +244,8 @@ class SuperGlueTest:
         elif isinstance(model, str):
             if "deberta" in model.lower():
                 batch_size = 4
+                self.epoch_per_dataset[dataset_key] *= 2
+                self.lr_per_dataset[dataset_key] /= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             tokenizer = AutoTokenizer.from_pretrained(model)
@@ -277,7 +280,7 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
-            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=2e-5, eps=optc["eps"], weight_decay=optc["weight_decay"],
+            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr_per_dataset[dataset_key], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
             scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
