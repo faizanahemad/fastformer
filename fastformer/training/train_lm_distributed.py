@@ -236,6 +236,9 @@ class SuperGlueTest:
 
     def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=True):
         batch_size = 8
+        train_backbone = False
+        if train_backbone:
+            self.lr_per_dataset[dataset_key] *= 5
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
             optimizer_config.eps = 1e-5
@@ -268,7 +271,7 @@ class SuperGlueTest:
         scheduler = None
         ddp_model = model
         if reinit or not isinstance(model, FastFormerForClassification):
-            classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer, train_backbone=False)
+            classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer, train_backbone=train_backbone)
             classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
             classifier = classifier.to(device)
             del model
@@ -317,7 +320,7 @@ class SuperGlueTest:
 
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
-                    dataset_key=dataset_key, rank=rank)
+                    dataset_key=dataset_key, rank=rank, train_backbone=train_backbone)
 
     def train_classifier(self, model, device, classifier_data, predict_only=False):
         all_val_loss = []
@@ -379,7 +382,7 @@ class SuperGlueTest:
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
-                per_epoch = 3 if max_allowed_epochs < 50 else 4
+                per_epoch = 3 if max_allowed_epochs < 50 and not train_backbone else 5
                 if epochs % per_epoch == 0 and rank == 0:
                     inner_model = model.module
                     labels, predictions, val_losses = [], [], []
