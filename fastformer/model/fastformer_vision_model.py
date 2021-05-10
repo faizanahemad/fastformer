@@ -417,7 +417,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=768, eps=1e-4,
+    def __init__(self, backbone, num_features=768, eps=1e-5,
                  patchclr_w=1.0, teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.09,
                  simclr_w=1.0, dino_w=1.0,
                  reinit=False, priority_clr=False, moco=False,):
@@ -425,24 +425,21 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.backbone = backbone
         self.patchclr_w = patchclr_w
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
-        if self.patchclr_w == 0:
-            self.ffn_input_features = (num_features) * 4
-        else:
-            self.ffn_input_features = (num_features)
+        self.ffn_input_features = (num_features) * 4
 
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(), nn.Linear(2048, 128, bias=False))
         self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 4),
                                            nn.GELU(),
                                            nn.Linear(num_features * 4, num_features, bias=False))
-        self.num_features = 128
+        self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
+                                               nn.GELU(),
+                                               nn.Linear(num_features, num_features * 2),
+                                               nn.Linear(num_features * 2, 1, bias=False))
+        self.num_moco_features = 128
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
         self.student_contrastive_temperature = student_contrastive_temperature
         self.simclr_w = simclr_w
-
-        self.channel_dropout = channel_dropout
-        self.dropout = nn.Dropout2d(channel_dropout)
-        self.priority_clr = priority_clr
         self.moco = moco
         self.key_ffn = None
         self.key_backbone = None

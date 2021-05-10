@@ -225,7 +225,7 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
-        self.epoch_per_dataset = {"boolq": 17, 'cb': 51, 'copa': 43, 'multirc': 19, 'record': 1, 'rte': 23, 'wic': 29, 'wsc.fixed': 61}
+        self.epoch_per_dataset = {"boolq": 17, 'cb': 51, 'copa': 43, 'multirc': 19, 'record': 2, 'rte': 23, 'wic': 29, 'wsc.fixed': 61}
         self.lr_per_dataset = {"boolq": 2e-5, 'cb': 2e-5, 'copa': 2e-5, 'multirc': 2e-5, 'record': 2e-5, 'rte': 2e-5, 'wic': 2e-5, 'wsc.fixed': 2e-5}
 
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
@@ -268,7 +268,7 @@ class SuperGlueTest:
         scheduler = None
         ddp_model = model
         if reinit or not isinstance(model, FastFormerForClassification):
-            classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer)
+            classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer, train_backbone=False)
             classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
             classifier = classifier.to(device)
             del model
