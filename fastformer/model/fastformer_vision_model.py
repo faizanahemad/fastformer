@@ -525,9 +525,13 @@ class PatchCLR(FastFormerPreTrainedModel):
             pass
 
         discriminator_loss = None
+        discriminator_accuracy = None
         if self.discriminator_w > 0:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
-            discriminator_loss = self.discriminator_w * self.loss_bce(x1_disc.squeeze(-1), gen_res["label_for_discriminator"])
+            logits = x1_disc.squeeze(-1)
+            discriminator_loss = self.discriminator_w * self.loss_bce(logits, gen_res["label_for_discriminator"])
+            predictions = (torch.sigmoid(logits) > 0.5).type(torch.float)
+            discriminator_accuracy = torch.mean((predictions == gen_res["label_for_discriminator"]).type(torch.float)).item()
             loss += discriminator_loss
         reconstruction_loss = gen_res["reconstruction_loss"]
         if reconstruction_loss is not None:
@@ -551,7 +555,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             loss += simclr_loss
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss,
-                    simclr_accuracy=simclr_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
+                    simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
                     mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"],
                     extra_negative_repr_simclr=extra_negative_repr_simclr)
 
