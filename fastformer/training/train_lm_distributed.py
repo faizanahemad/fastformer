@@ -273,7 +273,7 @@ class SuperGlueTest:
             classifier = classifier.to(device)
             del model
             model = classifier
-            ddp_model = DDP(model, device_ids=None if self.device == torch.device("cpu") else [self.device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+            ddp_model = DDP(model, device_ids=None if self.device == torch.device("cpu") else [self.device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
             try:
                 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
                 ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
