@@ -421,6 +421,7 @@ class SuperGlueTest:
                 if continue_training.item() == 0:
                     model.load_state_dict(stored_state)
                     optimizer.zero_grad(set_to_none=True)
+                    broken = True
                     break
                 elif continue_training.item() == 1:
                     stored_state = copy.deepcopy(model.state_dict().copy())
