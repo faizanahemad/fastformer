@@ -216,6 +216,7 @@ class SuperGlueTest:
         self.no_autocast = no_autocast
         self.size_dicts = size_dicts
         self.finetune = finetune
+        self.iter_size = 2
         self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
                                   cb=dict(agree="entailment", entailment="entailment", entail="entailment", contradiction="contradiction",
                                           contradict="contradiction", disagree="contradiction", neutral="neutral"),
@@ -225,7 +226,7 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
-        self.epoch_per_dataset = {"boolq": 17, 'cb': 51, 'copa': 43, 'multirc': 19, 'record': 2, 'rte': 23, 'wic': 29, 'wsc.fixed': 61}
+        self.epoch_per_dataset = {"boolq": 17, 'cb': 120, 'copa': 90, 'multirc': 19, 'record': 2, 'rte': 23, 'wic': 29, 'wsc.fixed': 61}
         self.lr_per_dataset = {"boolq": 2e-5, 'cb': 2e-5, 'copa': 2e-5, 'multirc': 2e-5, 'record': 2e-5, 'rte': 2e-5, 'wic': 2e-5, 'wsc.fixed': 2e-5}
 
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
@@ -287,6 +288,7 @@ class SuperGlueTest:
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
             scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
+
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
 
         train = None
@@ -297,6 +299,11 @@ class SuperGlueTest:
             train.training = False
             train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
                                collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1, persistent_workers=True)
+
+            iter_size = self.iter_size
+            steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr_per_dataset[dataset_key], epochs=self.epoch_per_dataset[dataset_key], steps_per_epoch=steps_per_epoch, div_factor=1e2,
+                                                            three_phase=False, pct_start=0.3, anneal_strategy="linear")
 
         validation = None
         if "validation" in dataset:
@@ -343,13 +350,13 @@ class SuperGlueTest:
             optimizer = classifier_data["optimizer"]
 
             optimizer.zero_grad(set_to_none=True)
-            iter_size = 2
+            iter_size = self.iter_size
             epochs = 0
             # (len(all_val_loss) >= 3 and (all_val_loss[-1] <= all_val_loss[-2] or all_val_loss[-2] <= all_val_loss[-3]))
             pbar = None
             if rank == 0:
-                pbar = tqdm(total=max_allowed_epochs * 2 * len(classifier_data["train"]), desc="%s train" % dataset_key)
-            while epochs < max_allowed_epochs * 2:
+                pbar = tqdm(total=max_allowed_epochs * len(classifier_data["train"]), desc="%s train" % dataset_key)
+            while epochs < max_allowed_epochs:
                 train_labels, train_predictions = [], []
                 model = model.train()
                 trainer = classifier_data["train"]
