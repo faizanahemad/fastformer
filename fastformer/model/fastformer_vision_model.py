@@ -99,7 +99,12 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
-        self.cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens, embed_dim))
+        self.cls_token = None
+        self.extra_cls_token = None
+        if num_highway_cls_tokens > 0:
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        if num_highway_cls_tokens - 1 > 0:
+            self.extra_cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens - 1, embed_dim))
         if relative_attention:
             self.first_pos_embed = nn.Parameter(torch.zeros(1, embed_dim))
             self.row_embed = nn.Parameter(torch.zeros(self.height * 2 + 1, pos_dim))
@@ -125,8 +130,12 @@ class PatchEmbed(nn.Module):
             x = x + self.pos_embed
             row_embed = None
             column_embed = None
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        if self.extra_cls_token is not None:
+            extra_cls_token = self.extra_cls_token.expand(B, -1, -1)
+            x = torch.cat((extra_cls_token, x), dim=1)
+        if self.cls_token is not None:
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
         x = self.layer_norm(x)
         x = self.dropout(x)
         return x, row_embed, column_embed
