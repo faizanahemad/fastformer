@@ -592,7 +592,7 @@ def train(local_rank, args):
                                                   zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
                     key_moco_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_moco_ffn.state_dict().items(), ddp_model.module.key_moco_ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict().items())})
 
-                if args["mode"] == "clr" and ((step + 1) % (4 * iter_size) == 0 or (4 * iter_size) == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                if args["mode"] == "clr" and ((step + 1) % (4 * iter_size) == 0 or (4 * iter_size) == 1) and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
@@ -640,8 +640,8 @@ def train(local_rank, args):
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives,
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, \nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),
                     samples_per_machine_simclr, total_samples_simclr, simclr_negative))
                 batch_times = []
                 full_times = []
