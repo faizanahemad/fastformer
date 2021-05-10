@@ -418,7 +418,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=768, eps=1e-5,
-                 patchclr_w=1.0, teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.09,
+                 patchclr_w=1.0, teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.1,
                  simclr_w=1.0, dino_w=1.0,
                  reinit=False, priority_clr=False, moco=False,):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
@@ -481,14 +481,6 @@ class PatchCLR(FastFormerPreTrainedModel):
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def _channel_dropout(self, x1, x2):
-        if self.channel_dropout > 0:
-            b = x1.size(0)
-            x = torch.cat((x1, x2), 0).unsqueeze(-1).unsqueeze(-1)
-            x = self.dropout(x).squeeze()
-            x1 = x[:b]
-            x2 = x[b:]
-        return x1, x2
 
     def _build_rep(self, x, backbone, ffn):
         # assert torch.all(torch.isfinite(x)).item()
@@ -497,7 +489,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             b = b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"]
 
         # assert torch.all(torch.isfinite(b.detach())).item()
-        b = ffn(b) if self.patchclr_w > 0 else ffn(b[:, 0:4].view(x.size(0), -1))
+        b = ffn(b)
 
         # assert torch.all(torch.isfinite(b.detach())).item()
 
