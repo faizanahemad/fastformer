@@ -333,6 +333,7 @@ class SuperGlueTest:
         epochs = -1
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
+        train_backbone = classifier_data["train_backbone"]
         max_allowed_epochs = self.epoch_per_dataset[dataset_key]
         broken = False
         stored_state = None

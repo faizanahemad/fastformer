@@ -427,7 +427,10 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
         self.ffn_input_features = (num_features) * 4
 
-        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(), nn.Linear(2048, 128, bias=False))
+        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
+                                 nn.Linear(2048, 2048),
+                                 nn.Linear(2048, 2048),
+                                 nn.Linear(2048, 128, bias=False))
         self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 4),
                                            nn.GELU(),
                                            nn.Linear(num_features * 4, num_features, bias=False))
