@@ -491,13 +491,16 @@ class PatchCLR(FastFormerPreTrainedModel):
         x1_simclr = None
         x2_simclr = None
         if self.simclr_w > 0 or self.dino_w > 0:
-            x2_repr = self.key_backbone(x2)
+            with torch.no_grad():
+                x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
                 x1_simclr = self.moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1))
-                x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
+                with torch.no_grad():
+                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
             if self.dino_w > 0:
                 x1_dino = self.ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
-                x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
+                with torch.no_grad():
+                    x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr,

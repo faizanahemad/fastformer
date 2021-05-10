@@ -66,8 +66,6 @@ def training_args():
 
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
-    parser.add_argument('--warm_restart_key_encoder', required=False, type=int,
-                        help='Warm Restarts Epochs for Key Encoder')
     parser.add_argument('--total_samples_simclr', default=65536, type=int,
                         help='SimCLR Negatives')
 
@@ -556,11 +554,6 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             if args["moco"]:
-                if step == 0 and "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0):
-                    key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
-                    key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
-                    key_moco_ffn.load_state_dict(ddp_model.module.key_moco_ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict())
-                    extra_negative_repr_simclr = None
                 key_backbone = key_backbone.eval()
                 key_ffn = key_ffn.eval()
                 key_moco_ffn = key_moco_ffn.eval()
@@ -603,18 +596,15 @@ def train(local_rank, args):
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
-                        if (epoch == 0 or (args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0))) and step <= (4 * iter_size):
-                            most_recent_simclr = extra_negative_repr_simclr
+                        extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
+                        samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
+                        if samples_per_machine_simclr <= 0:
+                            most_recent_simclr = mrs
                         else:
-                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
-                            samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
-                            if samples_per_machine_simclr <= 0:
-                                most_recent_simclr = mrs
-                            else:
-                                samples_per_machine_simclr = min(samples_per_machine_simclr, extra_negative_repr_simclr.size(0) // args["world_size"])
-                                start = extra_negative_repr_simclr.size(0) - ((rank + 1) * samples_per_machine_simclr)
-                                end = extra_negative_repr_simclr.size(0) - (rank * samples_per_machine_simclr)
-                                most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
+                            samples_per_machine_simclr = min(samples_per_machine_simclr, extra_negative_repr_simclr.size(0) // args["world_size"])
+                            start = extra_negative_repr_simclr.size(0) - ((rank + 1) * samples_per_machine_simclr)
+                            end = extra_negative_repr_simclr.size(0) - (rank * samples_per_machine_simclr)
+                            most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
                         empty_size = most_recent_simclr.size()
                         del extra_negative_repr_simclr
 
