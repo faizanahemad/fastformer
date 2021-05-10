@@ -238,7 +238,7 @@ class SuperGlueTest:
         batch_size = 8
         train_backbone = False
         if train_backbone:
-            self.lr_per_dataset[dataset_key] *= 5
+            self.lr_per_dataset[dataset_key] *= 10
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
             optimizer_config.eps = 1e-5
