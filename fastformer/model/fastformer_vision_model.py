@@ -99,13 +99,11 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.extra_cls_token = nn.Parameter(torch.zeros(1, max(3, num_highway_cls_tokens - 1), embed_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, num_highway_cls_tokens, embed_dim))
         if relative_attention:
             self.first_pos_embed = nn.Parameter(torch.zeros(1, embed_dim))
             self.row_embed = nn.Parameter(torch.zeros(self.height * 2 + 1, pos_dim))
             self.column_embed = nn.Parameter(torch.zeros(self.width * 2 + 1, pos_dim))
-
         else:
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
 
@@ -128,8 +126,7 @@ class PatchEmbed(nn.Module):
             row_embed = None
             column_embed = None
         cls_tokens = self.cls_token.expand(B, -1, -1)
-        extra_cls_token = self.extra_cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, extra_cls_token, x), dim=1)
+        x = torch.cat((cls_tokens, x), dim=1)
         x = self.layer_norm(x)
         x = self.dropout(x)
         return x, row_embed, column_embed
@@ -369,23 +366,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
         if reinit_backbone:
             self.init_weights()
 
-        if isinstance(self.head, nn.Sequential):
-            for module in self.head:
-                if hasattr(module, "weight") and len(module.weight.shape) == 2:
-                    fan_out, fan_in = module.weight.shape
-                    std = np.sqrt(1.0 / float(fan_in + fan_out))
-                    nn.init.normal_(module.weight, std=std)
-                if hasattr(module, "bias") and module.bias is not None:
-                    nn.init.constant_(module.bias, 0.0)
-        elif isinstance(self.head, nn.Linear):
-            module = self.head
-            if hasattr(module, "weight") and len(module.weight.shape) == 2:
-                fan_out, fan_in = module.weight.shape
-                std = np.sqrt(1.0 / float(fan_in + fan_out))
-                nn.init.normal_(module.weight, std=std)
-            if hasattr(module, "bias") and module.bias is not None:
-                nn.init.constant_(module.bias, 0.0)
-
+        init_weights(self.head)
 
     def get_representations(self, x):
         b = x.size(0)
@@ -417,66 +398,67 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=768, eps=1e-5,
-                 patchclr_w=1.0, teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.1,
-                 simclr_w=1.0, dino_w=1.0,
-                 reinit=False, priority_clr=False, moco=False,):
+    def __init__(self, backbone, num_features=768, eps=1e-7,
+                 generator_w=1.0, discriminator_w=1.0, simclr_w=1.0, dino_w=1.0,
+                 teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.1,
+                 discriminator_pos_frac=0.01,
+                 reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
+        self.cls_tokens = backbone.config.num_highway_cls_tokens if hasattr(backbone, "config") and hasattr(backbone.config, "num_highway_cls_tokens") else 1
         self.backbone = backbone
-        self.patchclr_w = patchclr_w
+        self.generator_w = generator_w
+        self.discriminator_w = discriminator_w
+        self.discriminator_pos_frac = discriminator_pos_frac
         self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
-        self.ffn_input_features = (num_features) * 4
+        self.ffn_input_features = num_features * self.cls_tokens
+        self.num_moco_features = 256
+        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
+        if discriminator_w > 0:
+            assert generator_w > 0
+        self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048),
+                                      nn.GELU(),
+                                      Norm(),
+                                      nn.Linear(2048, 2048),
+                                      nn.GELU(),
+                                      nn.Linear(2048, self.num_moco_features),
+                                      Norm())
 
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                  nn.Linear(2048, 2048),
-                                 nn.Linear(2048, 2048),
-                                 nn.Linear(2048, 128, bias=False))
-        self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 4),
+                                 nn.Linear(2048, 256),
+                                 Norm(),
+                                 nn.Linear(256, 2 ** 14, bias=False))
+        self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
-                                           nn.Linear(num_features * 4, num_features, bias=False))
+                                           nn.Linear(num_features * 2, num_features * 2),
+                                           nn.GELU(),
+                                           Norm(),
+                                           nn.Linear(num_features * 2, num_features))
         self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
-                                               nn.Linear(num_features, num_features * 2),
+                                               nn.Linear(num_features * 2, num_features * 2),
+                                               nn.GELU(),
                                                nn.Linear(num_features * 2, 1, bias=False))
-        self.num_moco_features = 128
+
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
         self.student_contrastive_temperature = student_contrastive_temperature
         self.simclr_w = simclr_w
-        self.moco = moco
+        self.dino_w = dino_w
         self.key_ffn = None
+        self.key_moco_ffn = None
         self.key_backbone = None
+        self.loss_bce = BCELossFocal()
 
         if reinit:
             self.init_weights()
-        for module in self.ffn:
-            if hasattr(module, "weight") and len(module.weight.shape) == 2:
-                fan_out, fan_in = module.weight.shape
-                std = np.sqrt(1.0 / float(fan_in + fan_out))
-                nn.init.normal_(module.weight, std=std)
-            if hasattr(module, "bias") and module.bias is not None:
-                nn.init.constant_(module.bias, 0.0)
+        init_weights(self.ffn)
+        init_weights(self.generator_ffn)
+        init_weights(self.discriminator_ffn)
+        init_weights(self.moco_ffn)
 
-    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, extra_negatives=None, calculate_accuracy=False):
-
-        # mask = contrastive_matrix.new_zeros(contrastive_matrix.size(), requires_grad=False).fill_diagonal_(1e2)
-        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        # contrastive_matrix = contrastive_matrix - mask
-        # del mask
-        # rnd_idx = 0
+    def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
-        if extra_negatives is not None:
-            # ens = extra_negatives.size(1)
-            # rnd_idx = random.randint(0, ens)
-            # en1, en2 = extra_negatives.split([rnd_idx, ens - rnd_idx], 1)
-            # contrastive_matrix = torch.cat((en1, contrastive_matrix, en2), 1)
-            # print("extra_negatives.size = %s, contrastive_matrix.size = %s" % (extra_negatives.size(), contrastive_matrix.size()))
-            contrastive_matrix = torch.cat((contrastive_matrix, extra_negatives), 1)
-            # labels = labels + rnd_idx
-        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        contrastive_matrix = contrastive_matrix / self.contrastive_temperature
-        # assert torch.all(torch.isfinite(contrastive_matrix.detach())).item()
-        labels = torch.cat((labels + label_lengths, labels))
         loss = self.loss_ce(contrastive_matrix, labels)
         accuracy = 0
         if calculate_accuracy:
@@ -484,121 +466,82 @@ class PatchCLR(FastFormerPreTrainedModel):
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
+    def forward_generator(self, x1_noised, x1_label, x2):
+        b = x1_noised.size(0)
+        x1_repr = self.backbone(x1_noised)
+        x1_reconstruct = None
+        label_for_discriminator = None
+        mean_error_percent_per_pixel = None
+        reconstruction_loss = None
+        if self.generator_w > 0:
+            x1_reconstruct = self.generator_ffn(x1_repr[:, self.cls_tokens:])
+            x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
+            reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+            mean_error_percent_per_pixel = ((reconstruction_loss.detach() ** 0.5) / (torch.abs(x1_label) + 1e-4)).mean().item()
+            losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
+            highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
+            label_for_discriminator = torch.zeros_like(losses_per_region)
+            label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
+            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
+            # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+            reconstruction_loss = self.generator_w * reconstruction_loss.mean()
 
-    def _build_rep(self, x, backbone, ffn):
-        # assert torch.all(torch.isfinite(x)).item()
-        b = backbone(x)
-        if isinstance(b, dict):
-            b = b["third_block_hidden"] if b["third_block_hidden"] is not None else b["second_block_hidden"]
+        simclr_loss = 0
+        dino_loss = 0
+        x1_simclr = None
+        x2_simclr = None
+        if self.simclr_w > 0 or self.dino_w > 0:
+            x2_repr = self.key_backbone(x2)
+            if self.simclr_w > 0:
+                x1_simclr = self.moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1))
+                x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
+            if self.dino_w > 0:
+                x1_dino = self.ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
+                x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
 
-        # assert torch.all(torch.isfinite(b.detach())).item()
-        b = ffn(b)
+        return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
+                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr,
+                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr)
 
-        # assert torch.all(torch.isfinite(b.detach())).item()
-
-        # assert torch.all(torch.isfinite(b.norm(2, -1, True).detach())).item()
-        b = b / (b.norm(2, -1, True) + self.eps)
-
-        # assert torch.all(torch.isfinite(b.detach())).item()
-        return b
-
-    def build_representations(self, x1, x2, eval=False, use_key_enc=False):
-        backbone = self.backbone
-        ffn = self.ffn
-        encoder_x = torch.cat((x1, x2))
-        if eval:
-            _ = self.eval()
-            _ = backbone.eval()
-            _ = ffn.eval()
-
-            with torch.no_grad():
-                b1 = self._build_rep(encoder_x, backbone, ffn)
-                if use_key_enc:
-                    backbone = self.key_backbone
-                    ffn = self.key_ffn
-                    b2 = self._build_rep(encoder_x, backbone, ffn)
-                else:
-                    b2 = b1
-
-        else:
-            _ = self.train()
-            _ = backbone.train()
-            _ = ffn.train()
-            b1 = self._build_rep(encoder_x, backbone, ffn)
-            if use_key_enc:
-                backbone = self.key_backbone
-                ffn = self.key_ffn
-                with torch.no_grad():
-                    b2 = self._build_rep(encoder_x, backbone, ffn)
-            else:
-                b2 = b1
-
-        return b1, b2
-
-    def forward(self, x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None, calculate_accuracy=False):
-        b1, b2 = self.build_representations(x1, x2, use_key_enc=self.moco)
-        b, s = b1.shape[:2]
-        bs = b * s
+    def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, calculate_accuracy=False):
+        gen_res = self.forward_generator(x1_noised, x1_label, x2)
+        b = x1_noised.size(0)
 
         loss = 0.0
-        patchclr_loss = None
-        patchclr_accuracy = None
-        if self.patchclr_w > 0:
-            b1p = b1
-            b2p = b2
-            out_1 = b1p.reshape(-1, self.num_features)  # BxS , D
-            out_2 = b2p.reshape(-1, self.num_features)  # BxS , D
-            # b2 = torch.cat((out_2, out_1), 0)
+        dino_loss = 0.0
+        if self.dino_w > 0:
+            pass
 
-            contrastive_matrix = out_1.mm(out_2.t()) * (1 - torch.eye(out_1.size(0), out_1.size(0), device=out_1.device))
-            contrastive_matrix_store = contrastive_matrix
-
-            patchclr_negative=None
-            if extra_negative_repr_patchclr is not None and self.patchclr_use_extra_negatives:
-                # if extra_negative_repr_patchclr.size(0) > 2 * bs:
-                #     extra_negative_repr_patchclr = extra_negative_repr_patchclr[bs:]
-                # extra_negative_repr_patchclr = extra_negative_repr_patchclr.to(c1.device)
-                patchclr_negative = out_1.mm(extra_negative_repr_patchclr.t())
-                extra_negative_repr_patchclr = torch.cat((extra_negative_repr_patchclr, out_2.detach()), 0)
-            else:
-                extra_negative_repr_patchclr = out_2.detach()
-            extra_negative_repr_patchclr = extra_negative_repr_patchclr.detach()
-
-            patchclr_loss, patchclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, out_1.shape[0] // 2, patchclr_negative, calculate_accuracy=calculate_accuracy)
-            patchclr_loss = self.patchclr_w * patchclr_loss
-            loss += patchclr_loss
+        discriminator_loss = None
+        if self.discriminator_w > 0:
+            x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
+            discriminator_loss = self.discriminator_w * self.loss_bce(x1_disc.squeeze(-1), gen_res["label_for_discriminator"])
+            loss += discriminator_loss
+        reconstruction_loss = gen_res["reconstruction_loss"]
+        if reconstruction_loss is not None:
+            loss += reconstruction_loss
 
         simclr_loss = None
-        simclr_loss_simple = None
         simclr_accuracy = None
         simclr_accuracy_simple = None
         if self.simclr_w > 0:
-            if self.patchclr_w > 0:
-                b1s = b1[:, 0:4].view(b, -1)
-                b2s = b2[:, 0:4].view(b, -1)
-            else:
-                b1s = b1.view(b, -1)
-                b2s = b2.view(b, -1)
-
-            contrastive_matrix = b1s.mm(b2s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
-            simclr_negative = None
+            b1s = gen_res["x1_simclr"]
+            b2s = gen_res["x2_simclr"]
             if extra_negative_repr_simclr is not None:
-                # if extra_negative_repr_simclr.size(0) > 1024 * b:
-                #     extra_negative_repr_simclr = extra_negative_repr_simclr[b:]
-                # extra_negative_repr_simclr = extra_negative_repr_simclr.to(sc1.device)
-                simclr_negative = b1s.mm(extra_negative_repr_simclr.t())
+                contrastive_matrix = b1s.mm(torch.cat((b2s, extra_negative_repr_simclr)).t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
             else:
+                contrastive_matrix = b1s.mm(b2s.t())
                 extra_negative_repr_simclr = b2s.detach()
 
-            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0] // 2, simclr_negative, calculate_accuracy=calculate_accuracy)
+            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
             simclr_loss = self.simclr_w * simclr_loss
             loss += simclr_loss
 
-        return dict(loss=loss, patchclr_loss=patchclr_loss, clustering_loss=clustering_loss, simclr_loss=simclr_loss, gap_bias_loss=gap_bias_loss, simclr_loss_simple=simclr_loss_simple,
-                    patchclr_accuracy=patchclr_accuracy, simclr_accuracy=simclr_accuracy, gap_bias_accuracy=gap_bias_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    extra_negative_repr_patchclr=extra_negative_repr_patchclr.detach() if extra_negative_repr_patchclr is not None else None,
-                    extra_negative_repr_simclr=extra_negative_repr_simclr.detach() if extra_negative_repr_simclr is not None else None)
+        return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss,
+                    simclr_accuracy=simclr_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
+                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"],
+                    extra_negative_repr_simclr=extra_negative_repr_simclr)
 
 
 if __name__ == '__main__':
@@ -655,7 +598,6 @@ if __name__ == '__main__':
     grasshopper = to_tensor(Image.open("grasshopper.jpg"))
     x2 = torch.stack([dog, cat, fox, grasshopper])
     x = x1
-    
 
     # x = torch.randn(batch_size, 3, 224, 224, device=device)
 
@@ -665,7 +607,9 @@ if __name__ == '__main__':
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, patchclr_w=0.0)
+            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, dino_w=0.0)
+            model.key_backbone = model.backbone
+            model.key_moco_ffn = model.moco_ffn
     else:
         model = FastFormerVisionModel(config)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -675,7 +619,9 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0, patchclr_w=0.0)
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0, dino_w=0.0)
+            model.key_backbone = model.backbone
+            model.key_moco_ffn = model.moco_ffn
     if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
             args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
@@ -690,9 +636,7 @@ if __name__ == '__main__':
         print(output.argmax(-1))
         exit()
 
-    patch_clr_or_not = torch.ones(x.size(0)).to(device)
-    output = model(x1, x2, patch_clr_or_not)
-    check_patch_clr_acc(model, "clr", "cpu", args["pretrained_model"], config)
+    output = model(x1, x1, x2, calculate_accuracy=True)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
@@ -719,7 +663,7 @@ if __name__ == '__main__':
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(x, x, patch_clr_or_not)
+                    output = model(x, x1, x2, calculate_accuracy=True)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
                     get_unused_params(model)
@@ -729,7 +673,7 @@ if __name__ == '__main__':
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(x, x, patch_clr_or_not)
+                output = model(x, x1, x2, calculate_accuracy=True)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 get_unused_params(model)
@@ -740,11 +684,11 @@ if __name__ == '__main__':
             if fp16:
                 with autocast():
                     with torch.no_grad():
-                        output = model(x, x, patch_clr_or_not)
+                        output = model(x, x1, x2, calculate_accuracy=True)
 
             else:
                 with torch.no_grad():
-                    output = model(x, x, patch_clr_or_not)
+                    output = model(x, x1, x2, calculate_accuracy=True)
             return output
         return output
 
@@ -757,7 +701,7 @@ if __name__ == '__main__':
         output = run()
         et = time.time() - st
         times.append(et)
-        output = {k: float(v) for k, v in output.items() if v is not None}
+        output = {k: float(v) for k, v in output.items() if v is not None and not isinstance(v, torch.Tensor)}
         accuracy.append(output)
     print("Time Taken = %.4f, Lowest = %.4f, Highest = %.4f, variance = %.4f" % (np.mean(times), np.min(times), np.max(times), np.std(times)))
     print(accuracy[:5])

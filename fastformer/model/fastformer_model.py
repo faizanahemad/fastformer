@@ -651,12 +651,9 @@ class FastFormerPreTrainedModel(PreTrainedModel):
 
         if classname.find("Conv1d") != -1 or classname.find("Conv2d") != -1 or classname.find("ConvTranspose2d") != -1:
             if getattr(module, "weight", None) is not None:
-                if self.config.initializer_std is None:
-                    fan_out, fan_in = module.weight.shape[:2]
-                    fan_out, fan_in = fan_out, fan_in
-                    std = np.sqrt(1.0 / float(fan_in + fan_out))
-                else:
-                    std = self.config.initializer_std
+                fan_out, fan_in = module.weight.shape[:2]
+                fan_out, fan_in = fan_out, fan_in
+                std = np.sqrt(1.0 / float(fan_in + fan_out))
                 nn.init.normal_(module.weight, std=std)
 
             if getattr(module, "bias", None) is not None:
@@ -687,14 +684,10 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                 nn.init.normal_(module.first_pos_embed, std=std)
             if hasattr(module, "proj"):
                 if getattr(module.proj, "weight", None) is not None:
-                    if self.config.initializer_std is None:
-                        fan_out, fan_in = module.proj.weight.shape[:2]
-                        fan_out, fan_in = fan_out, fan_in
-                        std = np.sqrt(1.0 / float(fan_in + fan_out))
-                    else:
-                        std = self.config.initializer_std
+                    fan_out, fan_in = module.proj.weight.shape[:2]
+                    fan_out, fan_in = fan_out, fan_in
+                    std = np.sqrt(1.0 / float(fan_in + fan_out))
                     nn.init.normal_(module.proj.weight, std=std)
-
 
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):
@@ -931,20 +924,14 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                                       nn.Dropout(0.2),
                                       nn.Linear(2048, num_classes))
         else:
-            self.head = nn.Sequential(nn.Linear(self.num_features, num_classes))
+            self.head = nn.Sequential(Norm(), nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
         if reinit_backbone:
             self.init_weights()
 
-        for module in self.head:
-            if hasattr(module, "weight") and len(module.weight.shape) == 2:
-                fan_out, fan_in = module.weight.shape
-                std = np.sqrt(1.0 / float(fan_in + fan_out))
-                nn.init.normal_(module.weight, std=std)
-            if hasattr(module, "bias") and module.bias is not None:
-                nn.init.constant_(module.bias, 0.0)
+        init_weights(self.head)
 
     def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
         funnel_inputs = dict(input_ids=input_ids,

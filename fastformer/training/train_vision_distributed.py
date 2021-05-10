@@ -63,16 +63,12 @@ def training_args():
 
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
-    parser.add_argument('--pct_simclr_simple', default=20, type=int,
-                        help='pct_simclr_simple')
 
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
     parser.add_argument('--warm_restart_key_encoder', required=False, type=int,
                         help='Warm Restarts Epochs for Key Encoder')
-    parser.add_argument('--total_samples_patchclr', default=65536, type=int,
-                        help='Patch Negatives')
-    parser.add_argument('--total_samples_simclr', default=65536 * 2, type=int,
+    parser.add_argument('--total_samples_simclr', default=65536, type=int,
                         help='SimCLR Negatives')
 
     parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
@@ -89,9 +85,6 @@ def training_args():
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
 
-    parser.add_argument('--patchclr_heads', default=1, type=int,
-                        help='Patchclr heads')
-
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
 
@@ -103,17 +96,17 @@ def training_args():
     parser.add_argument('--wandb_dryrun', action="store_true", default=False,
                         help='WanDB Dryrun Only')
 
-    parser.add_argument('--moco', action="store_true", default=False,
-                        help='Momentum Contrast')
-
-    parser.add_argument('--simclr_moco', action="store_true", default=False,
-                        help='Small Batch SIMCLR then Momentum Contrast')
-
-    parser.add_argument('--simclr_w', type=float, required=False,
+    parser.add_argument('--simclr_w', type=float, required=False, default=0.0,
                         help='simclr weight')
 
-    parser.add_argument('--patchclr_w', type=float, required=False,
-                        help='patchclr weight')
+    parser.add_argument('--dino_w', type=float, required=False, default=0.0,
+                        help='dino_w weight')
+
+    parser.add_argument('--generator_w', type=float, required=False, default=0.0,
+                        help='generator_w weight')
+
+    parser.add_argument('--discriminator_w', type=float, required=False, default=0.0,
+                        help='discriminator_w weight')
 
     parser.add_argument('--shuffle_dataset', action="store_true", default=False,
                         help='Shuffle Train')
@@ -166,11 +159,8 @@ def training_args():
 
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
-    args.moco = args.moco if args.mode == 'clr' else False
-    args.simclr_moco = args.simclr_moco if args.mode == 'clr' else False
-    args.pct_simclr_simple = args.pct_simclr_simple if args.mode == 'clr' else 0
+    args.moco = args.simclr_w > 0
 
-    args.moco = False if args.simclr_moco else args.moco
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -195,15 +185,18 @@ def model_train_validation_switch(model, args, train=True):
 
 
 class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_student, dataset_teacher):
+    def __init__(self, dataset_student, dataset_teacher, image_transforms):
         self.dataset_student, self.dataset_teacher = dataset_student, dataset_teacher
+        self.image_transforms = image_transforms
 
     def __getitem__(self, item):
 
         x1, _ = self.dataset_student[item]
+        x1_noised = self.image_transforms["to_tensor"](self.image_transforms["non_shape_transforms"](x1.copy()))
+        x1_label = self.image_transforms["to_tensor"](x1)
         # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
         x2, label = self.dataset_teacher[item]
-        return dict(x1=x1, x2=x2, patch_clr_or_not=True)
+        return dict(x1_noised=x1_noised, x1_label=x1_label, x2=x2)
 
     def __len__(self):
         return len(self.dataset_student)
@@ -246,23 +239,23 @@ class ImageNetValidation:
         print("[Validation]: Time = %s, Train Acc = %.5f, Val Acc = %.5f" % (get_time_string(), train_acc, val_acc))
 
 
-def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None, simclr_w=None, patchclr_w=None):
+def build_dataloader(location, mode, shuffle_dataset, batch_size, world_size=1, num_workers=1, split=None):
     from torchvision.datasets import CIFAR10, EMNIST, FashionMNIST, MNIST, STL10, SVHN, Places365, ImageNet
     single_node = world_size == 1
 
     split = split if split is not None else ("val" if mode == "validation" else "train")
-    image_transforms = get_image_augmetations(mode)
+    image_transforms = get_image_augmetations(mode, False)
 
     if "imagenet" in location.lower():
         dataset_student = ImageNet(location, split, transform=get_image_augmetations(mode, False)["shape_transforms"])
-        dataset_teacher = ImageNet(location, split, transform=get_image_augmetations(mode, True)["shape_transforms"])
+        dataset_teacher = ImageNet(location, split, transform=get_image_augmetations("full_train", True)["shape_transforms"])
     elif "cifar10" in location.lower():
         dataset_student = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode, False)["shape_transforms"])
-        dataset_teacher = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations(mode, True)["shape_transforms"])
+        dataset_teacher = CIFAR10(root=location, train=split != "val", download=True, transform=get_image_augmetations("full_train", True)["shape_transforms"])
 
     if mode == "clr":
         # print("[Train]: Time = %s, %s, %s, %s" % (get_time_string(), image_transforms["shape_transforms"], image_transforms["non_shape_transforms"], image_transforms["to_tensor"]))
-        dataset = CLRDataset(dataset_student, dataset_teacher)
+        dataset = CLRDataset(dataset_student, dataset_teacher, image_transforms)
     else:
         dataset = dataset_student
     kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
@@ -347,16 +340,16 @@ def train(local_rank, args):
         backbone = FastFormerVisionModel(config, reinit=True)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
-    simclr_w = args["simclr_w"] if "simclr_w" in args else 2.0
-    patchclr_w = args["patchclr_w"] if "patchclr_w" in args else 0.5
+    simclr_w = args["simclr_w"] if "simclr_w" in args else 0.0
+    generator_w = args["generator_w"] if "generator_w" in args else 0.0
+    discriminator_w = args["discriminator_w"] if "discriminator_w" in args else 0.0
+    dino_w = args["dino_w"] if "dino_w" in args else 0.0
 
     if args["mode"] == "clr":
-        if args["deit"]:
-            model = PatchCLR(backbone, 768, config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
-                             reinit=reinit, patchclr_use_extra_negatives=False, simclr_use_extra_negatives=False, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
-        else:
-            model = PatchCLR(backbone, config.block_channel_size[-1], config.layer_norm_eps, patchclr_w=patchclr_w, simclr_w=simclr_w, clustering_w=0.0, gap_bias_w=0.0,
-                             reinit=reinit, patchclr_use_extra_negatives=True, simclr_use_extra_negatives=True, moco=args["moco"], heads=args["patchclr_heads"]).to(device)
+        hidden_dims = 768 if args["deit"] else config.block_channel_size[-1]
+        model = PatchCLR(backbone, hidden_dims, config.layer_norm_eps,
+                         generator_w=generator_w, discriminator_w=discriminator_w, simclr_w=simclr_w, dino_w=dino_w,
+                         reinit=reinit).to(device)
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
@@ -369,12 +362,10 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-    if local_rank == 0 and not args["moco"]:
+    if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
         print(type(model))
         print(model)
-        # if "pretrained_model" in args and args["pretrained_model"] is not None and args["mode"] == "clr":
-        #     check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -415,8 +406,6 @@ def train(local_rank, args):
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
-    # if local_rank == 0 and not (args["moco"] or args["simclr_moco"]):
-    #     check_patch_clr_acc(model, args["mode"], device, args["pretrained_model"], config)
     model = model_train_validation_switch(model, args, train=True)
     if args["mode"] == "validation" and local_rank == 0:
         assert args["world_size"] == 1
@@ -432,18 +421,22 @@ def train(local_rank, args):
     else:
         ddp_model = model
 
-    if (args["moco"] or args["simclr_moco"]) and args["mode"] == "clr":
+    if args["moco"] and args["mode"] == "clr":
         print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
         if isinstance(ddp_model, DDP):
             key_backbone = copy.deepcopy(ddp_model.module.backbone).to(device)
             key_backbone.load_state_dict(copy.deepcopy(ddp_model.module.backbone.state_dict()))
             key_ffn = copy.deepcopy(ddp_model.module.ffn).to(device)
             key_ffn.load_state_dict(copy.deepcopy(ddp_model.module.ffn.state_dict()))
+            key_moco_ffn = copy.deepcopy(ddp_model.module.key_moco_ffn).to(device)
+            key_moco_ffn.load_state_dict(copy.deepcopy(ddp_model.module.key_moco_ffn.state_dict()))
         else:
             key_backbone = copy.deepcopy(backbone).to(device)
             key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
             key_ffn = copy.deepcopy(model.ffn).to(device)
             key_ffn.load_state_dict(copy.deepcopy(model.ffn.state_dict()))
+            key_moco_ffn = copy.deepcopy(model.key_moco_ffn).to(device)
+            key_moco_ffn.load_state_dict(copy.deepcopy(model.key_moco_ffn.state_dict()))
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -474,8 +467,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["mode"], args["shuffle_dataset"], batch_size,
-                                  world_size=args["world_size"], num_workers=args["num_workers"],
-                                  simclr_w=simclr_w, patchclr_w=patchclr_w)
+                                  world_size=args["world_size"], num_workers=args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)
@@ -483,9 +475,8 @@ def train(local_rank, args):
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else len(dataloader))
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
-    #                                                 div_factor=1e2, three_phase=False, pct_start=0.3, anneal_strategy="linear")
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps_per_epoch * (args["epochs"] // args["lr_steps"]), gamma=0.4)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch, div_factor=1e2, three_phase=False, pct_start=0.3, anneal_strategy="linear")
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=steps_per_epoch * (args["epochs"] // args["lr_steps"]), gamma=0.4)
 
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
@@ -522,17 +513,10 @@ def train(local_rank, args):
             param.register_hook(hook)
 
     extra_negative_repr_simclr = None
-    extra_negative_repr_patchclr = None
     total_steps = args["epochs"] * len(dataloader)
-    pct_simclr_simple = args["pct_simclr_simple"]
-    assert pct_simclr_simple * 4 <= 50
-    assert not args["moco"] or pct_simclr_simple == 0
-    assert not args["simclr_moco"] or pct_simclr_simple > 0
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
     total_samples_simclr = 8 * (total_samples_simclr // 8)
-    total_samples_patchclr = args["total_samples_patchclr"]
-    total_samples_patchclr_cur = total_samples_patchclr
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -545,6 +529,7 @@ def train(local_rank, args):
         for step, batch in enumerate(dataloader):
             steps_done = epoch * len(dataloader) + step
             pct_done = (100 * steps_done / total_steps)
+            discriminator_pos_frac = 0.85 * min(1.0, max(0.01, pct_done / 100.0))
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
                 bs_size = list(batch[key].size())
@@ -558,31 +543,6 @@ def train(local_rank, args):
             gen_batch_time = time.time() - start_time
             batch_times.append(gen_batch_time)
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
-            model.simclr_use_extra_negatives = False
-            model.patchclr_use_extra_negatives = False
-            if hasattr(ddp_model, "module"):
-                ddp_model.module.simclr_use_extra_negatives = False
-                ddp_model.module.patchclr_use_extra_negatives = False
-
-            if pct_done < pct_simclr_simple:
-                samples_per_machine_simclr = 0
-                model.simclr_use_extra_negatives = False
-                model.patchclr_use_extra_negatives = False
-                if hasattr(ddp_model, "module"):
-                    ddp_model.module.simclr_use_extra_negatives = False
-                    ddp_model.module.patchclr_use_extra_negatives = False
-            else:
-                if args["simclr_moco"]:
-                    samples_per_machine_simclr = int(samples_per_machine_simclr * min(1, max(0, (pct_done - pct_simclr_simple) / ((pct_simclr_simple * 4) - pct_simclr_simple))))
-                    total_samples_patchclr_cur = int(total_samples_patchclr * min(1, max(0, (pct_done - pct_simclr_simple) / ((pct_simclr_simple * 4) - pct_simclr_simple))))
-                    model.moco = True
-                    ddp_model.module.moco = True
-                model.simclr_use_extra_negatives = True
-                model.patchclr_use_extra_negatives = True
-                if hasattr(ddp_model, "module"):
-                    ddp_model.module.simclr_use_extra_negatives = True
-                    ddp_model.module.patchclr_use_extra_negatives = True
-
             if (steps_done + 1) % save_every_steps == 0:
                 state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
                 barrier()
@@ -595,45 +555,49 @@ def train(local_rank, args):
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
-            if args["moco"] or (args["simclr_moco"] and pct_done >= pct_simclr_simple):
+            if args["moco"]:
                 if step == 0 and "warm_restart_key_encoder" in args and args["warm_restart_key_encoder"] is not None and ((epoch + 1) % args["warm_restart_key_encoder"] == 0):
                     key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
                     key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
-                    extra_negative_repr_patchclr = None
+                    key_moco_ffn.load_state_dict(ddp_model.module.key_moco_ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict())
                     extra_negative_repr_simclr = None
                 key_backbone = key_backbone.eval()
                 key_ffn = key_ffn.eval()
+                key_moco_ffn = key_moco_ffn.eval()
                 if hasattr(ddp_model, "module"):
                     ddp_model.module.key_backbone = key_backbone
                     ddp_model.module.key_ffn = key_ffn
+                    ddp_model.module.key_moco_ffn = key_moco_ffn
+                    ddp_model.module.discriminator_pos_frac = discriminator_pos_frac
                 else:
                     ddp_model.key_backbone = key_backbone
                     ddp_model.key_ffn = key_ffn
+                    ddp_model.key_moco_ffn = key_moco_ffn
+                    ddp_model.discriminator_pos_frac = discriminator_pos_frac
                 model.key_backbone = key_backbone
                 model.key_ffn = key_ffn
+                model.key_moco_ffn = key_moco_ffn
+                model.discriminator_pos_frac = discriminator_pos_frac
             try:
                 model_start = time.time()
                 if no_sync and (step + 1) % iter_size != 0 and hasattr(ddp_model, "no_sync"):
                     with ddp_model.no_sync():
                         output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
-                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
+                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr)
                     model_times.append(time.time() - model_start)
                 else:
                     output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr, extra_negative_repr_patchclr=extra_negative_repr_patchclr)
+                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr)
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
                     
-                if args["mode"] == "clr" and (args["moco"] or args["simclr_moco"]) and (step + 1) % (4 * iter_size) == 0:
-                    if pct_done < pct_simclr_simple:
-                        key_backbone.load_state_dict(ddp_model.module.backbone.state_dict() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict())
-                        key_ffn.load_state_dict(ddp_model.module.ffn.state_dict() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict())
-                    else:
-                        key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
-                        key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
-                                                      zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
+                if args["mode"] == "clr" and args["moco"] and (step + 1) % (4 * iter_size) == 0:
+                    key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
+                    key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
+                                                  zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
+                    key_moco_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_moco_ffn.state_dict().items(), ddp_model.module.key_moco_ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict().items())})
 
                 if args["mode"] == "clr" and ((step + 1) % (4 * iter_size) == 0 or (4 * iter_size) == 1) and (hasattr(ddp_model, "module") and ddp_model.module.simclr_use_extra_negatives) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
@@ -658,14 +622,8 @@ def train(local_rank, args):
                         tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
                         torch.distributed.all_gather(tensor_list, most_recent_simclr)
 
-                        extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"], most_recent_simclr.size(-1))
-                        output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
-
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                extra_negative_repr_patchclr = output.pop("extra_negative_repr_patchclr", None)
-                if extra_negative_repr_patchclr is not None and extra_negative_repr_patchclr.size(0) > total_samples_patchclr_cur:
-                    extra_negative_repr_patchclr = extra_negative_repr_patchclr[extra_negative_repr_patchclr.size(0) - total_samples_patchclr_cur:]
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
@@ -680,22 +638,21 @@ def train(local_rank, args):
             if (steps_done + 1) % log_every_steps == 0 or step == 0:
                 if local_rank == 0:
                     simclr_negative = extra_negative_repr_simclr.size(0) if extra_negative_repr_simclr is not None else 0
-                    patchclr_negative = extra_negative_repr_patchclr.size(0) if extra_negative_repr_patchclr is not None else 0
                     steps_remaining = total_steps - steps_done
                     output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
                     wandb_log = dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
                                    batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
-                                     simclr_negative=simclr_negative, patchclr_negative=patchclr_negative,
+                                     simclr_negative=simclr_negative,
                                    **{k: v for k, v in output.items() if v is not None})
 
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s, patchclr_negative = %s" % (
+                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f, simclr_use_extra_negatives = %s,\nsamples_per_machine_simclr = %s, total_samples_simclr = %s, simclr_negative = %s" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps), ddp_model.module.simclr_use_extra_negatives if hasattr(ddp_model, "module") else ddp_model.simclr_use_extra_negatives,
-                    samples_per_machine_simclr, total_samples_simclr, simclr_negative, patchclr_negative))
+                    samples_per_machine_simclr, total_samples_simclr, simclr_negative))
                 batch_times = []
                 full_times = []
                 model_times = []
@@ -721,15 +678,15 @@ def train(local_rank, args):
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
-                     no_sync=False, zero_grad_check=False, extra_negative_repr_patchclr=None, extra_negative_repr_simclr=None,
+                     no_sync=False, zero_grad_check=False, extra_negative_repr_simclr=None,
                      scaler=None):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
         if args["mode"] == "clr":
-            x1 = batch["x1"]
+            x1_noised = batch["x1_noised"]
+            x1_label = batch["x1_label"]
             x2 = batch["x2"]
-            patch_clr_or_not = batch["patch_clr_or_not"]
-            output = ddp_model(x1, x2, patch_clr_or_not, extra_negative_repr_patchclr=extra_negative_repr_patchclr, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync)
+            output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync)
         elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
             x = batch[0]
             labels = batch[1]

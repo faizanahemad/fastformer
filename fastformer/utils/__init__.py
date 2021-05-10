@@ -716,19 +716,18 @@ def get_image_augmetations(mode, teacher=True):
                                 transforms.RandomChoice([identity] if teacher else [
                                     get_imgaug(iaa.CoarseDropout((0.02, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
                                     get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.05, 0.1), per_channel=True)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                    get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                     transforms.Compose([transforms.Resize(512), get_alb(
-                                        alb.transforms.GridDropout(ratio=0.75, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)), ]),
+                                        alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)), ]),
                                     transforms.Compose([transforms.Resize(512), get_alb(
-                                        alb.transforms.GridDropout(ratio=0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)), ]),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
+                                        alb.transforms.GridDropout(ratio=0.4 if teacher else 0.5, holes_number_x=64, holes_number_y=64, random_offset=True, p=1.0)), ]),
+                                    get_alb(alb.transforms.GridDropout(ratio=0.4 if teacher else 0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
+                                    get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.35, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
+                                    get_alb(alb.transforms.GridDropout(ratio=0.1 if teacher else 0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
                                 ]),
                             ]
 
-    if mode == "full_train" or mode == "clr":
+    if mode == "full_train":
         non_shape_transforms = transforms.Compose(non_shape_transforms)
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
     elif mode == "linear_probe":
@@ -748,45 +747,35 @@ def get_image_augmetations(mode, teacher=True):
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms)
 
 
-def check_patch_clr_acc(model, mode, device, state_dict_location=None, model_config=None):
-    import torchvision.transforms as transforms
-    from PIL import Image
-    from fastformer.model.fastformer_vision_model import PatchCLR, ClassificationModel, FastFormerVisionModel
-    import traceback
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
-    dog = to_tensor(Image.open("dog.jpg"))
-    cat = to_tensor(Image.open("cat.jpg"))
-    fox = to_tensor(Image.open("fox.jpg"))
-    grasshopper = to_tensor(Image.open("grasshopper.jpg"))
-    x = torch.stack([dog, cat, fox, grasshopper])
-    x = x.to(device)
-    if mode == "clr":
-
-        output = model(x, x, torch.tensor([True] * x.size(0)).to(device))
-        _ = output.pop("extra_negative_repr_simclr", None)
-        _ = output.pop("extra_negative_repr_patchclr", None)
-    else:
-        assert isinstance(model, ClassificationModel)
-        output = model(x)
-        _ = output.pop("logits", None)
-
-    print("[CHECK]: Time = %s, Output = %s" % (get_time_string(), output))
-
-    if state_dict_location is not None:
-        try:
-            model = FastFormerVisionModel(model_config)
-            model = PatchCLR(model, model_config.block_channel_size[0] if model_config.has_decoder else model_config.block_channel_size[1], 1e-7, simclr_w=1.0)
-            model = model.to("cpu")
-            x = x.to("cpu")
-            state_dict = torch.load(state_dict_location, map_location="cpu")
-            model.load_state_dict(state_dict, strict=True)
-            output = model(x, x, torch.tensor([True] * x.size(0)).to(device))
-            print("[CHECK-LOAD]: Time = %s, Output = %s" % (get_time_string(), output))
-        except Exception as e:
-            traceback.print_exc()
-
 
 def worker_init_fn(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
+
+
+class Norm(nn.Module):
+    def __init__(self, p=2.0, dim=-1, eps=1e-8):
+        super().__init__()
+        self.p = p
+        self.dim = dim
+        self.eps = eps
+
+    def forward(self, x):
+        return F.normalize(x, self.p, self.dim, self.eps)
+
+
+def init_weights(module):
+    if isinstance(module, nn.Sequential):
+        for mod in module:
+            init_weights(mod)
+    else:
+        if hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
+            fan_out, fan_in = module.weight.shape[:2]
+            std = np.sqrt(1.0 / float(fan_in + fan_out))
+            nn.init.normal_(module.weight, std=std)
+        elif hasattr(module, "weight"):
+            std = np.sqrt(1.0 / module.weight.shape[-1])
+            nn.init.normal_(module.weight, std=std)
+        if hasattr(module, "bias") and module.bias is not None:
+            nn.init.constant_(module.bias, 0.0)
+
+
