@@ -414,7 +414,7 @@ def train(local_rank, args):
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in model.named_parameters() if v.requires_grad}))
     if args["world_size"] > 1:
         # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
-        ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+        ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
 
     else:
         ddp_model = model
