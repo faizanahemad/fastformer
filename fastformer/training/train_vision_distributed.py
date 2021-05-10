@@ -426,15 +426,15 @@ def train(local_rank, args):
             key_backbone.load_state_dict(copy.deepcopy(ddp_model.module.backbone.state_dict()))
             key_ffn = copy.deepcopy(ddp_model.module.ffn).to(device)
             key_ffn.load_state_dict(copy.deepcopy(ddp_model.module.ffn.state_dict()))
-            key_moco_ffn = copy.deepcopy(ddp_model.module.key_moco_ffn).to(device)
-            key_moco_ffn.load_state_dict(copy.deepcopy(ddp_model.module.key_moco_ffn.state_dict()))
+            key_moco_ffn = copy.deepcopy(ddp_model.module.moco_ffn).to(device)
+            key_moco_ffn.load_state_dict(copy.deepcopy(ddp_model.module.moco_ffn.state_dict()))
         else:
             key_backbone = copy.deepcopy(backbone).to(device)
             key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
             key_ffn = copy.deepcopy(model.ffn).to(device)
             key_ffn.load_state_dict(copy.deepcopy(model.ffn.state_dict()))
-            key_moco_ffn = copy.deepcopy(model.key_moco_ffn).to(device)
-            key_moco_ffn.load_state_dict(copy.deepcopy(model.key_moco_ffn.state_dict()))
+            key_moco_ffn = copy.deepcopy(model.moco_ffn).to(device)
+            key_moco_ffn.load_state_dict(copy.deepcopy(model.moco_ffn.state_dict()))
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
