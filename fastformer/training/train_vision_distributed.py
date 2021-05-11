@@ -613,7 +613,7 @@ def train(local_rank, args):
                         try:
                             extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
                         except Exception as e:
-                            print(extra_negative_repr_simclr.size(), (4 * iter_size), batch_size, step, samples_per_machine_simclr)
+                            print("[Train-Exception]: %s, %s, %s, %s, %s" % (extra_negative_repr_simclr.size(), (4 * iter_size), batch_size, step, samples_per_machine_simclr), flush=True)
                             raise e
                         samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
                         if samples_per_machine_simclr <= 0:
