@@ -695,11 +695,11 @@ class SuperGlueTest:
             elif dk == "rte":
                 final_predictions, pred_data, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
 
-            print("val_acc: %s" % pred_data["val_acc"])
-            print("train_acc: %s" % pred_data["train_acc"])
-            print("val_loss: %s" % pred_data["val_loss_hist"][0])
             _ = gc.collect()
             if self.rank == 0:
+                print("val_acc: %s" % pred_data["val_acc"])
+                print("train_acc: %s" % pred_data["train_acc"])
+                print("val_loss: %s" % pred_data["val_loss_hist"][0])
                 with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
                     writer.write_all(final_predictions)
                 if dk == "rte":
