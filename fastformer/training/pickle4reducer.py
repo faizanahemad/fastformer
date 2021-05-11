@@ -18,7 +18,7 @@ class ForkingPickler4(ForkingPickler):
     @classmethod
     def dumps(cls, obj, protocol=pickle.HIGHEST_PROTOCOL):
         buf = io.BytesIO()
-        cls(buf, protocol).dump(obj)
+        dill.dump(obj, buf)
         return buf.getbuffer()
     loads = dill.loads
 
