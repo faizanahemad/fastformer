@@ -606,11 +606,15 @@ def train(local_rank, args):
                                                   zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
                     key_moco_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_moco_ffn.state_dict().items(), ddp_model.module.key_moco_ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict().items())})
 
-                if args["mode"] == "clr" and ((step + 1) % (4 * iter_size) == 0 or (4 * iter_size) == 1) and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
-                        extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
+                        try:
+                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
+                        except Exception as e:
+                            print(extra_negative_repr_simclr.size(), (4 * iter_size), batch_size, step, samples_per_machine_simclr)
+                            raise e
                         samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
                         if samples_per_machine_simclr <= 0:
                             most_recent_simclr = mrs
