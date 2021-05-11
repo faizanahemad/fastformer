@@ -310,7 +310,7 @@ class SuperGlueTest:
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=self.epochs, steps_per_epoch=steps_per_epoch, div_factor=1e2,
-                                                            three_phase=False, pct_start=0.2, anneal_strategy="linear")
+                                                            three_phase=False, pct_start=0.1, anneal_strategy="linear")
 
         validation = None
         if "validation" in dataset:
