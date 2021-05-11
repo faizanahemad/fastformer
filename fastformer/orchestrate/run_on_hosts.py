@@ -180,7 +180,7 @@ if __name__ == "__main__":
     # vision_cmd += " --warm_restart_key_encoder 20"
     vision_cmd += " --simclr_w 1.0 --generator_w 1.0 --discriminator_w 2.0"
     # vision_cmd += " --pct_simclr_simple 0"
-    # vision_cmd += " --detect_anomaly"
+    vision_cmd += " --detect_anomaly"
 
     # vision_cmd += " --wandb_dryrun"
     # vision_cmd += " --deit"
