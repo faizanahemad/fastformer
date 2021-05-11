@@ -9,12 +9,15 @@
 # TODO: Resume training from saved checkpoint
 # TODO: Use TQDM and progress bar as well as metrics for speed
 
-from fastformer.training.pickle4reducer import *
-import pickle4reducer
-import multiprocessing as mp
-ctx = mp.get_context("spawn")
-ctx.reducer = Pickle4Reducer()
+# from fastformer.training.pickle4reducer import *
+# import pickle4reducer
+# import multiprocessing as mp
+# ctx = mp.get_context("spawn")
+# ctx.reducer = Pickle4Reducer()
 
+import multiprocessing
+import dill
+import signal
 import copy
 import warnings
 warnings.simplefilter("ignore")
@@ -41,7 +44,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm, trange
 from torch.optim import AdamW
 import torch.distributed as dist
-from torch.multiprocessing import Process
+from torch.multiprocessing import Process, ProcessContext
 import torch.multiprocessing as mp
 import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -1330,6 +1333,50 @@ def train(local_rank, args):
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
+from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
+
+def _wrap(fn, i, args, error_queue):
+    fn = dill.loads(fn)
+    # prctl(2) is a Linux specific system call.
+    # On other systems the following function call has no effect.
+    # This is set to ensure that non-daemonic child processes can
+    # terminate if their parent terminates before they do.
+    _prctl_pr_set_pdeathsig(signal.SIGINT)
+
+    try:
+        fn(i, *args)
+    except KeyboardInterrupt:
+        pass  # SIGINT; Killed by parent, do nothing
+    except Exception:
+        # Propagate exception to parent process, keeping original traceback
+        import traceback
+        error_queue.put(traceback.format_exc())
+        sys.exit(1)
+
+
+def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+    mp = multiprocessing.get_context(start_method)
+    error_queues = []
+    processes = []
+    for i in range(nprocs):
+        error_queue = mp.SimpleQueue()
+        process = mp.Process(
+            target=_wrap,
+            args=(dill.dumps(fn), i, args, error_queue),
+            daemon=daemon,
+        )
+        process.start()
+        error_queues.append(error_queue)
+        processes.append(process)
+
+    context = ProcessContext(processes, error_queues)
+    if not join:
+        return context
+
+    # Loop on join until it returns True or raises an exception.
+    while not context.join():
+        pass
+
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
@@ -1338,7 +1385,7 @@ if __name__ == "__main__":
     if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
     else:
-        # mp.start_processes(train_catch_exception, (args,), args["gpus_per_node"], True, False, start_method='fork')
-        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        mp.start_processes(train_catch_exception, (args,), args["gpus_per_node"], True, False, start_method='spawn')
+        # mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
 
 
