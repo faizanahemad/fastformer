@@ -935,6 +935,7 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
 
 
 def train_catch_exception(local_rank, args):
+    from fastformer.training.train_vision_distributed import train
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     nr = args["nr"]
     try:
