@@ -9,10 +9,10 @@ class ForkingPickler4(ForkingPickler):
 
     def __init__(self, file, protocol=pickle.HIGHEST_PROTOCOL):
         # print(type(file), type(protocol), file)
-        buf = io.BytesIO()
-        dill.dump(file, buf)
-        file = buf
-        assert hasattr(file, "write")
+        # buf = io.BytesIO()
+        # dill.dump(file, buf)
+        # file = buf
+        # assert hasattr(file, "write")
         super().__init__(file, protocol)
 
     @classmethod
