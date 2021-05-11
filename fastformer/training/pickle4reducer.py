@@ -9,11 +9,14 @@ class ForkingPickler4(ForkingPickler):
 
     def __init__(self, file, protocol=pickle.HIGHEST_PROTOCOL):
         # print(type(file), type(protocol), file)
-        # buf = io.BytesIO()
+        buf = io.BytesIO()
         # dill.dump(file, buf)
-        # file = buf
-        # assert hasattr(file, "write")
+        pickle.Pickler(buf, protocol).dump(file)
+        file = buf
+        assert hasattr(file, "write")
         super().__init__(file, protocol)
+        # self.dispatch_table = self._copyreg_dispatch_table.copy()
+        # self.dispatch_table.update(self._extra_reducers)
 
     @classmethod
     def dumps(cls, obj, protocol=pickle.HIGHEST_PROTOCOL):
