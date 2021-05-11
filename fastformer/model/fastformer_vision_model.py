@@ -505,7 +505,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             with torch.no_grad():
                 x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
-                x1_simclr = self.moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1))
+                x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
                     x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
             if self.dino_w > 0:
