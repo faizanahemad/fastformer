@@ -122,7 +122,7 @@ def training_args():
     parser.add_argument('--validate_only', action="store_true", default=False,
                         help='Validate Only')
 
-    parser.add_argument('--test_only', action="store_true", default=False,
+    parser.add_argument('--test_only', action="store_true", default=True,
                         help='Test Only')
 
     parser.add_argument('--shuffle_dataset', action="store_true", default=False,
@@ -1018,8 +1018,6 @@ def train(local_rank, args):
     format = "%Y-%m-%d %H-%M %Z"
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
-    ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
-    group = "%s-%s-%sN-%s" % (ds_name, args["model_config"], args["nodes"], time_string)
     set_seeds(args["seed"])
     model_config.model_size = args["model_config"]
     size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
@@ -1137,6 +1135,8 @@ def train(local_rank, args):
     samples_processed = 0
     samples_processed_this_log_iter = 0
     print("[Train]: Time = %s, Start Training for Rank = %s" % (get_time_string(), rank))
+    ds_name = list(filter(lambda x: len(x.strip()) > 0, args["train_dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
+    group = "%s-%s-%sN-%s" % (ds_name, args["model_config"], args["nodes"], time_string)
     if local_rank == 0:
         wandb_init_args = dict(project="fastformer", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                                config={"args":args, "model_config": mconf, "config": config, "optimizer_config": optc},
