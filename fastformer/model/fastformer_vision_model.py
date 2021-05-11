@@ -483,6 +483,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         mean_error_percent_per_pixel = None
         reconstruction_loss = None
         discriminator_label_mean = None
+        x1_label_saved = x1_label
         if self.generator_w > 0:
             x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
@@ -501,10 +502,12 @@ class PatchCLR(FastFormerPreTrainedModel):
         dino_loss = 0
         x1_simclr = None
         x2_simclr = None
+        x1_extras = None
         if self.simclr_w > 0 or self.dino_w > 0:
             with torch.no_grad():
                 x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
+                x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
                 x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
                     x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
@@ -515,7 +518,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr,
-                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr)
+                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras)
 
     def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, calculate_accuracy=False):
         gen_res = self.forward_generator(x1_noised, x1_label, x2)
@@ -545,12 +548,17 @@ class PatchCLR(FastFormerPreTrainedModel):
         if self.simclr_w > 0:
             b1s = gen_res["x1_simclr"]
             b2s = gen_res["x2_simclr"]
+            b3s = gen_res["x1_extras"]
+            own_negatives = b1s.mm(b3s.t())
+            l_idxs = torch.arange(b1s.size(0))
+            own_negatives[torch.cat((l_idxs, l_idxs)), torch.cat((l_idxs, l_idxs + b1s.size(0)))] *= 0.0
             if extra_negative_repr_simclr is not None:
                 contrastive_matrix = b1s.mm(torch.cat((b2s, extra_negative_repr_simclr)).t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
             else:
                 contrastive_matrix = b1s.mm(b2s.t())
                 extra_negative_repr_simclr = b2s.detach()
+            contrastive_matrix = torch.cat((contrastive_matrix, own_negatives), 1)
 
             simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
             simclr_loss = self.simclr_w * simclr_loss
