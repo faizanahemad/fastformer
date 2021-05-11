@@ -528,9 +528,9 @@ def train(local_rank, args):
             steps_done = epoch * len(dataloader) + step
             pct_done = (100 * steps_done / total_steps)
             discriminator_pos_frac = 0.85 * min(1.0, max(0.02, pct_done / 100.0))
-            generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
-            discriminator_w_progressive = discriminator_w * min(1.0, max(0.01, pct_done / 100.0))
-            simclr_w_progressive = simclr_w * min(1.0, max(0.01, pct_done / 100.0))
+            generator_w_progressive = generator_w * min(1.0, max(0.1, pct_done / 100.0))
+            discriminator_w_progressive = discriminator_w * min(1.0, max(0.1, pct_done / 100.0))
+            simclr_w_progressive = simclr_w * min(1.0, max(0.1, pct_done / 100.0))
             if hasattr(ddp_model, "module"):
                 ddp_model.module.generator_w = generator_w_progressive
                 ddp_model.module.discriminator_w = discriminator_w_progressive
@@ -610,11 +610,7 @@ def train(local_rank, args):
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
-                        try:
-                            extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
-                        except Exception as e:
-                            print("[Train-Exception]: %s, %s, %s, %s, %s" % (extra_negative_repr_simclr.size(), (4 * iter_size), batch_size, step, samples_per_machine_simclr), flush=True)
-                            raise e
+                        extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
                         samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
                         if samples_per_machine_simclr <= 0:
                             most_recent_simclr = mrs
