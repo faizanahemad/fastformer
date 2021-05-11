@@ -442,7 +442,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.Linear(num_features * 2, num_features * 2),
                                            nn.GELU(),
                                            Norm(),
-                                           nn.Linear(num_features * 2, num_features))
+                                           nn.Linear(num_features * 2, num_features), nn.Tanh())
         self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, num_features * 2),
@@ -483,7 +483,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         mean_error_percent_per_pixel = None
         reconstruction_loss = None
         if self.generator_w > 0:
-            x1_reconstruct = self.generator_ffn(x1_repr[:, self.cls_tokens:])
+            x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
             reconstruction_loss = (x1_reconstruct - x1_label) ** 2
             mean_error_percent_per_pixel = ((reconstruction_loss.detach() ** 0.5) / (torch.abs(x1_label) + 1e-4)).mean().item()
