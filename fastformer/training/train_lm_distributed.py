@@ -9,11 +9,11 @@
 # TODO: Resume training from saved checkpoint
 # TODO: Use TQDM and progress bar as well as metrics for speed
 
-from fastformer.training.pickle4reducer import *
-import pickle4reducer
-import multiprocessing as mp
-ctx = mp.get_context("spawn")
-ctx.reducer = Pickle4Reducer()
+# from fastformer.training.pickle4reducer import *
+# import pickle4reducer
+# import multiprocessing as mp
+# ctx = mp.get_context("spawn")
+# ctx.reducer = Pickle4Reducer()
 
 import copy
 import warnings
@@ -1338,6 +1338,7 @@ if __name__ == "__main__":
     if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
     else:
-        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        mp.start_processes(train_catch_exception, (args,), args["gpus_per_node"], True, False, start_method='fork')
+        # mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
 
 
