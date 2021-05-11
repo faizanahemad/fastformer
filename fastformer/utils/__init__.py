@@ -753,7 +753,7 @@ def worker_init_fn(worker_id):
 
 
 class Norm(nn.Module):
-    def __init__(self, p=2.0, dim=-1, eps=1e-8):
+    def __init__(self, p=2.0, dim=-1, eps=1e-4):
         super().__init__()
         self.p = p
         self.dim = dim
