@@ -15,8 +15,8 @@ class ForkingPickler4(ForkingPickler):
         file = buf
         assert hasattr(file, "write")
         super().__init__(file, protocol)
-        # self.dispatch_table = self._copyreg_dispatch_table.copy()
-        # self.dispatch_table.update(self._extra_reducers)
+        self.dispatch_table = self._copyreg_dispatch_table.copy()
+        self.dispatch_table.update(self._extra_reducers)
 
     @classmethod
     def dumps(cls, obj, protocol=pickle.HIGHEST_PROTOCOL):
