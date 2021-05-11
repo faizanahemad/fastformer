@@ -105,9 +105,9 @@ def training_args():
     parser.add_argument('--checkpoint', required=False, type=str,
                         help='Checkpoint Location')
 
-    parser.add_argument('--model_save_dir', required=True, type=str,
+    parser.add_argument('--model_save_dir', required=False, type=str,
                         help='Save Dir')
-    parser.add_argument('--model_save_name', required=True, type=str,
+    parser.add_argument('--model_save_name', required=False, type=str,
                         help='Save Name')
 
     parser.add_argument('--validate_on_start', action="store_true", default=False,
