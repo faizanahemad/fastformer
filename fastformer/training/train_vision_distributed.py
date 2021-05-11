@@ -530,14 +530,18 @@ def train(local_rank, args):
             discriminator_pos_frac = 0.85 * min(1.0, max(0.02, pct_done / 100.0))
             generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
             discriminator_w_progressive = discriminator_w * min(1.0, max(0.01, pct_done / 100.0))
+            simclr_w_progressive = simclr_w * min(1.0, max(0.0, pct_done / 100.0))
             if hasattr(ddp_model, "module"):
                 ddp_model.module.generator_w = generator_w_progressive
                 ddp_model.module.discriminator_w = discriminator_w_progressive
+                ddp_model.module.simclr_w = simclr_w_progressive
             else:
                 ddp_model.generator_w = generator_w_progressive
                 ddp_model.discriminator_w = discriminator_w_progressive
+                ddp_model.simclr_w = simclr_w_progressive
             model.generator_w = generator_w_progressive
             model.discriminator_w = discriminator_w_progressive
+            model.simclr_w = simclr_w_progressive
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
                 bs_size = list(batch[key].size())
