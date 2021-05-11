@@ -482,6 +482,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         label_for_discriminator = None
         mean_error_percent_per_pixel = None
         reconstruction_loss = None
+        discriminator_label_mean = None
         if self.generator_w > 0:
             x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
@@ -491,6 +492,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
             label_for_discriminator = torch.zeros_like(losses_per_region)
             label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
+            discriminator_label_mean = label_for_discriminator.mean().item()
             x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
             # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
             reconstruction_loss = self.generator_w * reconstruction_loss.mean()
@@ -511,7 +513,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 with torch.no_grad():
                     x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
 
-        return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
+        return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr,
                     mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr)
 
@@ -556,7 +558,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss,
                     simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"],
+                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean= gen_res["discriminator_label_mean"],
                     extra_negative_repr_simclr=extra_negative_repr_simclr)
 
 

@@ -85,6 +85,12 @@ def training_args():
                         help='ranking within the nodes')
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
+    parser.add_argument('--lr', default=optimizer_config.lr, type=float,
+                        help='lr')
+    parser.add_argument('--epochs', default=10, type=int,
+                        help='Epochs')
+    parser.add_argument('--dataset_key', required=False, type=str,
+                        help='dataset_key')
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
@@ -204,8 +210,9 @@ def wsc_proc(x):
     text = "original: " + x["text"] + " modified: " + modified_text + " word1: " + words[x["span1_index"]] + " word2: " + words[x["span2_index"]]
     return dict(text=text)
 
+
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, no_autocast=False, finetune=True):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -213,10 +220,12 @@ class SuperGlueTest:
         self.tokenizer = tokenizer
         self.rank = rank
         self.world_size = world_size
-        self.no_autocast = no_autocast
         self.size_dicts = size_dicts
         self.finetune = finetune
+        self.lr = lr
+        self.epochs = epochs
         self.iter_size = 2
+        self.dataset_key = dataset_key
         self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
                                   cb=dict(agree="entailment", entailment="entailment", entail="entailment", contradiction="contradiction",
                                           contradict="contradiction", disagree="contradiction", neutral="neutral"),
@@ -226,8 +235,9 @@ class SuperGlueTest:
         self.task_word_map["axg"] = self.task_word_map["rte"]
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
-        self.epoch_per_dataset = {"boolq": 35, 'cb': 150, 'copa': 200, 'multirc': 19, 'record': 2, 'rte': 200, 'wic': 100, 'wsc.fixed': 200}
-        self.lr_per_dataset = {"boolq": 2e-5, 'cb': 2e-5, 'copa': 2e-5, 'multirc': 2e-5, 'record': 2e-5, 'rte': 2e-5, 'wic': 2e-5, 'wsc.fixed': 2e-5}
+        # self.epoch_per_dataset = {"boolq": 35, 'cb': 150, 'copa': 200, 'multirc': 19, 'record': 2, 'rte': 200, 'wic': 100, 'wsc.fixed': 200}
+        self.epochs = epochs
+        # self.lr_per_dataset = {"boolq": lr, 'cb': lr, 'copa': lr, 'multirc': lr, 'record': lr, 'rte': lr, 'wic': lr, 'wsc.fixed': lr}
 
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"}, rte={0: "entailment", 1: "not_entailment"})
 
@@ -237,19 +247,16 @@ class SuperGlueTest:
 
     def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=True):
         batch_size = 8
-        train_backbone = False
-        if train_backbone:
-            self.lr_per_dataset[dataset_key] *= 10
+        train_backbone = self.finetune
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
-            optimizer_config.eps = 1e-5
-            model.config.eps = 1e-5
+            optimizer_config.eps = 1e-7
+            model.config.eps = 1e-7
             tokenizer = model.tokenizer
         elif isinstance(model, str):
             if "deberta" in model.lower():
                 batch_size = 4
-                self.epoch_per_dataset[dataset_key] *= 2
-                self.lr_per_dataset[dataset_key] /= 2
+                self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             tokenizer = AutoTokenizer.from_pretrained(model)
@@ -284,7 +291,7 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
-            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr_per_dataset[dataset_key], eps=optc["eps"], weight_decay=optc["weight_decay"],
+            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=optc["weight_decay"],
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
             scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
@@ -302,8 +309,8 @@ class SuperGlueTest:
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr_per_dataset[dataset_key], epochs=self.epoch_per_dataset[dataset_key], steps_per_epoch=steps_per_epoch, div_factor=1e2,
-                                                            three_phase=False, pct_start=0.3, anneal_strategy="linear")
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=self.epoch_per_dataset[dataset_key], steps_per_epoch=steps_per_epoch, div_factor=1e2,
+                                                            three_phase=False, pct_start=0.2, anneal_strategy="linear")
 
         validation = None
         if "validation" in dataset:
@@ -341,7 +348,7 @@ class SuperGlueTest:
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
         train_backbone = classifier_data["train_backbone"]
-        max_allowed_epochs = self.epoch_per_dataset[dataset_key]
+        max_allowed_epochs = self.epochs
         broken = False
         stored_state = None
         if not predict_only:
@@ -377,15 +384,15 @@ class SuperGlueTest:
                         output = model(**batch, label=label)
                         loss = output["loss"] / iter_size
                         loss.backward()
-                    preds = output["predictions"].cpu().tolist()
-                    train_predictions.extend(preds)
-                    if rank == 0:
-                        pbar.update()
-                    if (step + 1) % iter_size == 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                         optimizer.step()
                         scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
+                    preds = output["predictions"].cpu().tolist()
+                    train_predictions.extend(preds)
+                    if rank == 0:
+                        pbar.update()
+
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
@@ -657,7 +664,9 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
-        if os.path.exists(os.path.join(os.getcwd(), 'validation.txt')):
+        if self.dataset_key is not None:
+            keys = [self.dataset_key]
+        elif os.path.exists(os.path.join(os.getcwd(), 'validation.txt')):
             with open('validation.txt') as f:
                 my_list = [eval(x.rstrip()) for x in f if len(x.rstrip()) > 0]
                 if self.rank == 0:
@@ -1056,7 +1065,7 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["dataset_key"], False)()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
