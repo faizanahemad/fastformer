@@ -9,10 +9,12 @@
 # TODO: Resume training from saved checkpoint
 # TODO: Use TQDM and progress bar as well as metrics for speed
 
-# import pickle4reducer
-# import multiprocessing as mp
-# ctx = mp.get_context()
-# ctx.reducer = pickle4reducer.Pickle4Reducer()
+from fastformer.training.pickle4reducer import *
+import pickle4reducer
+import multiprocessing as mp
+ctx = mp.get_context("spawn")
+ctx.reducer = Pickle4Reducer()
+
 import copy
 import warnings
 warnings.simplefilter("ignore")
@@ -1334,8 +1336,8 @@ if __name__ == "__main__":
     # torch.multiprocessing.set_sharing_strategy('file_system')
     args = training_args()
     if args["world_size"] == 1 or args["cpu"]:
-        train(0, args)
+        train_catch_exception(0, args)
     else:
-        mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
 
 
