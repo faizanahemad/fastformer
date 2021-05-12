@@ -439,6 +439,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                  nn.Linear(256, 2 ** 14, bias=False))
         self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
+                                           Norm(),
                                            nn.Linear(num_features * 2, num_features * 2),
                                            nn.GELU(),
                                            Norm(),
