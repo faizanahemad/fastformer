@@ -445,8 +445,6 @@ class PatchCLR(FastFormerPreTrainedModel):
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
-                                               nn.Linear(num_features * 2, num_features * 2),
-                                               nn.GELU(),
                                                nn.Linear(num_features * 2, 1, bias=False))
 
         self.eps = eps
