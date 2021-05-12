@@ -511,6 +511,7 @@ def train(local_rank, args):
             param.register_hook(hook)
 
     extra_negative_repr_simclr = None
+    dino_center = None
     total_steps = args["epochs"] * len(dataloader)
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
@@ -591,12 +592,14 @@ def train(local_rank, args):
                     with ddp_model.no_sync():
                         output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
-                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr)
+                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
+                                                  extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
                     model_times.append(time.time() - model_start)
                 else:
                     output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"], extra_negative_repr_simclr=extra_negative_repr_simclr)
+                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
+                                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
                     
@@ -607,6 +610,12 @@ def train(local_rank, args):
                     key_moco_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_moco_ffn.state_dict().items(), ddp_model.module.key_moco_ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict().items())})
 
                 if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                    dino_center = output.pop("dino_center", None)
+                    if dino_center is not None:
+                        torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.MEAN)
+                        output["dino_center"] = dino_center
+
+
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
                     if extra_negative_repr_simclr is not None:
@@ -631,6 +640,7 @@ def train(local_rank, args):
 
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
+                dino_center = output.pop("dino_center", None)
             except Exception as e:
                 es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
                     get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
@@ -685,7 +695,7 @@ def train(local_rank, args):
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
-                     no_sync=False, zero_grad_check=False, extra_negative_repr_simclr=None,
+                     no_sync=False, zero_grad_check=False, extra_negative_repr_simclr=None, dino_center=None,
                      scaler=None):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
@@ -693,7 +703,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             x1_noised = batch["x1_noised"]
             x1_label = batch["x1_label"]
             x2 = batch["x2"]
-            output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync)
+            output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync, dino_center=dino_center)
         elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
             x = batch[0]
             labels = batch[1]

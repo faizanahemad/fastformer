@@ -525,6 +525,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
                     x2_dino = torch.softmax(x2_dino, 1)
                     dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
+                    dino_loss = self.dino_w * dino_loss
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr, dino_center=dino_center,
