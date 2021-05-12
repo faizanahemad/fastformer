@@ -61,6 +61,9 @@ def training_args():
     parser.add_argument('--model_config', required=True, type=str,
                         help='model config')
 
+    parser.add_argument('--wandb_name', required=False, type=str, default="",
+                        help='wandb_name')
+
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
 
@@ -307,7 +310,6 @@ def train(local_rank, args):
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
     ds_name = list(filter(lambda x: len(x.strip()) > 0, args["dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
-    group = "%s-%s-%sN-%s" % (ds_name, args["model_config"], args["nodes"], time_string)
     set_seeds(args["seed"])
     model_size = args["model_config"]
     batch_size = get_vision_batch_size(args["model_config"], not args["no_autocast"], args["mode"])
@@ -481,6 +483,7 @@ def train(local_rank, args):
           (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
 
     if local_rank == 0:
+        group = "%s-%s-%s-%sN-%s" % (wandb_name, ds_name, args["model_config"], args["nodes"], time_string)
         wandb_init_args = dict(project="patchclr", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                                config={"args":args, "config": config, "optimizer_config": optc},
                                settings=wandb.Settings(start_method="fork"))
