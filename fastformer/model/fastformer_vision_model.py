@@ -445,7 +445,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                                nn.GELU(),
                                                nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
-                                               nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, 1, bias=False))
+                                               nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, 1, bias=True))
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
