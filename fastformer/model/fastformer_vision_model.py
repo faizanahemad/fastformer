@@ -484,6 +484,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
         b = x1_noised.size(0)
         x1_repr = self.backbone(x1_noised)
+        assert torch.isfinite(x1_repr).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
         mean_error_percent_per_pixel = None
@@ -492,8 +493,10 @@ class PatchCLR(FastFormerPreTrainedModel):
         x1_label_saved = x1_label
         if self.generator_w > 0:
             x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
+            assert torch.isfinite(x1_reconstruct).all().item()
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
             reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+            assert torch.isfinite(reconstruction_loss).all().item()
             mean_error_percent_per_pixel = ((reconstruction_loss.detach() ** 0.5) / (torch.abs(x1_label) + 1e-4)).mean().item()
             losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
             highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
@@ -546,6 +549,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         discriminator_negative_accuracy = None
         if self.discriminator_w > 0:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
+            assert torch.isfinite(x1_disc).all().item()
             logits = x1_disc.squeeze(-1)
             label_for_discriminator = gen_res["label_for_discriminator"]
             discriminator_loss = self.discriminator_w * self.loss_bce(logits, label_for_discriminator)
