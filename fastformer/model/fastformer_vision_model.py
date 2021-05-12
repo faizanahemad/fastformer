@@ -476,6 +476,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
         b = x1_noised.size(0)
+        assert torch.isfinite(x1_noised).all().item()
         x1_repr = self.backbone(x1_noised)
         assert torch.isfinite(x1_repr).all().item()
         x1_reconstruct = None
@@ -487,6 +488,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         if self.generator_w > 0:
             x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
             assert torch.isfinite(x1_reconstruct).all().item()
+            assert torch.isfinite(x1_label).all().item()
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
             reconstruction_loss = (x1_reconstruct - x1_label) ** 2
             assert torch.isfinite(reconstruction_loss).all().item()
@@ -507,6 +509,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         x1_extras = None
         if self.simclr_w > 0 or self.dino_w > 0:
             with torch.no_grad():
+                assert torch.isfinite(x2).all().item()
                 x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
                 x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1)) / self.teacher_contrastive_temperature
