@@ -377,7 +377,7 @@ def train(local_rank, args):
                     model.load_state_dict(state_dict, strict=False)
                     load_type = "not_strict"
                 except:
-                    state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                    state_dict = {k: v for k, v in state_dict.items() if k.startswith("backbone.")}
                     model.load_state_dict(state_dict, strict=False)
                     load_type = "not_strict_no_ffn"
             except:
@@ -388,7 +388,7 @@ def train(local_rank, args):
                         load_type = "strict-from-ddp"
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
                         model.load_state_dict(state_dict, strict=True)
                         load_type = "strict-from-ddp-no-ffn"
                 except:
@@ -398,7 +398,7 @@ def train(local_rank, args):
                         load_type = "not_strict-from-ddp"
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("ffn.")}
+                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
                         model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
 
