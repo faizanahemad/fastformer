@@ -483,7 +483,7 @@ def train(local_rank, args):
           (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
 
     if local_rank == 0:
-        group = "%s-%s-%s-%sN-%s" % (wandb_name, ds_name, args["model_config"], args["nodes"], time_string)
+        group = "%s-%s-%s-%sN-%s" % (args["wandb_name"], ds_name, args["model_config"], args["nodes"], time_string)
         wandb_init_args = dict(project="patchclr", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                                config={"args":args, "config": config, "optimizer_config": optc},
                                settings=wandb.Settings(start_method="fork"))
