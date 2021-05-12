@@ -421,6 +421,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
+        self.dino_dims = 2 ** 14
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -435,7 +436,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                  nn.Linear(2048, 2048),
                                  nn.Linear(2048, 256),
                                  Norm(),
-                                 nn.Linear(256, 2 ** 14, bias=False))
+                                 nn.Linear(256, self.dino_dims, bias=False))
         self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
                                            nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features * 2),

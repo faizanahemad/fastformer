@@ -511,7 +511,7 @@ def train(local_rank, args):
             param.register_hook(hook)
 
     extra_negative_repr_simclr = None
-    dino_center = None
+    dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     total_steps = args["epochs"] * len(dataloader)
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
