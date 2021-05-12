@@ -157,7 +157,7 @@ def training_args():
 
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
-    args.moco = args.simclr_w > 0
+    args.moco = args.simclr_w > 0 or args.dino_w > 0
 
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
