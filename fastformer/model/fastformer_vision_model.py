@@ -418,7 +418,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.generator_w = generator_w
         self.discriminator_w = discriminator_w
         self.discriminator_pos_frac = discriminator_pos_frac
-        self.loss_ce = AdMSoftmaxLoss(ignore_index=-100, m=0.3)
+        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
