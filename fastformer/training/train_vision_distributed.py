@@ -615,8 +615,10 @@ def train(local_rank, args):
                 if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     dino_center = output.pop("dino_center", None)
                     if dino_center is not None:
-                        torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.MEAN)
-                        output["dino_center"] = dino_center
+                        dtype = dino_center.dtype
+                        dino_center = dino_center.type(torch.float64) / args["world_size"]
+                        torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
+                        output["dino_center"] = dino_center.type(dtype)
 
 
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
