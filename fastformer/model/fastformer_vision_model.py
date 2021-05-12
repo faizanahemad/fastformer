@@ -456,7 +456,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.key_ffn = None
         self.key_moco_ffn = None
         self.key_backbone = None
-        self.loss_bce = BCELossFocal()
+        self.loss_bce = nn.BCEWithLogitsLoss()
 
         if reinit:
             self.init_weights()
