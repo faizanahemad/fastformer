@@ -426,7 +426,6 @@ class PatchCLR(FastFormerPreTrainedModel):
             assert generator_w > 0
         self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048),
                                       nn.GELU(),
-                                      Norm(),
                                       nn.Linear(2048, 2048),
                                       nn.GELU(),
                                       nn.Linear(2048, self.num_moco_features),
@@ -439,17 +438,13 @@ class PatchCLR(FastFormerPreTrainedModel):
                                  nn.Linear(256, 2 ** 14, bias=False))
         self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
-                                           Norm(),
                                            nn.Linear(num_features * 2, num_features * 2),
                                            nn.GELU(),
-                                           Norm(),
                                            nn.Linear(num_features * 2, num_features), nn.Tanh())
         self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
-                                               Norm(),
                                                nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
-                                               Norm(),
                                                nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, 1, bias=False))
@@ -534,14 +529,15 @@ class PatchCLR(FastFormerPreTrainedModel):
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr, dino_center=dino_center,
                     mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras)
 
-    def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, calculate_accuracy=False):
-        gen_res = self.forward_generator(x1_noised, x1_label, x2)
+    def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+        gen_res = self.forward_generator(x1_noised, x1_label, x2, dino_center=dino_center)
         b = x1_noised.size(0)
 
         loss = 0.0
-        dino_loss = 0.0
+        dino_loss = None
         if self.dino_w > 0:
-            pass
+            dino_loss = gen_res["dino_loss"]
+            loss += dino_loss
 
         discriminator_loss = None
         discriminator_accuracy = None
@@ -586,7 +582,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             simclr_loss = self.simclr_w * simclr_loss
             loss += simclr_loss
 
-        return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss,
+        return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
                     simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
                     mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean=gen_res["discriminator_label_mean"],
                     extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"],
