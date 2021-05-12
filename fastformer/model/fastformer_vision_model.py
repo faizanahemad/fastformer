@@ -410,7 +410,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=768, eps=1e-7,
                  generator_w=1.0, discriminator_w=1.0, simclr_w=1.0, dino_w=1.0,
                  teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.1,
-                 discriminator_pos_frac=0.01,
+                 discriminator_pos_frac=0.01, dino_cw=0.99,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = backbone.config.num_highway_cls_tokens if hasattr(backbone, "config") and hasattr(backbone.config, "num_highway_cls_tokens") else 1
@@ -445,6 +445,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.Linear(num_features * 2, num_features), nn.Tanh())
         self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
+                                               Norm(),
+                                               nn.Linear(num_features * 2, num_features * 2),
+                                               nn.GELU(),
+                                               Norm(),
                                                nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, 1, bias=False))
@@ -454,6 +458,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.student_contrastive_temperature = student_contrastive_temperature
         self.simclr_w = simclr_w
         self.dino_w = dino_w
+        self.dino_cw = dino_cw
         self.key_ffn = None
         self.key_moco_ffn = None
         self.key_backbone = None
@@ -475,7 +480,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def forward_generator(self, x1_noised, x1_label, x2):
+    def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
         b = x1_noised.size(0)
         x1_repr = self.backbone(x1_noised)
         x1_reconstruct = None
@@ -510,14 +515,19 @@ class PatchCLR(FastFormerPreTrainedModel):
                 x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1)) / self.teacher_contrastive_temperature
                 x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
-                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
+                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach() / self.teacher_contrastive_temperature
             if self.dino_w > 0:
-                x1_dino = self.ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
+                x1_dino = self.ffn(x1_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
+                x1_dino = torch.log_softmax(x1_dino, 1)
                 with torch.no_grad():
-                    x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)) / self.teacher_contrastive_temperature
+                    x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
+                    dino_center = self.dino_cw * dino_center + (1 - self.dino_cw)*x2_dino.mean(dim=0)
+                    x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
+                    x2_dino = torch.softmax(x2_dino, 1)
+                    dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
-                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr,
+                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr, dino_center=dino_center,
                     mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras)
 
     def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, calculate_accuracy=False):
@@ -531,12 +541,19 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         discriminator_loss = None
         discriminator_accuracy = None
+        discriminator_positive_accuracy = None
+        discriminator_negative_accuracy = None
         if self.discriminator_w > 0:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
             logits = x1_disc.squeeze(-1)
-            discriminator_loss = self.discriminator_w * self.loss_bce(logits, gen_res["label_for_discriminator"])
-            predictions = (torch.sigmoid(logits) > 0.5).type(torch.float)
-            discriminator_accuracy = torch.mean((predictions == gen_res["label_for_discriminator"]).type(torch.float)).item()
+            label_for_discriminator = gen_res["label_for_discriminator"]
+            discriminator_loss = self.discriminator_w * self.loss_bce(logits, label_for_discriminator)
+            predictions = (torch.sigmoid(logits.detach()) > 0.5).type(torch.float)
+            sample_accuracies = (predictions == label_for_discriminator).type(torch.float)
+            label_for_discriminator = label_for_discriminator.bool()
+            discriminator_positive_accuracy = sample_accuracies[label_for_discriminator].mean().item()
+            discriminator_negative_accuracy = sample_accuracies[torch.logical_not(label_for_discriminator)].mean().item()
+            discriminator_accuracy = torch.mean(sample_accuracies).item()
             loss += discriminator_loss
         reconstruction_loss = gen_res["reconstruction_loss"]
         if reconstruction_loss is not None:
@@ -566,8 +583,9 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss,
                     simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean= gen_res["discriminator_label_mean"],
-                    extra_negative_repr_simclr=extra_negative_repr_simclr)
+                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean=gen_res["discriminator_label_mean"],
+                    extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"],
+                    discriminator_negative_accuracy=discriminator_negative_accuracy, discriminator_positive_accuracy=discriminator_positive_accuracy)
 
 
 if __name__ == '__main__':

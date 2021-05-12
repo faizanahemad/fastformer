@@ -174,7 +174,7 @@ if __name__ == "__main__":
     vision_cmd += " --mode clr"
     vision_cmd += " --no_autocast"
     vision_cmd += " --lr 0.001 --lr_steps 2"
-    vision_cmd += " --batch_size 16"
+    vision_cmd += " --batch_size 8 --optimizer rangerlars"
     # vision_cmd += " --moco"
     # vision_cmd += " --simclr_moco"
     # vision_cmd += " --warm_restart_key_encoder 20"
