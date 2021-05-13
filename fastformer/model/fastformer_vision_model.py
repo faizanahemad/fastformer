@@ -422,7 +422,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
         self.dino_dims = 2 ** 14
-        self.discriminator_tol = 0.65
+        self.discriminator_tol = 0.4
         self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
