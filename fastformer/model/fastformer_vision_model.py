@@ -422,7 +422,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
         self.dino_dims = 2 ** 14
-        self.discriminator_tol = 0.85
+        self.discriminator_tol = 0.65
         self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
@@ -450,7 +450,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                                nn.GELU(),
                                                nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features * 2),
                                                nn.GELU(),
-                                               nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, 1, bias=True))
+                                               nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features))
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
@@ -501,7 +501,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             assert torch.isfinite(reconstruction_loss).all().item()
             mean_error_percent_per_pixel = (absolute_reconstruction_loss / (torch.abs(x1_label) + 1e-4)).mean().item()
             if self.fixed_tolerance_discriminator:
-                label_for_discriminator = (absolute_reconstruction_loss.mean(-1) < self.discriminator_tol).float()
+                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
             else:
                 losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
                 highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
@@ -560,8 +560,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         if self.discriminator_w > 0:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
             assert torch.isfinite(x1_disc).all().item()
-            logits = x1_disc.squeeze(-1)
-            label_for_discriminator = gen_res["label_for_discriminator"]
+            logits = x1_disc.squeeze(-1).reshape(b, -1)
+            label_for_discriminator = gen_res["label_for_discriminator"].reshape(b, -1)
             discriminator_loss = self.discriminator_w * self.loss_bce(logits, label_for_discriminator)
             predictions = (torch.sigmoid(logits.detach()) > 0.5).type(torch.float)
             sample_accuracies = (predictions == label_for_discriminator).type(torch.float)
