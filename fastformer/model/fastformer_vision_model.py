@@ -501,12 +501,13 @@ class PatchCLR(FastFormerPreTrainedModel):
             assert torch.isfinite(reconstruction_loss).all().item()
             mean_error_percent_per_pixel = (absolute_reconstruction_loss / (torch.abs(x1_label) + 1e-4)).mean().item()
             if self.fixed_tolerance_discriminator:
-                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
+                label_for_discriminator = (absolute_reconstruction_loss.mean(-1) < self.discriminator_tol).float()
             else:
                 losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
                 highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
                 label_for_discriminator = torch.zeros_like(losses_per_region)
                 label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
+            absolute_reconstruction_loss = absolute_reconstruction_loss.mean()
             discriminator_label_mean = label_for_discriminator.mean().item()
             x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
             # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
