@@ -232,13 +232,12 @@ class MultiheadAttention(nn.Module):
         assert query.size(1) > 0
         batch_size, seq_len, _ = query.shape
         query_temp = query
-        value = value if value is not None else query
+        query = self.layer_norm(query)
+        value = self.layer_norm(value) if value is not None else query
+        key = self.layer_norm(key) if key is not None else query
         value = self.v_head(value)
-        if key is None and value is None:
-            key = query
-            value = query
         attn_out = self.self_attention(query, key, value, attention_inputs)
-        output = query_temp + self.layer_norm(attn_out)
+        output = query_temp + attn_out
         return output
 
 
@@ -254,9 +253,8 @@ class PositionwiseFFN(nn.Module):
         self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
 
     def forward(self, hidden):
-        h = hidden
+        h = self.layer_norm(hidden)
         h = self.ffn(h)
-        h = self.layer_norm(h)
         h = hidden + h
         return h
 
@@ -310,6 +308,14 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         if reinit:
             self.init_weights()
 
+    def forward_first_block(self, x):
+        x, row_embed, column_embed = self.patch_embed(x)
+        initail_attention = None
+        hidden = x
+        for layer in self.encoder_block_one:
+            hidden = layer(hidden, None, None, ((row_embed, column_embed,), initail_attention))
+        return hidden
+
     def forward(self, x, run_decoder=True):
         config = self.config
         B, C, H, W = x.shape
@@ -319,7 +325,8 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
         second_block_attention = initail_attention
         hidden = x
         for layer in self.encoder_block_one:
-            hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), initail_attention))
+            hidden = layer(hidden, None, None, ((row_embed, column_embed,), initail_attention))
+
         first_block_hidden = hidden
         hidden = self.dim_match(hidden)
         second_block_init = hidden
@@ -335,7 +342,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             if i == 0:
                 hidden = layer(hidden, second_block_init, second_block_init, ((row_embed, column_embed,), second_block_attention))
             else:
-                hidden = layer(hidden, hidden, hidden, ((row_embed, column_embed,), second_block_attention))
+                hidden = layer(hidden, None, None, ((row_embed, column_embed,), second_block_attention))
         second_block_hidden = hidden
 
         upsampled_hidden = None
@@ -356,7 +363,7 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
                     upsampled_hidden = layer(upsampled_hidden, hidden, hidden,
                                              ((row_embed, column_embed,), second_block_attention))
                 else:
-                    upsampled_hidden = layer(upsampled_hidden, upsampled_hidden, upsampled_hidden,
+                    upsampled_hidden = layer(upsampled_hidden, None, None,
                                              ((row_embed, column_embed,), initail_attention))
         hidden = second_block_hidden if upsampled_hidden is None else upsampled_hidden
         return hidden
@@ -429,6 +436,7 @@ class PatchCLR(FastFormerPreTrainedModel):
             assert generator_w > 0
         self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048),
                                       nn.GELU(),
+                                      nn.LayerNorm(2048),
                                       nn.Linear(2048, 2048),
                                       nn.GELU(),
                                       nn.LayerNorm(2048),
