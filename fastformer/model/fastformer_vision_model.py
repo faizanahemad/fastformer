@@ -547,7 +547,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     dino_loss = self.dino_w * dino_loss
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
-                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr, dino_center=dino_center,
+                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, dino_center=dino_center,
                     mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
                     absolute_reconstruction_loss=absolute_reconstruction_loss)
 
