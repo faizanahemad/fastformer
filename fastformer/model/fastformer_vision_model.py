@@ -490,8 +490,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         assert torch.isfinite(x1_noised).all().item()
         first_block_out = self.backbone.forward_first_block(x1_noised)
         assert torch.isfinite(first_block_out[0]).all().item()
-        x1_repr = self.backbone.forward_second_block(x1_noised, first_block_out)
-        assert torch.isfinite(x1_repr).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
         mean_error_percent_per_pixel = None
@@ -527,6 +525,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         x2_simclr = None
         x1_extras = None
         if self.simclr_w > 0 or self.dino_w > 0:
+            x1_repr = self.backbone.forward_second_block(x1_noised, first_block_out)
+            assert torch.isfinite(x1_repr).all().item()
             with torch.no_grad():
                 assert torch.isfinite(x2).all().item()
                 x2_repr = self.key_backbone(x2)
