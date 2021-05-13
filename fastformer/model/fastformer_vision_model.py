@@ -310,24 +310,16 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
     def forward_first_block(self, x):
         x, row_embed, column_embed = self.patch_embed(x)
-        initail_attention = None
         hidden = x
         for layer in self.encoder_block_one:
-            hidden = layer(hidden, None, None, ((row_embed, column_embed,), initail_attention))
-        return hidden
+            hidden = layer(hidden, None, None, ((row_embed, column_embed,), None))
+        return hidden, row_embed, column_embed
 
-    def forward(self, x, run_decoder=True):
-        config = self.config
+    def forward_second_block(self, x, first_block_out):
+        hidden, row_embed, column_embed = first_block_out
         B, C, H, W = x.shape
-        x, row_embed, column_embed = self.patch_embed(x)
         H, W = self.patch_embed.height, self.patch_embed.width
-        initail_attention = None
-        second_block_attention = initail_attention
-        hidden = x
-        for layer in self.encoder_block_one:
-            hidden = layer(hidden, None, None, ((row_embed, column_embed,), initail_attention))
-
-        first_block_hidden = hidden
+        config = self.config
         hidden = self.dim_match(hidden)
         second_block_init = hidden
         if self.stride > 1:
@@ -340,9 +332,17 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
 
         for i, layer in enumerate(self.encoder_block_two):
             if i == 0:
-                hidden = layer(hidden, second_block_init, second_block_init, ((row_embed, column_embed,), second_block_attention))
+                hidden = layer(hidden, second_block_init, second_block_init, ((row_embed, column_embed,), None))
             else:
-                hidden = layer(hidden, None, None, ((row_embed, column_embed,), second_block_attention))
+                hidden = layer(hidden, None, None, ((row_embed, column_embed,), None))
+        return hidden
+
+    def forward(self, x, run_decoder=True):
+        config = self.config
+        B, C, H, W = x.shape
+        first_block_out = self.forward_first_block(x)
+        first_block_hidden, row_embed, column_embed = first_block_out
+        hidden = self.forward_second_block(x, first_block_out)
         second_block_hidden = hidden
 
         upsampled_hidden = None
@@ -361,10 +361,10 @@ class FastFormerVisionModel(FastFormerPreTrainedModel):
             for i, layer in enumerate(self.decoder_block):
                 if i == 0:
                     upsampled_hidden = layer(upsampled_hidden, hidden, hidden,
-                                             ((row_embed, column_embed,), second_block_attention))
+                                             ((row_embed, column_embed,), None))
                 else:
                     upsampled_hidden = layer(upsampled_hidden, None, None,
-                                             ((row_embed, column_embed,), initail_attention))
+                                             ((row_embed, column_embed,), None))
         hidden = second_block_hidden if upsampled_hidden is None else upsampled_hidden
         return hidden
 
@@ -429,7 +429,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
         self.dino_dims = 2 ** 14
-        self.discriminator_tol = 0.4
+        self.discriminator_tol = 0.3
         self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
@@ -488,7 +488,9 @@ class PatchCLR(FastFormerPreTrainedModel):
     def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
         b = x1_noised.size(0)
         assert torch.isfinite(x1_noised).all().item()
-        x1_repr = self.backbone(x1_noised)
+        first_block_out = self.backbone.forward_first_block(x1_noised)
+        assert torch.isfinite(first_block_out[0]).all().item()
+        x1_repr = self.backbone.forward_second_block(x1_noised, first_block_out)
         assert torch.isfinite(x1_repr).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
@@ -498,7 +500,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         absolute_reconstruction_loss = None
         x1_label_saved = x1_label
         if self.generator_w > 0:
-            x1_reconstruct = self.generator_ffn(x1_repr[:, self.cls_tokens:])  # * 3
+            x1_reconstruct = self.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
             assert torch.isfinite(x1_reconstruct).all().item()
             assert torch.isfinite(x1_label).all().item()
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
