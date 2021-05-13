@@ -422,6 +422,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 256
         self.dino_dims = 2 ** 14
+        self.discriminator_tol = 0.85
+        self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -429,6 +431,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                       nn.GELU(),
                                       nn.Linear(2048, 2048),
                                       nn.GELU(),
+                                      nn.LayerNorm(2048),
                                       nn.Linear(2048, self.num_moco_features),
                                       Norm())
 
@@ -441,7 +444,8 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.GELU(),
                                            nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features * 2),
                                            nn.GELU(),
-                                           nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features), nn.Tanh())
+                                           nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features),  # nn.Tanh()
+                                           )
         self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
                                                nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features * 2),
@@ -485,19 +489,24 @@ class PatchCLR(FastFormerPreTrainedModel):
         mean_error_percent_per_pixel = None
         reconstruction_loss = None
         discriminator_label_mean = None
+        absolute_reconstruction_loss = None
         x1_label_saved = x1_label
         if self.generator_w > 0:
-            x1_reconstruct = 3 * self.generator_ffn(x1_repr[:, self.cls_tokens:])
+            x1_reconstruct = self.generator_ffn(x1_repr[:, self.cls_tokens:])  # * 3
             assert torch.isfinite(x1_reconstruct).all().item()
             assert torch.isfinite(x1_label).all().item()
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
             reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+            absolute_reconstruction_loss = reconstruction_loss.detach() ** 0.5
             assert torch.isfinite(reconstruction_loss).all().item()
-            mean_error_percent_per_pixel = ((reconstruction_loss.detach() ** 0.5) / (torch.abs(x1_label) + 1e-4)).mean().item()
-            losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
-            highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
-            label_for_discriminator = torch.zeros_like(losses_per_region)
-            label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
+            mean_error_percent_per_pixel = (absolute_reconstruction_loss / (torch.abs(x1_label) + 1e-4)).mean().item()
+            if self.fixed_tolerance_discriminator:
+                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
+            else:
+                losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
+                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
+                label_for_discriminator = torch.zeros_like(losses_per_region)
+                label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
             discriminator_label_mean = label_for_discriminator.mean().item()
             x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
             # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
@@ -530,7 +539,8 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, x1_repr=x1_repr, dino_center=dino_center,
-                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras)
+                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
+                    absolute_reconstruction_loss=absolute_reconstruction_loss)
 
     def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
         gen_res = self.forward_generator(x1_noised, x1_label, x2, dino_center=dino_center)
@@ -588,7 +598,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
                     simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
                     mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean=gen_res["discriminator_label_mean"],
-                    extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"],
+                    extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"], absolute_reconstruction_loss=gen_res["absolute_reconstruction_loss"],
                     discriminator_negative_accuracy=discriminator_negative_accuracy, discriminator_positive_accuracy=discriminator_positive_accuracy)
 
 
