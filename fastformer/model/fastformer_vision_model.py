@@ -474,6 +474,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
+        contrastive_matrix = contrastive_matrix / self.teacher_contrastive_temperature
         loss = self.loss_ce(contrastive_matrix, labels)
         accuracy = 0
         if calculate_accuracy:
@@ -527,10 +528,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                 assert torch.isfinite(x2).all().item()
                 x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
-                x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1)) / self.teacher_contrastive_temperature
+                x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1))
                 x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
-                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach() / self.teacher_contrastive_temperature
+                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
             if self.dino_w > 0:
                 x1_dino = self.ffn(x1_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
                 x1_dino = torch.log_softmax(x1_dino, 1)
