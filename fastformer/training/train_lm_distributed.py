@@ -95,6 +95,8 @@ def training_args():
                         help='lr')
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+    parser.add_argument('--weight_decay', default=0.1, type=float,
+                        help='Epochs')
 
     parser.add_argument('--hpo', required=False, type=str,
                         help='hpo dict with lr, epochs, warmup steps')
@@ -222,7 +224,7 @@ def wsc_proc(x):
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, hpo=None, dataset_key=None, finetune=True):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, weight_decay, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -236,7 +238,7 @@ class SuperGlueTest:
 
         self.lr = lr
         self.epochs = epochs
-        self.weight_decay = optimizer_config.weight_decay
+        self.weight_decay = weight_decay
 
         self.iter_size = 2
         self.dataset_key = dataset_key
@@ -1149,7 +1151,7 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["hpo"], args["dataset_key"], False)()
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"], args["hpo"], args["dataset_key"], False)()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
