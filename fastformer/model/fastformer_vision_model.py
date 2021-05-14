@@ -376,7 +376,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
         if isinstance(self.backbone, FastFormerVisionModel):
             num_features = num_features * (self.backbone.config.num_highway_cls_tokens + 1)
         self.num_features = num_features
-        self.head = nn.Linear(self.num_features, num_classes)  # nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
+        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, num_classes))  # nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
         if reinit_backbone:
