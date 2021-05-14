@@ -96,7 +96,7 @@ def training_args():
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
     parser.add_argument('--weight_decay', default=0.1, type=float,
-                        help='Epochs')
+                        help='weight_decay')
 
     parser.add_argument('--hpo', required=False, type=str,
                         help='hpo dict with lr, epochs, warmup steps')
@@ -417,7 +417,7 @@ class SuperGlueTest:
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
                 per_epoch = 3 if max_allowed_epochs < 50 and not train_backbone else 5
-                if epochs % per_epoch == 0 and rank == 0 and self.hpo is None:
+                if epochs % per_epoch == 0 and rank == 0 and self.hpo is None and False:
                     inner_model = model.module
                     labels, predictions, val_losses = [], [], []
                     with model.no_sync():
@@ -455,7 +455,7 @@ class SuperGlueTest:
                 epochs += 1
                 torch.distributed.barrier()
                 dist.broadcast(continue_training, 0)
-                if continue_training.item() == 0 and self.hpo is None:
+                if continue_training.item() == 0 and self.hpo is None and False:
                     model.load_state_dict(stored_state)
                     optimizer.zero_grad(set_to_none=True)
                     broken = True
