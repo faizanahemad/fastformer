@@ -323,6 +323,7 @@ class SuperGlueTest:
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
+            print("epochs = ", int(self.epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(self.epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
 
@@ -364,6 +365,7 @@ class SuperGlueTest:
         dataset_key = classifier_data["dataset_key"]
         train_backbone = classifier_data["train_backbone"]
         max_allowed_epochs = int(self.epochs)
+
         broken = False
         stored_state = None
         if not predict_only:
