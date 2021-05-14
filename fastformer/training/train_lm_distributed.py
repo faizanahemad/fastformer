@@ -95,6 +95,10 @@ def training_args():
                         help='lr')
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+
+    parser.add_argument('--hpo', required=False, type=str,
+                        help='hpo dict with lr, epochs, warmup steps')
+
     parser.add_argument('--dataset_key', required=False, type=str,
                         help='dataset_key')
 
@@ -218,7 +222,7 @@ def wsc_proc(x):
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, dataset_key=None, finetune=True):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -228,8 +232,12 @@ class SuperGlueTest:
         self.world_size = world_size
         self.size_dicts = size_dicts
         self.finetune = finetune
+        self.hpo = eval(hpo) if hpo is not None else None
+
         self.lr = lr
         self.epochs = epochs
+        self.weight_decay = optimizer_config.weight_decay
+
         self.iter_size = 2
         self.dataset_key = dataset_key
         self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
@@ -297,7 +305,7 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
-            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=optc["weight_decay"],
+            optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
             scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
@@ -347,6 +355,7 @@ class SuperGlueTest:
         all_val_acc = []
         all_train_acc = []
         val_acc = -1
+        val_loss = -1
         stored_state_val_loss = -1
         stored_state_val_acc = -1
         train_acc = -1
@@ -404,7 +413,7 @@ class SuperGlueTest:
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
                 per_epoch = 3 if max_allowed_epochs < 50 and not train_backbone else 5
-                if epochs % per_epoch == 0 and rank == 0:
+                if epochs % per_epoch == 0 and rank == 0 and self.hpo is None:
                     inner_model = model.module
                     labels, predictions, val_losses = [], [], []
                     with model.no_sync():
@@ -442,12 +451,12 @@ class SuperGlueTest:
                 epochs += 1
                 torch.distributed.barrier()
                 dist.broadcast(continue_training, 0)
-                if continue_training.item() == 0:
+                if continue_training.item() == 0 and self.hpo is None:
                     model.load_state_dict(stored_state)
                     optimizer.zero_grad(set_to_none=True)
                     broken = True
                     break
-                elif continue_training.item() == 1:
+                elif continue_training.item() == 1 and self.hpo is None:
                     stored_state = copy.deepcopy(model.state_dict().copy())
 
             torch.distributed.barrier()
@@ -478,6 +487,7 @@ class SuperGlueTest:
                         predictions.extend(val_preds)
                         val_losses.append(val_loss)
                 cur_val_loss = np.mean(val_losses)
+                val_loss = cur_val_loss
                 # cur_val_loss = torch.tensor(cur_val_loss).to(device)
                 # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
                 # torch.distributed.all_gather(tensor_list, cur_val_loss)
@@ -491,39 +501,39 @@ class SuperGlueTest:
                 all_val_acc.append(val_acc)
 
                 # Test
-                with model.no_sync():
-                    inner_model = copy.deepcopy(model.module)
-                    if stored_state is not None:
-                        stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                        inner_model.load_state_dict(stored_state, strict=True)
-                    predictions = []
-                    for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
-                        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                        _ = batch.pop("label", None)
-                        with torch.no_grad():
-                            output = inner_model(**batch, label=None)
-                        test_preds = output["predictions"].cpu().tolist()
-                        test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
-                        predictions.extend(test_preds)
-            torch.distributed.barrier()
 
-        else:
+            torch.distributed.barrier()
+        predictions = []
+        if hasattr(model, "no_sync") and rank == 0 and self.hpo is None:
+            model = model.eval()
+            inner_model = model.module
+            if stored_state is not None:
+                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                inner_model.load_state_dict(stored_state, strict=True)
+            for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                _ = batch.pop("label", None)
+                with torch.no_grad():
+                    with model.no_sync():
+                        output = inner_model(**batch, label=None)
+                test_preds = output["predictions"].cpu().tolist()
+                test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
+                predictions.extend(test_preds)
+        elif rank == 0 and self.hpo is None:
             val_acc = 0.0
             model = model.eval()
-            if rank == 0:
-                inner_model = model
-                if stored_state is not None:
-                    stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                    inner_model.load_state_dict(stored_state, strict=True)
-                predictions = []
-                for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
-                    batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                    _ = batch.pop("label", None)
-                    with torch.no_grad():
-                        output = inner_model(**batch, label=None)
-                    test_preds = output["predictions"].cpu().tolist()
-                    test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
-                    predictions.extend(test_preds)
+            inner_model = model
+            if stored_state is not None:
+                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
+                inner_model.load_state_dict(stored_state, strict=True)
+            for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
+                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+                _ = batch.pop("label", None)
+                with torch.no_grad():
+                    output = inner_model(**batch, label=None)
+                test_preds = output["predictions"].cpu().tolist()
+                test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
+                predictions.extend(test_preds)
 
         del model
         clean_memory()
@@ -532,7 +542,7 @@ class SuperGlueTest:
         print("For %s: Train = %.4f, Val = %.4f, stored_state_val_acc = %.4f, stored_state_val_loss = %.4f" % (dataset_key, train_acc, val_acc, stored_state_val_acc, stored_state_val_loss))
         print("For %s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
-                    all_train_acc=all_train_acc, epochs=epochs, broken=broken)
+                    all_train_acc=all_train_acc, epochs=epochs, broken=broken, val_loss=val_loss)
 
     def boolq(self, model, boolq, device, dataset_key, rank):
         boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
@@ -540,6 +550,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
@@ -552,6 +565,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
@@ -563,6 +579,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
@@ -574,6 +593,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None, None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"]), None, None
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
@@ -600,6 +622,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=pred > 0.5) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         mrcp = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
@@ -622,6 +647,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         choices = [copa["test"][i]["choice"] for i in range(len(copa["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
@@ -637,6 +665,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=False)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         choices = [record["test"][i]["choice"] for i in range(len(record["test"]))]
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
@@ -658,6 +689,9 @@ class SuperGlueTest:
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wsc.fixed", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
@@ -670,8 +704,48 @@ class SuperGlueTest:
         pred_datas = []
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
+        if self.hpo is not None:
+            assert self.dataset_key is not None
+            dataset = super_glue[self.dataset_key]
+            hpo = self.hpo
+            hpo_keys = list(hpo.keys())
+            hpo_combinations = np.array(np.meshgrid(*hpo.values())).T.reshape(-1, len(hpo_keys))
+            dk = self.dataset_key
+            results = []
+            for idx, c in enumerate(hpo_combinations):
+                for k, v in zip(hpo_keys, c):
+                    setattr(self, k, v)
+                if dk == "boolq":
+                    _, pred_data = self.boolq(model, dataset, self.device, dk, self.rank)
+                elif dk == "cb":
+                    _, pred_data = self.cb(model, dataset, self.device, dk, self.rank)
+                elif dk == "copa":
+                    _, pred_data = self.copa(model, dataset, self.device, dk, self.rank)
+                elif dk == "multirc":
+                    _, pred_data = self.multirc(model, dataset, self.device, dk, self.rank)
+                elif dk == "record":
+                    _, pred_data = self.record(model, dataset, self.device, dk, self.rank)
+                elif dk == "wic":
+                    _, pred_data = self.wic(model, dataset, self.device, dk, self.rank)
+                elif dk == "wsc.fixed":
+                    _, pred_data = self.wsc(model, dataset, self.device, dk, self.rank)
+                elif dk == "rte":
+                    _, pred_data, _, _ = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
+                else:
+                    raise NotImplementedError
+                if self.rank == 0:
+                    res_dict = dict(zip(hpo_keys, c))
+                    res_dict["val_acc"] = pred_data["val_acc"]
+                    res_dict["train_acc"] = pred_data["train_acc"]
+                    res_dict["val_loss"] = pred_data["val_loss"]
+                    results.append(res_dict)
+            if self.rank == 0:
+                print(tabulate(results, headers="keys", tablefmt="grid"))
+            return None
+
         if self.dataset_key is not None:
             keys = [self.dataset_key]
+
         elif os.path.exists(os.path.join(os.getcwd(), 'validation.txt')):
             with open('validation.txt') as f:
                 my_list = [eval(x.rstrip()) for x in f if len(x.rstrip()) > 0]
@@ -1073,7 +1147,7 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["dataset_key"], False)()
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["hpo"], args["dataset_key"], False)()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
