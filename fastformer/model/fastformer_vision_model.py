@@ -434,7 +434,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
-        self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
+        self.moco_ffn = nn.Sequential(nn.LayerNorm(self.ffn_input_features), nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                       nn.Linear(2048, 2048), nn.GELU(),
                                       nn.Linear(2048, self.num_moco_features),
                                       Norm())
