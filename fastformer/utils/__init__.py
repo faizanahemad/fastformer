@@ -757,7 +757,8 @@ class Norm(nn.Module):
 
     def forward(self, x):
         assert torch.isfinite(x).all().item()
-        x = F.normalize(x, self.p, self.dim, self.eps)
+        x = x / (x.norm(2, -1, True) + self.eps)
+        # x = F.normalize(x, self.p, self.dim, self.eps)
         assert torch.isfinite(x).all().item()
         return x
 
