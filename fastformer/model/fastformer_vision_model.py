@@ -528,7 +528,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                 assert torch.isfinite(x2).all().item()
                 x2_repr = self.key_backbone(x2)
             if self.simclr_w > 0:
-                x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1))
+                # x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1))
                 x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
                     x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
@@ -585,10 +585,14 @@ class PatchCLR(FastFormerPreTrainedModel):
         if self.simclr_w > 0:
             b1s = gen_res["x1_simclr"]
             b2s = gen_res["x2_simclr"]
-            b3s = gen_res["x1_extras"]
-            own_negatives = b1s.mm(b3s.t())
             l_idxs = torch.arange(b1s.size(0))
-            own_negatives[torch.cat((l_idxs, l_idxs)), torch.cat((l_idxs, l_idxs + b1s.size(0)))] *= 0.0
+            if gen_res["x1_extras"] is not None:
+                b3s = gen_res["x1_extras"]
+                own_negatives = b1s.mm(b3s.t())
+                own_negatives[torch.cat((l_idxs, l_idxs)), torch.cat((l_idxs, l_idxs + b1s.size(0)))] *= 0.0
+            else:
+                own_negatives = b1s.mm(b1s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
+
             if extra_negative_repr_simclr is not None:
                 contrastive_matrix = b1s.mm(torch.cat((b2s, extra_negative_repr_simclr)).t())
                 extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
