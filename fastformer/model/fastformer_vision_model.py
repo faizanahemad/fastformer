@@ -427,7 +427,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.discriminator_pos_frac = discriminator_pos_frac
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
-        self.num_moco_features = 256
+        self.num_moco_features = 64
         self.dino_dims = 2 ** 14
         self.discriminator_tol = 0.3
         self.fixed_tolerance_discriminator = True
