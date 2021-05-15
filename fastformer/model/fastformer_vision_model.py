@@ -472,7 +472,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
-        contrastive_matrix = contrastive_matrix / self.teacher_contrastive_temperature
+        contrastive_matrix = contrastive_matrix / self.student_contrastive_temperature
         loss = self.loss_ce(contrastive_matrix, labels)
         accuracy = 0
         if calculate_accuracy:
