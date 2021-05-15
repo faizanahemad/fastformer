@@ -2192,6 +2192,29 @@ for c in contents:
         unloadable.append(c)
         
 print(len(unloadable), len(loadable), len(contents))
+
+dsets_512 = ['openwebtext512',
+ 'reddit512',
+ 'scientific_papers_arxiv512',
+ 'scientific_papers_pubmed512',
+ 'yahoo_answers_topics512',
+ 'bookcorpusopen512',
+ 'bookcorpus512',
+ 'big_patent512',
+ 'reuters512',
+ 'amazon_polarity512',
+ 'wiki512',
+ 'yahoo_answers_qa512']
+ 
+ dsets = ['openwebtext512',
+    'reddit512',
+    'yahoo_answers_topics512',
+    'bookcorpusopen512',
+    'bookcorpus512',
+    'reuters512',
+    'wiki512',
+    'yahoo_answers_qa512']
+
 dsets = ['ai2_arc_easy_qna',
  'ai2_arc_qna',
  'amazon_polarity_qna',
