@@ -427,16 +427,16 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.discriminator_pos_frac = discriminator_pos_frac
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
-        self.num_moco_features = 64
+        self.num_moco_features = 128
         self.dino_dims = 2 ** 14
-        self.discriminator_tol = 0.3
+        self.discriminator_tol = 0.2
         self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
-        self.moco_ffn = nn.Sequential(nn.LayerNorm(self.ffn_input_features), nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
-                                      nn.Linear(2048, 2048), nn.GELU(),
-                                      nn.Linear(2048, self.num_moco_features),
+        self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
+                                      nn.Linear(2048, 256), nn.GELU(),
+                                      nn.Linear(256, self.num_moco_features),
                                       Norm())
 
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
