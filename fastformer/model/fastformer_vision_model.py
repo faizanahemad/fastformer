@@ -446,11 +446,11 @@ class PatchCLR(FastFormerPreTrainedModel):
                                  nn.Linear(256, self.dino_dims, bias=False))
         self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
-                                           nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features),  # nn.Tanh()
+                                           nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                            )
         self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
-                                               nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features))
+                                               nn.Linear(num_features * 2, num_features))
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
