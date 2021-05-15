@@ -448,7 +448,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.GELU(),
                                            nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                            )
-        self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 4),
+        self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
                                                nn.LayerNorm(num_features * 2), nn.Linear(num_features * 2, num_features))
 
