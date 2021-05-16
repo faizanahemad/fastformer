@@ -176,7 +176,7 @@ if __name__ == "__main__":
     # vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
     vision_cmd += " --mode clr"
     vision_cmd += " --lr 1.0 --lr_steps 1 --weight_decay 0.1 --warmup_steps 1000 --gradient_clipping 1.0 --simclr_warmup 1000"
-    vision_cmd += " --batch_size 16 --optimizer sgd"
+    vision_cmd += " --batch_size 16 --optimizer rangerlars"
 
     vision_cmd += " --simclr_w 1.0 --generator_w 2.0 --discriminator_w 2.0 --dino_w 1.0"
     # vision_cmd += " --detect_anomaly"
