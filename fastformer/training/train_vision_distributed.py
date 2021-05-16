@@ -455,6 +455,8 @@ def train(local_rank, args):
     if args["optimizer"] == "adamw":
         optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
+    elif args["optimizer"] == "sgd":
+        optimizer = torch.optim.SGD(ddp_model.parameters(), lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     elif args["optimizer"] == "novograd":
         optimizer = Novograd(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
     elif args["optimizer"] == "rangerlars":
