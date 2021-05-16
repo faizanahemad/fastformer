@@ -602,12 +602,15 @@ def get_pretrained_deit(features_only=True):
 def identity(x):
     return x
 
-def get_cutout(cutout_proba, cutout_size, n_cuts):
+def get_cutout(cutout_proba, cutout_size):
     cut = transforms.Compose([
         transforms.ToTensor(),
         transforms.RandomErasing(p=cutout_proba, scale=(cutout_size / 2, cutout_size), ratio=(0.4, 2.5), value=0, inplace=False),  # 'random'
         transforms.ToPILImage(),
     ])
+    return cut
+
+def get_multi_cuts(n_cuts, cut):
     def multi_cut(im):
         for _ in range(n_cuts):
             im = cut(im)
@@ -673,8 +676,8 @@ def get_image_augmetations(mode, teacher=True):
     to_tensor = transforms.Compose([crop_224, to_pytorch])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
-    cut = get_cutout(1.0, 0.02, 4)
-    bigcut = get_cutout(1.0, 0.02, 8)
+    cut = transforms.Compose([get_cutout(1.0, 0.02) for _ in range(4)])
+    bigcut = transforms.Compose([get_cutout(1.0, 0.02) for _ in range(8)])
     if mode == "linear_probe":
         teacher = True
     if mode == "validation":
