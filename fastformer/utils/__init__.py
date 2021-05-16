@@ -653,10 +653,19 @@ def get_image_augmetations(mode, teacher=True):
     import imgaug.augmenters as iaa
     import torchvision.transforms as transforms
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    normalize = transforms.Normalize(mean=mean,
+                                     std=std)
+    inv_normalize = transforms.Normalize(
+        mean=[-m / s for m, s in zip(mean, std)],
+        std=[1 / s for s in std]
+    )
 
-    to_tensor = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+    crop_224 = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224)])
+    to_pytorch = transforms.Compose([transforms.ToTensor(), normalize])
+    from_pytorch = transforms.Compose([inv_normalize, transforms.ToPILImage()])
+    to_tensor = transforms.Compose([crop_224, to_pytorch])
     shape_transforms = []
     small_shape_transforms = transforms.RandomAffine(10, (0.05, 0.05), (0.9, 1.1), 10)
     small_cut = get_cutout(1.0, 0.02)
@@ -668,13 +677,13 @@ def get_image_augmetations(mode, teacher=True):
         shape_transforms = to_tensor
     else:
         shape_transforms = transforms.Compose([
-            transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 10 if teacher else 20),
-            transforms.RandomPerspective(distortion_scale=0.1 if teacher else 0.2),
             transforms.RandomChoice([
                 identity,
+                transforms.RandomPerspective(distortion_scale=0.1 if teacher else 0.2),
                 transforms.RandomRotation(15 if teacher else 45),
                 DefinedRotation(90),
                 DefinedRotation(180),
+                transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 10 if teacher else 20),
             ]),
             transforms.RandomResizedCrop(416, scale=(0.6, 1.0) if teacher else (0.2, 0.8), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=0.5),
@@ -713,14 +722,16 @@ def get_image_augmetations(mode, teacher=True):
                                 identity,
                                 identity if teacher else small_cut,
                                 small_cut if teacher else cut,
+                                cut if teacher else bigcut,
                                 transforms.RandomChoice([identity] if teacher else [
-                                    get_imgaug(iaa.CoarseDropout((0.02, 0.05), size_percent=(0.25, 0.5), per_channel=0.5)),
+                                    get_imgaug(iaa.CoarseDropout((0.05, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
                                     get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.02, 0.05), per_channel=True)),
                                     get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                     get_alb(alb.transforms.GridDropout(ratio=0.3 if teacher else 0.4, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)),
                                     get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.1 if teacher else 0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))]),
+                                    get_alb(alb.transforms.GridDropout(ratio=0.1 if teacher else 0.2, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0))
                                 ]),
+                            ]),
                             ]
 
     if mode == "full_train":
@@ -740,7 +751,8 @@ def get_image_augmetations(mode, teacher=True):
     else:
         non_shape_transforms = transforms.Compose(non_shape_transforms)
 
-    return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms)
+    return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms,
+                inv_normalize=inv_normalize, normalize=normalize, crop_224=crop_224, to_pytorch=to_pytorch, from_pytorch=from_pytorch)
 
 
 

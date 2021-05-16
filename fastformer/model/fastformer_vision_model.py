@@ -625,7 +625,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", type=str, default='cpu',
                     help="Device")
-    ap.add_argument("--config", type=str, default='vision_base_rel_config',
+    ap.add_argument("--config", type=str, default='vision_base_config',
                     help="Config")
 
     ap.add_argument("--forward_only", type=str2bool, default=False)
@@ -693,7 +693,12 @@ if __name__ == '__main__':
             args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
         if os.path.exists(args["pretrained_model"]):
             state_dict = torch.load(args["pretrained_model"], map_location=device)
-            model.load_state_dict(state_dict, strict=True)
+            try:
+                model.load_state_dict(state_dict, strict=True)
+            except:
+                state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                model.load_state_dict(state_dict, strict=False)
+                load_type = "strict-from-ddp"
 
     print(model)
     model = model.to(device)
@@ -702,6 +707,23 @@ if __name__ == '__main__':
         print(output.argmax(-1))
         exit()
 
+    from fastformer.utils import get_image_augmetations
+
+    dog = Image.open("cat.jpg")
+    image_transforms = get_image_augmetations("clr", False)
+    dog_noised = image_transforms["non_shape_transforms"](dog)
+    dog = image_transforms["crop_224"](dog)
+    dog_noised = image_transforms["crop_224"](dog_noised)
+    dog_pt = image_transforms["to_pytorch"](dog)
+    dog_noised_pt = image_transforms["to_pytorch"](dog_noised)
+
+    with torch.no_grad():
+        reconstructed = model.forward_generator(dog_noised_pt.unsqueeze(0), dog_pt.unsqueeze(0), dog_pt.unsqueeze(0))["x1_reconstruct"].squeeze(0)
+        reconstructed = image_transforms["from_pytorch"](reconstructed)
+
+    dog.show()
+    dog_noised.show()
+    reconstructed.show()
     output = model(x1, x1, x2, calculate_accuracy=True)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
