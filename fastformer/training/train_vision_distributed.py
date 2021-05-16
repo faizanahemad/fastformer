@@ -80,6 +80,8 @@ def training_args():
                         help='lr_steps')
     parser.add_argument('--weight_decay', default=optimizer_config.weight_decay, type=float,
                         help='weight_decay')
+    parser.add_argument('--simclr_warmup', default=1000, type=int,
+                        help='simclr_warmup')
     parser.add_argument('--gradient_clipping', default=optimizer_config.gradient_clipping, type=float,
                         help='gradient_clipping')
 
@@ -527,6 +529,7 @@ def train(local_rank, args):
     total_samples_simclr = args["total_samples_simclr"] if "total_samples_simclr" in args and args["total_samples_simclr"] is not None else (
                 16 * batch_size * args["world_size"])  # args["world_size"] to max
     total_samples_simclr = 8 * (total_samples_simclr // 8)
+    simclr_warmup = args["simclr_warmup"]
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -542,7 +545,7 @@ def train(local_rank, args):
             discriminator_pos_frac = 0.6 * min(1.0, max(0.02, pct_done / 100.0))
             # generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
             # discriminator_w_progressive = discriminator_w * min(1.0, max(0.001, pct_done / 100.0))
-            simclr_w_progressive = simclr_w * min(1.0, max(0.01, pct_done / 5.0))
+            simclr_w_progressive = simclr_w * min(1.0, max(0.01, steps_done / simclr_warmup))
             generator_w_progressive = generator_w
             discriminator_w_progressive = discriminator_w
             # simclr_w_progressive = simclr_w
