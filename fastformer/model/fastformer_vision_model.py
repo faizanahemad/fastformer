@@ -20,6 +20,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
+from torch.nn.utils import weight_norm
 try:
     from performer_pytorch import SelfAttention, FastAttention
 except:
@@ -416,8 +417,8 @@ class ClassificationModel(FastFormerPreTrainedModel):
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=768, eps=1e-7,
                  generator_w=1.0, discriminator_w=1.0, simclr_w=1.0, dino_w=1.0,
-                 teacher_contrastive_temperature=0.05, student_contrastive_temperature=0.1,
-                 discriminator_pos_frac=0.01, dino_cw=0.99,
+                 teacher_contrastive_temperature=0.04, student_contrastive_temperature=0.1,
+                 dino_cw=0.9,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = backbone.config.num_highway_cls_tokens if hasattr(backbone, "config") and hasattr(backbone.config, "num_highway_cls_tokens") else 1
@@ -428,7 +429,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 128
-        self.dino_dims = 2 ** 14
+        self.dino_dims = 2 ** 16
         self.discriminator_tol = 0.1
         self.fixed_tolerance_discriminator = True
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
@@ -441,9 +442,9 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                  nn.Linear(2048, 2048), nn.GELU(),
-                                 nn.Linear(2048, 256), nn.GELU(),
+                                 nn.Linear(2048, 512), nn.GELU(),
                                  Norm(),
-                                 nn.Linear(256, self.dino_dims, bias=False))
+                                 weight_norm(nn.Linear(512, self.dino_dims)))
         self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
                                            nn.Linear(num_features * 2, num_features),  # nn.Tanh()

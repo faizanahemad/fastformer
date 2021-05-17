@@ -684,54 +684,49 @@ def get_image_augmetations(mode, teacher=True):
         shape_transforms = to_tensor
     else:
         shape_transforms = transforms.Compose([
-            transforms.RandomChoice([
-                identity,
-                transforms.RandomPerspective(distortion_scale=0.1 if teacher else 0.2),
-                transforms.RandomRotation(15 if teacher else 45),
+            identity if teacher else transforms.RandomChoice([
+                transforms.RandomPerspective(distortion_scale=0.2),
+                transforms.RandomRotation(45),
                 DefinedRotation(90),
                 DefinedRotation(180),
-                transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 10 if teacher else 20),
+                transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 20),
             ]),
-            transforms.RandomResizedCrop(416, scale=(0.6, 1.0) if teacher else (0.2, 0.8), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
+            transforms.RandomResizedCrop(416, scale=(0.6, 1.0) if teacher else (0.2, 0.6), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=0.5),
             # transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0) if teacher else (0.6, 1.0), 0),
-
         ])
 
     non_shape_transforms = [
-                            transforms.RandomChoice([
-                                identity,
+                            identity if teacher else transforms.RandomChoice([
                                 # get_alb(alb.transforms.MedianBlur(p=0.5 if teacher else 1.0)),
                                 # get_alb(alb.transforms.RandomGamma(p=0.75 if teacher else 1.0)),
                                 # get_alb(alb.transforms.RGBShift(p=0.75 if teacher else 1.0)),
                                 # get_alb(alb.transforms.MotionBlur(7 if teacher else 11, p=1.0)),
+                                identity,
                                 transforms.GaussianBlur(3 if teacher else 9, sigma=(0.2, 1.0)),
                                 get_alb(alb.transforms.GaussNoise(var_limit=(1.0, 5.0) if teacher else (5.0, 25.0), mean=0, always_apply=False, p=1.0)),
                             ]),
                             transforms.RandomChoice([
-                                identity,
-                                get_alb(alb.transforms.ImageCompression(90 if teacher else 5, 100, 0, p=1.0, always_apply=True,)),
-                                transforms.RandomChoice([identity] if teacher else [
+                                identity if teacher else transforms.RandomChoice([identity] if teacher else [
+                                    identity,
+                                    get_alb(alb.transforms.ImageCompression(90 if teacher else 5, 100, 0, p=1.0, always_apply=True, )),
                                     get_alb(alb.transforms.Equalize(p=1.0, always_apply=True, )),
                                     get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
                                     # get_alb(alb.transforms.Solarize(threshold=128, always_apply=True, p=1.0)),
-                                    get_alb(alb.transforms.Solarize(threshold=160, always_apply=True, p=1.0)),
+                                    get_alb(alb.transforms.Solarize(threshold=224, always_apply=True, p=1.0)),
                                     # get_alb(alb.transforms.Solarize(threshold=192, always_apply=True, p=1.0)),
                                     get_imgaug(iaa.AllChannelsCLAHE()),
                                     transforms.RandomGrayscale(p=0.75 if teacher else 1.0),
                                     get_imgaug(iaa.LogContrast(gain=(0.9, 1.1) if teacher else (0.8, 1.2))),
                                     get_imgaug(iaa.pillike.Autocontrast((1, 5) if teacher else (5, 25), per_channel=True)),
                                 ]),
-
-
                                 transforms.ColorJitter(brightness=0.05 if teacher else 0.2, contrast=0.02 if teacher else 0.15,
                                                        saturation=0.02 if teacher else 0.1, hue=0.01 if teacher else 0.05),
 
                             ]),
-                            transforms.RandomChoice([
-                                identity,
-                                identity if teacher else cut,
-                                identity if teacher else bigcut,
+                            identity if teacher else transforms.RandomChoice([
+                                cut,
+                                bigcut,
                                 transforms.RandomChoice([identity] if teacher else [
                                     # get_imgaug(iaa.CoarseDropout((0.05, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
                                     # get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.02, 0.05), per_channel=True)),

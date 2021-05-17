@@ -740,13 +740,13 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     _ = output.pop("predictions", None)
     zgradders = []
     inf_gradders = []
-    if zero_grad_check:
-        zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
-        if len(zgradders):
-            print("[Train]: Time = %s, Zero Grads: " % get_time_string(), zgradders)
-        inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
-        if len(inf_gradders):
-            print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
+    # if zero_grad_check:
+    #     zgradders = [name for name, params in ddp_model.named_parameters() if torch.all(params.grad == 0).item()]
+    #     if len(zgradders):
+    #         print("[Train]: Time = %s, Zero Grads: " % get_time_string(), zgradders)
+    #     inf_gradders = [name for name, params in ddp_model.named_parameters() if torch.any(torch.logical_not(torch.isfinite(params.grad))).item()]
+    #     if len(inf_gradders):
+    #         print("[Train]: Time = %s, INF/NAN Grads: " % get_time_string(), inf_gradders)
     # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     if not no_sync:
         if is_fp16:
