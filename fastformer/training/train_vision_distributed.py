@@ -628,7 +628,7 @@ def train(local_rank, args):
                                               extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
-                if args["mode"] == "clr" and hasattr(ddp_model, "no_sync"):
+                if args["mode"] == "clr" and hasattr(ddp_model, "no_sync") and simclr_w > 0 or dino_w > 0:
                     x1_noised = batch["x1_noised"]
                     x1_label = batch["x1_label"]
                     x2 = batch["x2"]
