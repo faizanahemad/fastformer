@@ -425,7 +425,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.backbone = backbone
         self.generator_w = generator_w
         self.discriminator_w = discriminator_w
-        self.discriminator_pos_frac = discriminator_pos_frac
+        self.discriminator_pos_frac = 0.1
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 128
