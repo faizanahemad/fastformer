@@ -416,7 +416,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 class PatchCLR(FastFormerPreTrainedModel):
     def __init__(self, backbone, num_features=768, eps=1e-7,
-                 generator_w=1.0, discriminator_w=1.0, simclr_w=1.0, dino_w=1.0,
+                 generator_w=0.0, discriminator_w=0.0, simclr_w=1.0, dino_w=1.0,
                  teacher_contrastive_temperature=0.04, student_contrastive_temperature=0.1,
                  dino_cw=0.9,
                  reinit=False):
@@ -546,8 +546,8 @@ class PatchCLR(FastFormerPreTrainedModel):
                     dino_center = self.dino_cw * dino_center + (1 - self.dino_cw)*x2_dino.mean(dim=0)
                     x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
                     x2_dino = torch.softmax(x2_dino, 1)
-                    dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
-                    dino_loss = self.dino_w * dino_loss
+                dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
+                dino_loss = self.dino_w * dino_loss
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, dino_center=dino_center,
@@ -682,8 +682,10 @@ if __name__ == '__main__':
         else:
             model = get_pretrained_deit()
             model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, dino_w=0.0)
-            model.key_backbone = model.backbone
-            model.key_moco_ffn = model.moco_ffn
+            model.key_backbone = copy.deepcopy(model.backbone)
+            model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
+            model.key_ffn = copy.deepcopy(model.ffn)
+            dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     else:
         model = FastFormerVisionModel(config)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -693,9 +695,11 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=1.0, dino_w=0.0)
-            model.key_backbone = model.backbone
-            model.key_moco_ffn = model.moco_ffn
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0, dino_w=1.0)
+            model.key_backbone = copy.deepcopy(model.backbone)
+            model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
+            model.key_ffn = copy.deepcopy(model.ffn)
+            dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
             args["pretrained_model"] = os.path.normpath(os.path.join(os.getcwd(), args["pretrained_model"]))
@@ -704,9 +708,12 @@ if __name__ == '__main__':
             try:
                 model.load_state_dict(state_dict, strict=True)
             except:
-                state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                model.load_state_dict(state_dict, strict=False)
-                load_type = "strict-from-ddp"
+                try:
+                    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                    model.load_state_dict(state_dict, strict=False)
+                    load_type = "strict-from-ddp"
+                except:
+                    print("WARN: State dict load error")
 
     print(model)
     model = model.to(device)
@@ -715,24 +722,24 @@ if __name__ == '__main__':
         print(output.argmax(-1))
         exit()
 
-    from fastformer.utils import get_image_augmetations
+    if model.generator_w > 0:
+        from fastformer.utils import get_image_augmetations
+        dog = Image.open("cat.jpg")
+        image_transforms = get_image_augmetations("clr", False)
+        dog_noised = image_transforms["non_shape_transforms"](dog)
+        dog = image_transforms["crop_224"](dog)
+        dog_noised = image_transforms["crop_224"](dog_noised)
+        dog_pt = image_transforms["to_pytorch"](dog)
+        dog_noised_pt = image_transforms["to_pytorch"](dog_noised)
 
-    dog = Image.open("cat.jpg")
-    image_transforms = get_image_augmetations("clr", False)
-    dog_noised = image_transforms["non_shape_transforms"](dog)
-    dog = image_transforms["crop_224"](dog)
-    dog_noised = image_transforms["crop_224"](dog_noised)
-    dog_pt = image_transforms["to_pytorch"](dog)
-    dog_noised_pt = image_transforms["to_pytorch"](dog_noised)
+        with torch.no_grad():
+            reconstructed = model.forward_generator(dog_noised_pt.unsqueeze(0), dog_pt.unsqueeze(0), dog_pt.unsqueeze(0), dino_center=dino_center)["x1_reconstruct"].squeeze(0)
+            reconstructed = image_transforms["from_pytorch"](reconstructed)
 
-    with torch.no_grad():
-        reconstructed = model.forward_generator(dog_noised_pt.unsqueeze(0), dog_pt.unsqueeze(0), dog_pt.unsqueeze(0))["x1_reconstruct"].squeeze(0)
-        reconstructed = image_transforms["from_pytorch"](reconstructed)
-
-    dog.show()
-    dog_noised.show()
-    reconstructed.show()
-    output = model(x1, x1, x2, calculate_accuracy=True)
+        dog.show()
+        dog_noised.show()
+        reconstructed.show()
+    output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
     all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
@@ -759,7 +766,7 @@ if __name__ == '__main__':
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(x, x1, x2, calculate_accuracy=True)
+                    output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
                     get_unused_params(model)
@@ -769,7 +776,7 @@ if __name__ == '__main__':
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(x, x1, x2, calculate_accuracy=True)
+                output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 get_unused_params(model)
@@ -780,11 +787,11 @@ if __name__ == '__main__':
             if fp16:
                 with autocast():
                     with torch.no_grad():
-                        output = model(x, x1, x2, calculate_accuracy=True)
+                        output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
             else:
                 with torch.no_grad():
-                    output = model(x, x1, x2, calculate_accuracy=True)
+                    output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
             return output
         return output
 
