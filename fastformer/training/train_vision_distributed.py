@@ -322,14 +322,14 @@ def train(local_rank, args):
     optimizer_config.warmup_steps = args["warmup_steps"]
     optimizer_config.gradient_clipping = args["gradient_clipping"]
 
-    if args["world_size"] != 128:
-        optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
+    # if args["world_size"] != 128:
+    #     optimizer_config.lr = optimizer_config.lr * (args["world_size"]/128)
     config.eps = 1e-4
     if args["no_autocast"]:
-        optimizer_config.eps = 1e-5
-        config.layer_norm_eps = 1e-5
-        config.eps = 1e-5
-        optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
+        optimizer_config.eps = 1e-7
+        config.layer_norm_eps = 1e-7
+        config.eps = 1e-7
+        # optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     reinit = not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
