@@ -197,9 +197,16 @@ class CLRDataset(torch.utils.data.Dataset):
         x1, _ = self.dataset_student[item]
         x1_noised = self.image_transforms["to_tensor"](self.image_transforms["non_shape_transforms"](x1.copy()))
         x1_label = self.image_transforms["to_tensor"](x1)
+
+        x1_second, _ = self.dataset_student[item]
+        x1_noised_second = self.image_transforms["to_tensor"](self.image_transforms["non_shape_transforms"](x1_second.copy()))
+        x1_label_second = self.image_transforms["to_tensor"](x1_second)
+
         # In 25% case X1 is not transformed so the patch_clr task becomes patch reconstruction by aggregation from neighbouring patches.
         x2, label = self.dataset_teacher[item]
-        return dict(x1_noised=x1_noised, x1_label=x1_label, x2=x2)
+        x2_second, label = self.dataset_teacher[item]
+        return dict(x1_noised=x1_noised, x1_label=x1_label, x2=x2,
+                    x1_noised_second=x1_noised_second, x1_label_second=x1_label_second, x2_second=x2_second)
 
     def __len__(self):
         return len(self.dataset_student)
@@ -621,16 +628,72 @@ def train(local_rank, args):
                                               extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
-                if args["mode"] == "clr":
-                    batch["x1_label"], batch["x1_noised"] = None, batch["x1_label"]
-                    _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
-                                         scheduler, gradient_clipping, iter_size=iter_size,
-                                         no_sync=True,
-                                         zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
-                                         extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                if args["mode"] == "clr" and hasattr(ddp_model, "no_sync"):
+                    x1_noised = batch["x1_noised"]
+                    x1_label = batch["x1_label"]
+                    x2 = batch["x2"]
+
+                    x1_noised_second = batch["x1_noised_second"]
+                    x1_label_second = batch["x1_label_second"]
+                    x2_second = batch["x2_second"]
+                    with ddp_model.no_sync():
+                        batch["x1_label"] = None
+                        batch["x1_noised"] = x1_label
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+
+                        batch["x1_noised"] = x1_noised
+                        batch["x2"] = x2_second
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+
+                        batch["x1_noised"] = x1_label
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        ##
+
+                        batch["x2"] = x2_second
+                        batch["x1_noised"] = x1_noised_second
+                        batch["x1_label"] = x1_label_second
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        ##
+                        batch["x1_label"] = None
+                        batch["x1_noised"] = x1_label_second
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+
+                        batch["x1_noised"] = x1_noised_second
+                        batch["x2"] = x2
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+
+                        batch["x1_noised"] = x1_label_second
+                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                             scheduler, gradient_clipping, iter_size=iter_size,
+                                             no_sync=True,
+                                             zero_grad_check=False,
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
 
 
-                    
                 if args["mode"] == "clr" and args["moco"] and (step + 1) % (4 * iter_size) == 0:
                     key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
                     key_ffn.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in
