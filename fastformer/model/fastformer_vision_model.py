@@ -251,7 +251,7 @@ class PositionwiseFFN(nn.Module):
         activation_dropout = Dropout(hidden_dropout)
 
         self.layer_norm = nn.LayerNorm(d_model, layer_norm_eps)
-        self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), nn.GELU(), nn.Linear(d_inner, d_model, bias=False), activation_dropout)
+        self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), nn.GELU(), activation_dropout, nn.Linear(d_inner, d_model, bias=False))
 
     def forward(self, hidden):
         h = self.layer_norm(hidden)
@@ -432,6 +432,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.dino_dims = 2 ** 16
         self.discriminator_tol = 0.1
         self.fixed_tolerance_discriminator = True
+        self.simclr_temperature = 0.2
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -476,7 +477,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
-        contrastive_matrix = contrastive_matrix / self.student_contrastive_temperature
+        contrastive_matrix = contrastive_matrix / self.simclr_temperature
         loss = self.loss_ce(contrastive_matrix, labels)
         accuracy = 0
         if calculate_accuracy:

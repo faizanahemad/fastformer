@@ -449,7 +449,7 @@ def train(local_rank, args):
     clean_memory()
     _ = model_train_validation_switch(ddp_model.module if hasattr(ddp_model, "module") else ddp_model, args, train=True)
     if args["mode"] == "linear_probe":
-        optimizer_config.weight_decay = 0.1
+        _ = model_train_validation_switch(ddp_model.module.backbone if hasattr(ddp_model, "module") else ddp_model.backbone, args, train=False)
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
     if args["optimizer"] == "adamw":
