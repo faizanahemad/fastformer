@@ -445,7 +445,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                                  nn.Linear(2048, 512), nn.GELU(),
                                  Norm(),
                                  weight_norm(nn.Linear(512, self.dino_dims)))
-        self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
+        self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features),
+                                           nn.Linear(num_features, num_features * 2),
+                                           nn.GELU(),
+                                           nn.Linear(num_features * 2, num_features * 2),
                                            nn.GELU(),
                                            nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                            )
