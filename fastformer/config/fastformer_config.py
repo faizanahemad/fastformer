@@ -318,11 +318,11 @@ vision_base_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0,
 vision_base_rel_config = FastFormerConfig(stride=1, d_head=[64, 64], n_head=[(12, 0, 0), (12, 0, 0)], block_channel_size=[768, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
                                           hidden_dropout=0.1, attention_dropout=0.1, max_position_embeddings=14, relative_attention=True)
 
-vision_md_config = FastFormerConfig(stride=2, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
-                                    hidden_dropout=0.0, attention_dropout=0.0, relative_attention=False)
+vision_md_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
+                                    hidden_dropout=0.1, attention_dropout=0.1, relative_attention=False)
 
-vision_md_rel_config = FastFormerConfig(stride=2, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
-                                    hidden_dropout=0.0, attention_dropout=0.0, max_position_embeddings=14, relative_attention=True)
+vision_md_rel_config = FastFormerConfig(stride=1, d_head=[48, 64], n_head=[(8, 0, 0), (12, 0, 0)], block_channel_size=[384, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
+                                    hidden_dropout=0.1, attention_dropout=0.1, max_position_embeddings=14, relative_attention=True)
 
 vision_lg_config = FastFormerConfig(stride=2, d_head=[64, 64], n_head=[(8, 0, 0), (16, 0, 0)], block_channel_size=[512, 768], num_decoder_layers=2, block_sizes=[6, 6], num_highway_cls_tokens=4, has_decoder=False,
                                     hidden_dropout=0.0, attention_dropout=0.0, relative_attention=False)
