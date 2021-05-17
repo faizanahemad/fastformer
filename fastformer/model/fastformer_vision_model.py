@@ -497,7 +497,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         discriminator_label_mean = None
         absolute_reconstruction_loss = None
         extra_reconstruction_loss = None
-        if self.generator_w > 0:
+        if self.generator_w > 0 and x1_label is not None:
             x1_reconstruct = self.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
             assert torch.isfinite(x1_reconstruct).all().item()
             assert torch.isfinite(x1_label).all().item()
@@ -569,7 +569,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         discriminator_accuracy = None
         discriminator_positive_accuracy = None
         discriminator_negative_accuracy = None
-        if self.discriminator_w > 0:
+        if self.discriminator_w > 0 and x1_label is not None:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
             assert torch.isfinite(x1_disc).all().item()
             logits = x1_disc.squeeze(-1).reshape(b, -1)

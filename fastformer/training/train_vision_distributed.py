@@ -621,6 +621,15 @@ def train(local_rank, args):
                                               extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
+                if args["mode"] == "clr":
+                    batch["x1_label"], batch["x1_noised"] = None, batch["x1_label"]
+                    _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                                         scheduler, gradient_clipping, iter_size=iter_size,
+                                         no_sync=True,
+                                         zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
+                                         extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+
+
                     
                 if args["mode"] == "clr" and args["moco"] and (step + 1) % (4 * iter_size) == 0:
                     key_backbone.load_state_dict({k_key: 0.999 * v_key + 0.001 * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})

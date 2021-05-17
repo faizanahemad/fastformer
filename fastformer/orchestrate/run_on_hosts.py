@@ -171,14 +171,14 @@ if __name__ == "__main__":
     vision_cmd += " --no_autocast --accumulation_steps 1"
 
     vision_cmd += " --epochs 300"
-    vision_cmd += " --wandb_name all_1_2_2_1_m1"
+    vision_cmd += " --wandb_name all_1_2_2_1_m2"
     vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name patchclr.pth --dataset /home/ahemf/processed_datasets/ImageNet"
     # vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
     vision_cmd += " --mode clr"
     vision_cmd += " --lr 0.004 --lr_steps 2 --weight_decay 0.05 --warmup_steps 1000 --gradient_clipping 1.0 --simclr_warmup 1000"
     vision_cmd += " --batch_size 16 --optimizer adamw"
 
-    vision_cmd += " --simclr_w 1.0 --generator_w 2.0 --discriminator_w 2.0 --dino_w 1.0"
+    vision_cmd += " --simclr_w 0.0 --generator_w 2.0 --discriminator_w 2.0 --dino_w 1.0"
     # vision_cmd += " --detect_anomaly"
 
     # vision_cmd += " --wandb_dryrun"
