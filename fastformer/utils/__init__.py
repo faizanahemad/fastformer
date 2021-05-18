@@ -684,76 +684,54 @@ def get_image_augmetations(mode, teacher=True):
         shape_transforms = to_tensor
     else:
         shape_transforms = transforms.Compose([
-            identity if teacher else transforms.RandomChoice([
-                transforms.RandomPerspective(distortion_scale=0.2),
-                transforms.RandomRotation(45),
-                DefinedRotation(90),
-                DefinedRotation(180),
-                transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 20),
-            ]),
-            transforms.RandomResizedCrop(416, scale=(0.35, 1.0) if teacher else (0.1, 0.35), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
+            transforms.RandomResizedCrop(224, scale=(0.35, 1.0) if teacher else (0.1, 0.35), ratio=(3 / 4, 4 / 3)),
             transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply(
+                [transforms.RandomChoice([
+                    transforms.RandomPerspective(distortion_scale=0.2),
+                    transforms.RandomRotation(45),
+                    DefinedRotation(90),
+                    DefinedRotation(180),
+                    transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 20),
+                    transforms.RandomAffine(0, (0.0, 0.0), (0.4, 0.8), 0),
+                ])],
+                p=0.0 if teacher else 0.25),
             # transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0) if teacher else (0.6, 1.0), 0),
         ])
 
-    non_shape_transforms = [
-                            identity if teacher else transforms.RandomChoice([
-                                # get_alb(alb.transforms.MedianBlur(p=0.5 if teacher else 1.0)),
-                                # get_alb(alb.transforms.RandomGamma(p=0.75 if teacher else 1.0)),
-                                # get_alb(alb.transforms.RGBShift(p=0.75 if teacher else 1.0)),
-                                # get_alb(alb.transforms.MotionBlur(7 if teacher else 11, p=1.0)),
-                                identity,
-                                transforms.GaussianBlur(3 if teacher else 9, sigma=(0.2, 1.0)),
-                                get_alb(alb.transforms.GaussNoise(var_limit=(1.0, 5.0) if teacher else (5.0, 25.0), mean=0, always_apply=False, p=1.0)),
-                            ]),
-                            transforms.RandomChoice([
-                                identity if teacher else transforms.RandomChoice([identity] if teacher else [
-                                    identity,
-                                    get_alb(alb.transforms.ImageCompression(90 if teacher else 5, 100, 0, p=1.0, always_apply=True, )),
-                                    get_alb(alb.transforms.Equalize(p=1.0, always_apply=True, )),
-                                    get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
-                                    # get_alb(alb.transforms.Solarize(threshold=128, always_apply=True, p=1.0)),
-                                    get_alb(alb.transforms.Solarize(threshold=224, always_apply=True, p=1.0)),
-                                    # get_alb(alb.transforms.Solarize(threshold=192, always_apply=True, p=1.0)),
-                                    get_imgaug(iaa.AllChannelsCLAHE()),
-                                    transforms.RandomGrayscale(p=0.75 if teacher else 1.0),
-                                    get_imgaug(iaa.LogContrast(gain=(0.9, 1.1) if teacher else (0.8, 1.2))),
-                                    get_imgaug(iaa.pillike.Autocontrast((1, 5) if teacher else (5, 25), per_channel=True)),
-                                ]),
-                                transforms.ColorJitter(brightness=0.05 if teacher else 0.2, contrast=0.02 if teacher else 0.15,
-                                                       saturation=0.02 if teacher else 0.1, hue=0.01 if teacher else 0.05),
+    non_shape_transforms = transforms.Compose([
+        transforms.RandomApply(
+            [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+            p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([transforms.GaussianBlur(23, sigma=(0.1, 2.0))], p=0.1 if teacher else 1.0),
+        get_alb(alb.transforms.Solarize(threshold=128, always_apply=False, p=0.2)),
+        transforms.RandomApply(
+            [transforms.RandomChoice([
+                get_alb(alb.transforms.ImageCompression(5, 100, 0, p=1.0, always_apply=True)),
+                get_alb(alb.transforms.Equalize(p=1.0, always_apply=True, )),
+                get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
+                get_imgaug(iaa.AllChannelsCLAHE()),
+                get_imgaug(iaa.LogContrast(gain=(0.7, 1.3))),
+                get_imgaug(iaa.pillike.Autocontrast((5, 25), per_channel=True)),
+                get_alb(alb.transforms.MedianBlur(p=1.0)),
+                get_alb(alb.transforms.RandomGamma(p=1.0)),
+                get_alb(alb.transforms.RGBShift(p=1.0)),
+                get_alb(alb.transforms.MotionBlur(11, p=1.0)),
+                get_alb(alb.transforms.GaussNoise(var_limit=(5.0, 25.0), mean=0, always_apply=False, p=1.0)),
+            ])],
+            p=0.0 if teacher else 0.25),
+        transforms.RandomApply(
+            [transforms.RandomChoice([
+                cut, bigcut,
+                get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=8, holes_number_y=8, random_offset=True, p=1.0)),
+                get_alb(alb.transforms.GridDropout(ratio=0.3, holes_number_x=8, holes_number_y=8, random_offset=True, p=1.0))
+            ])],
+            p=0.0 if teacher else 0.25),
+    ])
 
-                            ]),
-                            identity if teacher else transforms.RandomChoice([
-                                cut,
-                                bigcut,
-                                transforms.RandomChoice([identity] if teacher else [
-                                    # get_imgaug(iaa.CoarseDropout((0.05, 0.1), size_percent=(0.25, 0.5), per_channel=0.5)),
-                                    # get_imgaug(iaa.CoarseSaltAndPepper(0.05, size_percent=(0.02, 0.05), per_channel=True)),
-                                    # get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=8, holes_number_y=8, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.3 if teacher else 0.5, holes_number_x=8, holes_number_y=8, random_offset=True, p=1.0)),
-                                    # get_alb(alb.transforms.GridDropout(ratio=0.2 if teacher else 0.3, holes_number_x=16, holes_number_y=16, random_offset=True, p=1.0)),
-                                    get_alb(alb.transforms.GridDropout(ratio=0.1 if teacher else 0.3, holes_number_x=8, holes_number_y=8, random_offset=True, p=1.0))
-                                ]),
-                            ]),
-                            ]
-
-    if mode == "full_train":
-        non_shape_transforms = transforms.Compose(non_shape_transforms)
+    if mode == "full_train" or mode == "linear_probe":
         shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
-    elif mode == "linear_probe":
-        # non_shape_transforms = [cut, identity]
-        non_shape_transforms = transforms.RandomChoice([identity, cut, bigcut,
-                                                        get_alb(alb.transforms.GaussNoise(var_limit=(10.0, 50.0), mean=0, always_apply=False, p=1.0)),
-                                                        transforms.GaussianBlur(11, sigma=(0.2, 1.0)),
-                                                        get_alb(alb.transforms.Equalize(p=1.0, always_apply=True, )),
-                                                        get_alb(alb.transforms.Posterize(num_bits=4, always_apply=True, p=1.0)),
-                                                        get_alb(alb.transforms.Solarize(threshold=128, always_apply=True, p=1.0)),
-                                                        get_alb(alb.transforms.Solarize(threshold=160, always_apply=True, p=1.0)),
-                                                        get_alb(alb.transforms.GridDropout(ratio=0.5, holes_number_x=32, holes_number_y=32, random_offset=True, p=1.0)), ])
-        shape_transforms = transforms.Compose([shape_transforms, non_shape_transforms, to_tensor])
-    else:
-        non_shape_transforms = transforms.Compose(non_shape_transforms)
 
     return dict(to_tensor=to_tensor, non_shape_transforms=non_shape_transforms, shape_transforms=shape_transforms, small_shape_transforms=small_shape_transforms,
                 inv_normalize=inv_normalize, normalize=normalize, crop_224=crop_224, to_pytorch=to_pytorch, from_pytorch=from_pytorch)

@@ -114,7 +114,7 @@ class PatchEmbed(nn.Module):
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
 
         self.dropout = Dropout(hidden_dropout)
-        self.layer_norm = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+        # self.layer_norm = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
@@ -137,7 +137,7 @@ class PatchEmbed(nn.Module):
         if self.cls_token is not None:
             cls_tokens = self.cls_token.expand(B, -1, -1)
             x = torch.cat((cls_tokens, x), dim=1)
-        x = self.layer_norm(x)
+        # x = self.layer_norm(x)
         x = self.dropout(x)
         return x, row_embed, column_embed
 
@@ -433,6 +433,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.discriminator_tol = 0.1
         self.fixed_tolerance_discriminator = True
         self.simclr_temperature = 0.2
+        self.pool_kernel = (3, 2, 2)
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -453,9 +454,10 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.GELU(),
                                            nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                            )
+        assert num_features % np.prod(self.pool_kernel) == 0
         self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
-                                               nn.Linear(num_features * 2, num_features))
+                                               nn.Linear(num_features * 2, num_features // np.prod(self.pool_kernel)))
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
@@ -492,7 +494,6 @@ class PatchCLR(FastFormerPreTrainedModel):
         assert torch.isfinite(first_block_out[0]).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
-        mean_error_percent_per_pixel = None
         reconstruction_loss = None
         discriminator_label_mean = None
         absolute_reconstruction_loss = None
@@ -507,9 +508,10 @@ class PatchCLR(FastFormerPreTrainedModel):
             reconstruction_loss_by_averaging = torch.abs(x1_label - x1_label.mean(-1).unsqueeze(-1))
             extra_reconstruction_loss = (reconstruction_loss_by_averaging - reconstruction_loss.detach()).mean()
             x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
+            reconstruction_loss = reconstruction_loss.reshape(b, 14 * 14, 3, 16, 16)
+            reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
             absolute_reconstruction_loss = reconstruction_loss.detach()
             assert torch.isfinite(reconstruction_loss).all().item()
-            mean_error_percent_per_pixel = (absolute_reconstruction_loss / (torch.abs(x1_label) + 1e-4)).mean().item()
             if self.fixed_tolerance_discriminator:
                 label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
             else:
@@ -517,11 +519,13 @@ class PatchCLR(FastFormerPreTrainedModel):
                 highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
                 label_for_discriminator = torch.zeros_like(losses_per_region)
                 label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
-            absolute_reconstruction_loss = absolute_reconstruction_loss.mean()
+            reconstruction_loss = reconstruction_loss.mean(-1).mean(-1).mean()
+            absolute_reconstruction_loss = reconstruction_loss.detach()
             discriminator_label_mean = label_for_discriminator.mean().item()
 
             # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
-            reconstruction_loss = self.generator_w * reconstruction_loss.mean()
+
+            reconstruction_loss = self.generator_w * reconstruction_loss
 
         simclr_loss = 0
         dino_loss = 0
@@ -552,7 +556,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
                     x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, dino_center=dino_center,
-                    mean_error_percent_per_pixel=mean_error_percent_per_pixel, x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
+                    x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
                     absolute_reconstruction_loss=absolute_reconstruction_loss, extra_reconstruction_loss=extra_reconstruction_loss)
 
     def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
@@ -571,6 +575,8 @@ class PatchCLR(FastFormerPreTrainedModel):
         discriminator_negative_accuracy = None
         if self.discriminator_w > 0 and x1_label is not None:
             x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
+            # x1_disc = x1_disc.reshape(b, 14 * 14, 3, 16, 16)
+            # x1_disc = F.avg_pool3d(x1_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
             assert torch.isfinite(x1_disc).all().item()
             logits = x1_disc.squeeze(-1).reshape(b, -1)
             label_for_discriminator = gen_res["label_for_discriminator"].reshape(b, -1)
@@ -614,7 +620,7 @@ class PatchCLR(FastFormerPreTrainedModel):
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
                     simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    mean_error_percent_per_pixel=gen_res["mean_error_percent_per_pixel"], discriminator_label_mean=gen_res["discriminator_label_mean"],
+                    discriminator_label_mean=gen_res["discriminator_label_mean"],
                     extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"], absolute_reconstruction_loss=gen_res["absolute_reconstruction_loss"],
                     discriminator_negative_accuracy=discriminator_negative_accuracy, discriminator_positive_accuracy=discriminator_positive_accuracy, extra_reconstruction_loss=gen_res["extra_reconstruction_loss"])
 
@@ -676,17 +682,18 @@ if __name__ == '__main__':
 
     # x = torch.randn(batch_size, 3, 224, 224, device=device)
 
+    dino_center = None
     if args["deit"]:
         from timm.models.vision_transformer import VisionTransformer
         if args["classification"]:
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, dino_w=0.0)
+            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, dino_w=0.0, generator_w=1.0, discriminator_w=1.0,)
             model.key_backbone = copy.deepcopy(model.backbone)
             model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
             model.key_ffn = copy.deepcopy(model.ffn)
-            dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
+            dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     else:
         model = FastFormerVisionModel(config)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -696,7 +703,7 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0, dino_w=1.0)
+            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
             model.key_backbone = copy.deepcopy(model.backbone)
             model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
             model.key_ffn = copy.deepcopy(model.ffn)
