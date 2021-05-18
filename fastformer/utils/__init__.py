@@ -691,7 +691,7 @@ def get_image_augmetations(mode, teacher=True):
                 DefinedRotation(180),
                 transforms.RandomAffine(0, (0.0, 0.0), (1.0, 1.0), 20),
             ]),
-            transforms.RandomResizedCrop(416, scale=(0.6, 1.0) if teacher else (0.2, 0.6), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
+            transforms.RandomResizedCrop(416, scale=(0.35, 1.0) if teacher else (0.1, 0.35), ratio=(3 / 4, 4 / 3) if teacher else (3 / 5, 5 / 3)),
             transforms.RandomHorizontalFlip(p=0.5),
             # transforms.RandomAffine(0, (0.0, 0.0), (0.8, 1.0) if teacher else (0.6, 1.0), 0),
         ])
