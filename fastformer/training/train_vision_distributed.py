@@ -384,7 +384,7 @@ def train(local_rank, args):
         raise ValueError
 
     if local_rank == 0 and rank == 0:
-        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model.student if hasattr(model, "student") else model) / 1_000_000))
         print(type(model))
         print(model)
 
