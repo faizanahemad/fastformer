@@ -388,7 +388,7 @@ class ClassificationModel(FastFormerPreTrainedModel):
         if reinit_backbone:
             self.init_weights()
 
-        init_weights(self.head)
+        init_weights(self.head, 0.01)
 
     def get_representations(self, x):
         b = x.size(0)
@@ -441,12 +441,16 @@ class PatchModel(FastFormerPreTrainedModel):
         self.fixed_tolerance_discriminator = True
         self.discriminator_tol = 0.1
         self.loss_bce = nn.BCEWithLogitsLoss()
+        if reinit:
+            self.init_weights()
 
         self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                       nn.Linear(2048, 256), nn.GELU(),
                                       nn.Linear(256, self.num_moco_features),
                                       Norm())
-        last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, self.dino_dims, bias=False))
+        last_layer = nn.Linear(bottleneck_dim, self.dino_dims, bias=False)
+        init_weights(last_layer, 0.02)
+        last_layer = nn.utils.weight_norm(last_layer)
         last_layer.weight_g.data.fill_(1)
         if norm_last_layer:
             last_layer.weight_g.requires_grad = False
@@ -470,10 +474,9 @@ class PatchModel(FastFormerPreTrainedModel):
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, num_features // np.prod(self.pool_kernel)))
 
-        if reinit:
-            self.init_weights()
-        init_weights(self.ffn, 0.02)
-        init_weights(last_layer, 0.1)
+        init_weights(self.ffn[0], 0.02)
+        init_weights(self.ffn[1], 0.02)
+        init_weights(self.ffn[2], 0.02)
         last_layer.weight_g.data.fill_(1)
         init_weights(self.generator_ffn, 0.01)
         init_weights(self.discriminator_ffn, 0.01)

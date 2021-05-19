@@ -446,7 +446,7 @@ def train(local_rank, args):
 
     if args["moco"] and args["mode"] == "clr":
         print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
-        student_teacher_param_update(model.student, model.teacher, 0.99)
+        student_teacher_param_update(model.student, model.teacher, 0.95)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         if args["mode"] == "clr":
