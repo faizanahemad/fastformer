@@ -365,10 +365,9 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         hidden_dims = 768 if args["deit"] else config.block_channel_size[-1]
-        student = PatchModel(backbone, hidden_dims)
-        teacher = PatchModel(teacher_backbone, hidden_dims)
-        model = PatchCLR(student, teacher, config.layer_norm_eps,
-                         generator_w=generator_w, discriminator_w=discriminator_w, simclr_w=simclr_w, dino_w=dino_w).to(device)
+        student = PatchModel(backbone, hidden_dims, generator_w=generator_w, discriminator_w=discriminator_w, simclr_w=simclr_w, dino_w=dino_w)
+        teacher = PatchModel(teacher_backbone, hidden_dims, generator_w=0.0, discriminator_w=0.0, simclr_w=simclr_w, dino_w=dino_w)
+        model = PatchCLR(student, teacher, config.layer_norm_eps).to(device)
         trainable_model = student
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
