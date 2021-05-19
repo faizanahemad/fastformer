@@ -752,7 +752,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     if not no_sync:
         if is_fp16:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            torch.nn.utils.clip_grad_norm_((ddp_model.student if isinstance(ddp_model, PatchCLR) else ddp_model).parameters(), gradient_clipping)
             scaler.step(optimizer)
             scaler.update()
             if isinstance(scheduler, list):
@@ -761,7 +761,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             else:
                 scheduler.step()
         else:
-            ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
+            ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_((ddp_model.student if isinstance(ddp_model, PatchCLR) else ddp_model).parameters(), gradient_clipping)
             optimizer.step()
             if isinstance(scheduler, list):
                 for sch in scheduler:
