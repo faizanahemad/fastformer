@@ -645,7 +645,7 @@ class PatchCLR:
         eye = (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
         own_negatives = b1s.mm(b1s.t()) * eye
         b2s_matrix = b1s.mm(b2s.t())
-
+        extra_neg_matrix = None
         if extra_negative_repr_simclr is not None:
             extra_neg_matrix = b1s.mm(extra_negative_repr_simclr.t())
             contrastive_matrix = torch.cat((b2s_matrix, extra_neg_matrix, own_negatives), 1)
@@ -659,7 +659,7 @@ class PatchCLR:
         if b2s_dash is not None:
             b2s_matrix = b2s_matrix * eye
             b2sd_matrix = b1s.mm(b2s_dash.t())
-            if extra_negative_repr_simclr is not None:
+            if extra_neg_matrix is not None:
                 contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, extra_neg_matrix, own_negatives), 1)
             else:
                 contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, own_negatives), 1)
@@ -837,7 +837,7 @@ if __name__ == '__main__':
         dog.show()
         dog_noised.show()
         reconstructed.show()
-    output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
+    output = model(x1, x1, x2, x2, calculate_accuracy=True, dino_center=dino_center)
 
     all_params = list(filter(lambda p: p.requires_grad, model.student.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
