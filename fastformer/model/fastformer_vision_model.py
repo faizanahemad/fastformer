@@ -50,6 +50,7 @@ from transformers.modeling_outputs import (
 )
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
+import traceback
 
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
@@ -429,7 +430,7 @@ class PatchModel(FastFormerPreTrainedModel):
         self.num_moco_features = 128
         self.dino_dims = 2 ** 16
         norm_last_layer = True
-        bottleneck_dim = 256
+        bottleneck_dim = 512
         assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -642,7 +643,7 @@ class PatchCLR:
 
     def simclr_loss(self, b1s, b2s, b2s_dash=None, extra_negative_repr_simclr=None, calculate_accuracy=False):
         eye = (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
-        own_negatives = b1s.mm(b1s.t() * eye)
+        own_negatives = b1s.mm(b1s.t()) * eye
         b2s_matrix = b1s.mm(b2s.t())
 
         if extra_negative_repr_simclr is not None:
@@ -808,8 +809,9 @@ if __name__ == '__main__':
                     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
                     model.student.load_state_dict(state_dict, strict=False)
                     load_type = "strict-from-ddp"
-                except:
+                except Exception as e:
                     print("WARN: State dict load error")
+                    traceback.print_exc()
 
     print(model)
     model = model.to(device)
