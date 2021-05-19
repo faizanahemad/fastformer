@@ -39,7 +39,7 @@ from pytz import timezone
 from datetime import datetime, timedelta
 from torch.utils.data.dataloader import DataLoader
 from collections import Counter
-from fastformer.model.fastformer_vision_model import FastFormerVisionModel, PatchCLR, ClassificationModel
+from fastformer.model.fastformer_vision_model import FastFormerVisionModel, PatchCLR, ClassificationModel, PatchModel
 import torchvision.transforms as transforms
 
 try:
@@ -66,6 +66,8 @@ def training_args():
 
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+    parser.add_argument('--freeze_last_layer', default=2, type=int,
+                        help='freeze_last_layer')
 
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
@@ -347,8 +349,13 @@ def train(local_rank, args):
     if args["deit"]:
         batch_size = get_vision_batch_size("vision_md_config", not args["no_autocast"], args["mode"])
         backbone = get_pretrained_deit(not args["deit_classifier"])
+        teacher_backbone = copy.deepcopy(backbone)
     else:
         backbone = FastFormerVisionModel(config, reinit=True)
+        teacher_config = copy.deepcopy(config)
+        teacher_config.hidden_dropout = 0.0
+        teacher_config.attention_dropout = 0.0
+        teacher_backbone = FastFormerVisionModel(teacher_config, reinit=True)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     simclr_w = args["simclr_w"] if "simclr_w" in args else 0.0
@@ -358,12 +365,15 @@ def train(local_rank, args):
 
     if args["mode"] == "clr":
         hidden_dims = 768 if args["deit"] else config.block_channel_size[-1]
-        model = PatchCLR(backbone, hidden_dims, config.layer_norm_eps,
-                         generator_w=generator_w, discriminator_w=discriminator_w, simclr_w=simclr_w, dino_w=dino_w,
-                         reinit=reinit).to(device)
+        student = PatchModel(backbone, hidden_dims)
+        teacher = PatchModel(teacher_backbone, hidden_dims)
+        model = PatchCLR(student, teacher, config.layer_norm_eps,
+                         generator_w=generator_w, discriminator_w=discriminator_w, simclr_w=simclr_w, dino_w=dino_w).to(device)
+        trainable_model = student
     elif args["mode"] in ['linear_probe', 'full_train', 'validation']:
         model = ClassificationModel(backbone, args["num_classes"], 768 if args["deit"] else config.block_channel_size[1], train_backbone=True if "full_train" else False,
                                     reinit_backbone=not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))).to(device)
+        trainable_model = model
         if args["deit"] and args["deit_classifier"]:
             model.head = nn.Identity().to(device)
         if args["mode"] == "linear_probe":
@@ -382,37 +392,37 @@ def train(local_rank, args):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
 
         try:
-            model.load_state_dict(state_dict, strict=True)
+            trainable_model.load_state_dict(state_dict, strict=True)
             load_type = "strict"
         except:
             try:
                 try:
-                    model.load_state_dict(state_dict, strict=False)
+                    trainable_model.load_state_dict(state_dict, strict=False)
                     load_type = "not_strict"
                 except:
                     state_dict = {k: v for k, v in state_dict.items() if k.startswith("backbone.")}
-                    model.load_state_dict(state_dict, strict=False)
+                    trainable_model.load_state_dict(state_dict, strict=False)
                     load_type = "not_strict_no_ffn"
             except:
                 try:
                     try:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        model.load_state_dict(state_dict, strict=True)
+                        trainable_model.load_state_dict(state_dict, strict=True)
                         load_type = "strict-from-ddp"
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
                         state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
-                        model.load_state_dict(state_dict, strict=True)
+                        trainable_model.load_state_dict(state_dict, strict=True)
                         load_type = "strict-from-ddp-no-ffn"
                 except:
                     try:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        model.load_state_dict(state_dict, strict=False)
+                        trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp"
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
                         state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
-                        model.load_state_dict(state_dict, strict=False)
+                        trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
@@ -426,53 +436,44 @@ def train(local_rank, args):
 
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in model.named_parameters() if v.requires_grad}))
     if args["world_size"] > 1:
-        # ddp_model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
-        ddp_model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
-
-    else:
-        ddp_model = model
+        # model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
+        if args["mode"] == "clr":
+            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
+            model.student = trainable_model
+        else:
+            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)
 
     if args["moco"] and args["mode"] == "clr":
         print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
-        if isinstance(ddp_model, DDP):
-            key_backbone = copy.deepcopy(ddp_model.module.backbone).to(device)
-            key_backbone.load_state_dict(copy.deepcopy(ddp_model.module.backbone.state_dict()))
-            key_ffn = copy.deepcopy(ddp_model.module.ffn).to(device)
-            key_ffn.load_state_dict(copy.deepcopy(ddp_model.module.ffn.state_dict()))
-            key_moco_ffn = copy.deepcopy(ddp_model.module.moco_ffn).to(device)
-            key_moco_ffn.load_state_dict(copy.deepcopy(ddp_model.module.moco_ffn.state_dict()))
-        else:
-            key_backbone = copy.deepcopy(backbone).to(device)
-            key_backbone.load_state_dict(copy.deepcopy(backbone.state_dict()))
-            key_ffn = copy.deepcopy(model.ffn).to(device)
-            key_ffn.load_state_dict(copy.deepcopy(model.ffn.state_dict()))
-            key_moco_ffn = copy.deepcopy(model.moco_ffn).to(device)
-            key_moco_ffn.load_state_dict(copy.deepcopy(model.moco_ffn.state_dict()))
+        student_teacher_param_update(model.student, model.teacher, 0.99)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
-        ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
+        if args["mode"] == "clr":
+            trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
+        else:
+            trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
     except:
         print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
 
     del backbone
     clean_memory()
-    _ = model_train_validation_switch(ddp_model.module if hasattr(ddp_model, "module") else ddp_model, args, train=True)
+    _ = model_train_validation_switch(model.module if hasattr(model, "module") else model, args, train=True)
     if args["mode"] == "linear_probe":
-        _ = model_train_validation_switch(ddp_model.module.backbone if hasattr(ddp_model, "module") else ddp_model.backbone, args, train=False)
+        _ = model_train_validation_switch(model.module.backbone if hasattr(model, "module") else model.backbone, args, train=False)
     optc = optimizer_config.to_dict()
-    trainable_params = list(filter(lambda p: p.requires_grad, ddp_model.parameters()))
+    trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters() if args["mode"] == "clr" else model.parameters()))
     if args["optimizer"] == "adamw":
-        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
+        optimizer = torch.optim.AdamW(trainable_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
                                       betas=(optc["beta_1"], optc["beta_2"]))
     elif args["optimizer"] == "sgd":
-        optimizer = torch.optim.SGD(ddp_model.parameters(), lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
+        optimizer = torch.optim.SGD(trainable_params, lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     elif args["optimizer"] == "novograd":
-        optimizer = Novograd(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
+        optimizer = Novograd(trainable_params, lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
     elif args["optimizer"] == "rangerlars":
-        optimizer = RangerLars(ddp_model.parameters(), lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
+        optimizer = RangerLars(trainable_params, lr=optc["lr"], eps=optc["eps"], betas=(optc["beta_1"], optc["beta_2"]), weight_decay=optc["weight_decay"],)
     else:
         raise ValueError
-    # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in ddp_model.named_parameters() if v.requires_grad}))
+    # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in trainable_model.named_parameters() if v.requires_grad}))
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
@@ -516,7 +517,7 @@ def train(local_rank, args):
     full_times = []
     batch_times = []
     model_times = []
-    ddp_model.zero_grad(set_to_none=True)
+    model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
     if args["detect_anomaly"]:
@@ -531,7 +532,7 @@ def train(local_rank, args):
         return None
 
     if not args["no_autocast"] and args["backward_hook"]:
-        for name, param in ddp_model.named_parameters():
+        for name, param in model.named_parameters():
             param.register_hook(hook)
 
     extra_negative_repr_simclr = None
@@ -561,14 +562,7 @@ def train(local_rank, args):
             generator_w_progressive = generator_w
             discriminator_w_progressive = discriminator_w
             # simclr_w_progressive = simclr_w
-            if hasattr(ddp_model, "module"):
-                ddp_model.module.generator_w = generator_w_progressive
-                ddp_model.module.discriminator_w = discriminator_w_progressive
-                ddp_model.module.simclr_w = simclr_w_progressive
-            else:
-                ddp_model.generator_w = generator_w_progressive
-                ddp_model.discriminator_w = discriminator_w_progressive
-                ddp_model.simclr_w = simclr_w_progressive
+
             model.generator_w = generator_w_progressive
             model.discriminator_w = discriminator_w_progressive
             model.simclr_w = simclr_w_progressive
@@ -586,7 +580,7 @@ def train(local_rank, args):
             batch_times.append(gen_batch_time)
             samples_per_machine_simclr = total_samples_simclr // args["world_size"]
             if (steps_done + 1) % save_every_steps == 0:
-                state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
+                state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
                 barrier()
                 if local_rank == 0:
                     torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
@@ -597,41 +591,26 @@ def train(local_rank, args):
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
-            if args["moco"]:
-                key_backbone = key_backbone.eval()
-                key_ffn = key_ffn.eval()
-                key_moco_ffn = key_moco_ffn.eval()
-                if hasattr(ddp_model, "module"):
-                    ddp_model.module.key_backbone = key_backbone
-                    ddp_model.module.key_ffn = key_ffn
-                    ddp_model.module.key_moco_ffn = key_moco_ffn
-                    ddp_model.module.discriminator_pos_frac = discriminator_pos_frac
-                else:
-                    ddp_model.key_backbone = key_backbone
-                    ddp_model.key_ffn = key_ffn
-                    ddp_model.key_moco_ffn = key_moco_ffn
-                    ddp_model.discriminator_pos_frac = discriminator_pos_frac
-                model.key_backbone = key_backbone
-                model.key_ffn = key_ffn
-                model.key_moco_ffn = key_moco_ffn
-                model.discriminator_pos_frac = discriminator_pos_frac
+            model.discriminator_pos_frac = discriminator_pos_frac
             try:
                 model_start = time.time()
-                if no_sync and (step + 1) % iter_size != 0 and hasattr(ddp_model, "no_sync"):
-                    with ddp_model.no_sync():
-                        output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
+                    with trainable_model.no_sync():
+                        output = train_inner_loop(inner_args, model, batch, optimizer,
                                                   scheduler, gradient_clipping, iter_size=iter_size,
                                                   no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
-                                                  extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                                                  extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center,
+                                                  freeze_last_layer=epoch < args["freeze_last_layer"])
                     model_times.append(time.time() - model_start)
                 else:
-                    output = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                    output = train_inner_loop(inner_args, model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
-                                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center,
+                                              freeze_last_layer=epoch < args["freeze_last_layer"])
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
-                if args["mode"] == "clr" and hasattr(ddp_model, "no_sync") and simclr_w > 0 or dino_w > 0:
+                if args["mode"] == "clr" and hasattr(model, "no_sync") and simclr_w > 0 or dino_w > 0:
                     x1_noised = batch["x1_noised"]
                     x1_label = batch["x1_label"]
                     x2 = batch["x2"]
@@ -639,78 +618,73 @@ def train(local_rank, args):
                     x1_noised_second = batch["x1_noised_second"]
                     x1_label_second = batch["x1_label_second"]
                     x2_second = batch["x2_second"]
-                    with ddp_model.no_sync():
+                    with trainable_model.no_sync():
                         batch["x1_label"] = None
                         # batch["x1_noised"] = x1_label
-                        # _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
                         #                      scheduler, gradient_clipping, iter_size=iter_size,
                         #                      no_sync=True,
                         #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
                         # batch["x1_noised"] = x1_noised
 
                         batch["x2"] = x2_second
-                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        _ = train_inner_loop(inner_args, model, batch, optimizer,
                                              scheduler, gradient_clipping, iter_size=iter_size,
                                              no_sync=True,
                                              zero_grad_check=False,
-                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
                         # batch["x1_noised"] = x1_label
-                        # _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
                         #                      scheduler, gradient_clipping, iter_size=iter_size,
                         #                      no_sync=True,
                         #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
                         ##
 
                         batch["x2"] = x2_second
                         batch["x1_noised"] = x1_noised_second
                         batch["x1_label"] = x1_label_second
-                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        _ = train_inner_loop(inner_args, model, batch, optimizer,
                                              scheduler, gradient_clipping, iter_size=iter_size,
                                              no_sync=True,
                                              zero_grad_check=False,
-                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
                         ##
                         batch["x1_label"] = None
                         # batch["x1_noised"] = x1_label_second
-                        # _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
                         #                      scheduler, gradient_clipping, iter_size=iter_size,
                         #                      no_sync=True,
                         #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
                         batch["x1_noised"] = x1_noised_second
                         batch["x2"] = x2
-                        _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        _ = train_inner_loop(inner_args, model, batch, optimizer,
                                              scheduler, gradient_clipping, iter_size=iter_size,
                                              no_sync=True,
                                              zero_grad_check=False,
-                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
                         # batch["x1_noised"] = x1_label_second
-                        # _ = train_inner_loop(inner_args, ddp_model, batch, optimizer,
+                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
                         #                      scheduler, gradient_clipping, iter_size=iter_size,
                         #                      no_sync=True,
                         #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center)
+                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
 
-                if args["mode"] == "clr" and args["moco"] and (step + 1) % (4 * iter_size) == 0:
-                    key_backbone.load_state_dict({k_key: teacher_update_w * v_key + (1 - teacher_update_w) * v_query for (k_key, v_key), (k_query, v_query) in zip(key_backbone.state_dict().items(), ddp_model.module.backbone.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.backbone.state_dict().items())})
-                    key_ffn.load_state_dict({k_key: teacher_update_w * v_key + (1 - teacher_update_w) * v_query for (k_key, v_key), (k_query, v_query) in
-                                                  zip(key_ffn.state_dict().items(), ddp_model.module.ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.ffn.state_dict().items())})
-                    key_moco_ffn.load_state_dict({k_key: teacher_update_w * v_key + (1 - teacher_update_w) * v_query for (k_key, v_key), (k_query, v_query) in zip(key_moco_ffn.state_dict().items(), ddp_model.module.key_moco_ffn.state_dict().items() if hasattr(ddp_model, "module") else ddp_model.key_moco_ffn.state_dict().items())})
-
-                if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and (hasattr(ddp_model, "module")) and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                if args["mode"] == "clr" and args["moco"] and (step + 1) % iter_size == 0:
+                    student_teacher_param_update(model.student, model.teacher, teacher_update_w)
+                if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1 and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
                     dino_center = output.pop("dino_center", None)
                     if dino_center is not None:
                         dtype = dino_center.dtype
                         dino_center = dino_center.type(torch.float64) / args["world_size"]
                         torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
                         output["dino_center"] = dino_center.type(dtype)
-
 
                     extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
 
@@ -733,7 +707,6 @@ def train(local_rank, args):
                         extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"],
                                                                                       most_recent_simclr.size(-1))
                         output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
-
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
                 dino_center = output.pop("dino_center", None)
@@ -778,21 +751,21 @@ def train(local_rank, args):
             del bs_size
             start_time = time.time()
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    state_dict = ddp_model.state_dict() if not isinstance(ddp_model, DDP) else ddp_model.module.state_dict()
+    state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
     if local_rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
-    del ddp_model
+    del model
     if rank == 0 and args["mode"] in ['linear_probe', 'full_train']:
         model = ClassificationModel(FastFormerVisionModel(config), args["num_classes"], 768 if args["deit"] else config.block_channel_size[1],
                                     train_backbone=True if "full_train" else False).to(device)
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
         assert isinstance(model, ClassificationModel)
         ImageNetValidation(model, args["dataset"], batch_size, device, args["num_workers"])()
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
                      no_sync=False, zero_grad_check=False, extra_negative_repr_simclr=None, dino_center=None,
-                     scaler=None):
+                     scaler=None, freeze_last_layer=False):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
         if args["mode"] == "clr":
@@ -800,6 +773,10 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             x1_label = batch["x1_label"]
             x2 = batch["x2"]
             output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync, dino_center=dino_center)
+            last_layer = ddp_model.get_last_dino_layer()
+            if freeze_last_layer:
+                for p in last_layer.parameters():
+                    p.grad = None
         elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
             x = batch[0]
             labels = batch[1]

@@ -126,7 +126,7 @@ class FastFormerConfig(PretrainedConfig):
             max_position_embeddings=512,
             type_vocab_size=0,
             initializer_range=0.1,
-            initializer_std=0.1,
+            initializer_std=0.01,
             layer_norm_eps=1e-4,
             pooling_type="mean",  # learn, #learn_sdconv
             pooling_kernel_size=5,

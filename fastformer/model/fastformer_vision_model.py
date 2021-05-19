@@ -20,6 +20,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
+from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.nn.utils import weight_norm
 try:
     from performer_pytorch import SelfAttention, FastAttention
@@ -380,6 +381,9 @@ class ClassificationModel(FastFormerPreTrainedModel):
         self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, num_classes))  # nn.Sequential(nn.Linear(self.num_features, self.num_features), nn.GELU(), nn.Linear(self.num_features, num_classes))
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.train_backbone = train_backbone
+        if not train_backbone:
+            for v in self.backbone.parameters():
+                v.requires_grad = False
         if reinit_backbone:
             self.init_weights()
 
@@ -414,39 +418,31 @@ class ClassificationModel(FastFormerPreTrainedModel):
         return dict(loss=loss, logits=logits, predictions=predictions, accuracy=accuracy)
 
 
-class PatchCLR(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=768, eps=1e-7,
-                 generator_w=0.0, discriminator_w=0.0, simclr_w=1.0, dino_w=1.0,
-                 teacher_contrastive_temperature=0.04, student_contrastive_temperature=0.1,
-                 dino_cw=0.9,
-                 reinit=False):
+class PatchModel(FastFormerPreTrainedModel):
+    def __init__(self, backbone, num_features=768, reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = backbone.config.num_highway_cls_tokens if hasattr(backbone, "config") and hasattr(backbone.config, "num_highway_cls_tokens") else 1
         self.backbone = backbone
-        self.generator_w = generator_w
-        self.discriminator_w = discriminator_w
-        self.discriminator_pos_frac = 0.1
-        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
         self.ffn_input_features = num_features * self.cls_tokens
         self.num_moco_features = 128
         self.dino_dims = 2 ** 16
-        self.discriminator_tol = 0.1
-        self.fixed_tolerance_discriminator = True
-        self.simclr_temperature = 0.2
-        self.pool_kernel = (3, 2, 2)
-        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
-        if discriminator_w > 0:
-            assert generator_w > 0
+        norm_last_layer = True
+        bottleneck_dim = 256
         self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                       nn.Linear(2048, 256), nn.GELU(),
                                       nn.Linear(256, self.num_moco_features),
                                       Norm())
+        last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, self.dino_dims, bias=False))
+        last_layer.weight_g.data.fill_(1)
+        if norm_last_layer:
+            last_layer.weight_g.requires_grad = False
 
         self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                  nn.Linear(2048, 2048), nn.GELU(),
-                                 nn.Linear(2048, 512), nn.GELU(),
+                                 nn.Linear(2048, bottleneck_dim), nn.GELU(),
                                  Norm(),
-                                 nn.Linear(512, self.dino_dims))  # weight_norm
+                                 last_layer)  # weight_norm
+
         self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features),
                                            nn.Linear(num_features, num_features * 2),
                                            nn.GELU(),
@@ -454,10 +450,47 @@ class PatchCLR(FastFormerPreTrainedModel):
                                            nn.GELU(),
                                            nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                            )
+        self.pool_kernel = (3, 2, 2)
         assert num_features % np.prod(self.pool_kernel) == 0
         self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, num_features // np.prod(self.pool_kernel)))
+
+        if reinit:
+            self.init_weights()
+        init_weights(self.ffn, 0.02)
+        init_weights(last_layer, 0.1)
+        last_layer.weight_g.data.fill_(1)
+        init_weights(self.generator_ffn, 0.01)
+        init_weights(self.discriminator_ffn, 0.01)
+        init_weights(self.moco_ffn, 0.01)
+
+
+class PatchCLR:
+    def __init__(self, student: PatchModel, teacher: PatchModel, eps=1e-7,
+                 generator_w=0.0, discriminator_w=0.0, simclr_w=1.0, dino_w=1.0,
+                 teacher_contrastive_temperature=0.04, student_contrastive_temperature=0.1,
+                 dino_cw=0.9):
+
+        self.cls_tokens = student.cls_tokens
+        self.dino_dims = student.dino_dims
+        self.student = student
+        self.teacher = teacher
+        for p in teacher.parameters():
+            p.requires_grad = False
+        self.generator_w = generator_w
+        self.discriminator_w = discriminator_w
+        self.discriminator_pos_frac = 0.1
+        self.loss_ce = CrossEntropyLoss(ignore_index=-100)
+
+        self.discriminator_tol = 0.1
+        self.fixed_tolerance_discriminator = True
+        self.simclr_temperature = 0.2
+        self.pool_kernel = student.pool_kernel
+        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
+        if discriminator_w > 0:
+            assert generator_w > 0
+
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
@@ -465,17 +498,32 @@ class PatchCLR(FastFormerPreTrainedModel):
         self.simclr_w = simclr_w
         self.dino_w = dino_w
         self.dino_cw = dino_cw
-        self.key_ffn = None
-        self.key_moco_ffn = None
-        self.key_backbone = None
+
         self.loss_bce = nn.BCEWithLogitsLoss()
 
-        if reinit:
-            self.init_weights()
-        init_weights(self.ffn)
-        init_weights(self.generator_ffn)
-        init_weights(self.discriminator_ffn)
-        init_weights(self.moco_ffn)
+    def get_last_dino_layer(self):
+        if isinstance(self.student, DistributedDataParallel):
+            return self.student.module.ffn[-1]
+        return self.student.ffn[-1]
+
+    def to(self, device):
+        self.student.to(device)
+        self.teacher.to(device)
+        return self
+
+    def eval(self):
+        self.student.eval()
+        self.teacher.eval()
+        return self
+
+    def train(self):
+        self.student.train()
+        self.teacher.eval()
+        return self
+
+    def zero_grad(self, set_to_none=True):
+        self.student.zero_grad(set_to_none=set_to_none)
+        self.teacher.zero_grad(set_to_none=set_to_none)
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
@@ -490,7 +538,7 @@ class PatchCLR(FastFormerPreTrainedModel):
     def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
         b = x1_noised.size(0)
         assert torch.isfinite(x1_noised).all().item()
-        first_block_out = self.backbone.forward_first_block(x1_noised)
+        first_block_out = self.student.backbone.forward_first_block(x1_noised)
         assert torch.isfinite(first_block_out[0]).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
@@ -499,7 +547,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         absolute_reconstruction_loss = None
         extra_reconstruction_loss = None
         if self.generator_w > 0 and x1_label is not None:
-            x1_reconstruct = self.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
+            x1_reconstruct = self.student.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
             assert torch.isfinite(x1_reconstruct).all().item()
             assert torch.isfinite(x1_label).all().item()
             x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
@@ -533,21 +581,21 @@ class PatchCLR(FastFormerPreTrainedModel):
         x2_simclr = None
         x1_extras = None
         if self.simclr_w > 0 or self.dino_w > 0:
-            x1_repr = self.backbone.forward_second_block(x1_noised, first_block_out)
+            x1_repr = self.student.backbone.forward_second_block(x1_noised, first_block_out)
             assert torch.isfinite(x1_repr).all().item()
             with torch.no_grad():
                 assert torch.isfinite(x2).all().item()
-                x2_repr = self.key_backbone(x2)
+                x2_repr = self.teacher.backbone(x2)
             if self.simclr_w > 0:
                 # x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1))
-                x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
+                x1_simclr = self.student.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
                 with torch.no_grad():
-                    x2_simclr = self.key_moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
+                    x2_simclr = self.teacher.moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
             if self.dino_w > 0:
-                x1_dino = self.ffn(x1_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
+                x1_dino = self.student.ffn(x1_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
                 x1_dino = torch.log_softmax(x1_dino, 1)
                 with torch.no_grad():
-                    x2_dino = self.key_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
+                    x2_dino = self.teacher.ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
                     dino_center = self.dino_cw * dino_center + (1 - self.dino_cw)*x2_dino.mean(dim=0)
                     x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
                     x2_dino = torch.softmax(x2_dino, 1)
@@ -559,7 +607,7 @@ class PatchCLR(FastFormerPreTrainedModel):
                     x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
                     absolute_reconstruction_loss=absolute_reconstruction_loss, extra_reconstruction_loss=extra_reconstruction_loss)
 
-    def forward(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+    def __call__(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
         gen_res = self.forward_generator(x1_noised, x1_label, x2, dino_center=dino_center)
         b = x1_noised.size(0)
 
@@ -574,7 +622,7 @@ class PatchCLR(FastFormerPreTrainedModel):
         discriminator_positive_accuracy = None
         discriminator_negative_accuracy = None
         if self.discriminator_w > 0 and x1_label is not None:
-            x1_disc = self.discriminator_ffn(self.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
+            x1_disc = self.student.discriminator_ffn(self.student.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
             # x1_disc = x1_disc.reshape(b, 14 * 14, 3, 16, 16)
             # x1_disc = F.avg_pool3d(x1_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
             assert torch.isfinite(x1_disc).all().item()
@@ -689,10 +737,9 @@ if __name__ == '__main__':
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            model = PatchCLR(model, 768, 1e-7, simclr_w=1.0, dino_w=0.0, generator_w=1.0, discriminator_w=1.0,)
-            model.key_backbone = copy.deepcopy(model.backbone)
-            model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
-            model.key_ffn = copy.deepcopy(model.ffn)
+            student = PatchModel(model, 768)
+            teacher = PatchModel(copy.deepcopy(model), 768)
+            model = PatchCLR(student, teacher, 1e-7, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
             dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     else:
         model = FastFormerVisionModel(config)
@@ -703,10 +750,10 @@ if __name__ == '__main__':
         if args["classification"]:
             pass
         else:
-            model = PatchCLR(model, config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1], 1e-7, simclr_w=0.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
-            model.key_backbone = copy.deepcopy(model.backbone)
-            model.key_moco_ffn = copy.deepcopy(model.moco_ffn)
-            model.key_ffn = copy.deepcopy(model.ffn)
+            dims = config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1]
+            student = PatchModel(model, dims)
+            teacher = PatchModel(copy.deepcopy(model), dims)
+            model = PatchCLR(student, teacher, 1e-7, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
             dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
@@ -714,11 +761,11 @@ if __name__ == '__main__':
         if os.path.exists(args["pretrained_model"]):
             state_dict = torch.load(args["pretrained_model"], map_location=device)
             try:
-                model.load_state_dict(state_dict, strict=True)
+                model.student.load_state_dict(state_dict, strict=True)
             except:
                 try:
                     state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                    model.load_state_dict(state_dict, strict=False)
+                    model.student.load_state_dict(state_dict, strict=False)
                     load_type = "strict-from-ddp"
                 except:
                     print("WARN: State dict load error")
@@ -749,7 +796,7 @@ if __name__ == '__main__':
         reconstructed.show()
     output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
-    all_params = list(filter(lambda p: p.requires_grad, model.parameters()))
+    all_params = list(filter(lambda p: p.requires_grad, model.student.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
     torch.autograd.set_detect_anomaly(True)
     optimizer.zero_grad()
@@ -766,7 +813,7 @@ if __name__ == '__main__':
         _ = model.train()
 
     def get_unused_params(model):
-        for name, params in model.named_parameters():
+        for name, params in model.student.named_parameters():
             if params.grad is None:
                 print(name)
 

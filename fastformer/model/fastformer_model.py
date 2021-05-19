@@ -635,6 +635,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
     base_model_prefix = "funnel"
 
     def _init_weights(self, module):
+        from timm.models.layers.weight_init import lecun_normal_, trunc_normal_
         # print("[WARN] [FastFormerPreTrainedModel]: Time = %s, Init Weights, self type = %s" % (get_time_string(), type(self)))
         classname = module.__class__.__name__
         if classname.find("Linear") != -1:
@@ -644,17 +645,21 @@ class FastFormerPreTrainedModel(PreTrainedModel):
                     std = np.sqrt(1.0 / float(fan_in + fan_out))
                 else:
                     std = self.config.initializer_std
-                nn.init.normal_(module.weight, std=std)
+                trunc_normal_(module.weight, std=std)
 
             if getattr(module, "bias", None) is not None:
                 nn.init.constant_(module.bias, 0.0)
 
         if classname.find("Conv1d") != -1 or classname.find("Conv2d") != -1 or classname.find("ConvTranspose2d") != -1:
-            if getattr(module, "weight", None) is not None:
-                fan_out, fan_in = module.weight.shape[:2]
-                fan_out, fan_in = fan_out, fan_in
-                std = np.sqrt(1.0 / float(fan_in + fan_out))
-                nn.init.normal_(module.weight, std=std)
+            if self.config.initializer_std is None:
+
+                if getattr(module, "weight", None) is not None:
+                    fan_out, fan_in = module.weight.shape[:2]
+                    fan_out, fan_in = fan_out, fan_in
+                    std = np.sqrt(1.0 / float(fan_in + fan_out))
+            else:
+                std = self.config.initializer_std
+            trunc_normal_(module.weight, std=std)
 
             if getattr(module, "bias", None) is not None:
                 nn.init.constant_(module.bias, 0.0)
@@ -662,32 +667,35 @@ class FastFormerPreTrainedModel(PreTrainedModel):
             nn.init.uniform_(module.r_w_bias, b=self.config.initializer_range)
         elif classname == "Embeddings":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
-            nn.init.normal_(module.word_embeddings.weight, std=std)
-            nn.init.normal_(module.position_embeddings.weight, std=std)
+            trunc_normal_(module.word_embeddings.weight, std=std)
+            trunc_normal_(module.position_embeddings.weight, std=std)
             if hasattr(module, "token_type_embeddings"):
-                nn.init.normal_(module.token_type_embeddings.weight, std=std)
+                trunc_normal_(module.token_type_embeddings.weight, std=std)
             if hasattr(module, "char_embeddings"):
-                nn.init.normal_(module.char_embeddings.weight, std=std)
+                trunc_normal_(module.char_embeddings.weight, std=std)
             if hasattr(module, "highway_embeds"):
-                nn.init.normal_(module.highway_embeds, std=std)
+                trunc_normal_(module.highway_embeds, std=std)
         elif classname == "PatchEmbed":
             std = 1.0 if self.config.initializer_std is None else self.config.initializer_std
             if hasattr(module, "cls_token"):
-                nn.init.normal_(module.cls_token, std=std)
+                trunc_normal_(module.cls_token, std=std)
             if hasattr(module, "pos_embed"):
-                nn.init.normal_(module.pos_embed, std=std)
+                trunc_normal_(module.pos_embed, std=std)
             if hasattr(module, "column_embed"):
-                nn.init.normal_(module.column_embed, std=std)
+                trunc_normal_(module.column_embed, std=std)
             if hasattr(module, "row_embed"):
-                nn.init.normal_(module.row_embed, std=std)
+                trunc_normal_(module.row_embed, std=std)
             if hasattr(module, "first_pos_embed"):
-                nn.init.normal_(module.first_pos_embed, std=std)
+                trunc_normal_(module.first_pos_embed, std=std)
             if hasattr(module, "proj"):
-                if getattr(module.proj, "weight", None) is not None:
-                    fan_out, fan_in = module.proj.weight.shape[:2]
-                    fan_out, fan_in = fan_out, fan_in
-                    std = np.sqrt(1.0 / float(fan_in + fan_out))
-                    nn.init.normal_(module.proj.weight, std=std)
+                if self.config.initializer_std is None:
+                    if getattr(module.proj, "weight", None) is not None:
+                        fan_out, fan_in = module.proj.weight.shape[:2]
+                        fan_out, fan_in = fan_out, fan_in
+                        std = np.sqrt(1.0 / float(fan_in + fan_out))
+                    else:
+                        std = self.config.initializer_std
+                trunc_normal_(module.proj.weight, std=std)
 
         elif classname == "FastAttention":
             if not hasattr(module, 'projection_matrix'):

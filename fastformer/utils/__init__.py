@@ -13,6 +13,7 @@ from pytz import timezone
 import time
 from torch import nn
 from torch.nn import functional as F
+from timm.models.layers.weight_init import lecun_normal_, trunc_normal_
 
 import pandas as pd
 import random
@@ -29,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 from albumentations import augmentations as alb
 import imgaug.augmenters as iaa
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torchvision.transforms as transforms
 
 
@@ -125,6 +127,7 @@ def numel(m: torch.nn.Module, only_trainable: bool = True):
 
 def set_seeds(seed=0):
     torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = False
     random.seed(seed)
     np.random.seed(seed)
@@ -757,19 +760,27 @@ class Norm(nn.Module):
         return x
 
 
-def init_weights(module):
+def init_weights(module, std=None):
     if isinstance(module, nn.Sequential):
         for mod in module:
             init_weights(mod)
     else:
-        if hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
+        if std is not None:
+            pass
+        elif hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
             fan_out, fan_in = module.weight.shape[:2]
             std = np.sqrt(1.0 / float(fan_in + fan_out))
-            nn.init.normal_(module.weight, std=std)
         elif hasattr(module, "weight"):
             std = np.sqrt(1.0 / module.weight.shape[-1])
-            nn.init.normal_(module.weight, std=std)
+        if hasattr(module, "weight"):
+            trunc_normal_(module.weight, std=std)
         if hasattr(module, "bias") and module.bias is not None:
             nn.init.constant_(module.bias, 0.0)
+
+
+def student_teacher_param_update(student, teacher, m):
+    for param_q, param_k in zip((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).parameters(), teacher.parameters()):
+        param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+
 
 
