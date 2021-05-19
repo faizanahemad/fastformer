@@ -419,7 +419,9 @@ class ClassificationModel(FastFormerPreTrainedModel):
 
 
 class PatchModel(FastFormerPreTrainedModel):
-    def __init__(self, backbone, num_features=768, reinit=False):
+    def __init__(self, backbone, num_features=768,
+                 generator_w=0.0, discriminator_w=0.0, simclr_w=1.0, dino_w=1.0,
+                 reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = backbone.config.num_highway_cls_tokens if hasattr(backbone, "config") and hasattr(backbone.config, "num_highway_cls_tokens") else 1
         self.backbone = backbone
@@ -428,6 +430,17 @@ class PatchModel(FastFormerPreTrainedModel):
         self.dino_dims = 2 ** 16
         norm_last_layer = True
         bottleneck_dim = 256
+        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
+        if discriminator_w > 0:
+            assert generator_w > 0
+        self.generator_w = generator_w
+        self.discriminator_w = discriminator_w
+        self.simclr_w = simclr_w
+        self.dino_w = dino_w
+        self.fixed_tolerance_discriminator = True
+        self.discriminator_tol = 0.1
+        self.loss_bce = nn.BCEWithLogitsLoss()
+
         self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                       nn.Linear(2048, 256), nn.GELU(),
                                       nn.Linear(256, self.num_moco_features),
@@ -465,10 +478,89 @@ class PatchModel(FastFormerPreTrainedModel):
         init_weights(self.discriminator_ffn, 0.01)
         init_weights(self.moco_ffn, 0.01)
 
+    def forward(self, x1_noised, x1_label=None):
+        b = x1_noised.size(0)
+        assert torch.isfinite(x1_noised).all().item()
+        first_block_out = self.backbone.forward_first_block(x1_noised)
+        assert torch.isfinite(first_block_out[0]).all().item()
+        x1_reconstruct = None
+        label_for_discriminator = None
+        reconstruction_loss = None
+        discriminator_label_mean = None
+        absolute_reconstruction_loss = None
+        extra_reconstruction_loss = None
+        extra_reconstruction_small_pool_loss = None
+        if self.generator_w > 0 and x1_label is not None:
+            x1_reconstruct = self.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
+            assert torch.isfinite(x1_reconstruct).all().item()
+            assert torch.isfinite(x1_label).all().item()
+
+            x1_label_copy = x1_label
+            x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14 * 14, -1)
+            reconstruction_loss = torch.abs(x1_reconstruct - x1_label)
+            x1_reconstruct = x1_reconstruct.detach()
+            reconstruction_loss_by_averaging = torch.abs(x1_label - x1_label.mean(-1).unsqueeze(-1))
+            extra_reconstruction_loss = (reconstruction_loss_by_averaging - reconstruction_loss.detach()).mean()
+            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
+            reconstruction_loss_by_averaging = torch.abs(F.max_pool2d(x1_label_copy, kernel_size=3, stride=1, padding=1) - x1_label_copy)
+            extra_reconstruction_small_pool_loss = (reconstruction_loss_by_averaging - torch.abs(x1_label_copy - x1_reconstruct)).mean()
+            reconstruction_loss = reconstruction_loss.reshape(b, 14 * 14, 3, 16, 16)
+            reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
+            absolute_reconstruction_loss = reconstruction_loss.detach()
+            assert torch.isfinite(reconstruction_loss).all().item()
+            if self.fixed_tolerance_discriminator:
+                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
+            else:
+                losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
+                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
+                label_for_discriminator = torch.zeros_like(losses_per_region)
+                label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
+            reconstruction_loss = reconstruction_loss.mean(-1).mean(-1).mean()
+            absolute_reconstruction_loss = reconstruction_loss.detach()
+            discriminator_label_mean = label_for_discriminator.mean().item()
+
+            # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+
+            reconstruction_loss = self.generator_w * reconstruction_loss
+
+        discriminator_loss = None
+        discriminator_accuracy = None
+        discriminator_positive_accuracy = None
+        discriminator_negative_accuracy = None
+        if self.discriminator_w > 0 and x1_label is not None:
+            x1_disc = self.discriminator_ffn(self.backbone(x1_reconstruct)[:, self.cls_tokens:])
+
+
+            # x1_disc = x1_disc.reshape(b, 14 * 14, 3, 16, 16)
+            # x1_disc = F.avg_pool3d(x1_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
+            assert torch.isfinite(x1_disc).all().item()
+            logits = x1_disc.squeeze(-1).reshape(b, -1)
+            label_for_discriminator = label_for_discriminator.reshape(b, -1)
+            discriminator_loss = self.discriminator_w * self.loss_bce(logits, label_for_discriminator)
+            predictions = (torch.sigmoid(logits.detach()) > 0.5).type(torch.float)
+            sample_accuracies = (predictions == label_for_discriminator).type(torch.float)
+            label_for_discriminator = label_for_discriminator.bool()
+            discriminator_positive_accuracy = sample_accuracies[label_for_discriminator].mean().item()
+            discriminator_negative_accuracy = sample_accuracies[torch.logical_not(label_for_discriminator)].mean().item()
+            discriminator_accuracy = torch.mean(sample_accuracies).item()
+
+        x1_simclr = None
+        x1_dino = None
+        if self.simclr_w > 0 or self.dino_w > 0:
+            x1_repr = self.backbone.forward_second_block(x1_noised, first_block_out)
+            if self.simclr_w > 0:
+                x1_simclr = self.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
+            if self.dino_w > 0:
+                x1_dino = self.ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
+        return dict(reconstruction_loss=reconstruction_loss, discriminator_label_mean=discriminator_label_mean, absolute_reconstruction_loss=absolute_reconstruction_loss,
+                    extra_reconstruction_small_pool_loss=extra_reconstruction_small_pool_loss, extra_reconstruction_loss=extra_reconstruction_loss,
+                    discriminator_loss=discriminator_loss, discriminator_accuracy=discriminator_accuracy,
+                    discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
+                    simclr=x1_simclr, dino=x1_dino, reconstruct=x1_reconstruct)
+
 
 class PatchCLR:
     def __init__(self, student: PatchModel, teacher: PatchModel, eps=1e-7,
-                 generator_w=0.0, discriminator_w=0.0, simclr_w=1.0, dino_w=1.0,
                  teacher_contrastive_temperature=0.04, student_contrastive_temperature=0.1,
                  dino_cw=0.9):
 
@@ -478,28 +570,24 @@ class PatchCLR:
         self.teacher = teacher
         for p in teacher.parameters():
             p.requires_grad = False
-        self.generator_w = generator_w
-        self.discriminator_w = discriminator_w
+        teacher.generator_w = 0.0
+        teacher.discriminator_w = 0.0
+        self.generator_w = student.generator_w
+        self.discriminator_w = student.discriminator_w
         self.discriminator_pos_frac = 0.1
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
 
-        self.discriminator_tol = 0.1
-        self.fixed_tolerance_discriminator = True
         self.simclr_temperature = 0.2
         self.pool_kernel = student.pool_kernel
-        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
-        if discriminator_w > 0:
-            assert generator_w > 0
+
 
 
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
         self.student_contrastive_temperature = student_contrastive_temperature
-        self.simclr_w = simclr_w
-        self.dino_w = dino_w
+        self.simclr_w = student.simclr_w
+        self.dino_w = student.dino_w
         self.dino_cw = dino_cw
-
-        self.loss_bce = nn.BCEWithLogitsLoss()
 
     def get_last_dino_layer(self):
         if isinstance(self.student, DistributedDataParallel):
@@ -535,142 +623,95 @@ class PatchCLR:
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def forward_generator(self, x1_noised, x1_label, x2, dino_center=None):
-        b = x1_noised.size(0)
-        assert torch.isfinite(x1_noised).all().item()
-        first_block_out = self.student.backbone.forward_first_block(x1_noised)
-        assert torch.isfinite(first_block_out[0]).all().item()
-        x1_reconstruct = None
-        label_for_discriminator = None
-        reconstruction_loss = None
-        discriminator_label_mean = None
-        absolute_reconstruction_loss = None
-        extra_reconstruction_loss = None
-        if self.generator_w > 0 and x1_label is not None:
-            x1_reconstruct = self.student.generator_ffn(first_block_out[0][:, self.cls_tokens:])  # * 3
-            assert torch.isfinite(x1_reconstruct).all().item()
-            assert torch.isfinite(x1_label).all().item()
-            x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14*14, -1)
-            reconstruction_loss = torch.abs(x1_reconstruct - x1_label)
-            x1_reconstruct = x1_reconstruct.detach()
-            reconstruction_loss_by_averaging = torch.abs(x1_label - x1_label.mean(-1).unsqueeze(-1))
-            extra_reconstruction_loss = (reconstruction_loss_by_averaging - reconstruction_loss.detach()).mean()
-            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
-            reconstruction_loss = reconstruction_loss.reshape(b, 14 * 14, 3, 16, 16)
-            reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
-            absolute_reconstruction_loss = reconstruction_loss.detach()
-            assert torch.isfinite(reconstruction_loss).all().item()
-            if self.fixed_tolerance_discriminator:
-                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
+    def dino_loss(self, x1_dino, x2_dino, dino_center, x2_dino_dash=None):
+        x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, 1)
+        dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * (torch.cat((x2_dino, x2_dino_dash)) if x2_dino_dash is not None else x2_dino).mean(dim=0)
+        x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
+        x2_dino = torch.softmax(x2_dino, 1)
+        dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
+        dino_loss = self.dino_w * dino_loss
+
+        if x2_dino_dash is not None:
+            x2_dino_dash = (x2_dino_dash - dino_center) / self.teacher_contrastive_temperature
+            x2_dino_dash = torch.softmax(x2_dino_dash, 1)
+            dino_loss_dash = -1 * (x2_dino_dash * x1_dino).sum(dim=1).mean()
+            dino_loss_dash = self.dino_w * dino_loss_dash
+            dino_loss = (dino_loss + dino_loss_dash) / 2.0
+
+        return dict(dino_loss=dino_loss, dino_center=dino_center)
+
+    def simclr_loss(self, b1s, b2s, b2s_dash=None, extra_negative_repr_simclr=None, calculate_accuracy=False):
+        eye = (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
+        own_negatives = b1s.mm(b1s.t() * eye)
+        b2s_matrix = b1s.mm(b2s.t())
+
+        if extra_negative_repr_simclr is not None:
+            extra_neg_matrix = b1s.mm(extra_negative_repr_simclr.t())
+            contrastive_matrix = torch.cat((b2s_matrix, extra_neg_matrix, own_negatives), 1)
+            extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
+        else:
+            contrastive_matrix = torch.cat((b2s_matrix, own_negatives), 1)
+            extra_negative_repr_simclr = b2s.detach()
+
+        simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
+
+        if b2s_dash is not None:
+            b2s_matrix = b2s_matrix * eye
+            b2sd_matrix = b1s.mm(b2s_dash.t())
+            if extra_negative_repr_simclr is not None:
+                contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, extra_neg_matrix, own_negatives), 1)
             else:
-                losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
-                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
-                label_for_discriminator = torch.zeros_like(losses_per_region)
-                label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
-            reconstruction_loss = reconstruction_loss.mean(-1).mean(-1).mean()
-            absolute_reconstruction_loss = reconstruction_loss.detach()
-            discriminator_label_mean = label_for_discriminator.mean().item()
+                contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, own_negatives), 1)
 
-            # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
+            simclr_loss_dash, simclr_accuracy_dash = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
+            simclr_loss = (simclr_loss + simclr_loss_dash)/2.0
+            if calculate_accuracy:
+                simclr_accuracy = (simclr_accuracy + simclr_accuracy_dash)/2.0
+        simclr_loss = self.simclr_w * simclr_loss
+        return dict(simclr_loss=simclr_loss, simclr_accuracy=simclr_accuracy, extra_negative_repr_simclr=extra_negative_repr_simclr)
 
-            reconstruction_loss = self.generator_w * reconstruction_loss
-
-        simclr_loss = 0
-        dino_loss = 0
-        x1_simclr = None
-        x2_simclr = None
-        x1_extras = None
-        if self.simclr_w > 0 or self.dino_w > 0:
-            x1_repr = self.student.backbone.forward_second_block(x1_noised, first_block_out)
-            assert torch.isfinite(x1_repr).all().item()
-            with torch.no_grad():
-                assert torch.isfinite(x2).all().item()
-                x2_repr = self.teacher.backbone(x2)
-            if self.simclr_w > 0:
-                # x1_extras = self.moco_ffn(self.backbone(torch.cat((x1_label_saved, x2)))[:, :self.cls_tokens].view(2*b, -1))
-                x1_simclr = self.student.moco_ffn(x1_repr[:, :self.cls_tokens].view(b, -1))
-                with torch.no_grad():
-                    x2_simclr = self.teacher.moco_ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
-            if self.dino_w > 0:
-                x1_dino = self.student.ffn(x1_repr[:, :self.cls_tokens].view(b, -1)) / self.student_contrastive_temperature
-                x1_dino = torch.log_softmax(x1_dino, 1)
-                with torch.no_grad():
-                    x2_dino = self.teacher.ffn(x2_repr[:, :self.cls_tokens].view(b, -1)).detach()
-                    dino_center = self.dino_cw * dino_center + (1 - self.dino_cw)*x2_dino.mean(dim=0)
-                    x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
-                    x2_dino = torch.softmax(x2_dino, 1)
-                dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
-                dino_loss = self.dino_w * dino_loss
-
-        return dict(reconstruction_loss=reconstruction_loss, simclr_loss=simclr_loss, dino_loss=dino_loss, discriminator_label_mean=discriminator_label_mean,
-                    x1_reconstruct=x1_reconstruct, label_for_discriminator=label_for_discriminator, dino_center=dino_center,
-                    x1_simclr=x1_simclr, x2_simclr=x2_simclr, x1_extras=x1_extras,
-                    absolute_reconstruction_loss=absolute_reconstruction_loss, extra_reconstruction_loss=extra_reconstruction_loss)
-
-    def __call__(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
-        gen_res = self.forward_generator(x1_noised, x1_label, x2, dino_center=dino_center)
-        b = x1_noised.size(0)
+    def __call__(self, x1_noised, x1_label, x2, x2_dash=None, x2_small=None, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+        student_rep = self.student(x1_noised, x1_label)
+        with torch.no_grad():
+            teacher_rep = self.teacher(x2, None)
+            dino_dash = None
+            simclr_dash = None
+            if x2_dash is not None:
+                teacher_rep_dash = self.teacher(x2_dash, None)
+                dino_dash = teacher_rep_dash["dino"].detach()
+                simclr_dash = teacher_rep_dash["simclr"].detach()
 
         loss = 0.0
         dino_loss = None
         if self.dino_w > 0:
-            dino_loss = gen_res["dino_loss"]
+            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, dino_dash)
+            dino_center = dino_results["dino_center"]
+            dino_loss = dino_results["dino_loss"]
             loss += dino_loss
 
-        discriminator_loss = None
-        discriminator_accuracy = None
-        discriminator_positive_accuracy = None
-        discriminator_negative_accuracy = None
-        if self.discriminator_w > 0 and x1_label is not None:
-            x1_disc = self.student.discriminator_ffn(self.student.backbone(gen_res["x1_reconstruct"])[:, self.cls_tokens:])
-            # x1_disc = x1_disc.reshape(b, 14 * 14, 3, 16, 16)
-            # x1_disc = F.avg_pool3d(x1_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
-            assert torch.isfinite(x1_disc).all().item()
-            logits = x1_disc.squeeze(-1).reshape(b, -1)
-            label_for_discriminator = gen_res["label_for_discriminator"].reshape(b, -1)
-            discriminator_loss = self.discriminator_w * self.loss_bce(logits, label_for_discriminator)
-            predictions = (torch.sigmoid(logits.detach()) > 0.5).type(torch.float)
-            sample_accuracies = (predictions == label_for_discriminator).type(torch.float)
-            label_for_discriminator = label_for_discriminator.bool()
-            discriminator_positive_accuracy = sample_accuracies[label_for_discriminator].mean().item()
-            discriminator_negative_accuracy = sample_accuracies[torch.logical_not(label_for_discriminator)].mean().item()
-            discriminator_accuracy = torch.mean(sample_accuracies).item()
-            loss += discriminator_loss
-        reconstruction_loss = gen_res["reconstruction_loss"]
+        reconstruction_loss = student_rep["reconstruction_loss"]
         if reconstruction_loss is not None:
             loss += reconstruction_loss
 
+        discriminator_loss = student_rep["discriminator_loss"]
+        if discriminator_loss is not None:
+            loss += discriminator_loss
+
         simclr_loss = None
         simclr_accuracy = None
-        simclr_accuracy_simple = None
         if self.simclr_w > 0:
-            b1s = gen_res["x1_simclr"]
-            b2s = gen_res["x2_simclr"]
-            l_idxs = torch.arange(b1s.size(0))
-            if gen_res["x1_extras"] is not None:
-                b3s = gen_res["x1_extras"]
-                own_negatives = b1s.mm(b3s.t())
-                own_negatives[torch.cat((l_idxs, l_idxs)), torch.cat((l_idxs, l_idxs + b1s.size(0)))] *= 0.0
-            else:
-                own_negatives = b1s.mm(b1s.t()) * (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
-
-            if extra_negative_repr_simclr is not None:
-                contrastive_matrix = b1s.mm(torch.cat((b2s, extra_negative_repr_simclr)).t())
-                extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
-            else:
-                contrastive_matrix = b1s.mm(b2s.t())
-                extra_negative_repr_simclr = b2s.detach()
-            contrastive_matrix = torch.cat((contrastive_matrix, own_negatives), 1)
-
-            simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
-            simclr_loss = self.simclr_w * simclr_loss
+            simclr_results = self.simclr_loss(student_rep["simclr"], teacher_rep["simclr"].detach(), simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
+            simclr_loss = simclr_results["simclr_loss"]
+            simclr_accuracy = simclr_results["simclr_accuracy"]
+            extra_negative_repr_simclr = simclr_results["extra_negative_repr_simclr"]
             loss += simclr_loss
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
-                    simclr_accuracy=simclr_accuracy, discriminator_accuracy=discriminator_accuracy, simclr_accuracy_simple=simclr_accuracy_simple,
-                    discriminator_label_mean=gen_res["discriminator_label_mean"],
-                    extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=gen_res["dino_center"], absolute_reconstruction_loss=gen_res["absolute_reconstruction_loss"],
-                    discriminator_negative_accuracy=discriminator_negative_accuracy, discriminator_positive_accuracy=discriminator_positive_accuracy, extra_reconstruction_loss=gen_res["extra_reconstruction_loss"])
+                    simclr_accuracy=simclr_accuracy, discriminator_accuracy=student_rep["discriminator_accuracy"],
+                    discriminator_label_mean=student_rep["discriminator_label_mean"],
+                    extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, absolute_reconstruction_loss=student_rep["absolute_reconstruction_loss"],
+                    discriminator_negative_accuracy=student_rep["discriminator_negative_accuracy"], discriminator_positive_accuracy=student_rep["discriminator_positive_accuracy"],
+                    extra_reconstruction_loss=student_rep["extra_reconstruction_loss"], extra_reconstruction_small_pool_loss=student_rep["extra_reconstruction_small_pool_loss"])
 
 
 if __name__ == '__main__':
@@ -737,9 +778,9 @@ if __name__ == '__main__':
             model = get_pretrained_deit(False)
         else:
             model = get_pretrained_deit()
-            student = PatchModel(model, 768)
-            teacher = PatchModel(copy.deepcopy(model), 768)
-            model = PatchCLR(student, teacher, 1e-7, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            student = PatchModel(model, 768, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            teacher = PatchModel(copy.deepcopy(model), 768, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            model = PatchCLR(student, teacher, 1e-7, )
             dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     else:
         model = FastFormerVisionModel(config)
@@ -751,9 +792,9 @@ if __name__ == '__main__':
             pass
         else:
             dims = config.block_channel_size[0] if config.has_decoder else config.block_channel_size[1]
-            student = PatchModel(model, dims)
-            teacher = PatchModel(copy.deepcopy(model), dims)
-            model = PatchCLR(student, teacher, 1e-7, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            student = PatchModel(model, dims, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            teacher = PatchModel(copy.deepcopy(model), dims, simclr_w=1.0, dino_w=1.0, generator_w=1.0, discriminator_w=1.0,)
+            model = PatchCLR(student, teacher, 1e-7)
             dino_center = torch.zeros(model.dino_dims, device=device) if model.dino_w > 0 else None
     if "pretrained_model" in args and args["pretrained_model"] is not None:
         if not os.path.exists(args["pretrained_model"]):
@@ -788,7 +829,7 @@ if __name__ == '__main__':
         dog_noised_pt = image_transforms["to_pytorch"](dog_noised)
 
         with torch.no_grad():
-            reconstructed = model.forward_generator(dog_noised_pt.unsqueeze(0), dog_pt.unsqueeze(0), dog_pt.unsqueeze(0), dino_center=dino_center)["x1_reconstruct"].squeeze(0)
+            reconstructed = model.student(dog_noised_pt.unsqueeze(0), dog_pt.unsqueeze(0))["reconstruct"].squeeze(0)
             reconstructed = image_transforms["from_pytorch"](reconstructed)
 
         dog.show()

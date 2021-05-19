@@ -424,6 +424,8 @@ def train(local_rank, args):
                         state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
                         trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
+        if args["mode"] == "clr":
+            student_teacher_param_update(model.student, model.teacher, 0.001)
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
@@ -611,39 +613,9 @@ def train(local_rank, args):
                     optimizer.zero_grad(set_to_none=True)
                     model_times.append(time.time() - model_start)
                 if args["mode"] == "clr" and hasattr(model, "no_sync") and simclr_w > 0 or dino_w > 0:
-                    x1_noised = batch["x1_noised"]
-                    x1_label = batch["x1_label"]
-                    x2 = batch["x2"]
-
                     x1_noised_second = batch["x1_noised_second"]
                     x1_label_second = batch["x1_label_second"]
-                    x2_second = batch["x2_second"]
                     with trainable_model.no_sync():
-                        batch["x1_label"] = None
-                        # batch["x1_noised"] = x1_label
-                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
-                        #                      scheduler, gradient_clipping, iter_size=iter_size,
-                        #                      no_sync=True,
-                        #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-                        # batch["x1_noised"] = x1_noised
-
-                        batch["x2"] = x2_second
-                        _ = train_inner_loop(inner_args, model, batch, optimizer,
-                                             scheduler, gradient_clipping, iter_size=iter_size,
-                                             no_sync=True,
-                                             zero_grad_check=False,
-                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-
-                        # batch["x1_noised"] = x1_label
-                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
-                        #                      scheduler, gradient_clipping, iter_size=iter_size,
-                        #                      no_sync=True,
-                        #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-                        ##
-
-                        batch["x2"] = x2_second
                         batch["x1_noised"] = x1_noised_second
                         batch["x1_label"] = x1_label_second
                         _ = train_inner_loop(inner_args, model, batch, optimizer,
@@ -651,29 +623,6 @@ def train(local_rank, args):
                                              no_sync=True,
                                              zero_grad_check=False,
                                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-                        ##
-                        batch["x1_label"] = None
-                        # batch["x1_noised"] = x1_label_second
-                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
-                        #                      scheduler, gradient_clipping, iter_size=iter_size,
-                        #                      no_sync=True,
-                        #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-
-                        batch["x1_noised"] = x1_noised_second
-                        batch["x2"] = x2
-                        _ = train_inner_loop(inner_args, model, batch, optimizer,
-                                             scheduler, gradient_clipping, iter_size=iter_size,
-                                             no_sync=True,
-                                             zero_grad_check=False,
-                                             extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
-
-                        # batch["x1_noised"] = x1_label_second
-                        # _ = train_inner_loop(inner_args, model, batch, optimizer,
-                        #                      scheduler, gradient_clipping, iter_size=iter_size,
-                        #                      no_sync=True,
-                        #                      zero_grad_check=False,
-                        #                      extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
 
                 if args["mode"] == "clr" and args["moco"] and (step + 1) % iter_size == 0:
@@ -772,7 +721,8 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             x1_noised = batch["x1_noised"]
             x1_label = batch["x1_label"]
             x2 = batch["x2"]
-            output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync, dino_center=dino_center)
+            x2_second = batch["x2_second"]
+            output = ddp_model(x1_noised, x1_label, x2, x2_dash=x2_second, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync, dino_center=dino_center)
             last_layer = ddp_model.get_last_dino_layer()
             if freeze_last_layer:
                 for p in last_layer.parameters():
