@@ -682,8 +682,10 @@ class PatchCLR:
             simclr_dash = None
             if x2_dash is not None:
                 teacher_rep_dash = self.teacher(x2_dash, None)
-                dino_dash = teacher_rep_dash["dino"].detach()
-                simclr_dash = teacher_rep_dash["simclr"].detach()
+                if self.dino_w > 0:
+                    dino_dash = teacher_rep_dash["dino"].detach()
+                if self.simclr_w > 0:
+                    simclr_dash = teacher_rep_dash["simclr"].detach()
 
         loss = 0.0
         dino_loss = None
