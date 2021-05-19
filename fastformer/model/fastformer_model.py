@@ -635,7 +635,7 @@ class FastFormerPreTrainedModel(PreTrainedModel):
     base_model_prefix = "funnel"
 
     def _init_weights(self, module):
-        from timm.models.layers.weight_init import lecun_normal_, trunc_normal_
+        from timm.models.layers.weight_init import trunc_normal_
         # print("[WARN] [FastFormerPreTrainedModel]: Time = %s, Init Weights, self type = %s" % (get_time_string(), type(self)))
         classname = module.__class__.__name__
         if classname.find("Linear") != -1:

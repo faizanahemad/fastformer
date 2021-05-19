@@ -13,7 +13,7 @@ from pytz import timezone
 import time
 from torch import nn
 from torch.nn import functional as F
-from timm.models.layers.weight_init import lecun_normal_, trunc_normal_
+from timm.models.layers.weight_init import trunc_normal_
 
 import pandas as pd
 import random
