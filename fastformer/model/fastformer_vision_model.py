@@ -685,7 +685,7 @@ class PatchCLR:
         assert len(x1_noised.shape) == 5
         assert len(x1_label.shape) == 5
         assert len(x2.shape) == 5
-        b, mcx1 = x1.shape[:2]
+        b, mcx1 = x1_noised.shape[:2]
         b, mcx2 = x2.shape[:2]
         x1_noised = x1_noised.transpose(0, 1).reshape(-1, *x1_noised.shape[2:])
         x1_label = x1_label.transpose(0, 1).reshape(-1, *x1_label.shape[2:])
