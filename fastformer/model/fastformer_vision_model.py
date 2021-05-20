@@ -627,20 +627,24 @@ class PatchCLR:
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def dino_loss(self, x1_dino, x2_dino, dino_center, x2_dino_dash=None):
+    def dino_loss(self, x1_dino, x2_dino, dino_center, x1_dino_dash=None, x2_dino_dash=None):
         x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, 1)
+        x1_dino_dash = torch.log_softmax(x1_dino_dash / self.student_contrastive_temperature, 1) if x1_dino_dash is not None else x1_dino_dash
         dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * (torch.cat((x2_dino, x2_dino_dash)) if x2_dino_dash is not None else x2_dino).mean(dim=0)
         x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
         x2_dino = torch.softmax(x2_dino, 1)
-        dino_loss = -1 * (x2_dino * x1_dino).sum(dim=1).mean()
+        dino_loss = (-1 * (x2_dino * x1_dino).sum(dim=1).mean()) + (-1 * (x2_dino * x1_dino_dash).sum(dim=1).mean()) if x1_dino_dash is not None else 0.0
         dino_loss = self.dino_w * dino_loss
 
         if x2_dino_dash is not None:
             x2_dino_dash = (x2_dino_dash - dino_center) / self.teacher_contrastive_temperature
             x2_dino_dash = torch.softmax(x2_dino_dash, 1)
-            dino_loss_dash = -1 * (x2_dino_dash * x1_dino).sum(dim=1).mean()
+            dino_loss_dash = (-1 * (x2_dino_dash * x1_dino).sum(dim=1).mean()) + (-1 * (x2_dino_dash * x1_dino_dash).sum(dim=1).mean()) if x1_dino_dash is not None else 0.0
             dino_loss_dash = self.dino_w * dino_loss_dash
             dino_loss = (dino_loss + dino_loss_dash) / 2.0
+
+        if x1_dino_dash is not None:
+            dino_loss = dino_loss / 2.0
 
         return dict(dino_loss=dino_loss, dino_center=dino_center)
 
@@ -674,10 +678,12 @@ class PatchCLR:
         simclr_loss = self.simclr_w * simclr_loss
         return dict(simclr_loss=simclr_loss, simclr_accuracy=simclr_accuracy, extra_negative_repr_simclr=extra_negative_repr_simclr)
 
-    def __call__(self, x1_noised, x1_label, x2, x2_dash=None, x2_small=None, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+    def __call__(self, x1_noised, x1_label, x2, x1_noised_dash=None, x2_dash=None, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
         student_rep = self.student(x1_noised, x1_label)
+        student_dashed = self.student(x1_noised_dash, None) if x1_noised_dash is not None else dict()
         with torch.no_grad():
             teacher_rep = self.teacher(x2, None)
+            simclr = teacher_rep["simclr"].detach()
             dino_dash = None
             simclr_dash = None
             if x2_dash is not None:
@@ -690,7 +696,7 @@ class PatchCLR:
         loss = 0.0
         dino_loss = None
         if self.dino_w > 0:
-            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, dino_dash)
+            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, student_dashed.pop("dino", None), dino_dash)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
             loss += dino_loss
@@ -706,9 +712,19 @@ class PatchCLR:
         simclr_loss = None
         simclr_accuracy = None
         if self.simclr_w > 0:
-            simclr_results = self.simclr_loss(student_rep["simclr"], teacher_rep["simclr"].detach(), simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
+            simclr_results = self.simclr_loss(student_rep["simclr"], simclr, simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
             simclr_loss = simclr_results["simclr_loss"]
             simclr_accuracy = simclr_results["simclr_accuracy"]
+
+            if "simclr" in student_dashed:
+                results = self.simclr_loss(student_dashed["simclr"], simclr, simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=False)
+                simclr_loss = (simclr_loss + results["simclr_loss"]) / 2.0
+                simclr_accuracy = (simclr_accuracy + results["simclr_accuracy"]) / 2.0
+
+                results = self.simclr_loss(student_dashed["simclr"], student_rep["simclr"], None, extra_negative_repr_simclr=extra_negative_repr_simclr,
+                                           calculate_accuracy=False)
+                simclr_loss = simclr_loss + 0.5 * results["simclr_loss"]
+
             extra_negative_repr_simclr = simclr_results["extra_negative_repr_simclr"]
             loss += simclr_loss
 
@@ -842,7 +858,7 @@ if __name__ == '__main__':
         dog.show()
         dog_noised.show()
         reconstructed.show()
-    output = model(x1, x1, x2, x2, calculate_accuracy=True, dino_center=dino_center)
+    output = model(x1, x1, x2, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
     all_params = list(filter(lambda p: p.requires_grad, model.student.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
