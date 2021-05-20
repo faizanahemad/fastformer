@@ -458,43 +458,51 @@ class PatchModel(FastFormerPreTrainedModel):
         if reinit:
             self.init_weights()
 
-        self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
-                                      nn.Linear(2048, 256), nn.GELU(),
-                                      nn.Linear(256, self.num_moco_features),
-                                      Norm())
-        last_layer = nn.Linear(bottleneck_dim, self.dino_dims, bias=False)
-        init_weights(last_layer, 0.02)
-        last_layer = nn.utils.weight_norm(last_layer)
-        last_layer.weight_g.data.fill_(1)
-        if norm_last_layer:
-            last_layer.weight_g.requires_grad = False
+        if simclr_w > 0:
+            self.moco_ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
+                                          nn.Linear(2048, 256), nn.GELU(),
+                                          nn.Linear(256, self.num_moco_features),
+                                          Norm())
+            init_weights(self.moco_ffn, 0.01)
 
-        self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
-                                 nn.Linear(2048, 2048), nn.GELU(),
-                                 nn.Linear(2048, bottleneck_dim), nn.GELU(),
-                                 Norm(),
-                                 last_layer)  # weight_norm
+        if dino_w > 0:
+            last_layer = nn.Linear(bottleneck_dim, self.dino_dims, bias=False)
+            init_weights(last_layer, 0.02)
+            last_layer = nn.utils.weight_norm(last_layer)
+            last_layer.weight_g.data.fill_(1)
+            if norm_last_layer:
+                last_layer.weight_g.requires_grad = False
 
-        self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features),
-                                           nn.Linear(num_features, num_features * 2),
-                                           nn.GELU(),
-                                           nn.Linear(num_features * 2, num_features * 2),
-                                           nn.GELU(),
-                                           nn.Linear(num_features * 2, num_features),  # nn.Tanh()
-                                           )
+            self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
+                                     nn.Linear(2048, 2048), nn.GELU(),
+                                     nn.Linear(2048, bottleneck_dim), nn.GELU(),
+                                     Norm(),
+                                     last_layer)  # weight_norm
+            init_weights(self.ffn[0], 0.02)
+            init_weights(self.ffn[1], 0.02)
+            init_weights(self.ffn[2], 0.02)
+            last_layer.weight_g.data.fill_(1)
+
+        if generator_w > 0:
+            self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features),
+                                               nn.Linear(num_features, num_features * 2),
+                                               nn.GELU(),
+                                               nn.Linear(num_features * 2, num_features * 2),
+                                               nn.GELU(),
+                                               nn.Linear(num_features * 2, num_features),  # nn.Tanh()
+                                               )
+            init_weights(self.generator_ffn, 0.01)
+
         self.pool_kernel = (3, 2, 2)
         assert num_features % np.prod(self.pool_kernel) == 0
-        self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
-                                               nn.GELU(),
-                                               nn.Linear(num_features * 2, num_features // np.prod(self.pool_kernel)))
+        if discriminator_w > 0:
+            self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features), nn.Linear(num_features, num_features * 2),
+                                                   nn.GELU(),
+                                                   nn.Linear(num_features * 2, num_features // np.prod(self.pool_kernel)))
 
-        init_weights(self.ffn[0], 0.02)
-        init_weights(self.ffn[1], 0.02)
-        init_weights(self.ffn[2], 0.02)
-        last_layer.weight_g.data.fill_(1)
-        init_weights(self.generator_ffn, 0.01)
-        init_weights(self.discriminator_ffn, 0.01)
-        init_weights(self.moco_ffn, 0.01)
+
+
+            init_weights(self.discriminator_ffn, 0.01)
 
     def forward(self, x1_noised, x1_label=None):
         b = x1_noised.size(0)
