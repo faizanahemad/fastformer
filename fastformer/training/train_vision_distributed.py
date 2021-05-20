@@ -439,10 +439,10 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         # model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
         if args["mode"] == "clr":
-            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
+            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
             model.student = trainable_model
         else:
-            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)
+            trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)
 
     if args["moco"] and args["mode"] == "clr":
         print("[Train]: Time = %s, Init MOCO backbone" % (get_time_string()))
@@ -593,78 +593,71 @@ def train(local_rank, args):
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"], mode=args["mode"])
             model.discriminator_pos_frac = discriminator_pos_frac
-            try:
-                model_start = time.time()
-                if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
-                    with trainable_model.no_sync():
-                        output = train_inner_loop(inner_args, model, batch, optimizer,
-                                                  scheduler, gradient_clipping, iter_size=iter_size,
-                                                  no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
-                                                  extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center,
-                                                  freeze_last_layer=epoch < args["freeze_last_layer"])
-                    model_times.append(time.time() - model_start)
-                else:
+
+            model_start = time.time()
+            if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
+                with trainable_model.no_sync():
                     output = train_inner_loop(inner_args, model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
+                                              no_sync=True, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
                                               extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center,
                                               freeze_last_layer=epoch < args["freeze_last_layer"])
-                    optimizer.zero_grad(set_to_none=True)
-                    model_times.append(time.time() - model_start)
-                # if args["mode"] == "clr" and hasattr(model, "no_sync") and simclr_w > 0 or dino_w > 0:
-                #     x1_noised_second = batch["x1_noised_second"]
-                #     x1_label_second = batch["x1_label_second"]
-                #     with trainable_model.no_sync():
-                #         batch["x1_noised"] = x1_noised_second
-                #         batch["x1_label"] = x1_label_second
-                #         _ = train_inner_loop(inner_args, model, batch, optimizer,
-                #                              scheduler, gradient_clipping, iter_size=iter_size,
-                #                              no_sync=True,
-                #                              zero_grad_check=False,
-                #                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
+                model_times.append(time.time() - model_start)
+            else:
+                output = train_inner_loop(inner_args, model, batch, optimizer,
+                                          scheduler, gradient_clipping, iter_size=iter_size,
+                                          no_sync=False, zero_grad_check=(step + 1) % log_every_steps == 0 and local_rank == 0 and not args["no_autocast"],
+                                          extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center,
+                                          freeze_last_layer=epoch < args["freeze_last_layer"])
+                optimizer.zero_grad(set_to_none=True)
+                model_times.append(time.time() - model_start)
+            # if args["mode"] == "clr" and hasattr(model, "no_sync") and simclr_w > 0 or dino_w > 0:
+            #     x1_noised_second = batch["x1_noised_second"]
+            #     x1_label_second = batch["x1_label_second"]
+            #     with trainable_model.no_sync():
+            #         batch["x1_noised"] = x1_noised_second
+            #         batch["x1_label"] = x1_label_second
+            #         _ = train_inner_loop(inner_args, model, batch, optimizer,
+            #                              scheduler, gradient_clipping, iter_size=iter_size,
+            #                              no_sync=True,
+            #                              zero_grad_check=False,
+            #                              extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, freeze_last_layer=epoch < args["freeze_last_layer"])
 
 
-                if args["mode"] == "clr" and args["moco"] and (step + 1) % iter_size == 0:
-                    student_teacher_param_update(model.student, model.teacher, teacher_update_w)
-                if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1 and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
-                    dino_center = output.pop("dino_center", None)
-                    if dino_center is not None:
-                        dtype = dino_center.dtype
-                        dino_center = dino_center.type(torch.float64) / args["world_size"]
-                        torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
-                        output["dino_center"] = dino_center.type(dtype)
-
-                    extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-
-                    if extra_negative_repr_simclr is not None:
-                        extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
-                        samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
-                        if samples_per_machine_simclr <= 0:
-                            most_recent_simclr = mrs
-                        else:
-                            samples_per_machine_simclr = min(samples_per_machine_simclr, extra_negative_repr_simclr.size(0) // args["world_size"])
-                            start = extra_negative_repr_simclr.size(0) - ((rank + 1) * samples_per_machine_simclr)
-                            end = extra_negative_repr_simclr.size(0) - (rank * samples_per_machine_simclr)
-                            most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
-                        empty_size = most_recent_simclr.size()
-                        del extra_negative_repr_simclr
-
-                        most_recent_simclr = most_recent_simclr.contiguous()
-                        tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
-                        torch.distributed.all_gather(tensor_list, most_recent_simclr)
-                        extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"],
-                                                                                      most_recent_simclr.size(-1))
-                        output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+            if args["mode"] == "clr" and args["moco"] and (step + 1) % iter_size == 0:
+                student_teacher_param_update(model.student, model.teacher, teacher_update_w)
+            if args["mode"] == "clr" and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1 and samples_per_machine_simclr >= 1 and simclr_w is not None and simclr_w > 0:
+                dino_center = output.pop("dino_center", None)
+                if dino_center is not None:
+                    dtype = dino_center.dtype
+                    dino_center = dino_center.type(torch.float64) / args["world_size"]
+                    torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
+                    output["dino_center"] = dino_center.type(dtype)
 
                 extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
-                dino_center = output.pop("dino_center", None)
-            except Exception as e:
-                es = "[Train-Exception]: Time = %s, Step = %s for Rank = %s, Scale = %s, input_size = %s, lr = %s" % (
-                    get_time_string(), step, rank, None, bs_size, optimizer.param_groups[0]['lr'])
-                print(es)
-                torch.save(batch, os.path.join(os.getcwd(), "error-input.pth"))
 
-                reraise(e, es)
+                if extra_negative_repr_simclr is not None:
+                    extra_negative_repr_simclr, mrs = extra_negative_repr_simclr.split([extra_negative_repr_simclr.size(0) - (4 * iter_size) * batch_size, (4 * iter_size) * batch_size])
+                    samples_per_machine_simclr = samples_per_machine_simclr - mrs.size(0)
+                    if samples_per_machine_simclr <= 0:
+                        most_recent_simclr = mrs
+                    else:
+                        samples_per_machine_simclr = min(samples_per_machine_simclr, extra_negative_repr_simclr.size(0) // args["world_size"])
+                        start = extra_negative_repr_simclr.size(0) - ((rank + 1) * samples_per_machine_simclr)
+                        end = extra_negative_repr_simclr.size(0) - (rank * samples_per_machine_simclr)
+                        most_recent_simclr = torch.cat((extra_negative_repr_simclr[start:end], mrs))
+                    empty_size = most_recent_simclr.size()
+                    del extra_negative_repr_simclr
+
+                    most_recent_simclr = most_recent_simclr.contiguous()
+                    tensor_list = [most_recent_simclr.new_empty(empty_size) for _ in range(args["world_size"])]
+                    torch.distributed.all_gather(tensor_list, most_recent_simclr)
+                    extra_negative_repr_simclr = torch.stack(tensor_list, 1).view(most_recent_simclr.size(0) * args["world_size"],
+                                                                                  most_recent_simclr.size(-1))
+                    output["extra_negative_repr_simclr"] = extra_negative_repr_simclr
+
+            extra_negative_repr_simclr = output.pop("extra_negative_repr_simclr", None)
+            dino_center = output.pop("dino_center", None)
             full_time = time.time() - start_time
             full_times.append(full_time)
             if step == 0 and epoch == 0:

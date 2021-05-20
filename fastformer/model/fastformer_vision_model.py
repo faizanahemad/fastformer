@@ -711,6 +711,7 @@ class PatchCLR:
 
         simclr_loss = None
         simclr_accuracy = None
+        simclr_small_accuracy = None
         if self.simclr_w > 0:
             simclr_results = self.simclr_loss(student_rep["simclr"], simclr, simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
             simclr_loss = simclr_results["simclr_loss"]
@@ -724,6 +725,7 @@ class PatchCLR:
                 results = self.simclr_loss(student_dashed["simclr"], student_rep["simclr"], None, extra_negative_repr_simclr=extra_negative_repr_simclr,
                                            calculate_accuracy=False)
                 simclr_loss = simclr_loss + 0.5 * results["simclr_loss"]
+                simclr_small_accuracy = results["simclr_accuracy"]
 
             extra_negative_repr_simclr = simclr_results["extra_negative_repr_simclr"]
             loss += simclr_loss
@@ -733,7 +735,8 @@ class PatchCLR:
                     discriminator_label_mean=student_rep["discriminator_label_mean"],
                     extra_negative_repr_simclr=extra_negative_repr_simclr, dino_center=dino_center, absolute_reconstruction_loss=student_rep["absolute_reconstruction_loss"],
                     discriminator_negative_accuracy=student_rep["discriminator_negative_accuracy"], discriminator_positive_accuracy=student_rep["discriminator_positive_accuracy"],
-                    extra_reconstruction_loss=student_rep["extra_reconstruction_loss"], extra_reconstruction_small_pool_loss=student_rep["extra_reconstruction_small_pool_loss"])
+                    extra_reconstruction_loss=student_rep["extra_reconstruction_loss"], extra_reconstruction_small_pool_loss=student_rep["extra_reconstruction_small_pool_loss"],
+                    simclr_small_accuracy=simclr_small_accuracy)
 
 
 if __name__ == '__main__':
