@@ -116,21 +116,35 @@ class PatchEmbed(nn.Module):
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
 
         self.dropout = Dropout(hidden_dropout)
+        self.embed_dim = embed_dim
         # self.layer_norm = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
         B, C, H, W = x.shape
-        # FIXME look at relaxing size constraints
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        assert H == W
         x = self.proj(x).flatten(2).transpose(1, 2)
+        req_patches = x.size(1)
+
+        if req_patches > self.num_patches:
+            raise ValueError
+
         if self.relative_attention:
             x[:, 0] = x[:, 0] + self.first_pos_embed
-            row_embed = self.row_embed
-            column_embed = self.column_embed
+            if req_patches < self.num_patches:
+                row_embed = F.adaptive_avg_pool1d(self.row_embed.permute(1, 0).unsqueeze(0), int(req_patches ** 0.5) * 2 + 1).squeeze(0).permute(1, 0)
+                column_embed = F.adaptive_avg_pool1d(self.column_embed.permute(1, 0).unsqueeze(0), int(req_patches ** 0.5) * 2 + 1).squeeze(0).permute(1, 0)
+            else:
+                row_embed = self.row_embed
+                column_embed = self.column_embed
         else:
-            x = x + self.pos_embed
+            if req_patches < self.num_patches:
+                side = int(self.num_patches ** 0.5)
+                pos_embed = self.pos_embed.view(1, side, side, self.embed_dim).permute(0, -1, 1, 2)
+                pos_embed = F.adaptive_avg_pool2d(pos_embed, int(req_patches ** 0.5)).permute(0, 2, 3, 1).view(1, -1, self.embed_dim)
+            else:
+                pos_embed = self.pos_embed
+            x = x + pos_embed
             row_embed = None
             column_embed = None
         if self.extra_cls_token is not None:
@@ -486,6 +500,8 @@ class PatchModel(FastFormerPreTrainedModel):
         b = x1_noised.size(0)
         assert torch.isfinite(x1_noised).all().item()
         first_block_out = self.backbone.forward_first_block(x1_noised)
+        s = first_block_out[0].size(1) - self.cls_tokens
+        one_side = int(s ** 0.5)
         assert torch.isfinite(first_block_out[0]).all().item()
         x1_reconstruct = None
         label_for_discriminator = None
@@ -500,23 +516,23 @@ class PatchModel(FastFormerPreTrainedModel):
             assert torch.isfinite(x1_label).all().item()
 
             x1_label_copy = x1_label
-            x1_label = x1_label.view(b, 3, 14, 16, 14, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, 14 * 14, -1)
+            x1_label = x1_label.view(b, 3, one_side, 16, one_side, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, s, -1)
             reconstruction_loss = torch.abs(x1_reconstruct - x1_label)
             x1_reconstruct = x1_reconstruct.detach()
             reconstruction_loss_by_averaging = torch.abs(x1_label - x1_label.mean(-1).unsqueeze(-1))
             extra_reconstruction_loss = (reconstruction_loss_by_averaging - reconstruction_loss.detach()).mean()
-            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, 14, 14).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, 224, 224)
+            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, one_side, one_side).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, one_side * 16, one_side * 16)
             reconstruction_loss_by_averaging = torch.abs(F.max_pool2d(x1_label_copy, kernel_size=3, stride=1, padding=1) - x1_label_copy)
             extra_reconstruction_small_pool_loss = (reconstruction_loss_by_averaging - torch.abs(x1_label_copy - x1_reconstruct)).mean()
-            reconstruction_loss = reconstruction_loss.reshape(b, 14 * 14, 3, 16, 16)
-            reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
+            reconstruction_loss = reconstruction_loss.reshape(b, s, 3, 16, 16)
+            reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, s, -1)
             absolute_reconstruction_loss = reconstruction_loss.detach()
             assert torch.isfinite(reconstruction_loss).all().item()
             if self.fixed_tolerance_discriminator:
                 label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
             else:
                 losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
-                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * 196), dim=1).indices
+                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * s), dim=1).indices
                 label_for_discriminator = torch.zeros_like(losses_per_region)
                 label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
             reconstruction_loss = reconstruction_loss.mean(-1).mean(-1).mean()
@@ -533,10 +549,6 @@ class PatchModel(FastFormerPreTrainedModel):
         discriminator_negative_accuracy = None
         if self.discriminator_w > 0 and x1_label is not None:
             x1_disc = self.discriminator_ffn(self.backbone(x1_reconstruct)[:, self.cls_tokens:])
-
-
-            # x1_disc = x1_disc.reshape(b, 14 * 14, 3, 16, 16)
-            # x1_disc = F.avg_pool3d(x1_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, 14 * 14, -1)
             assert torch.isfinite(x1_disc).all().item()
             logits = x1_disc.squeeze(-1).reshape(b, -1)
             label_for_discriminator = label_for_discriminator.reshape(b, -1)
@@ -794,6 +806,13 @@ if __name__ == '__main__':
     x2 = torch.stack([dog, cat, fox, grasshopper])
     x = x1
 
+    sa_aug = get_image_augmetations("clr", teacher=False, dims=96)
+    dog = sa_aug["to_tensor"](Image.open("dog.jpg"))
+    cat = sa_aug["to_tensor"](Image.open("cat.jpg"))
+    fox = sa_aug["to_tensor"](Image.open("fox.jpg"))
+    grasshopper = sa_aug["to_tensor"](Image.open("grasshopper.jpg"))
+    x1_small = torch.stack([dog, cat, fox, grasshopper])
+
     # x = torch.randn(batch_size, 3, 224, 224, device=device)
 
     dino_center = None
@@ -861,6 +880,7 @@ if __name__ == '__main__':
         dog.show()
         dog_noised.show()
         reconstructed.show()
+    output = model(x1_small, x1_small, x2, x1_small, x2, calculate_accuracy=True, dino_center=dino_center)
     output = model(x1, x1, x2, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
     all_params = list(filter(lambda p: p.requires_grad, model.student.parameters()))

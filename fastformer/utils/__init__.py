@@ -658,7 +658,7 @@ class DefinedRotation(torchvision.transforms.RandomRotation):
         return angle
 
 
-def get_image_augmetations(mode, teacher=True):
+def get_image_augmetations(mode, teacher=True, dims=224):
     from PIL import Image
     from albumentations import augmentations as alb
     import imgaug.augmenters as iaa
@@ -673,7 +673,7 @@ def get_image_augmetations(mode, teacher=True):
         std=[1 / s for s in std]
     )
 
-    crop_224 = transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224)])
+    crop_224 = transforms.Compose([transforms.Resize(dims), transforms.CenterCrop(dims)])
     to_pytorch = transforms.Compose([transforms.ToTensor(), normalize])
     from_pytorch = transforms.Compose([inv_normalize, transforms.ToPILImage()])
     to_tensor = transforms.Compose([crop_224, to_pytorch])
@@ -687,7 +687,7 @@ def get_image_augmetations(mode, teacher=True):
         shape_transforms = to_tensor
     else:
         shape_transforms = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.35, 1.0) if teacher else (0.1, 0.35), ratio=(3 / 4, 4 / 3)),
+            transforms.RandomResizedCrop(dims, scale=(0.35, 1.0) if teacher else (0.1, 0.35), ratio=(3 / 4, 4 / 3)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomApply(
                 [transforms.RandomChoice([
