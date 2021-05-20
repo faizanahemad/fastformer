@@ -694,7 +694,8 @@ class PatchCLR:
 
         with torch.no_grad():
             teacher_rep = self.teacher(x2, None)
-            simclr = teacher_rep["simclr"].detach().reshape(mcx2, b, teacher_rep["simclr"].size(-1))
+            if self.simclr_w > 0:
+                simclr = teacher_rep["simclr"].detach().reshape(mcx2, b, teacher_rep["simclr"].size(-1))
 
         loss = 0.0
         dino_loss = None
