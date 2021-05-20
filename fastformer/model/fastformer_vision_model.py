@@ -639,76 +639,67 @@ class PatchCLR:
             accuracy = (predictions == labels).float().mean().item()
         return loss, accuracy
 
-    def dino_loss(self, x1_dino, x2_dino, dino_center, x1_dino_dash=None, x2_dino_dash=None):
+    def dino_loss(self, x1_dino, x2_dino, dino_center, student_crops, teacher_crops):
         x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, 1)
-        x1_dino_dash = torch.log_softmax(x1_dino_dash / self.student_contrastive_temperature, 1) if x1_dino_dash is not None else x1_dino_dash
-        dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * (torch.cat((x2_dino, x2_dino_dash)) if x2_dino_dash is not None else x2_dino).mean(dim=0)
+        dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * x2_dino.mean(dim=0)
         x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
         x2_dino = torch.softmax(x2_dino, 1)
-        dino_loss = (-1 * (x2_dino * x1_dino).sum(dim=1).mean()) + (-1 * (x2_dino * x1_dino_dash).sum(dim=1).mean()) if x1_dino_dash is not None else 0.0
+        x2_dino = x2_dino.repeat(student_crops, 1)
+        x1_dino = x1_dino.repeat(teacher_crops, 1)
+        dino_loss = -1 * (x2_dino * x1_dino).sum(dim=-1).mean()
         dino_loss = self.dino_w * dino_loss
-
-        if x2_dino_dash is not None:
-            x2_dino_dash = (x2_dino_dash - dino_center) / self.teacher_contrastive_temperature
-            x2_dino_dash = torch.softmax(x2_dino_dash, 1)
-            dino_loss_dash = (-1 * (x2_dino_dash * x1_dino).sum(dim=1).mean()) + (-1 * (x2_dino_dash * x1_dino_dash).sum(dim=1).mean()) if x1_dino_dash is not None else 0.0
-            dino_loss_dash = self.dino_w * dino_loss_dash
-            dino_loss = (dino_loss + dino_loss_dash) / 2.0
-
-        if x1_dino_dash is not None:
-            dino_loss = dino_loss / 2.0
-
         return dict(dino_loss=dino_loss, dino_center=dino_center)
 
-    def simclr_loss(self, b1s, b2s, b2s_dash=None, extra_negative_repr_simclr=None, calculate_accuracy=False):
+    def simclr_loss(self, b1s, b2s, teacher_crops, extra_negative_repr_simclr=None, calculate_accuracy=False):
         eye = (1 - torch.eye(b1s.size(0), b1s.size(0), device=b1s.device))
         own_negatives = b1s.mm(b1s.t()) * eye
-        b2s_matrix = b1s.mm(b2s.t())
         extra_neg_matrix = None
+        b2s_matrix_prev = None
+        simclr_loss = 0.0
+        simclr_accuracy = None
         if extra_negative_repr_simclr is not None:
             extra_neg_matrix = b1s.mm(extra_negative_repr_simclr.t())
-            contrastive_matrix = torch.cat((b2s_matrix, extra_neg_matrix, own_negatives), 1)
-            extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s.detach()), 0)
+            extra_negative_repr_simclr = torch.cat((extra_negative_repr_simclr, b2s[0].detach()), 0)
         else:
-            contrastive_matrix = torch.cat((b2s_matrix, own_negatives), 1)
-            extra_negative_repr_simclr = b2s.detach()
-
-        simclr_loss, simclr_accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
-
-        if b2s_dash is not None:
-            b2s_matrix = b2s_matrix * eye
-            b2sd_matrix = b1s.mm(b2s_dash.t())
+            extra_negative_repr_simclr = b2s[0].detach()
+        for i in range(teacher_crops):
+            ts = b2s[i]
+            b2s_matrix = b1s.mm(ts.t())
             if extra_neg_matrix is not None:
-                contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, extra_neg_matrix, own_negatives), 1)
+                concatter = [b2s_matrix, extra_neg_matrix, own_negatives] + ([b2s_matrix_prev] if b2s_matrix_prev is not None else [])
             else:
-                contrastive_matrix = torch.cat((b2sd_matrix, b2s_matrix, own_negatives), 1)
+                concatter = [b2s_matrix, own_negatives] + ([b2s_matrix_prev] if b2s_matrix_prev is not None else [])
+            contrastive_matrix = torch.cat(concatter, 1)
+            loss, accuracy = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
+            b2s_matrix_prev = b2s_matrix * eye
+            simclr_loss += loss
+            simclr_accuracy = (simclr_accuracy + accuracy) if simclr_accuracy is not None else accuracy
 
-            simclr_loss_dash, simclr_accuracy_dash = self.calculate_contrastive_loss(contrastive_matrix, b1s.shape[0], calculate_accuracy=calculate_accuracy)
-            simclr_loss = (simclr_loss + simclr_loss_dash)/2.0
-            if calculate_accuracy:
-                simclr_accuracy = (simclr_accuracy + simclr_accuracy_dash)/2.0
-        simclr_loss = self.simclr_w * simclr_loss
+        if calculate_accuracy:
+            simclr_accuracy = simclr_accuracy / teacher_crops
+        simclr_loss = self.simclr_w * simclr_loss / teacher_crops
         return dict(simclr_loss=simclr_loss, simclr_accuracy=simclr_accuracy, extra_negative_repr_simclr=extra_negative_repr_simclr)
 
-    def __call__(self, x1_noised, x1_label, x2, x1_noised_dash=None, x2_dash=None, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+    def __call__(self, x1_noised, x1_label, x2, extra_negative_repr_simclr=None, dino_center=None, calculate_accuracy=False):
+        # b, mc, ... -> mc, b ... , loop over the mc dim
+        assert len(x1_noised.shape) == 5
+        assert len(x1_label.shape) == 5
+        assert len(x2.shape) == 5
+        b, mcx1 = x1.shape[:2]
+        b, mcx2 = x2.shape[:2]
+        x1_noised = x1_noised.transpose(0, 1).reshape(-1, *x1_noised.shape[2:])
+        x1_label = x1_label.transpose(0, 1).reshape(-1, *x1_label.shape[2:])
+        x2 = x2.transpose(0, 1).reshape(-1, *x2.shape[2:])
         student_rep = self.student(x1_noised, x1_label)
-        student_dashed = self.student(x1_noised_dash, None) if x1_noised_dash is not None else dict()
+
         with torch.no_grad():
             teacher_rep = self.teacher(x2, None)
-            simclr = teacher_rep["simclr"].detach()
-            dino_dash = None
-            simclr_dash = None
-            if x2_dash is not None:
-                teacher_rep_dash = self.teacher(x2_dash, None)
-                if self.dino_w > 0:
-                    dino_dash = teacher_rep_dash["dino"].detach()
-                if self.simclr_w > 0:
-                    simclr_dash = teacher_rep_dash["simclr"].detach()
+            simclr = teacher_rep["simclr"].detach().reshape(mcx2, b, teacher_rep["simclr"].size(-1))
 
         loss = 0.0
         dino_loss = None
         if self.dino_w > 0:
-            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, student_dashed.pop("dino", None), dino_dash)
+            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, mcx1, mcx2)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
             loss += dino_loss
@@ -725,20 +716,14 @@ class PatchCLR:
         simclr_accuracy = None
         simclr_small_accuracy = None
         if self.simclr_w > 0:
-            simclr_results = self.simclr_loss(student_rep["simclr"], simclr, simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
-            simclr_loss = simclr_results["simclr_loss"]
-            simclr_accuracy = simclr_results["simclr_accuracy"]
+            student_rep["simclr"] = student_rep["simclr"].reshape(mcx1, b, student_rep["simclr"].size(-1))
+            for i in range(mcx1):
+                student_simclr = student_rep["simclr"][i]
+                simclr_results = self.simclr_loss(student_simclr, simclr, mcx2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
+                simclr_loss = (simclr_loss + simclr_results["simclr_loss"]) if simclr_loss is not None else simclr_results["simclr_loss"]
+                simclr_accuracy = (simclr_loss + simclr_results["simclr_accuracy"]) if simclr_loss is not None else simclr_results["simclr_accuracy"]
 
-            if "simclr" in student_dashed:
-                results = self.simclr_loss(student_dashed["simclr"], simclr, simclr_dash, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=False)
-                simclr_loss = (simclr_loss + results["simclr_loss"]) / 2.0
-                simclr_accuracy = (simclr_accuracy + results["simclr_accuracy"]) / 2.0
-
-                results = self.simclr_loss(student_dashed["simclr"], student_rep["simclr"], None, extra_negative_repr_simclr=extra_negative_repr_simclr,
-                                           calculate_accuracy=False)
-                simclr_loss = simclr_loss + 0.5 * results["simclr_loss"]
-                simclr_small_accuracy = results["simclr_accuracy"]
-
+            simclr_loss = simclr_loss / mcx1
             extra_negative_repr_simclr = simclr_results["extra_negative_repr_simclr"]
             loss += simclr_loss
 
@@ -863,6 +848,13 @@ if __name__ == '__main__':
         print(output.argmax(-1))
         exit()
 
+    x1_small = x1_small.unsqueeze(1)
+    x1 = x1.unsqueeze(1)
+    x2 = x2.unsqueeze(1)
+    # output = model(x1_small, x1_small, x2, calculate_accuracy=True, dino_center=dino_center)
+    x1 = x1.expand(-1, 3, -1, -1, -1)
+    x2 = x2.expand(-1, 2, -1, -1, -1)
+    output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
     if model.generator_w > 0:
         from fastformer.utils import get_image_augmetations
         dog = Image.open("cat.jpg")
@@ -880,8 +872,6 @@ if __name__ == '__main__':
         dog.show()
         dog_noised.show()
         reconstructed.show()
-    output = model(x1_small, x1_small, x2, x1_small, x2, calculate_accuracy=True, dino_center=dino_center)
-    output = model(x1, x1, x2, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
     all_params = list(filter(lambda p: p.requires_grad, model.student.parameters()))
     optimizer = AdamW(all_params, lr=lr, eps=1e-6, weight_decay=1e-2)
