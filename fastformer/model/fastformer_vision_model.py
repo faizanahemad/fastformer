@@ -683,8 +683,7 @@ class PatchCLR:
             simclr_loss += loss
             simclr_accuracy = (simclr_accuracy + accuracy) if simclr_accuracy is not None else accuracy
 
-        if calculate_accuracy:
-            simclr_accuracy = simclr_accuracy / teacher_crops
+        simclr_accuracy = simclr_accuracy / teacher_crops
         simclr_loss = self.simclr_w * simclr_loss / teacher_crops
         return dict(simclr_loss=simclr_loss, simclr_accuracy=simclr_accuracy, extra_negative_repr_simclr=extra_negative_repr_simclr)
 
@@ -730,10 +729,11 @@ class PatchCLR:
                 student_simclr = student_rep["simclr"][i]
                 simclr_results = self.simclr_loss(student_simclr, simclr, mcx2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
                 simclr_loss = (simclr_loss + simclr_results["simclr_loss"]) if simclr_loss is not None else simclr_results["simclr_loss"]
-                simclr_accuracy = (simclr_loss + simclr_results["simclr_accuracy"]) if simclr_loss is not None else simclr_results["simclr_accuracy"]
+                simclr_accuracy = (simclr_accuracy + simclr_results["simclr_accuracy"]) if simclr_accuracy is not None else simclr_results["simclr_accuracy"]
 
             simclr_loss = simclr_loss / mcx1
             extra_negative_repr_simclr = simclr_results["extra_negative_repr_simclr"]
+            simclr_accuracy = simclr_accuracy / mcx1
             loss += simclr_loss
 
         return dict(loss=loss, reconstruction_loss=reconstruction_loss, discriminator_loss=discriminator_loss, simclr_loss=simclr_loss, dino_loss=dino_loss,
