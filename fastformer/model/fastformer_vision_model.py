@@ -527,27 +527,35 @@ class PatchModel(FastFormerPreTrainedModel):
             x1_label = x1_label.view(b, 3, one_side, 16, one_side, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, s, -1)
             reconstruction_loss = torch.abs(x1_reconstruct - x1_label)
             x1_reconstruct = x1_reconstruct.detach()
+            # TODO: Error is less than 3x3 average kernel, our generators max loss in 3x3 is better than their min loss in 3x3 patch.
+
+            # TODO: Generate reconstruction labels only if  discriminator_w > 0
+
             reconstruction_loss_by_averaging = torch.abs(x1_label - x1_label.mean(-1).unsqueeze(-1))
             extra_reconstruction_loss = (reconstruction_loss_by_averaging - reconstruction_loss.detach()).mean()
-            x1_reconstruct = x1_reconstruct.permute(0, -1, -2).reshape(b, 3, 16, 16, one_side, one_side).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, one_side * 16, one_side * 16)
+            x1_reconstruct_temp = x1_reconstruct.permute(0, 2, 1).reshape(b, 3, 16, 16, one_side, one_side).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, one_side * 16, one_side * 16)
             reconstruction_loss_by_averaging = torch.abs(F.max_pool2d(x1_label_copy, kernel_size=3, stride=1, padding=1) - x1_label_copy)
-            extra_reconstruction_small_pool_loss = (reconstruction_loss_by_averaging - torch.abs(x1_label_copy - x1_reconstruct)).mean()
+            extra_reconstruction_small_pool_loss = (reconstruction_loss_by_averaging - torch.abs(x1_label_copy - x1_reconstruct_temp)).mean()
+            reconstruction_loss_by_averaging = reconstruction_loss_by_averaging.view(b, 3, one_side, 16, one_side, 16).permute(0, 2, 4, 1, 3, 5).reshape(b, s, -1).reshape(b, s, 3, 16, 16)
+            reconstruction_loss_by_averaging = -1 * F.max_pool3d(-1 * reconstruction_loss_by_averaging, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, s, -1)
+
+            # TODO: select few samples from x1_label 196 (10 %) and use them in reconstruct to ensure that atleast 10% positive samples exist
+            mask = (torch.randn(x1_reconstruct.shape[:2], device=x1_reconstruct.device) >= self.discriminator_tol).type(x1_reconstruct.dtype).unsqueeze(-1).expand(-1, -1, x1_reconstruct.shape[-1])
+            x1_reconstruct = x1_reconstruct * mask + (1 - mask) * x1_label
+            reconstruction_loss_disc = torch.abs(x1_reconstruct - x1_label)
+            x1_reconstruct = x1_reconstruct.permute(0, 2, 1).reshape(b, 3, 16, 16, one_side, one_side).permute(0, 1, 4, 2, 5, 3).reshape(b, 3, one_side * 16, one_side * 16)
+            reconstruction_loss_disc = reconstruction_loss_disc.reshape(b, s, 3, 16, 16)
+            reconstruction_loss_disc = F.max_pool3d(reconstruction_loss_disc, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, s, -1)
+
+
+            assert torch.isfinite(reconstruction_loss).all().item()
+            label_for_discriminator = (reconstruction_loss_disc < reconstruction_loss_by_averaging).float()
+
             reconstruction_loss = reconstruction_loss.reshape(b, s, 3, 16, 16)
             reconstruction_loss = F.max_pool3d(reconstruction_loss, kernel_size=self.pool_kernel, stride=self.pool_kernel).reshape(b, s, -1)
-            absolute_reconstruction_loss = reconstruction_loss.detach()
-            assert torch.isfinite(reconstruction_loss).all().item()
-            if self.fixed_tolerance_discriminator:
-                label_for_discriminator = (absolute_reconstruction_loss < self.discriminator_tol).float()
-            else:
-                losses_per_region = -1 * reconstruction_loss.detach().mean(-1)
-                highest_losses = torch.topk(losses_per_region, int(self.discriminator_pos_frac * s), dim=1).indices
-                label_for_discriminator = torch.zeros_like(losses_per_region)
-                label_for_discriminator[torch.arange(highest_losses.size(0)).repeat(highest_losses.size(-1), 1).t(), highest_losses] = 1.0
             reconstruction_loss = reconstruction_loss.mean(-1).mean(-1).mean()
             absolute_reconstruction_loss = reconstruction_loss.detach()
             discriminator_label_mean = label_for_discriminator.mean().item()
-
-            # reconstruction_loss = (x1_reconstruct - x1_label) ** 2
 
             reconstruction_loss = self.generator_w * reconstruction_loss
 
@@ -907,7 +915,7 @@ if __name__ == '__main__':
         if not forward_only:
             if fp16:
                 with autocast():
-                    output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
+                    output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
                     loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                     scaler.scale(loss).backward()
                     get_unused_params(model)
@@ -917,7 +925,7 @@ if __name__ == '__main__':
                     scaler.update()
                     optimizer.zero_grad()
             else:
-                output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
+                output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
                 loss = output[0] if isinstance(output, (list, tuple)) else output["loss"]
                 loss.backward()
                 get_unused_params(model)
@@ -928,11 +936,11 @@ if __name__ == '__main__':
             if fp16:
                 with autocast():
                     with torch.no_grad():
-                        output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
+                        output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
 
             else:
                 with torch.no_grad():
-                    output = model(x, x1, x2, calculate_accuracy=True, dino_center=dino_center)
+                    output = model(x1, x1, x2, calculate_accuracy=True, dino_center=dino_center)
             return output
         return output
 
