@@ -168,17 +168,17 @@ if __name__ == "__main__":
 
     vision_cmd = "python train_vision_distributed.py -n %s -g 8 --nr %s --model_config vision_base_config"
     vision_cmd += " --log_every_steps 100 --num_workers 8 --save_every_steps 2000 --init_method=tcp  --master_addr 0.0.0.0 --master_port 9999 --shuffle_dataset"
-    vision_cmd += " --no_autocast --accumulation_steps 1"
+    vision_cmd += " --accumulation_steps 1"
+    vision_cmd += " --no_autocast"
 
-    vision_cmd += " --epochs 300"
-    vision_cmd += " --wandb_name all_05_2_2_1_s2"
-    vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name patchclr.pth --dataset /home/ahemf/processed_datasets/ImageNet"
+    vision_cmd += " --epochs 100"
+    vision_cmd += " --wandb_name val_1_1_1_1_s1"
+    vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name imagenet.pth --dataset /home/ahemf/processed_datasets/ImageNet"
     vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
-    vision_cmd += " --mode clr"
-    vision_cmd += " --lr 0.004 --lr_steps 2 --weight_decay 0.1 --warmup_steps 1000 --gradient_clipping 3.0 --simclr_warmup 1000 --teacher_warmup_steps 1000"
-    vision_cmd += " --batch_size 32 --optimizer rangerlars"
-
-    vision_cmd += " --simclr_w 0.5 --generator_w 2.0 --discriminator_w 2.0 --dino_w 1.0"
+    vision_cmd += " --mode linear_probe"
+    vision_cmd += " --lr 0.001 --lr_steps 1 --weight_decay 0.05 --warmup_steps 1000 --gradient_clipping 3.0 --simclr_warmup 1000 --teacher_warmup_steps 1000"
+    vision_cmd += " --batch_size 32 --optimizer adamw"
+    # vision_cmd += " --simclr_w 1.0 --generator_w 1.0 --discriminator_w 1.0 --dino_w 1.0"
     # vision_cmd += " --detect_anomaly"
 
     # vision_cmd += " --wandb_dryrun"

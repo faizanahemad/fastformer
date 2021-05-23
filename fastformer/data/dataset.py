@@ -227,9 +227,9 @@ def char_mapper(char_to_id, x):
         return 1
 
 
-def char_rnn_tokenize(text, tokenizer, char_to_id, **tokenizer_args):
+def char_rnn_tokenize(text, tokenizer, char_to_id=None, **tokenizer_args):
     # Do padding myself
-    if isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
+    if isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and char_to_id is not None:
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **tokenizer_args)
         offset_mapping = tokenizer_outputs["offset_mapping"]
         offset_mapping -= 1
@@ -510,6 +510,111 @@ class TokenizerDataset(Dataset):
             for positives_for_anchor in results["positives"]:
                 for positive in positives_for_anchor:
                     positive[0] = min(positive[0], positive[1] -1)
+
+        return results
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class MTTDataset(Dataset):
+    def __init__(self, cls_tokens, vocab_size, tokenizer: PreTrainedTokenizerFast,
+                 tokenizer_args: dict, dataset: Dataset,
+                 word_jumble_proba: tuple = ((128, 0.1), (512, 0.15)),
+                 word_mask_proba: list = ((128, 0.1), (512, 0.15)),
+                 word_noise_proba: tuple = ((128, 0.1), (512, 0.15)),
+                 max_span_length: int = 1, max_jumbling_span_length: int = 2, jumble_sentence=True):
+        self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+        self.cls_tokens = cls_tokens
+        self.tokenizer = copy.deepcopy(tokenizer)
+        self.tokenizer_args = tokenizer_args
+        self.dataset = dataset
+        self.vocab_size = vocab_size
+        self.word_mask_proba = word_mask_proba
+        self.vocab = list(tokenizer.get_vocab())
+        self.word_noise_proba = word_noise_proba
+        self.training = True
+        self.max_span_length = max_span_length
+        self.wp_l, self.wp_p = zip(*word_mask_proba)
+        self.wn_l, self.wn_p = zip(*word_noise_proba)
+        self.wj_l, self.wj_p = zip(*word_jumble_proba)
+        self.max_jumbling_span_length = max_jumbling_span_length
+        self.jumble_sentence = jumble_sentence
+        
+    def train(self):
+        self.training = True
+
+    def eval(self):
+        self.training = False
+
+    def __getitem__(self, item):
+        tokenizer = self.tokenizer
+        item = self.dataset[item]
+        label = item["label"] if "label" in item else 0.0
+
+        text = item["text"]
+        length = len(text.strip())
+        if length == 0:
+            text = "empty empty no text empty"
+
+        text = unidecode.unidecode(text)
+        results = dict()
+
+        if self.training:
+            seg_sep_token = f" {tokenizer.sep_token} "
+
+            wp = self.wp_p[np.searchsorted(self.wp_l, length) - 1]
+            wn = self.wn_p[np.searchsorted(self.wn_l, length) - 1]
+            wj = self.wj_p[np.searchsorted(self.wj_l, length) - 1]
+            num_segments = 2 if length > 32 else 1
+            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+            num_segments = sum(segments != tokenizer.pad_token)
+
+            labels_segment_index = 0
+            if num_segments > 1 and self.jumble_sentence:
+                if random.random() < 0.5:
+                    labels_segment_index = 0
+                else:
+                    labels_segment_index = 1
+                    segments[0], segments[1] = segments[1], segments[0]
+                if random.random() < 0.5:
+                    seg_sep_token = " "
+
+            results.update(dict(labels_segment_index=labels_segment_index))
+
+            mlm_text = seg_sep_token.join(segments)  # Training Labels for MLM
+            tokenizer_outputs = tokenizer(mlm_text, return_offsets_mapping=False, **self.tokenizer_args)
+            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+            results["label_mlm_input_ids"] = input_ids.squeeze()
+
+            for idx, seq in enumerate(segments):
+                seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)
+
+                seq = seq.split()
+                new_seq = []
+                for i in range(len(seq))[::self.max_jumbling_span_length]:
+                    small_seq = seq[i:i+self.max_jumbling_span_length]
+                    if random.random() <= wj and self.tokenizer.mask_token not in small_seq:
+                        new_seq.extend(random.sample(small_seq, len(small_seq)))
+                    else:
+                        new_seq.extend(small_seq)
+                # seq = [w for i in range(len(seq))[::self.max_jumbling_span_length] for w in (random.sample(seq[i:i+self.max_jumbling_span_length], len(seq[i: i+self.max_jumbling_span_length])) if random.random() <= wj and self.tokenizer.mask_token not in seq[i:i+self.max_jumbling_span_length] else seq[i:i+self.max_jumbling_span_length])]
+                seq = " ".join(new_seq).strip()
+
+                seq = word_level_noising(seq, self.tokenizer, wn)
+                segments[idx] = seq
+
+            text = seg_sep_token.join(segments)
+        if "label" in item:
+            results["label"] = label
+        inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
+        if self.cls_tokens > 1:
+            dtype = inp["input_ids"].dtype
+            inp["input_ids"] = torch.cat((inp["input_ids"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
+            dtype = inp["attention_mask"].dtype
+            inp["attention_mask"] = torch.cat((inp["attention_mask"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
+
+        results.update(inp)
 
         return results
 

@@ -1190,17 +1190,6 @@ class FastFormerForFusedELECTRAPretraining(FastFormerPreTrainedModel):
             **kwargs
 
     ):
-        all_inputs = dict(input_ids=input_ids,
-                          attention_mask=attention_mask,
-                          token_type_ids=token_type_ids,
-                          inputs_embeds=inputs_embeds,
-                          labels=labels,
-                          labels_segment_index=labels_segment_index,
-                          char_ids=char_ids, char_offsets=char_offsets,
-                          highway_cls_ar_input_ids=highway_cls_ar_input_ids, highway_cls_ar__attention_mask=highway_cls_ar__attention_mask,
-                          labels_pet_input_ids=labels_pet_input_ids, labels_pet_attention_mask=labels_pet_attention_mask, labels_pet_max_length=labels_pet_max_length,
-                          contrastive_anchors=contrastive_anchors, contrastive_positives=contrastive_positives,
-                          **kwargs)
 
         timing_dict = list()
         bs = input_ids.size(0)

@@ -656,13 +656,17 @@ class PatchCLR:
         return loss, accuracy
 
     def dino_loss(self, x1_dino, x2_dino, dino_center, student_crops, teacher_crops):
-        x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, 1)
-        dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * x2_dino.mean(dim=0)
+        x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, -1)
+        dino_center = self.dino_cw * dino_center + (1 - self.dino_cw) * x2_dino.mean(dim=0).mean(dim=0)
         x2_dino = (x2_dino - dino_center) / self.teacher_contrastive_temperature
-        x2_dino = torch.softmax(x2_dino, 1)
-        x2_dino = x2_dino.repeat(student_crops, 1)
-        x1_dino = x1_dino.repeat(teacher_crops, 1)
-        dino_loss = -1 * (x2_dino * x1_dino).sum(dim=-1).mean()
+        x2_dino = torch.softmax(x2_dino, -1)
+
+        dino_loss = 0.0
+        for s in range(student_crops):
+            for t in range(teacher_crops):
+                loss = -1 * (x2_dino[t] * x1_dino[s]).sum(dim=-1).mean()
+                dino_loss += loss
+        dino_loss = dino_loss / (student_crops * teacher_crops)
         dino_loss = self.dino_w * dino_loss
         return dict(dino_loss=dino_loss, dino_center=dino_center)
 
@@ -709,13 +713,17 @@ class PatchCLR:
 
         with torch.no_grad():
             teacher_rep = self.teacher(x2, None)
+            teacher_rep_small = self.teacher(torch.cat((x1_noised, x1_label)), None)
             if self.simclr_w > 0:
-                simclr = teacher_rep["simclr"].detach().reshape(mcx2, b, teacher_rep["simclr"].size(-1))
+                simclr = torch.cat((teacher_rep["simclr"].detach().reshape(mcx2, b, teacher_rep["simclr"].size(-1)),
+                                    teacher_rep_small["simclr"].detach().reshape(mcx1 * 2, b, teacher_rep["simclr"].size(-1))))
+            if self.dino_w > 0:
+                dino = torch.cat((teacher_rep_small["dino"].detach().reshape(mcx1*2, b, -1), teacher_rep["dino"].detach().reshape(mcx2, b, -1)))
 
         loss = 0.0
         dino_loss = None
         if self.dino_w > 0:
-            dino_results = self.dino_loss(student_rep["dino"], teacher_rep["dino"].detach(), dino_center, mcx1, mcx2)
+            dino_results = self.dino_loss(student_rep["dino"].reshape(mcx1, b, -1), dino, dino_center, mcx1, mcx1*2 + mcx2)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
             loss += dino_loss
@@ -735,7 +743,7 @@ class PatchCLR:
             student_rep["simclr"] = student_rep["simclr"].reshape(mcx1, b, student_rep["simclr"].size(-1))
             for i in range(mcx1):
                 student_simclr = student_rep["simclr"][i]
-                simclr_results = self.simclr_loss(student_simclr, simclr, mcx2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
+                simclr_results = self.simclr_loss(student_simclr, simclr, mcx1 * 2 + mcx2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=calculate_accuracy)
                 simclr_loss = (simclr_loss + simclr_results["simclr_loss"]) if simclr_loss is not None else simclr_results["simclr_loss"]
                 simclr_accuracy = (simclr_accuracy + simclr_results["simclr_accuracy"]) if simclr_accuracy is not None else simclr_results["simclr_accuracy"]
 
