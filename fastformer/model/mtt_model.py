@@ -207,7 +207,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
 
-            lm_accuracy = (new_input_ids == labels).float().mean()
+            lm_accuracy = (new_input_ids == labels).float().mean().item()
             if self.discriminator_w > 0:
                 tol = (0.85 - lm_accuracy) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
