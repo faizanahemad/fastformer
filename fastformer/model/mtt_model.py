@@ -189,7 +189,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if self.sentence_order_prediction_w  and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
-            sent_order_logits = self.sent_order_nn(outputs["hidden_states"][-1][:, self.cls_tokens - 1]).squueze(-1)
+            sent_order_logits = self.sent_order_nn(outputs["hidden_states"][-1][:, self.cls_tokens - 1]).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
             sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(torch.float)
             sent_order_accuracy = (sent_order_preds == labels_segment_index).float().mean()
