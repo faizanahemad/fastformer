@@ -454,7 +454,6 @@ def train(local_rank, args):
 
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
-                print(batch)
                 bs_size = list(batch[key].size())
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             else:
