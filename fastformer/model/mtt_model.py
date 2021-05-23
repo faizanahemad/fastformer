@@ -199,7 +199,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
             generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
-            lm_logits = self.funnel.lm_head(generator_output)
+            lm_logits = self.lm_head(generator_output)
             new_input_ids = lm_logits.detach().argmax(dim=-1)
 
             if self.generator_w > 0:
