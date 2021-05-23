@@ -61,7 +61,7 @@ from fastformer.model import FastFormerPreTrainedModel
 
 def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     model = AutoModel.from_pretrained(model_name)
-    vocab_size, dims = model.embeddings.weight.size(0), model.embeddings.weight.size(1)
+    vocab_size, dims = model.embeddings.word_embeddings.weight.size(0), model.embeddings.word_embeddings.weight.size(1)
     if reinit:
         model.init_weights()
 
@@ -72,7 +72,6 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     return model, tokenizer
-
 
 
 class MTTModel(FastFormerPreTrainedModel):
@@ -99,7 +98,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.generator_w = generator_w
         self.discriminator_w = discriminator_w
         self.dino_w = dino_w
-        self.vocab_size = self.backbone.embeddings.weight.size(0) + (cls_tokens - 1)
+        self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0) + (cls_tokens - 1)
         self.lm_head = nn.Linear(num_features, self.vocab_size)
         self.sentence_order_prediction_w = sentence_order_prediction_w
         if reinit:
@@ -250,15 +249,13 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.generator_w = student.generator_w
         self.discriminator_w = student.discriminator_w
 
-        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-
         self.eps = eps
         self.teacher_contrastive_temperature = 0.04
         self.student_contrastive_temperature = 0.1
         self.dino_w = student.dino_w
         self.dino_cw = 0.9
 
-    def forward(
+    def __call__(
             self,
             input_ids,
             attention_mask,

@@ -445,7 +445,6 @@ class PatchModel(FastFormerPreTrainedModel):
         self.dino_dims = 2 ** 16
         norm_last_layer = True
         bottleneck_dim = 512
-        assert generator_w > 0 or simclr_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
         self.generator_w = generator_w
@@ -610,14 +609,11 @@ class PatchCLR:
         self.loss_ce = CrossEntropyLoss(ignore_index=-100)
 
         self.simclr_temperature = 0.2
-        self.pool_kernel = student.pool_kernel
-
-
-
+        self.pool_kernel = student.pool_kernel if hasattr(student, "pool_kernel") else None
         self.eps = eps
         self.teacher_contrastive_temperature = teacher_contrastive_temperature
         self.student_contrastive_temperature = student_contrastive_temperature
-        self.simclr_w = student.simclr_w
+        self.simclr_w = student.simclr_w if hasattr(student, "simclr_w") else None
         self.dino_w = student.dino_w
         self.dino_cw = dino_cw
 

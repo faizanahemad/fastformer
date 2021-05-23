@@ -175,16 +175,19 @@ class CLRDataset(torch.utils.data.Dataset):
     def __getitem__(self, item):
         x1 = self.dataset_student[item]
         x2 = self.dataset_teacher[item]
-        x2 = {k + "_teacher": v for k, v in x2.items()}
+        x1["labels"] = x1.pop("label_mlm_input_ids")
+        x2 = {k + "_teacher": v for k, v in x2.items() if k in ["input_ids", "attention_mask", "char_ids", "char_offsets"]}
         return dict(**x1, **x2)
 
     def __len__(self):
         return len(self.dataset_student)
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1, num_workers=1):
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    import os
+    num_workers = max(os.cpu_count() // 2, 1)
 
     train_dataset = Dataset.load_from_disk(location)
     kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
@@ -192,12 +195,13 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
                          word_jumble_proba=((256, 0.1), (512, 0.125)), word_mask_proba = ((256, 0.1), (512, 0.125)), word_noise_proba=((256, 0.1), (512, 0.125)),
                          max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
+
     student = MTTDataset(cls_tokens, vocab_size, tokenizer,
                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
                          word_jumble_proba=((128, 0.1), (512, 0.15)), word_mask_proba=((128, 0.1), (512, 0.15)), word_noise_proba=((128, 0.1), (512, 0.15)),
                          max_span_length=2, max_jumbling_span_length=2, jumble_sentence=True)
     dataset = CLRDataset(student, teacher)
-    train_loader = DataLoader(train_dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
+    train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
@@ -257,11 +261,12 @@ def train(local_rank, args):
     optimizer_config.gradient_clipping = args["gradient_clipping"]
 
     hidden_dims = 768
+    eps = 1e-4
     if args["no_autocast"]:
         optimizer_config.eps = 1e-7
         eps = 1e-7
 
-    reinit = not args["deit"] and not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
+    reinit = not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
     print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
     backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], reinit)
     teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], reinit)
@@ -271,7 +276,7 @@ def train(local_rank, args):
     discriminator_w = args["discriminator_w"] if "discriminator_w" in args else 0.0
     dino_w = args["dino_w"] if "dino_w" in args else 0.0
     sentence_order_prediction_w = args["sentence_order_prediction_w"] if "sentence_order_prediction_w" in args else 0.0
-    vocab_size = backbone.embeddings.weight.size(0)
+    vocab_size = backbone.embeddings.word_embeddings.weight.size(0)
 
     student = MTTModel(backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
@@ -372,7 +377,7 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
                                   tokenizer, args["cls_tokens"], vocab_size,
-                                  world_size=args["world_size"], num_workers=args["num_workers"])
+                                  world_size=args["world_size"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)
@@ -449,6 +454,7 @@ def train(local_rank, args):
 
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
+                print(batch)
                 bs_size = list(batch[key].size())
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             else:
