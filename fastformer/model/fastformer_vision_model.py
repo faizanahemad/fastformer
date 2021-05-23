@@ -618,9 +618,11 @@ class PatchCLR:
         self.dino_cw = dino_cw
 
     def get_last_dino_layer(self):
-        if isinstance(self.student, DistributedDataParallel):
+        if isinstance(self.student, DistributedDataParallel) and hasattr(self.student.module, "ffn"):
             return self.student.module.ffn[-1]
-        return self.student.ffn[-1]
+        if hasattr(self.student, "ffn"):
+            return self.student.ffn[-1]
+        return None
 
     def to(self, device):
         self.student.to(device)

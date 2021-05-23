@@ -702,7 +702,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             x2 = batch["x2"]
             output = ddp_model(x1_noised, x1_label, x2, extra_negative_repr_simclr=extra_negative_repr_simclr, calculate_accuracy=not no_sync, dino_center=dino_center)
             last_layer = ddp_model.get_last_dino_layer()
-            if freeze_last_layer:
+            if freeze_last_layer and last_layer is not None:
                 for p in last_layer.parameters():
                     p.grad = None
         elif args["mode"] == "linear_probe" or args["mode"] == "full_train":
