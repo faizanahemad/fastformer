@@ -275,7 +275,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                        char_ids=char_ids_teacher, char_offsets=char_offsets_teacher)
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
-        loss = torch.sum(losses)
+        loss = sum(losses)
         if self.dino_w > 0:
             dino_results = self.dino_loss(student_rep.pop("dino").unsqueeze(0), teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
