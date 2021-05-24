@@ -42,6 +42,10 @@ from torch.utils.data.dataloader import DataLoader
 from collections import Counter
 from fastformer.model.fastformer_vision_model import FastFormerVisionModel, PatchCLR, ClassificationModel, PatchModel
 import torchvision.transforms as transforms
+import multiprocessing
+import signal
+from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
+from torch.multiprocessing import Process, ProcessContext
 
 try:
     from torch.cuda.amp import GradScaler, autocast
@@ -605,6 +609,49 @@ def train_catch_exception(local_rank, args):
         # traceback.print_exception(*sys.exc_info())
         traceback.print_exc()
         raise e
+
+
+def _wrap(fn, i, args, error_queue):
+    fn = dill.loads(fn)
+    # prctl(2) is a Linux specific system call.
+    # On other systems the following function call has no effect.
+    # This is set to ensure that non-daemonic child processes can
+    # terminate if their parent terminates before they do.
+    _prctl_pr_set_pdeathsig(signal.SIGINT)
+
+    try:
+        fn(i, *args)
+    except KeyboardInterrupt:
+        pass  # SIGINT; Killed by parent, do nothing
+    except Exception:
+        # Propagate exception to parent process, keeping original traceback
+        import traceback
+        error_queue.put(traceback.format_exc())
+        sys.exit(1)
+
+
+def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+    mp = multiprocessing.get_context(start_method)
+    error_queues = []
+    processes = []
+    for i in range(nprocs):
+        error_queue = mp.SimpleQueue()
+        process = mp.Process(
+            target=_wrap,
+            args=(dill.dumps(fn), i, args, error_queue),
+            daemon=daemon,
+        )
+        process.start()
+        error_queues.append(error_queue)
+        processes.append(process)
+
+    context = ProcessContext(processes, error_queues)
+    if not join:
+        return context
+
+    # Loop on join until it returns True or raises an exception.
+    while not context.join():
+        pass
 
 
 if __name__ == "__main__":
