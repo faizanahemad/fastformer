@@ -47,10 +47,6 @@ def warn(*args, **kwargs):
 
 warnings.warn = warn
 
-import logging
-
-for name in logging.Logger.manager.loggerDict.keys():
-    logging.getLogger(name).setLevel(logging.CRITICAL)
 
 
 
