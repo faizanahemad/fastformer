@@ -754,7 +754,8 @@ def get_image_augmetations(mode, teacher=True, dims=224):
 
 
 def worker_init_fn(worker_id):
-    np.random.seed(np.random.get_state()[1][0] + worker_id)
+    random.seed(tuple(np.array(random.getstate()[1]) + worker_id))
+    np.random.seed(np.random.get_state()[1] + worker_id)
 
 
 class Norm(nn.Module):

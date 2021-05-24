@@ -208,7 +208,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
                          max_span_length=2, max_jumbling_span_length=2, jumble_sentence=True)
     dataset = CLRDataset(student, teacher)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
-                              batch_size=batch_size, shuffle=shuffle_dataset and single_node,
+                              batch_size=batch_size, shuffle=shuffle_dataset and single_node, persistent_workers=True,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
     return train_loader
@@ -378,6 +378,7 @@ def train(local_rank, args):
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
 
+    set_seeds(args["seed"] + rank)
     if local_rank == 0:
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
