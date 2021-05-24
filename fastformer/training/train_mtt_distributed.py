@@ -174,10 +174,17 @@ def training_args():
 
 
 class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_student: MTTDataset, dataset_teacher: MTTDataset):
-        self.dataset_student, self.dataset_teacher = copy.deepcopy(dataset_student), copy.deepcopy(dataset_teacher)
+    def __init__(self, dataset_student: dict, dataset_teacher: dict, dataset_length: int, location: str):
+        self.dataset_student, self.dataset_teacher = dataset_student, dataset_teacher
+        self.initialised = False
+        self.dataset_length = dataset_length
+        self.location = location
 
     def __getitem__(self, item):
+        if not self.initialised:
+            self.dataset_student = dataset_builder(self.location, self.dataset_student)
+            self.dataset_teacher = dataset_builder(self.location, self.dataset_teacher)
+            self.initialised = True
         x1 = self.dataset_student[item]
         x2 = self.dataset_teacher[item]
         x1["labels"] = x1.pop("label_mlm_input_ids")
@@ -185,7 +192,15 @@ class CLRDataset(torch.utils.data.Dataset):
         return dict(**x1, **x2)
 
     def __len__(self):
-        return len(self.dataset_student)
+        return self.dataset_length
+
+
+def dataset_builder(location, params):
+    from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+    dataset = Dataset.load_from_disk(location)
+    dataset = MTTDataset(dataset=dataset,
+                         **params)
+    return dataset
 
 
 def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1):
@@ -194,19 +209,24 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     import os
     num_workers = max(os.cpu_count() // 2, 1)
 
-    train_dataset = Dataset.load_from_disk(location)
-    kwargs = dict(prefetch_factor=8, persistent_workers=True) if num_workers > 0 else dict()
-    teacher = MTTDataset(cls_tokens, vocab_size, tokenizer,
-                         dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
-                         word_jumble_proba=((256, 0.1), (512, 0.125)), word_mask_proba = ((256, 0.1), (512, 0.125)), word_noise_proba=((256, 0.1), (512, 0.125)),
-                         max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
+    teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
+                        tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
+                        word_jumble_proba=((256, 0.1), (512, 0.125)),
+                        word_mask_proba=((256, 0.1), (512, 0.125)),
+                        word_noise_proba=((256, 0.1), (512, 0.125)),
+                        max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
+
+    student_args = dict(cls_tokens=cls_tokens, vocab_size=vocab_size, tokenizer=tokenizer,
+                        tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
+                        word_jumble_proba=((128, 0.1), (512, 0.15)),
+                        word_mask_proba=((128, 0.1), (512, 0.15)),
+                        word_noise_proba=((128, 0.1), (512, 0.15)),
+                        max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
 
     train_dataset = Dataset.load_from_disk(location)
-    student = MTTDataset(cls_tokens, vocab_size, tokenizer,
-                         dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
-                         word_jumble_proba=((128, 0.1), (512, 0.15)), word_mask_proba=((128, 0.1), (512, 0.15)), word_noise_proba=((128, 0.1), (512, 0.15)),
-                         max_span_length=2, max_jumbling_span_length=2, jumble_sentence=True)
-    dataset = CLRDataset(student, teacher)
+    dataset_length = len(train_dataset)
+    kwargs = dict(prefetch_factor=8, persistent_workers=True) if num_workers > 0 else dict()
+    dataset = CLRDataset(student_args, teacher_args, dataset_length, location)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
