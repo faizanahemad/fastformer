@@ -175,7 +175,7 @@ def training_args():
 
 class CLRDataset(torch.utils.data.Dataset):
     def __init__(self, dataset_student: MTTDataset, dataset_teacher: MTTDataset):
-        self.dataset_student, self.dataset_teacher = dataset_student, dataset_teacher
+        self.dataset_student, self.dataset_teacher = copy.deepcopy(dataset_student), copy.deepcopy(dataset_teacher)
 
     def __getitem__(self, item):
         x1 = self.dataset_student[item]
@@ -195,7 +195,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     num_workers = max(os.cpu_count() // 2, 1)
 
     train_dataset = Dataset.load_from_disk(location)
-    kwargs = dict(prefetch_factor=8) if num_workers > 0 else dict()
+    kwargs = dict(prefetch_factor=8, persistent_workers=True) if num_workers > 0 else dict()
     teacher = MTTDataset(cls_tokens, vocab_size, tokenizer,
                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
                          word_jumble_proba=((256, 0.1), (512, 0.125)), word_mask_proba = ((256, 0.1), (512, 0.125)), word_noise_proba=((256, 0.1), (512, 0.125)),
@@ -208,7 +208,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
                          max_span_length=2, max_jumbling_span_length=2, jumble_sentence=True)
     dataset = CLRDataset(student, teacher)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
-                              batch_size=batch_size, shuffle=shuffle_dataset and single_node, persistent_workers=True,
+                              batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
     return train_loader
@@ -484,7 +484,6 @@ def train(local_rank, args):
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"])
-            model.discriminator_pos_frac = discriminator_pos_frac
 
             model_start = time.time()
             if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
