@@ -214,6 +214,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
 
 
 def train(local_rank, args):
+    import os
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
