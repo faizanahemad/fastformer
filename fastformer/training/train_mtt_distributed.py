@@ -293,7 +293,7 @@ def train(local_rank, args):
         optimizer_config.eps = 1e-7
         eps = 1e-7
 
-    reinit = not (args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]))
+    reinit = args["pretrained_model"] is None
     print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
     backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], reinit)
     teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], reinit)
