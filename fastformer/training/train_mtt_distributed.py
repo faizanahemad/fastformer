@@ -201,6 +201,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
                          word_jumble_proba=((256, 0.1), (512, 0.125)), word_mask_proba = ((256, 0.1), (512, 0.125)), word_noise_proba=((256, 0.1), (512, 0.125)),
                          max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
 
+    train_dataset = Dataset.load_from_disk(location)
     student = MTTDataset(cls_tokens, vocab_size, tokenizer,
                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)), train_dataset,
                          word_jumble_proba=((128, 0.1), (512, 0.15)), word_mask_proba=((128, 0.1), (512, 0.15)), word_noise_proba=((128, 0.1), (512, 0.15)),
@@ -449,7 +450,6 @@ def train(local_rank, args):
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
             pct_done = (100 * steps_done / total_steps)
-            discriminator_pos_frac = 0.6 * min(1.0, max(0.02, pct_done / 100.0))
             # generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
             # discriminator_w_progressive = discriminator_w * min(1.0, max(0.001, pct_done / 100.0))
 
