@@ -1,4 +1,6 @@
 import argparse
+
+import dill
 import numpy as np
 import torch
 import random
@@ -30,8 +32,26 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from PIL import Image
 from albumentations import augmentations as alb
 import imgaug.augmenters as iaa
+from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
+from torch.multiprocessing import Process, ProcessContext
 from torch.nn.parallel import DistributedDataParallel as DDP
+import multiprocessing
+import signal
 import torchvision.transforms as transforms
+import warnings
+warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore")
+
+def warn(*args, **kwargs):
+    pass
+
+warnings.warn = warn
+
+import logging
+
+for name in logging.Logger.manager.loggerDict.keys():
+    logging.getLogger(name).setLevel(logging.CRITICAL)
+
 
 
 def str2bool(v):
@@ -781,6 +801,51 @@ def init_weights(module, std=None):
 def student_teacher_param_update(student, teacher, m):
     for param_q, param_k in zip((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).parameters(), teacher.parameters()):
         param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+
+
+
+
+def _wrap(fn, i, args, error_queue):
+    fn = dill.loads(fn)
+    # prctl(2) is a Linux specific system call.
+    # On other systems the following function call has no effect.
+    # This is set to ensure that non-daemonic child processes can
+    # terminate if their parent terminates before they do.
+    _prctl_pr_set_pdeathsig(signal.SIGINT)
+
+    try:
+        fn(i, *args)
+    except KeyboardInterrupt:
+        pass  # SIGINT; Killed by parent, do nothing
+    except Exception:
+        # Propagate exception to parent process, keeping original traceback
+        import traceback
+        error_queue.put(traceback.format_exc())
+        sys.exit(1)
+
+
+def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+    mp = multiprocessing.get_context(start_method)
+    error_queues = []
+    processes = []
+    for i in range(nprocs):
+        error_queue = mp.SimpleQueue()
+        process = mp.Process(
+            target=_wrap,
+            args=(dill.dumps(fn), i, args, error_queue),
+            daemon=daemon,
+        )
+        process.start()
+        error_queues.append(error_queue)
+        processes.append(process)
+
+    context = ProcessContext(processes, error_queues)
+    if not join:
+        return context
+
+    # Loop on join until it returns True or raises an exception.
+    while not context.join():
+        pass
 
 
 

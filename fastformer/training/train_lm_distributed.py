@@ -1413,50 +1413,6 @@ def train(local_rank, args):
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
-from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
-
-def _wrap(fn, i, args, error_queue):
-    fn = dill.loads(fn)
-    # prctl(2) is a Linux specific system call.
-    # On other systems the following function call has no effect.
-    # This is set to ensure that non-daemonic child processes can
-    # terminate if their parent terminates before they do.
-    _prctl_pr_set_pdeathsig(signal.SIGINT)
-
-    try:
-        fn(i, *args)
-    except KeyboardInterrupt:
-        pass  # SIGINT; Killed by parent, do nothing
-    except Exception:
-        # Propagate exception to parent process, keeping original traceback
-        import traceback
-        error_queue.put(traceback.format_exc())
-        sys.exit(1)
-
-
-def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
-    mp = multiprocessing.get_context(start_method)
-    error_queues = []
-    processes = []
-    for i in range(nprocs):
-        error_queue = mp.SimpleQueue()
-        process = mp.Process(
-            target=_wrap,
-            args=(dill.dumps(fn), i, args, error_queue),
-            daemon=daemon,
-        )
-        process.start()
-        error_queues.append(error_queue)
-        processes.append(process)
-
-    context = ProcessContext(processes, error_queues)
-    if not join:
-        return context
-
-    # Loop on join until it returns True or raises an exception.
-    while not context.join():
-        pass
-
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
