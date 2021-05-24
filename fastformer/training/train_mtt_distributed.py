@@ -203,11 +203,11 @@ def dataset_builder(location, params):
     return dataset
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1):
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1, num_workers=None):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
-    num_workers = min(max(os.cpu_count() // 2, 1), 4)
+    num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
 
     teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
@@ -405,7 +405,7 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
                                   tokenizer, args["cls_tokens"], vocab_size,
-                                  world_size=args["world_size"])
+                                  world_size=args["world_size"], args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)
