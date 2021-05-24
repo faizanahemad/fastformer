@@ -405,7 +405,7 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
                                   tokenizer, args["cls_tokens"], vocab_size,
-                                  world_size=args["world_size"], args["num_workers"])
+                                  world_size=args["world_size"], num_workers=args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
     iter_size = max(args["accumulation_steps"], 1)
