@@ -599,6 +599,7 @@ def train_catch_exception(local_rank, args):
     try:
         train(local_rank, args)
     except Exception as e:
+        import traceback
         print("[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, \n Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
         # traceback.print_tb(e.__traceback__)
         # traceback.print_exception(*sys.exc_info())
