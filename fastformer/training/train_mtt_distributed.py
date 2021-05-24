@@ -662,8 +662,8 @@ if __name__ == "__main__":
     if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
     else:
-        # mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
-        start_processes(train, (args,), args["gpus_per_node"], True, False, start_method='spawn')
+        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        # start_processes(train, (args,), args["gpus_per_node"], True, False, start_method='spawn')
 
 
 
