@@ -439,12 +439,13 @@ def train(local_rank, args):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
-            print("Time = %s [custom_batching_fn]: Distributed Sampler Epoch = %s" % (get_time_string(), epoch))
+            print("Time = %s: Distributed Sampler Epoch = %s" % (get_time_string(), epoch))
         else:
-            print("Time = %s [custom_batching_fn]: Unable to set Epoch = %s" % (get_time_string(), epoch))
+            print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), epoch))
 
         start_time = time.time()
         for step, batch in enumerate(dataloader):
+            print("Loaded one batch")
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
             pct_done = (100 * steps_done / total_steps)
