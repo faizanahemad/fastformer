@@ -31,6 +31,8 @@ def get_args():
 
     parser.add_argument("--start", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument("--lm", default=False, action="store_true",
+                        help="Flag to do something")
     parser.add_argument("--vision", default=False, action="store_true",
                         help="Flag to do something")
     parser.add_argument("--ggl", default=False, action="store_true",
@@ -185,6 +187,16 @@ if __name__ == "__main__":
     # vision_cmd += " --deit"
     vision_cmd += " > output.log 2>&1 & disown"
 
+    lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_config roberta-base --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
+    lm_cmd += " --dataset /home/ahemf/processed_datasets/train_fastformer_resampled_10M"
+    lm_cmd += " --log_every_steps 200 --num_workers 0 --save_every_steps 1000"
+    lm_cmd += " --wandb_dryrun"
+    lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 1"
+    lm_cmd += " --epochs 30 --lr 0.001 --batch_size 4"
+    lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 1.0 --dino_w 1.0"
+    lm_cmd += " --optimizer rangerlars --no_autocast --pretrained_model roberta-base"
+    lm_cmd += " > output.log 2>&1 & disown"
+
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
     # cmd1 = "kill -2 $(ps aux | grep multiprocessing | grep -v grep | awk \'{print $2}\')"
@@ -217,6 +229,20 @@ if __name__ == "__main__":
 
     if args["vision"]:
         cmd4 = cmd_dir + " && " + vision_cmd
+        if "tcp" in main_cmd:
+            ip_address_cmd = cmd_dir + " && " + "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
+            part0, part1 = cmd4.split("--master_addr")
+            part1 = part1.strip().split()[1:]
+            part1[1] = "9999"
+            part1 = ["--master_addr" + " " + ipaddr] + part1
+            part1 = " ".join(part1)
+            cmd4 = part0 + " " + part1
+
+        run_command_v2(hosts, cmd4, list(zip([len(hosts)] * len(hosts), list(map(str, list(range(len(hosts))))))), args["ds"])
+
+    if args["lm"]:
+        cmd4 = cmd_dir + " && " + lm_cmd
         if "tcp" in main_cmd:
             ip_address_cmd = cmd_dir + " && " + "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
             ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
