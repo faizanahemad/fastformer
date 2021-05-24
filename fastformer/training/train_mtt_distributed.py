@@ -40,7 +40,7 @@ from pytz import timezone
 from datetime import datetime, timedelta
 from torch.utils.data.dataloader import DataLoader
 from collections import Counter
-from fastformer.model.fastformer_vision_model import FastFormerVisionModel, PatchCLR, ClassificationModel, PatchModel
+from fastformer.model.mtt_model import MTTModel, MultiTaskHighwayCLSPretraining, get_mtt_backbone
 import torchvision.transforms as transforms
 import multiprocessing
 import signal
