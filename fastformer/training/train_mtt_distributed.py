@@ -207,7 +207,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
-    num_workers = max(os.cpu_count() // 2, 1)
+    num_workers = min(max(os.cpu_count() // 2, 1), 4)
 
     teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
@@ -225,7 +225,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
 
     train_dataset = Dataset.load_from_disk(location)
     dataset_length = len(train_dataset)
-    kwargs = dict(prefetch_factor=8, persistent_workers=True) if num_workers > 0 else dict()
+    kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     dataset = CLRDataset(student_args, teacher_args, dataset_length, location)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
