@@ -209,7 +209,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
             lm_accuracy = (new_input_ids == labels).float().mean().item()
             if self.discriminator_w > 0:
-                tol = (0.85 - lm_accuracy) / (1 - lm_accuracy)
+                tol = (0.75 - lm_accuracy) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids * mask + (1 - mask) * labels
                 discriminator_labels = (new_input_ids == labels).float()

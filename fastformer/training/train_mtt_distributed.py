@@ -141,7 +141,7 @@ def training_args():
     parser.add_argument('--optimizer', required=False, type=str, default="adamw",
                         help='optimizer')
 
-    parser.add_argument('--num_workers', required=False, type=int, default=0,
+    parser.add_argument('--num_workers', required=False, type=int, default=4,
                         help='Dataloader workers')
 
     parser.add_argument('--master_addr', type=str, required='MASTER_ADDR' not in os.environ,
