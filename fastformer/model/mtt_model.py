@@ -217,10 +217,11 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_labels = (new_input_ids == labels).float()
                 discriminator_label_mean = discriminator_labels.mean()
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
+                active_locations = attention_mask.bool()
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
-                discriminator_outputs = discriminator_outputs.squeeze(-1).reshape(b, -1)
-                discriminator_labels = discriminator_labels.reshape(b, -1)
+                discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
+                discriminator_labels = discriminator_labels[active_locations].reshape(-1)
                 discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
                 discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(torch.float)
                 sample_accuracies = (discriminator_preds == discriminator_labels).type(torch.float)
@@ -228,7 +229,6 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
-
 
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
