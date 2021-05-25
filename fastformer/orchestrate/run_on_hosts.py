@@ -174,7 +174,7 @@ if __name__ == "__main__":
     vision_cmd += " --no_autocast"
 
     vision_cmd += " --epochs 100"
-    vision_cmd += " --wandb_name val_0_1_1_0_s1"
+    vision_cmd += " --wandb_name val_1_1_1_1_32"
     vision_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name imagenet.pth --dataset /home/ahemf/processed_datasets/ImageNet"
     vision_cmd += " --pretrained_model /home/ahemf/model_save_dir/patchclr.pth"
     vision_cmd += " --mode linear_probe"
