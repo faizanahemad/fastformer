@@ -187,7 +187,7 @@ class MTTModel(FastFormerPreTrainedModel):
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
 
-        if self.sentence_order_prediction_w  and labels_segment_index is not None:
+        if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
             sent_order_logits = self.sent_order_nn(outputs["hidden_states"][-1][:, self.cls_tokens - 1]).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
@@ -198,7 +198,7 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
-            generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
+            generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
             new_input_ids = lm_logits.detach().argmax(dim=-1)
 
@@ -209,7 +209,9 @@ class MTTModel(FastFormerPreTrainedModel):
 
             lm_accuracy = (new_input_ids == labels).float().mean().item()
             if self.discriminator_w > 0:
-                tol = (0.75 - lm_accuracy) / (1 - lm_accuracy)
+                # TODO: Gradually sample more from our lm
+                # TODO: sample from lm such that we sample high confident samples which are wrong.
+                tol = min(0.75 - lm_accuracy, 0) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids * mask + (1 - mask) * labels
                 discriminator_labels = (new_input_ids == labels).float()
