@@ -179,6 +179,8 @@ class MTTModel(FastFormerPreTrainedModel):
         sent_order_accuracy = None
         sent_order_loss = None
         input_cls_orthogonal_loss = None
+        masked_lm_loss_long = None
+        lm_long_accuracy = None
         b = input_ids.size(0)
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
@@ -201,19 +203,32 @@ class MTTModel(FastFormerPreTrainedModel):
             generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
             new_input_ids = lm_logits.detach().argmax(dim=-1)
-
             if self.generator_w > 0:
                 active_labels = labels.reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-
             lm_accuracy = (new_input_ids == labels).float().mean().item()
+
+            if self.discriminator_w > 0 and labels is not None:
+                generator_output_long = self.generator_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:])
+                lm_logits_long = self.lm_head(generator_output_long)
+                new_input_ids_long = lm_logits_long.detach().argmax(dim=-1)
+                if self.generator_w > 0:
+                    active_prediction_logits_long = lm_logits_long.reshape(-1, self.vocab_size)
+                    masked_lm_loss_long = self.generator_w * self.loss_ce(active_prediction_logits_long, active_labels)
+                lm_long_accuracy = (new_input_ids_long == labels).float().mean().item()
+
             if self.discriminator_w > 0:
                 # TODO: Gradually sample more from our lm
                 # TODO: sample from lm such that we sample high confident samples which are wrong.
                 tol = min(0.75 - lm_accuracy, 0) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids * mask + (1 - mask) * labels
+
+                tol = min(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
+                mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
+                new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
+
                 discriminator_labels = (new_input_ids == labels).float()
                 discriminator_label_mean = discriminator_labels.mean()
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
@@ -230,7 +245,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
 
-        return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
+        return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy,
+                    dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy)
 
