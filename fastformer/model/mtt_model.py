@@ -221,16 +221,18 @@ class MTTModel(FastFormerPreTrainedModel):
             if self.discriminator_w > 0:
                 # TODO: Gradually sample more from our lm
                 # TODO: sample from lm such that we sample high confident samples which are wrong.
-                tol = min(0.75 - lm_accuracy, 0) / (1 - lm_accuracy)
+                tol = max(0.8 - lm_accuracy, 0) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids * mask + (1 - mask) * labels
 
-                tol = min(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
+                # print((new_input_ids == labels).float().mean(), tol, lm_accuracy)
+                tol = max(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
 
                 discriminator_labels = (new_input_ids == labels).float()
                 discriminator_label_mean = discriminator_labels.mean()
+                # print(discriminator_label_mean, tol, lm_long_accuracy)
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
                 active_locations = attention_mask.bool()
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
