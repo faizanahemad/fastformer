@@ -196,7 +196,8 @@ if __name__ == "__main__":
     lm_cmd += " --warmup_steps 10000 --gradient_clipping 3.0 --teacher_warmup_steps 1000"
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 1.0 --dino_w 1.0"
     lm_cmd += " --optimizer rangerlars --no_autocast"
-    lm_cmd += " --pretrained_model roberta-base"
+    # lm_cmd += " --pretrained_model roberta-base"
+    lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
     lm_cmd += " > output.log 2>&1 & disown"
 
     # > my.log 2>&1 &
