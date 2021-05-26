@@ -189,7 +189,7 @@ if __name__ == "__main__":
 
     lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_config roberta-base --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
     lm_cmd += " --dataset /home/ahemf/processed_datasets/all512"
-    lm_cmd += " --log_every_steps 200 --num_workers 0 --save_every_steps 1000"
+    lm_cmd += " --log_every_steps 200 --num_workers 1 --save_every_steps 1000"
     # lm_cmd += " --wandb_dryrun"
     lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 1"
     lm_cmd += " --epochs 5 --lr 0.001 --batch_size 4 --lr_steps 4"

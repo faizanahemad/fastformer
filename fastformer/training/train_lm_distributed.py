@@ -276,8 +276,21 @@ class SuperGlueTest:
                 self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
-            tokenizer = AutoTokenizer.from_pretrained(model)
-            model = AutoModel.from_pretrained(model)
+            if os.path.exists(model):
+                model_name = model.split("/")[-1].split(".")[0]
+                model, tokenizer = get_mtt_backbone(model_name, 1, reinit=False)
+                model = model.to(self.device)
+                state_dict = torch.load(model, map_location=self.device)
+                state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                try:
+                    model.load_state_dict(state_dict, strict=True)
+                except:
+                    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
+                    model.load_state_dict(state_dict, strict=True)
+            else:
+
+                tokenizer = AutoTokenizer.from_pretrained(model)
+                model = AutoModel.from_pretrained(model)
             model = model.train()
             optimizer_config.eps = 1e-5
         elif isinstance(model, DDP):
