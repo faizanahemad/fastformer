@@ -1149,7 +1149,7 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
 
     model = None
-    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
+    if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and not args["test_only"]:
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
 
