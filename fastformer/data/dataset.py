@@ -693,11 +693,11 @@ class MTTDataset(Dataset):
             inp["attention_mask"] = torch.cat((inp["attention_mask"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
 
         acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
-        print(acc.item(), acc2)
-        print(text,"\n",mlm_text)
-        print(list(zip(list(zip(inp["input_ids"].tolist(), results["label_mlm_input_ids"].tolist())), (inp["input_ids"] == results["label_mlm_input_ids"]).float().tolist())))
-        print(list(zip(self.tokenizer.decode(inp["input_ids"].tolist()).split(), self.tokenizer.decode(results["label_mlm_input_ids"].tolist()).split())))
-        print(list(zip([self.tokenizer.decode(k) for k in inp["input_ids"].tolist()], [self.tokenizer.decode(k) for k in results["label_mlm_input_ids"].tolist()])))
+        # print(acc.item(), acc2)
+        # print(text,"\n",mlm_text)
+        # print(list(zip(list(zip(inp["input_ids"].tolist(), results["label_mlm_input_ids"].tolist())), (inp["input_ids"] == results["label_mlm_input_ids"]).float().tolist())))
+        # print(list(zip(self.tokenizer.decode(inp["input_ids"].tolist()).split(), self.tokenizer.decode(results["label_mlm_input_ids"].tolist()).split())))
+        # print(list(zip([self.tokenizer.decode(k) for k in inp["input_ids"].tolist()], [self.tokenizer.decode(k) for k in results["label_mlm_input_ids"].tolist()])))
         results.update(inp)
 
         return results

@@ -227,8 +227,8 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     dataset_length = len(train_dataset)
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     dataset = CLRDataset(student_args, teacher_args, dataset_length, location)
-    for i in range(len(dataset) - 1000, len(dataset)):
-        k = dataset[i]
+    # for i in range(len(dataset) - 1000, len(dataset)):
+    #     k = dataset[i]
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
