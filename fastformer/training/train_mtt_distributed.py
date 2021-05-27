@@ -141,7 +141,7 @@ def training_args():
     parser.add_argument('--optimizer', required=False, type=str, default="adamw",
                         help='optimizer')
 
-    parser.add_argument('--num_workers', required=False, type=int, default=4,
+    parser.add_argument('--num_workers', required=False, type=int, default=0,
                         help='Dataloader workers')
 
     parser.add_argument('--master_addr', type=str, required='MASTER_ADDR' not in os.environ,
@@ -168,7 +168,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 139
+    seed = 3
     args.seed = seed
     return vars(args)
 
@@ -211,22 +211,24 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
 
     teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
-                        word_jumble_proba=((256, 0.1), (512, 0.125)),
-                        word_mask_proba=((256, 0.1), (512, 0.125)),
-                        word_noise_proba=((256, 0.1), (512, 0.125)),
+                        word_jumble_proba=((0, 0.02), (256, 0.1), (512, 0.125)),
+                        word_mask_proba=((0, 0.02), (256, 0.1), (512, 0.125)),
+                        word_noise_proba=((0, 0.02), (256, 0.1), (512, 0.125)),
                         max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
 
     student_args = dict(cls_tokens=cls_tokens, vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
-                        word_jumble_proba=((128, 0.1), (512, 0.15)),
-                        word_mask_proba=((128, 0.1), (512, 0.15)),
-                        word_noise_proba=((128, 0.1), (512, 0.15)),
-                        max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
+                        word_jumble_proba=((0, 0.05), (128, 0.1), (256, 0.15)),
+                        word_mask_proba=((0, 0.05), (128, 0.1), (256, 0.15)),
+                        word_noise_proba=((0, 0.05), (128, 0.1), (256, 0.15)),
+                        max_span_length=1, max_jumbling_span_length=2, jumble_sentence=True)
 
     train_dataset = Dataset.load_from_disk(location)
     dataset_length = len(train_dataset)
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     dataset = CLRDataset(student_args, teacher_args, dataset_length, location)
+    for i in range(len(dataset) - 1000, len(dataset)):
+        k = dataset[i]
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)

@@ -59,7 +59,7 @@ from fastformer.utils import *
 from fastformer.model import FastFormerPreTrainedModel
 
 
-def get_mtt_backbone(model_name, cls_tokens, reinit=False):
+def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None, extra_tokens=None):
     model = AutoModel.from_pretrained(model_name)
     vocab_size, dims = model.embeddings.word_embeddings.weight.size(0), model.embeddings.word_embeddings.weight.size(1)
     if reinit:

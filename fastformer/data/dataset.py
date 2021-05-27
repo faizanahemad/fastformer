@@ -185,7 +185,25 @@ def word_level_noising(text, tokenizer, probability=0.15):
     return new_text
 
 
-def span_based_whole_word_masking(text: str, tokenizer, probability: float, vocab: list, max_span_length: int = 3) -> str:
+class sample_random_token:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        probas = np.linspace(1, 0.01, len(tokenizer))
+        for i in tokenizer.all_special_ids:
+            probas[i] = 0
+        probas = probas / np.sum(probas)
+        self.probas = probas
+        self.length = len(tokenizer)
+
+    def __call__(self):
+        t_id = random.choices(range(self.length), self.probas)[0]
+        text = self.tokenizer.decode(t_id).strip().lower()
+        if text == "bor" or text == "or" or text == "b":
+            i = 1
+        return text
+
+
+def span_based_whole_word_masking(text: str, tokenizer, probability: float, vocab: list, max_span_length: int = 1, sampler=None) -> str:
     text = str(text)
     if probability == 0 or len(text) == 0 or len(text.split()) <= 2:
         return text
@@ -193,7 +211,7 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
     new_tokens = []
     skip_next_n_words = 0
     for idx, token in enumerate(tokens):
-        if token in tokenizer.all_special_tokens_extended:
+        if token in tokenizer.all_special_tokens_extended or token in tokenizer.all_special_tokens:
             skip_next_n_words = 0
             new_tokens.append(token)
             continue
@@ -203,12 +221,59 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
         prob = random.random()
         if prob < probability:
             prob /= probability
+            token_lengths = len(tokenizer.tokenize(" "+tokens[idx].strip()))
             if prob < 0.9:
                 span_size = min(random.sample(range(1, max_span_length + 1), 1)[0], len(tokens) - idx)
-                tks = [tokenizer.mask_token] * sum([len(tokenizer.tokenize(tokens[idx + i])) for i in range(span_size)])
+                token_lengths = sum([len(tokenizer.tokenize(" "+tokens[idx + i])) for i in range(span_size)])
+                tks = [tokenizer.mask_token] * token_lengths
                 skip_next_n_words = span_size - 1
+            elif sampler is not None:
+                tks = [sampler() for _ in range(token_lengths)]
             else:
-                tks = random.sample(vocab, 1)
+                tks = [tokenizer.decode(random.sample(range(len(tokenizer)), 1)[0]).strip() for _ in range(token_lengths)]
+
+        else:
+            tks = [token]
+        new_tokens.extend(tks)
+    return " ".join(new_tokens)
+
+
+def token_masking(text: str, tokenizer, probability: float, vocab: list, max_span_length: int = 1, sampler=None) -> str:
+    text = str(text)
+    if probability == 0 or len(text) == 0 or len(text.split()) <= 2:
+        return text
+
+    tokens = np.array(tokenizer.encode(text, add_special_tokens=False))
+    probas = np.random.random(len(tokens))
+    masked = probas < probability
+    rand_replace = probas < (probability * 0.1)
+    tokens[masked] = tokenizer.mask_token_id
+    np.sum(rand_replace)
+    tokens = text.split()
+    new_tokens = []
+    skip_next_n_words = 0
+    for idx, token in enumerate(tokens):
+        if token in tokenizer.all_special_tokens_extended or token in tokenizer.all_special_tokens:
+            skip_next_n_words = 0
+            new_tokens.append(token)
+            continue
+        if skip_next_n_words > 0:
+            skip_next_n_words -= 1
+            continue
+        prob = random.random()
+        if prob < probability:
+            prob /= probability
+            token_lengths = len(tokenizer.tokenize(" "+tokens[idx].strip()))
+            if prob < 0.9:
+                span_size = min(random.sample(range(1, max_span_length + 1), 1)[0], len(tokens) - idx)
+                token_lengths = sum([len(tokenizer.tokenize(" "+tokens[idx + i])) for i in range(span_size)])
+                tks = [tokenizer.mask_token] * token_lengths
+                skip_next_n_words = span_size - 1
+            elif sampler is not None:
+                tks = [sampler() for _ in range(token_lengths)]
+            else:
+                tks = [tokenizer.decode(random.sample(range(len(tokenizer)), 1)[0]).strip() for _ in range(token_lengths)]
+
         else:
             tks = [token]
         new_tokens.extend(tks)
@@ -229,6 +294,8 @@ def char_mapper(char_to_id, x):
 
 def char_rnn_tokenize(text, tokenizer, char_to_id=None, **tokenizer_args):
     # Do padding myself
+    text = " ".join([x.strip() for x in text.split()])
+    text = " " + text.strip()
     if isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and char_to_id is not None:
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=True, **tokenizer_args)
         offset_mapping = tokenizer_outputs["offset_mapping"]
@@ -296,6 +363,7 @@ class TokenizerDataset(Dataset):
         self.word_jumble_in_pet = word_jumble_in_pet
         self.n_anchors = n_anchors
         self.n_positives = n_positives
+        self.token_sampler = sample_random_token(self.tokenizer)
 
     def train(self):
         self.training = True
@@ -333,12 +401,14 @@ class TokenizerDataset(Dataset):
         # assert len(text.strip()) > 0
 
         text = unidecode.unidecode(text)
+        text = " ".join([x.strip() for x in text.split()])
+        text = " " + text.strip()
         # assert len(text.strip()) > 0
 
         results = dict(n_pet_queries=n_queries, answer=pet_answer)
 
         if self.training:
-            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)  # " ".join(self.sent_detector.tokenize(text)[::2])
+            tokenizer_outputs = char_rnn_tokenize(text, tokenizer, None, **self.tokenizer_args)
             # TODO: try one in ten words / alternate sentences?
             highway_cls_ar_input_ids, highway_cls_ar__attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
             length = torch.sum(highway_cls_ar__attention_mask).item()
@@ -460,18 +530,18 @@ class TokenizerDataset(Dataset):
                 labels_pet_text += getattr(tokenizer, "question_token_%s" % i) + " " + a
             labels_pet_text = (labels_pet_text + " " + getattr(tokenizer, "answer_end_token")).strip()
             if n_queries > 0:
-                tokenizer_outputs = tokenizer(labels_pet_text, return_offsets_mapping=False, **self.labels_pet_text_tokenizer_args)
+                tokenizer_outputs = char_rnn_tokenize(labels_pet_text, tokenizer, None, **self.labels_pet_text_tokenizer_args)
                 input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
                 results.update(dict(labels_pet_input_ids=input_ids.squeeze(),
                                     labels_pet_attention_mask=attention_mask.squeeze()))
 
-            tokenizer_outputs = tokenizer(mlm_text, return_offsets_mapping=False, **self.tokenizer_args)
+            tokenizer_outputs = char_rnn_tokenize(mlm_text, tokenizer, None, **self.tokenizer_args)
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
             for idx, seq in enumerate(segments):
                 if n_queries == 0 or self.word_mask_in_pet:
-                    seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)
+                    seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
                 if n_queries == 0 or self.word_jumble_in_pet:
                     seq = seq.split()
                     new_seq = []
@@ -540,6 +610,8 @@ class MTTDataset(Dataset):
         self.wj_l, self.wj_p = zip(*word_jumble_proba)
         self.max_jumbling_span_length = max_jumbling_span_length
         self.jumble_sentence = jumble_sentence
+        self.allowed_raw_length = self.tokenizer_args["max_length"] - 48
+        self.token_sampler = sample_random_token(self.tokenizer)
         
     def train(self):
         self.training = True
@@ -553,13 +625,18 @@ class MTTDataset(Dataset):
         label = item["label"] if "label" in item else 0.0
 
         text = item["text"]
-        length = len(text.strip())
+        length = len(text.strip().split())
         if length == 0:
             text = "empty empty no text empty"
+        if length > self.allowed_raw_length:
+            text = " ".join(text.split()[:self.allowed_raw_length])
+            length = len(text.strip().split())
 
         text = unidecode.unidecode(text)
+        text = " ".join([x.strip() for x in text.split()])
+        text = " " + text.strip()
         results = dict()
-
+        acc2 = -1
         if self.training:
             seg_sep_token = f" {tokenizer.sep_token} "
 
@@ -583,28 +660,29 @@ class MTTDataset(Dataset):
             results.update(dict(labels_segment_index=labels_segment_index))
 
             mlm_text = seg_sep_token.join(segments)  # Training Labels for MLM
-            tokenizer_outputs = tokenizer(mlm_text, return_offsets_mapping=False, **self.tokenizer_args)
+            tokenizer_outputs = char_rnn_tokenize(mlm_text, tokenizer, None, **self.tokenizer_args)
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
             for idx, seq in enumerate(segments):
-                seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length)
+                seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
 
-                seq = seq.split()
-                new_seq = []
-                for i in range(len(seq))[::self.max_jumbling_span_length]:
-                    small_seq = seq[i:i+self.max_jumbling_span_length]
-                    if random.random() <= wj and self.tokenizer.mask_token not in small_seq:
-                        new_seq.extend(random.sample(small_seq, len(small_seq)))
-                    else:
-                        new_seq.extend(small_seq)
-                # seq = [w for i in range(len(seq))[::self.max_jumbling_span_length] for w in (random.sample(seq[i:i+self.max_jumbling_span_length], len(seq[i: i+self.max_jumbling_span_length])) if random.random() <= wj and self.tokenizer.mask_token not in seq[i:i+self.max_jumbling_span_length] else seq[i:i+self.max_jumbling_span_length])]
-                seq = " ".join(new_seq).strip()
-
-                seq = word_level_noising(seq, self.tokenizer, wn)
+                # seq = seq.split()
+                # new_seq = []
+                # if self.max_jumbling_span_length > 1:
+                #     for i in range(len(seq))[::self.max_jumbling_span_length]:
+                #         small_seq = seq[i:i+self.max_jumbling_span_length]
+                #         if random.random() <= wj and self.tokenizer.mask_token not in small_seq:
+                #             new_seq.extend(random.sample(small_seq, len(small_seq)))
+                #         else:
+                #             new_seq.extend(small_seq)
+                # # seq = [w for i in range(len(seq))[::self.max_jumbling_span_length] for w in (random.sample(seq[i:i+self.max_jumbling_span_length], len(seq[i: i+self.max_jumbling_span_length])) if random.random() <= wj and self.tokenizer.mask_token not in seq[i:i+self.max_jumbling_span_length] else seq[i:i+self.max_jumbling_span_length])]
+                # seq = " ".join(new_seq).strip()
+                # seq = word_level_noising(seq, self.tokenizer, wn)
                 segments[idx] = seq
 
             text = seg_sep_token.join(segments)
+            # acc2 = (np.array(mlm_text.split()) == np.array(text.split())).mean()
         if "label" in item:
             results["label"] = label
         inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
@@ -614,6 +692,12 @@ class MTTDataset(Dataset):
             dtype = inp["attention_mask"].dtype
             inp["attention_mask"] = torch.cat((inp["attention_mask"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
 
+        acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
+        print(acc.item(), acc2)
+        print(text,"\n",mlm_text)
+        print(list(zip(list(zip(inp["input_ids"].tolist(), results["label_mlm_input_ids"].tolist())), (inp["input_ids"] == results["label_mlm_input_ids"]).float().tolist())))
+        print(list(zip(self.tokenizer.decode(inp["input_ids"].tolist()).split(), self.tokenizer.decode(results["label_mlm_input_ids"].tolist()).split())))
+        print(list(zip([self.tokenizer.decode(k) for k in inp["input_ids"].tolist()], [self.tokenizer.decode(k) for k in results["label_mlm_input_ids"].tolist()])))
         results.update(inp)
 
         return results
