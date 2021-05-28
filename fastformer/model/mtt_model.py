@@ -132,11 +132,11 @@ class MTTModel(FastFormerPreTrainedModel):
                                                )
             init_weights(self.generator_ffn, 0.01)
 
-            self.tail_gen_ffn = nn.Sequential(nn.Linear(num_features, num_features),
-                                              nn.GELU(),
-                                              nn.Linear(num_features, num_features),  # nn.Tanh()
-                                              )
-            init_weights(self.tail_gen_ffn, 0.01)
+            # self.tail_gen_ffn = nn.Sequential(nn.Linear(num_features, num_features),
+            #                                   nn.GELU(),
+            #                                   nn.Linear(num_features, num_features),  # nn.Tanh()
+            #                                   )
+            # init_weights(self.tail_gen_ffn, 0.01)
 
         if discriminator_w > 0:
             self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features),
@@ -220,25 +220,25 @@ class MTTModel(FastFormerPreTrainedModel):
             lm_accuracy = (new_input_ids == labels).float().mean().item()
 
             if self.discriminator_w > 0 and labels is not None:
-                generator_output_long = self.generator_ffn(self.tail_gen_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:]))
-                lm_logits_long = self.lm_head(generator_output_long)
-                new_input_ids_long = lm_logits_long.detach().argmax(dim=-1)
-                if self.generator_w > 0:
-                    active_prediction_logits_long = lm_logits_long.reshape(-1, self.vocab_size)
-                    masked_lm_loss_long = self.generator_w * self.loss_ce(active_prediction_logits_long, active_labels)
-                lm_long_accuracy = (new_input_ids_long == labels).float().mean().item()
+                # generator_output_long = self.generator_ffn(self.tail_gen_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:]))
+                # lm_logits_long = self.lm_head(generator_output_long)
+                # new_input_ids_long = lm_logits_long.detach().argmax(dim=-1)
+                # if self.generator_w > 0:
+                #     active_prediction_logits_long = lm_logits_long.reshape(-1, self.vocab_size)
+                #     masked_lm_loss_long = self.generator_w * self.loss_ce(active_prediction_logits_long, active_labels)
+                # lm_long_accuracy = (new_input_ids_long == labels).float().mean().item()
 
             if self.discriminator_w > 0:
                 # TODO: Gradually sample more from our lm
                 # TODO: sample from lm such that we sample high confident samples which are wrong.
-                tol = max(0.9 - lm_accuracy, 0) / (1 - lm_accuracy)
+                tol = max(0.85 - lm_accuracy, 0) / (1 - lm_accuracy)
                 mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 new_input_ids = new_input_ids * mask + (1 - mask) * labels
 
                 # print("First", (new_input_ids == labels).float().mean(), tol, lm_accuracy)
-                tol = max(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
-                mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
-                new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
+                # tol = max(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
+                # mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
+                # new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
 
                 discriminator_labels = (new_input_ids == labels).float()
                 discriminator_label_mean = discriminator_labels.mean()
