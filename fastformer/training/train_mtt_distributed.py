@@ -168,7 +168,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 3
+    seed = 313
     args.seed = seed
     return vars(args)
 
@@ -211,12 +211,12 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
 
     teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
-                        word_mask_proba=((0, 0.0), (32, 0.05), (128, 0.1), (256, 0.125)),
+                        word_mask_proba=((0, 0.0), (32, 0.05), (128, 0.1), (512, 0.125)),
                         max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
 
     student_args = dict(cls_tokens=cls_tokens, vocab_size=vocab_size, tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
-                        word_mask_proba=((0, 0.15), (32, 0.2), (128, 0.2), (256, 0.25)),
+                        word_mask_proba=((0, 0.2), (32, 0.2), (128, 0.2), (512, 0.25)),
                         max_span_length=1, max_jumbling_span_length=2, jumble_sentence=True)
 
     train_dataset = Dataset.load_from_disk(location)
