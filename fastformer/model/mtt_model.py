@@ -252,7 +252,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
             mask_indices = input_ids.long() != labels.long()
-            mask_indices_mean = mask_indices.long().float().mean().item()
+            mask_indices_mean = mask_indices[attention_mask].long().float().mean().item()
             lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
             generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
