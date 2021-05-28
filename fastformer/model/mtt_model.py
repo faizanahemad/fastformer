@@ -188,6 +188,7 @@ class MTTModel(FastFormerPreTrainedModel):
         masked_lm_loss_long = None
         lm_long_accuracy = None
         b = input_ids.size(0)
+        lm_input_accuracy = (input_ids == labels).float().mean().item()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
@@ -253,7 +254,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
 
-        return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy,
+        return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy)
