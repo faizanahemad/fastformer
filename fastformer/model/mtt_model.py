@@ -83,6 +83,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.cls_tokens = cls_tokens
         self.backbone = backbone
         self.pad_token_id = tokenizer.pad_token_id
+        self.mask_token_id = tokenizer.mask_token_id
         self.ce = CrossEntropyLoss(ignore_index=-100)
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.ignore_zero_ce = CrossEntropyLoss(ignore_index=0)
@@ -189,6 +190,7 @@ class MTTModel(FastFormerPreTrainedModel):
         lm_long_accuracy = None
         lm_input_accuracy = None
         b = input_ids.size(0)
+        mask_indices = input_ids == self.mask_token_id
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
 
 
@@ -212,12 +214,12 @@ class MTTModel(FastFormerPreTrainedModel):
             lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
             generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
-            new_input_ids = lm_logits.detach().argmax(dim=-1)
+            lm_out_ids = lm_logits.detach().argmax(dim=-1)
             if self.generator_w > 0:
                 active_labels = labels.reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-            lm_accuracy = (new_input_ids == labels).float().mean().item()
+            lm_accuracy = (lm_out_ids == labels).float().mean().item()
 
             # if self.discriminator_w > 0 and labels is not None:
                 # generator_output_long = self.generator_ffn(self.tail_gen_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:]))
@@ -231,9 +233,13 @@ class MTTModel(FastFormerPreTrainedModel):
             if self.discriminator_w > 0:
                 # TODO: Gradually sample more from our lm
                 # TODO: sample from lm such that we sample high confident samples which are wrong.
-                tol = max(0.85 - lm_accuracy, 0) / (1 - lm_accuracy)
-                mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
-                new_input_ids = new_input_ids * mask + (1 - mask) * labels
+                # tol = max(0.85 - lm_accuracy, 0) / (1 - lm_accuracy)
+                # new_input_ids = lm_out_ids
+                # mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
+                # new_input_ids = new_input_ids * mask + (1 - mask) * labels
+
+                new_input_ids = input_ids.clone()
+                new_input_ids[mask_indices] = lm_out_ids[mask_indices]
 
                 # print("First", (new_input_ids == labels).float().mean(), tol, lm_accuracy)
                 # tol = max(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)

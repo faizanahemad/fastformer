@@ -253,6 +253,23 @@ def token_masking(text: str, tokenizer, probability: float, vocab: list, max_spa
     tokens[rand_replace] = rand_tokens
     return tokenizer.decode(tokens)
 
+def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_span_length: int = 1, sampler=None) -> str:
+
+    if probability == 0 or len(tokens) <= 2:
+        return tokens
+
+    tokens = np.array(tokens.tolist())
+    probas = np.random.random(len(tokens))
+    masked = probas < probability
+    rand_replace = probas < (probability * 0.1)
+    tokens[masked] = tokenizer.mask_token_id
+    if sampler is not None:
+        rand_tokens = np.array([sampler()[1] for _ in range(np.sum(rand_replace))])
+    else:
+        rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in range(np.sum(rand_replace))])
+    tokens[rand_replace] = rand_tokens
+    return torch.tensor(list(tokens))
+
 
 def char_mapper(char_to_id, x):
     x = x.lower()
@@ -655,19 +672,22 @@ class MTTDataset(Dataset):
                 # seq = word_level_noising(seq, self.tokenizer, wn)
                 # segments[idx] = seq
 
-            text = seg_sep_token.join(segments)
-            text = token_masking(text, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
+            # text = seg_sep_token.join(segments)
+            # text = token_masking(text, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
             # acc2 = (np.array(mlm_text.split()) == np.array(text.split())).mean()
         if "label" in item:
             results["label"] = label
-        inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
+
+        # inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
+        input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
+        inp = dict(input_ids=input_ids, attention_mask=attention_mask)
         if self.cls_tokens > 1:
             dtype = inp["input_ids"].dtype
             inp["input_ids"] = torch.cat((inp["input_ids"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
             dtype = inp["attention_mask"].dtype
             inp["attention_mask"] = torch.cat((inp["attention_mask"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
 
-        acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
+        # acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
         # print(acc.item(), acc2)
         # print(text,"\n",mlm_text)
         # print(list(zip(list(zip(inp["input_ids"].tolist(), results["label_mlm_input_ids"].tolist())), (inp["input_ids"] == results["label_mlm_input_ids"]).float().tolist())))
