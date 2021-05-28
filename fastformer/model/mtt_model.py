@@ -58,6 +58,24 @@ from fastformer.model.lib import *
 from fastformer.utils import *
 from fastformer.model import FastFormerPreTrainedModel
 
+def log(t, eps=1e-8):
+    return torch.log(t + eps)
+
+def gumbel_noise(t):
+    noise = torch.zeros_like(t).uniform_(0, 1)
+    return -log(-log(noise))
+
+def gumbel_sample(t, temperature = 1.):
+    return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
+
+
+def temperature_sampling(logits, temperature=1.0):
+    if temperature is None or temperature == 0.0:
+        return torch.argmax(logits)
+    probs = F.softmax(logits / temperature)
+    pred_ids = probs.view(-1, probs.size(-1)).multinomial(1, replacement=False).view(*probs.shape[:2])
+    return pred_ids
+
 
 def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None, extra_tokens=None):
     model = AutoModel.from_pretrained(model_name)
@@ -189,6 +207,7 @@ class MTTModel(FastFormerPreTrainedModel):
         masked_lm_loss_long = None
         lm_long_accuracy = None
         lm_input_accuracy = None
+        discriminator_extra_accuracy = None
         b = input_ids.size(0)
         mask_indices = input_ids == self.mask_token_id
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
@@ -239,14 +258,14 @@ class MTTModel(FastFormerPreTrainedModel):
                 # new_input_ids = new_input_ids * mask + (1 - mask) * labels
 
                 new_input_ids = input_ids.clone()
-                new_input_ids[mask_indices] = lm_out_ids[mask_indices]
+                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())[mask_indices]
 
                 # print("First", (new_input_ids == labels).float().mean(), tol, lm_accuracy)
                 # tol = max(0.95 - lm_long_accuracy, 0) / (1 - lm_long_accuracy)
                 # mask = (torch.randn(new_input_ids.shape[:2], device=new_input_ids.device) >= tol).type(new_input_ids.dtype)
                 # new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
 
-                discriminator_labels = (new_input_ids == labels).float()
+                discriminator_labels = (new_input_ids.long() == labels.long()).float()
                 discriminator_label_mean = discriminator_labels.mean()
                 # print("Second", discriminator_label_mean, tol, lm_long_accuracy)
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
@@ -262,9 +281,10 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
+                discriminator_extra_accuracy = (discriminator_accuracy - discriminator_label_mean) / (100.0 - discriminator_label_mean)
 
         return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy, lm_input_accuracy=lm_input_accuracy,
-                    dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
+                    dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy, discriminator_extra_accuracy=discriminator_extra_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy)
 
