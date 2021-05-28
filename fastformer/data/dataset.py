@@ -271,11 +271,11 @@ def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_spa
         rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in range(np.sum(rand_replace))])
     tokens[rand_replace] = rand_tokens
 
-    for i, t in enumerate(tokens):
-        if t == tokenizer.mask_token_id and i > 1 and random.random() < 0.15:
-            tokens[i - 1] = tokenizer.mask_token_id
-        if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() < 0.15:
-            tokens[i + 1] = tokenizer.mask_token_id
+    # for i, t in enumerate(tokens):
+    #     if t == tokenizer.mask_token_id and i > 1 and random.random() < 0.15:
+    #         tokens[i - 1] = tokenizer.mask_token_id
+    #     if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() < 0.15:
+    #         tokens[i + 1] = tokenizer.mask_token_id
 
     special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
