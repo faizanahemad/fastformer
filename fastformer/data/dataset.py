@@ -261,6 +261,8 @@ def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_spa
 
     tokens = np.array(tokens.tolist())
     original_tokens = tokens.copy()
+    special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
+    full_length = np.logical_not(special_tokens_idx).sum()
     probas = np.random.random(len(tokens))
     masked = probas <= probability
     rand_replace = probas < (probability * 0.15)
@@ -271,13 +273,14 @@ def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_spa
         rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in range(np.sum(rand_replace))])
     tokens[rand_replace] = rand_tokens
 
-    for i, t in enumerate(tokens):
-        if t == tokenizer.mask_token_id and i > 1 and random.random() <= 0.15:
-            tokens[i - 1] = tokenizer.mask_token_id
-        if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() <= 0.15:
-            tokens[i + 1] = tokenizer.mask_token_id
+    if full_length > 64:
+        for i, t in enumerate(tokens):
+            if t == tokenizer.mask_token_id and i > 1 and random.random() <= 0.125:
+                tokens[i - 1] = tokenizer.mask_token_id
+            if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() <= 0.125:
+                tokens[i + 1] = tokenizer.mask_token_id
 
-    special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
+
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
     return torch.tensor(list(tokens))
 
