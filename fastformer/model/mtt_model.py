@@ -187,9 +187,10 @@ class MTTModel(FastFormerPreTrainedModel):
         input_cls_orthogonal_loss = None
         masked_lm_loss_long = None
         lm_long_accuracy = None
+        lm_input_accuracy = None
         b = input_ids.size(0)
-        print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
-        lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
+        # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
+
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
@@ -208,6 +209,7 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
+            lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
             generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
             new_input_ids = lm_logits.detach().argmax(dim=-1)
