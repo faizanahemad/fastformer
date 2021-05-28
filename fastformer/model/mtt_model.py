@@ -188,7 +188,8 @@ class MTTModel(FastFormerPreTrainedModel):
         masked_lm_loss_long = None
         lm_long_accuracy = None
         b = input_ids.size(0)
-        lm_input_accuracy = (input_ids == labels).float().mean().item()
+        print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels).shape)
+        lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
