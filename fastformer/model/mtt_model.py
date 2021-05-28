@@ -229,6 +229,7 @@ class MTTModel(FastFormerPreTrainedModel):
         b = input_ids.size(0)
         mask_indices_mean = None
         masked_accuracy = None
+        active_locations = attention_mask.bool()
         # mask_indices = input_ids == self.mask_token_id
 
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
@@ -252,7 +253,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
             mask_indices = input_ids.long() != labels.long()
-            mask_indices_mean = mask_indices[attention_mask].long().float().mean().item()
+            mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
             lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
             generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
@@ -290,14 +291,14 @@ class MTTModel(FastFormerPreTrainedModel):
                 # new_input_ids = new_input_ids_long * mask + (1 - mask) * new_input_ids
 
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
-                discriminator_label_mean = discriminator_labels.mean()
                 # print("Second", discriminator_label_mean, tol, lm_long_accuracy)
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
-                active_locations = attention_mask.bool()
+
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
                 discriminator_labels = discriminator_labels[active_locations].reshape(-1)
+                discriminator_label_mean = discriminator_labels.mean()
                 discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
                 discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(torch.float)
                 sample_accuracies = (discriminator_preds == discriminator_labels).type(torch.float)
