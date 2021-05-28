@@ -198,9 +198,7 @@ class sample_random_token:
     def __call__(self):
         t_id = random.choices(range(self.length), self.probas)[0]
         text = self.tokenizer.decode(t_id).strip().lower()
-        if text == "bor" or text == "or" or text == "b":
-            i = 1
-        return text
+        return text, t_id
 
 
 def span_based_whole_word_masking(text: str, tokenizer, probability: float, vocab: list, max_span_length: int = 1, sampler=None) -> str:
@@ -228,7 +226,7 @@ def span_based_whole_word_masking(text: str, tokenizer, probability: float, voca
                 tks = [tokenizer.mask_token] * token_lengths
                 skip_next_n_words = span_size - 1
             elif sampler is not None:
-                tks = [sampler() for _ in range(token_lengths)]
+                tks = [sampler()[0] for _ in range(token_lengths)]
             else:
                 tks = [tokenizer.decode(random.sample(range(len(tokenizer)), 1)[0]).strip() for _ in range(token_lengths)]
 
@@ -248,36 +246,12 @@ def token_masking(text: str, tokenizer, probability: float, vocab: list, max_spa
     masked = probas < probability
     rand_replace = probas < (probability * 0.1)
     tokens[masked] = tokenizer.mask_token_id
-    np.sum(rand_replace)
-    tokens = text.split()
-    new_tokens = []
-    skip_next_n_words = 0
-    for idx, token in enumerate(tokens):
-        if token in tokenizer.all_special_tokens_extended or token in tokenizer.all_special_tokens:
-            skip_next_n_words = 0
-            new_tokens.append(token)
-            continue
-        if skip_next_n_words > 0:
-            skip_next_n_words -= 1
-            continue
-        prob = random.random()
-        if prob < probability:
-            prob /= probability
-            token_lengths = len(tokenizer.tokenize(" "+tokens[idx].strip()))
-            if prob < 0.9:
-                span_size = min(random.sample(range(1, max_span_length + 1), 1)[0], len(tokens) - idx)
-                token_lengths = sum([len(tokenizer.tokenize(" "+tokens[idx + i])) for i in range(span_size)])
-                tks = [tokenizer.mask_token] * token_lengths
-                skip_next_n_words = span_size - 1
-            elif sampler is not None:
-                tks = [sampler() for _ in range(token_lengths)]
-            else:
-                tks = [tokenizer.decode(random.sample(range(len(tokenizer)), 1)[0]).strip() for _ in range(token_lengths)]
-
-        else:
-            tks = [token]
-        new_tokens.extend(tks)
-    return " ".join(new_tokens)
+    if sampler is not None:
+        rand_tokens = np.array([sampler()[1] for _ in np.sum(rand_replace)])
+    else:
+        rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in np.sum(rand_replace)])
+    tokens[rand_replace] = rand_tokens
+    return tokenizer.decode(tokens)
 
 
 def char_mapper(char_to_id, x):
@@ -664,8 +638,8 @@ class MTTDataset(Dataset):
             input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
             results["label_mlm_input_ids"] = input_ids.squeeze()
 
-            for idx, seq in enumerate(segments):
-                seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
+            # for idx, seq in enumerate(segments):
+                # seq = span_based_whole_word_masking(seq, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
 
                 # seq = seq.split()
                 # new_seq = []
@@ -679,9 +653,10 @@ class MTTDataset(Dataset):
                 # # seq = [w for i in range(len(seq))[::self.max_jumbling_span_length] for w in (random.sample(seq[i:i+self.max_jumbling_span_length], len(seq[i: i+self.max_jumbling_span_length])) if random.random() <= wj and self.tokenizer.mask_token not in seq[i:i+self.max_jumbling_span_length] else seq[i:i+self.max_jumbling_span_length])]
                 # seq = " ".join(new_seq).strip()
                 # seq = word_level_noising(seq, self.tokenizer, wn)
-                segments[idx] = seq
+                # segments[idx] = seq
 
             text = seg_sep_token.join(segments)
+            text = token_masking(text, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
             # acc2 = (np.array(mlm_text.split()) == np.array(text.split())).mean()
         if "label" in item:
             results["label"] = label
