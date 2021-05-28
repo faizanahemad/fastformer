@@ -194,7 +194,7 @@ if __name__ == "__main__":
     lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 1"
     lm_cmd += " --epochs 5 --lr 0.0001 --batch_size 4 --lr_steps 1"
     lm_cmd += " --warmup_steps 10000 --gradient_clipping 3.0 --teacher_warmup_steps 1000"
-    lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 10.0 --dino_w 1.0"
+    lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 1.0"
     lm_cmd += " --optimizer adamw --no_autocast"
     # lm_cmd += " --pretrained_model roberta-base"
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
