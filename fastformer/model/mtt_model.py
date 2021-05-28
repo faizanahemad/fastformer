@@ -209,7 +209,10 @@ class MTTModel(FastFormerPreTrainedModel):
         lm_input_accuracy = None
         discriminator_extra_accuracy = None
         b = input_ids.size(0)
-        mask_indices = input_ids == self.mask_token_id
+        # mask_indices = input_ids == self.mask_token_id
+        mask_indices = input_ids.long() != labels.long()
+        mask_indices_mean = mask_indices.long().float().mean().item()
+
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
 
 
@@ -286,7 +289,7 @@ class MTTModel(FastFormerPreTrainedModel):
         return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy, discriminator_extra_accuracy=discriminator_extra_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
-                    discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy)
+                    discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy, mask_indices_mean=mask_indices_mean)
 
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):

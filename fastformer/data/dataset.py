@@ -253,6 +253,7 @@ def token_masking(text: str, tokenizer, probability: float, vocab: list, max_spa
     tokens[rand_replace] = rand_tokens
     return tokenizer.decode(tokens)
 
+
 def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_span_length: int = 1, sampler=None) -> str:
 
     if probability == 0 or len(tokens) <= 2:
