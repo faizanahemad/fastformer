@@ -263,7 +263,7 @@ def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_spa
     original_tokens = tokens.copy()
     probas = np.random.random(len(tokens))
     masked = probas < probability
-    rand_replace = probas < (probability * 0.1)
+    rand_replace = probas < (probability * 0.15)
     tokens[masked] = tokenizer.mask_token_id
     if sampler is not None:
         rand_tokens = np.array([sampler()[1] for _ in range(np.sum(rand_replace))])
@@ -272,14 +272,13 @@ def token_id_masking(tokens, tokenizer, probability: float, vocab: list, max_spa
     tokens[rand_replace] = rand_tokens
 
     for i, t in enumerate(tokens):
-        if t == tokenizer.mask_token_id and i > 1 and random.random() < 0.1:
+        if t == tokenizer.mask_token_id and i > 1 and random.random() < 0.15:
             tokens[i - 1] = tokenizer.mask_token_id
+        if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() < 0.15:
+            tokens[i + 1] = tokenizer.mask_token_id
 
     special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
-
-    # TODO: continuous spans
-    # TODO: reordering
     return torch.tensor(list(tokens))
 
 
