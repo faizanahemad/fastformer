@@ -247,7 +247,7 @@ def token_masking(text: str, tokenizer, probability: float, vocab: list, max_spa
     rand_replace = probas < (probability * 0.1)
     tokens[masked] = tokenizer.mask_token_id
     if sampler is not None:
-        rand_tokens = np.array([sampler()[1] for _ in np.sum(rand_replace)])
+        rand_tokens = np.array([sampler()[1] for _ in range(len(np.sum(rand_replace)))])
     else:
         rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in range(len(np.sum(rand_replace)))])
     tokens[rand_replace] = rand_tokens
