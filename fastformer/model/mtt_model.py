@@ -219,7 +219,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
             lm_accuracy = (new_input_ids == labels).float().mean().item()
 
-            if self.discriminator_w > 0 and labels is not None:
+            # if self.discriminator_w > 0 and labels is not None:
                 # generator_output_long = self.generator_ffn(self.tail_gen_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:]))
                 # lm_logits_long = self.lm_head(generator_output_long)
                 # new_input_ids_long = lm_logits_long.detach().argmax(dim=-1)
