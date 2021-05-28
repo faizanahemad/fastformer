@@ -92,6 +92,24 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None, extra_t
     return model, tokenizer
 
 
+class PositionwiseFFN(nn.Module):
+    def __init__(self, d_model, hidden_dropout, layer_norm_eps):
+        super().__init__()
+
+        d_inner = d_model * 4
+        self.d_model = d_model
+        activation_dropout = Dropout(hidden_dropout)
+
+        self.layer_norm = nn.LayerNorm(d_model, layer_norm_eps)
+        self.ffn = nn.Sequential(nn.Linear(d_model, d_inner, bias=True), nn.GELU(), activation_dropout, nn.Linear(d_inner, d_model, bias=False))
+
+    def forward(self, hidden):
+        h = self.layer_norm(hidden)
+        h = self.ffn(h)
+        h = hidden + h
+        return h
+
+
 class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.1,
@@ -143,7 +161,8 @@ class MTTModel(FastFormerPreTrainedModel):
             last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
-            self.generator_ffn = nn.Sequential(nn.LayerNorm(num_features),
+            self.generator_ffn = nn.Sequential(PositionwiseFFN(num_features, dropout, 1e-5),
+                                               nn.LayerNorm(num_features),
                                                nn.Dropout(dropout),
                                                nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
@@ -159,10 +178,9 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if discriminator_w > 0:
             self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features),
-                                                   nn.Dropout(dropout),
-                                                   nn.Linear(num_features, num_features * 2),
+                                                   nn.Linear(num_features, num_features),
                                                    nn.GELU(),
-                                                   nn.Linear(num_features * 2, 1))
+                                                   nn.Linear(num_features, 1))
 
             init_weights(self.discriminator_ffn, 0.01)
 
@@ -210,6 +228,7 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_extra_accuracy = None
         b = input_ids.size(0)
         mask_indices_mean = None
+        masked_accuracy = None
         # mask_indices = input_ids == self.mask_token_id
 
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
@@ -235,7 +254,7 @@ class MTTModel(FastFormerPreTrainedModel):
             mask_indices = input_ids.long() != labels.long()
             mask_indices_mean = mask_indices.long().float().mean().item()
             lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
-            generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
+            generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)
             if self.generator_w > 0:
@@ -243,6 +262,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
             lm_accuracy = (lm_out_ids == labels).float().mean().item()
+            masked_accuracy = (lm_out_ids[mask_indices] == labels[mask_indices]).float().mean().item()
 
             # if self.discriminator_w > 0 and labels is not None:
                 # generator_output_long = self.generator_ffn(self.tail_gen_ffn(outputs["hidden_states"][-1][:, self.cls_tokens - 1:]))
@@ -288,7 +308,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_extra_accuracy = (discriminator_accuracy - discriminator_label_mean) / (100.0 - discriminator_label_mean)
 
         return dict(masked_lm_loss=masked_lm_loss, masked_lm_loss_long=masked_lm_loss_long, lm_accuracy=lm_accuracy, lm_long_accuracy=lm_long_accuracy, lm_input_accuracy=lm_input_accuracy,
-                    dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy, discriminator_extra_accuracy=discriminator_extra_accuracy,
+                    dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy, discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss, sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy, mask_indices_mean=mask_indices_mean)
 
