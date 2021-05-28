@@ -209,9 +209,8 @@ class MTTModel(FastFormerPreTrainedModel):
         lm_input_accuracy = None
         discriminator_extra_accuracy = None
         b = input_ids.size(0)
+        mask_indices_mean = None
         # mask_indices = input_ids == self.mask_token_id
-        mask_indices = input_ids.long() != labels.long()
-        mask_indices_mean = mask_indices.long().float().mean().item()
 
         # print(type(input_ids), type(labels), input_ids.shape, labels.shape, (input_ids == labels))
 
@@ -233,6 +232,8 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
+            mask_indices = input_ids.long() != labels.long()
+            mask_indices_mean = mask_indices.long().float().mean().item()
             lm_input_accuracy = (input_ids == labels).type(torch.int32).float().mean().item()
             generator_output = self.generator_ffn(outputs["hidden_states"][-6 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
             lm_logits = self.lm_head(generator_output)
