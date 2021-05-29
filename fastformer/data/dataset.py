@@ -697,9 +697,9 @@ class MTTDataset(Dataset):
         inp = dict(input_ids=input_ids, attention_mask=attention_mask)
         if self.cls_tokens > 1:
             dtype = inp["input_ids"].dtype
-            inp["input_ids"] = torch.cat((inp["input_ids"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
+            inp["input_ids"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), inp["input_ids"]))
             dtype = inp["attention_mask"].dtype
-            inp["attention_mask"] = torch.cat((inp["attention_mask"], torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype)))
+            inp["attention_mask"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), inp["attention_mask"]))
 
         # acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
         # print(acc.item(), acc2)

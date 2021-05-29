@@ -65,11 +65,11 @@ def gumbel_noise(t):
     noise = torch.zeros_like(t).uniform_(0, 1)
     return -log(-log(noise))
 
-def gumbel_sample(t, temperature = 1.):
+def gumbel_sample(t, temperature = 0.5):
     return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
 
 
-def temperature_sampling(logits, temperature=1.0):
+def temperature_sampling(logits, temperature=0.5):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
     probs = F.softmax(logits / temperature)
@@ -77,11 +77,14 @@ def temperature_sampling(logits, temperature=1.0):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None, extra_tokens=None):
+def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None):
     model = AutoModel.from_pretrained(model_name)
     vocab_size, dims = model.embeddings.word_embeddings.weight.size(0), model.embeddings.word_embeddings.weight.size(1)
     if reinit:
         model.init_weights()
+
+    # TODO: Later also add a QnA boolean / fixed number of options question
+    # TODO: Add extra CLS attr and tokens in embedding
 
     if "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
@@ -89,6 +92,14 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None, extra_t
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    with torch.no_grad():
+        if cls_tokens > 1:
+            std = model.embeddings.word_embeddings.weight.std()
+            mean = model.embeddings.word_embeddings.weight.mean()
+            extras = nn.Parameter(torch.randn(cls_tokens - 1, 768) * std + mean)
+            model.embeddings.word_embeddings.weight = nn.Parameter(torch.cat((model.embeddings.word_embeddings.weight, extras)))
+            setattr(model, "cls_tokens", cls_tokens)
     return model, tokenizer
 
 
@@ -222,14 +233,11 @@ class MTTModel(FastFormerPreTrainedModel):
         sent_order_accuracy = None
         sent_order_loss = None
         input_cls_orthogonal_loss = None
-        masked_lm_loss_long = None
-        lm_long_accuracy = None
         lm_input_accuracy = None
         discriminator_extra_accuracy = None
-        b = input_ids.size(0)
         mask_indices_mean = None
         masked_accuracy = None
-        active_locations = attention_mask.bool()
+        active_locations = attention_mask[:, self.cls_tokens - 1:].bool()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
@@ -248,10 +256,11 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
-            mask_indices = input_ids.long() != labels.long()
+            mask_indices = input_ids[:, self.cls_tokens - 1:].long() != labels.long()
             mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
-            lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = self.generator_ffn(outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:])
+            lm_input_accuracy = (input_ids[:, self.cls_tokens - 1:] == labels)[active_locations].type(torch.int32).float().mean().item()
+            generator_output = 0.75 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.25 * outputs["hidden_states"][-4 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:]
+            generator_output = self.generator_ffn(generator_output)
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)
             if self.generator_w > 0:
@@ -263,7 +272,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
             if self.discriminator_w > 0:
 
-                new_input_ids = input_ids.clone()
+                new_input_ids = input_ids[:, self.cls_tokens - 1:].clone()
                 new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())[mask_indices]
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
@@ -279,7 +288,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
-                discriminator_extra_accuracy = float((discriminator_accuracy - discriminator_label_mean) / (100.0 - discriminator_label_mean))
+                discriminator_extra_accuracy = float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean))
 
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,

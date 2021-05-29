@@ -936,6 +936,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         init_weights(self.head)
 
     def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
+        # TODO: support extra cls_tokens
         funnel_inputs = dict(input_ids=input_ids,
                              attention_mask=attention_mask,
                              token_type_ids=token_type_ids,

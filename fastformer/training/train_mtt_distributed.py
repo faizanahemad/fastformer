@@ -203,18 +203,18 @@ def dataset_builder(location, params):
     return dataset
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, vocab_size, world_size=1, num_workers=None):
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, world_size=1, num_workers=None):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
 
-    teacher_args = dict(cls_tokens=cls_tokens,vocab_size=vocab_size, tokenizer=tokenizer,
+    teacher_args = dict(cls_tokens=cls_tokens,vocab_size=len(tokenizer), tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
                         word_mask_proba=((0, 0.0), (32, 0.05), (128, 0.1), (512, 0.125)),
                         max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
 
-    student_args = dict(cls_tokens=cls_tokens, vocab_size=vocab_size, tokenizer=tokenizer,
+    student_args = dict(cls_tokens=cls_tokens, vocab_size=len(tokenizer), tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
                         word_mask_proba=((0, 0.15), (32, 0.15), (128, 0.2), (512, 0.2)),
                         max_span_length=1, max_jumbling_span_length=2, jumble_sentence=True)
@@ -301,7 +301,6 @@ def train(local_rank, args):
     discriminator_w = args["discriminator_w"] if "discriminator_w" in args else 0.0
     dino_w = args["dino_w"] if "dino_w" in args else 0.0
     sentence_order_prediction_w = args["sentence_order_prediction_w"] if "sentence_order_prediction_w" in args else 0.0
-    vocab_size = backbone.embeddings.word_embeddings.weight.size(0)
 
     student = MTTModel(backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
@@ -402,7 +401,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
-                                  tokenizer, args["cls_tokens"], vocab_size,
+                                  tokenizer, args["cls_tokens"],
                                   world_size=args["world_size"], num_workers=args["num_workers"])
     log_every_steps = args["log_every_steps"]
     save_every_steps = args["save_every_steps"]
