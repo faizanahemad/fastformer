@@ -274,8 +274,8 @@ class MTTModel(FastFormerPreTrainedModel):
 
                 new_input_ids = input_ids[:, self.cls_tokens - 1:].clone()
                 new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())[mask_indices]
-                discriminator_labels = (new_input_ids.long() == labels.long()).float()
-                discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
+                discriminator_labels = (new_input_ids.long() == labels.long()).contiguous().float()
+                discriminator_outputs = self.backbone(input_ids=new_input_ids.contiguous(), attention_mask=attention_mask[:, self.cls_tokens - 1:].contiguous(), output_hidden_states=True)["hidden_states"][-1]
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
