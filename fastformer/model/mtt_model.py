@@ -77,7 +77,7 @@ def temperature_sampling(logits, temperature=0.5):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, reinit=False, dataset=None):
+def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     model = AutoModel.from_pretrained(model_name)
     vocab_size, dims = model.embeddings.word_embeddings.weight.size(0), model.embeddings.word_embeddings.weight.size(1)
     if reinit:
@@ -259,7 +259,7 @@ class MTTModel(FastFormerPreTrainedModel):
             mask_indices = input_ids[:, self.cls_tokens - 1:].long() != labels.long()
             mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
             lm_input_accuracy = (input_ids[:, self.cls_tokens - 1:] == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = 0.75 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.25 * outputs["hidden_states"][-4 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:]
+            generator_output = 0.7 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.2 * outputs["hidden_states"][-5 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.1 * outputs["hidden_states"][-3 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:]
             generator_output = self.generator_ffn(generator_output)
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)

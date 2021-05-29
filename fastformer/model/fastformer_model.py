@@ -925,11 +925,12 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             self.ce = nn.BCEWithLogitsLoss()
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
-        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
+        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 2
         self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
+        self.cls_tokens = model.cls_tokens if hasattr(model, "cls_tokens") else 1
         if reinit_backbone:
             self.init_weights()
 
@@ -948,8 +949,11 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
             funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-            funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0],
-                                        funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
+            if self.cls_tokens > 1:
+                funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-1][:, 1]), -1)
+            else:
+                funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0]), -1)
+            # funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0], funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):

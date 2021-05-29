@@ -689,12 +689,17 @@ class MTTDataset(Dataset):
             # text = seg_sep_token.join(segments)
             # text = token_masking(text, self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
             # acc2 = (np.array(mlm_text.split()) == np.array(text.split())).mean()
+
+            # inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
+            input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
+            inp = dict(input_ids=input_ids, attention_mask=attention_mask)
+        else:
+            tokenizer_outputs = char_rnn_tokenize(text, tokenizer, None, **self.tokenizer_args)
+            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+            inp = dict(input_ids=input_ids, attention_mask=attention_mask)
         if "label" in item:
             results["label"] = label
 
-        # inp = char_rnn_tokenize(text, self.tokenizer, None, **self.tokenizer_args)
-        input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, wp, self.vocab, self.max_span_length, sampler=self.token_sampler)
-        inp = dict(input_ids=input_ids, attention_mask=attention_mask)
         if self.cls_tokens > 1:
             dtype = inp["input_ids"].dtype
             inp["input_ids"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), inp["input_ids"]))

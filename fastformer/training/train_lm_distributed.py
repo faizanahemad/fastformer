@@ -55,7 +55,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
-from fastformer.data.dataset import datadict_iterator, superglue_test
+from fastformer.data.dataset import datadict_iterator, superglue_test, MTTDataset
 from fastformer.utils import *
 from fastformer.model import *
 from transformers import optimization
@@ -104,6 +104,8 @@ def training_args():
 
     parser.add_argument('--dataset_key', required=False, type=str,
                         help='dataset_key')
+    parser.add_argument('--cls_tokens', default=1, type=int,
+                        help='cls_tokens')
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
@@ -225,7 +227,7 @@ def wsc_proc(x):
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, weight_decay, hpo=None, dataset_key=None, finetune=True):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, weight_decay, cls_tokens=1, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -235,6 +237,7 @@ class SuperGlueTest:
         self.world_size = world_size
         self.size_dicts = size_dicts
         self.finetune = finetune
+        self.cls_tokens = cls_tokens
         self.hpo = eval(hpo) if hpo is not None else None
 
         self.lr = lr
@@ -278,7 +281,7 @@ class SuperGlueTest:
             from transformers.models.deberta import DebertaModel
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
-                main_model, tokenizer = get_mtt_backbone(model_name, 1, reinit=False)
+                main_model, tokenizer = get_mtt_backbone(model_name, self.cls_tokens, reinit=False)
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
                 state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -331,9 +334,9 @@ class SuperGlueTest:
 
         train = None
         if "train" in dataset:
-            train = TokenizerDataset(None, tokenizer, get_char_to_id(),
-                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
-                                     dataset["train"])
+            train = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
+                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+                               dataset["train"])
             train.training = False
             train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
                                collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1, persistent_workers=True)
@@ -346,9 +349,9 @@ class SuperGlueTest:
 
         validation = None
         if "validation" in dataset:
-            validation = TokenizerDataset(None, tokenizer, get_char_to_id(),
-                                          dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
-                                          dataset["validation"])
+            validation = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
+                                    dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+                                    dataset["validation"])
             validation.training = False
             validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
                                     shuffle=False, persistent_workers=True)
@@ -356,9 +359,9 @@ class SuperGlueTest:
         test = None
         test_idx = None
         if rank == 0:
-            test = TokenizerDataset(None, tokenizer, get_char_to_id(),
-                                    dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
-                                    dataset["test"])
+            test = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
+                              dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+                              dataset["test"])
             test.training = False
             test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
             test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
@@ -1166,7 +1169,7 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"], args["hpo"], args["dataset_key"], False)()
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"], args["cls_tokens"], args["hpo"], args["dataset_key"], False)()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
