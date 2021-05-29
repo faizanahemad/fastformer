@@ -237,7 +237,7 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_extra_accuracy = None
         mask_indices_mean = None
         masked_accuracy = None
-        active_locations = attention_mask[:, self.cls_tokens - 1:].bool()
+        active_locations = attention_mask.bool()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
@@ -256,10 +256,10 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
-            mask_indices = (input_ids[:, self.cls_tokens - 1:].long() != labels.long())
+            mask_indices = (input_ids.long() != labels.long())
             mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
-            lm_input_accuracy = (input_ids[:, self.cls_tokens - 1:] == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = 0.7 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.2 * outputs["hidden_states"][-5 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:] + 0.1 * outputs["hidden_states"][-3 if self.discriminator_w > 0 else -1][:, self.cls_tokens - 1:]
+            lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
+            generator_output = 0.7 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1] + 0.2 * outputs["hidden_states"][-5 if self.discriminator_w > 0 else -1] + 0.1 * outputs["hidden_states"][-3 if self.discriminator_w > 0 else -1]
             generator_output = self.generator_ffn(generator_output)
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)
@@ -272,10 +272,10 @@ class MTTModel(FastFormerPreTrainedModel):
 
             if self.discriminator_w > 0:
 
-                new_input_ids = input_ids[:, self.cls_tokens - 1:].clone()
+                new_input_ids = input_ids.clone()
                 new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())[mask_indices]
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
-                discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask[:, self.cls_tokens - 1:], output_hidden_states=True)["hidden_states"][-1]
+                discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mas, output_hidden_states=True)["hidden_states"][-1]
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
