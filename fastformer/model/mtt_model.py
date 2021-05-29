@@ -146,7 +146,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.generator_w = generator_w
         self.discriminator_w = discriminator_w
         self.dino_w = dino_w
-        self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0) + (cls_tokens - 1)
+        self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0)
         self.lm_head = nn.Linear(num_features, self.vocab_size)
         self.sentence_order_prediction_w = sentence_order_prediction_w
         if reinit:
