@@ -193,7 +193,7 @@ class ConvBertEmbeddings(nn.Module):
         embeddings = inputs_embeds + position_embeddings
         if token_type_ids is not None:
             token_type_embeddings = self.token_type_embeddings(token_type_ids)
-            embeddings += token_type_embeddings
+            embeddings = embeddings + token_type_embeddings
         # embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
