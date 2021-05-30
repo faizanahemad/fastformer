@@ -601,7 +601,10 @@ class MTTDataset(Dataset):
                  max_span_length: int = 1, max_jumbling_span_length: int = 2, jumble_sentence=True):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         self.cls_tokens = cls_tokens
-        self.tokenizer = copy.deepcopy(tokenizer)
+        try:
+            self.tokenizer = copy.deepcopy(tokenizer)
+        except:
+            self.tokenizer = tokenizer
         self.tokenizer_args = tokenizer_args
         self.dataset = dataset
         self.vocab_size = vocab_size
