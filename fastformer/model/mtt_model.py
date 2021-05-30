@@ -241,9 +241,16 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
-            inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
+            inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
-            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * (inputs_embeds_cls ** 2).mean()
+            inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
+            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls ** 2) ** 0.5).mean()
+        elif self.cls_tokens > 1:
+            inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens].detach()
+            inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
+            inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
+            inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
+            input_cls_orthogonal_loss = ((inputs_embeds_cls ** 2) ** 0.5).mean()
 
         if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
@@ -259,7 +266,7 @@ class MTTModel(FastFormerPreTrainedModel):
             mask_indices = (input_ids.long() != labels.long())
             mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
             lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = 0.7 * outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1] + 0.2 * outputs["hidden_states"][-5 if self.discriminator_w > 0 else -1] + 0.1 * outputs["hidden_states"][-3 if self.discriminator_w > 0 else -1]
+            generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1]
             generator_output = self.generator_ffn(generator_output)
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)
