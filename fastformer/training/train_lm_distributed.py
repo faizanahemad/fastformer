@@ -279,7 +279,7 @@ class SuperGlueTest:
                 batch_size = 4
                 self.iter_size *= 2
             if "conv" in model.lower():
-                num_workers = 1
+                num_workers = 0
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             if os.path.exists(model):
