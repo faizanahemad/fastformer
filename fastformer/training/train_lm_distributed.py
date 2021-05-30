@@ -268,6 +268,7 @@ class SuperGlueTest:
     def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=True):
         batch_size = 8
         train_backbone = self.finetune
+        num_workers = 4
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
             optimizer_config.eps = 1e-7
@@ -277,6 +278,8 @@ class SuperGlueTest:
             if "deberta" in model.lower():
                 batch_size = 4
                 self.iter_size *= 2
+            if "conv" in model.lower():
+                num_workers = 1
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             if os.path.exists(model):
@@ -342,7 +345,7 @@ class SuperGlueTest:
                                dataset["train"])
             train.training = False
             train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
-                               collate_fn=collate_fn, prefetch_factor=2, num_workers=8, shuffle=self.world_size==1, persistent_workers=True)
+                               collate_fn=collate_fn, prefetch_factor=2, num_workers=num_workers, shuffle=self.world_size==1, persistent_workers=True)
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
@@ -356,7 +359,7 @@ class SuperGlueTest:
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
                                     dataset["validation"])
             validation.training = False
-            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
+            validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=num_workers,
                                     shuffle=False, persistent_workers=True)
 
         test = None
@@ -367,7 +370,7 @@ class SuperGlueTest:
                               dataset["test"])
             test.training = False
             test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
-            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=4,
+            test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, prefetch_factor=2, num_workers=num_workers,
                               shuffle=False)
 
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
