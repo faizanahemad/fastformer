@@ -23,6 +23,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn.init import trunc_normal_
 from transformers import PretrainedConfig
 
 from transformers.activations import ACT2FN, get_activation
@@ -123,7 +124,7 @@ class ConvBertConfig(PretrainedConfig):
         embedding_size=768,
         head_ratio=2,
         conv_kernel_size=9,
-        num_groups=1,
+        num_groups=2,
         **kwargs,
     ):
         super().__init__(
@@ -205,6 +206,11 @@ class GroupedLinearLayer(nn.Module):
         self.group_out_dim = self.output_size // self.num_groups
         self.weight = nn.Parameter(torch.Tensor(self.num_groups, self.group_in_dim, self.group_out_dim))
         self.bias = nn.Parameter(torch.Tensor(output_size))
+        self.register_parameter("weight", self.weight)
+        self.register_parameter("bias", self.bias)
+        trunc_normal_(self.weight, std=0.02)
+        trunc_normal_(self.bias, std=0.02)
+
 
     def forward(self, hidden_states):
         batch_size = list(hidden_states.size())[0]
@@ -243,6 +249,12 @@ class ConvBertPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+        elif isinstance(module, nn.Parameter):
+            trunc_normal_(module, std=self.config.initializer_range)
+        elif hasattr(module, "weight"):
+            trunc_normal_(module.weight, std=self.config.initializer_range)
+
+
 
 
 class SeparableConv1D(nn.Module):
@@ -456,20 +468,22 @@ class ConvBertIntermediate(nn.Module):
             self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
         else:
             self.dense = GroupedLinearLayer(
-                input_size=config.hidden_size, output_size=config.intermediate_size, num_groups=config.num_groups
+                input_size=config.hidden_size, output_size=config.intermediate_size, num_groups=config.num_groups,
             )
             self.dense_last = GroupedLinearLayer(
                 input_size=config.intermediate_size, output_size=config.hidden_size, num_groups=config.num_groups
             )
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.num_groups = config.num_groups
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
             self.intermediate_act_fn = config.hidden_act
 
     def forward(self, hidden_states):
-        hidden_states += self.dense_last(self.dropout(self.intermediate_act_fn(self.dense(self.LayerNorm(hidden_states)))))
+        hs = self.LayerNorm(hidden_states)
+        hidden_states += self.dense_last(self.dropout(self.intermediate_act_fn(self.dense(hs))))
         return hidden_states
 
 
@@ -1218,3 +1232,9 @@ class ConvBertForQuestionAnswering(ConvBertPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
+
+if __name__ == "__main__":
+    model = ConvBertModel(ConvBertConfig())
+    print(model(torch.tensor([[0, 1, 2, 200, 500]]), output_hidden_states=True)["hidden_states"])
+
