@@ -45,6 +45,7 @@ from transformers.modeling_utils import (
 )
 from transformers.utils import logging
 
+
 class ConvBertConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a :class:`~transformers.ConvBertModel`. It is used to
@@ -105,13 +106,13 @@ class ConvBertConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=30522,
+        vocab_size=50265,
         hidden_size=768,
         is_encoder_decoder=False,
         num_hidden_layers=12,
         num_attention_heads=12,
         intermediate_size=3072,
-        hidden_act="gelu",
+        hidden_act="geglu",
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
         max_position_embeddings=512,
@@ -153,6 +154,8 @@ class ConvBertConfig(PretrainedConfig):
         self.num_groups = num_groups
 
 logger = logging.get_logger(__name__)
+
+base_fast_conv_config = ConvBertConfig()
 
 
 class ConvBertEmbeddings(nn.Module):
@@ -461,14 +464,24 @@ class ConvBertAttention(nn.Module):
 
 
 class ConvBertIntermediate(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: ConvBertConfig):
         super().__init__()
+        self.geglu = False
+        if isinstance(config.hidden_act, str):
+            if config.hidden_act == "geglu":
+                self.geglu = True
+                self.intermediate_act_fn = ACT2FN["gelu"]
+            else:
+                self.intermediate_act_fn = ACT2FN[config.hidden_act]
+        else:
+            self.intermediate_act_fn = config.hidden_act
         if config.num_groups == 1:
-            self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+            self.dense = nn.Linear(config.hidden_size, config.intermediate_size * (2 if self.geglu else 1))
             self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
         else:
             self.dense = GroupedLinearLayer(
-                input_size=config.hidden_size, output_size=config.intermediate_size, num_groups=config.num_groups,
+                input_size=config.hidden_size, output_size=config.intermediate_size * (2 if self.geglu else 1),
+                num_groups=config.num_groups,
             )
             self.dense_last = GroupedLinearLayer(
                 input_size=config.intermediate_size, output_size=config.hidden_size, num_groups=config.num_groups
@@ -476,14 +489,15 @@ class ConvBertIntermediate(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.num_groups = config.num_groups
-        if isinstance(config.hidden_act, str):
-            self.intermediate_act_fn = ACT2FN[config.hidden_act]
-        else:
-            self.intermediate_act_fn = config.hidden_act
 
     def forward(self, hidden_states):
         hs = self.LayerNorm(hidden_states)
-        hidden_states += self.dense_last(self.dropout(self.intermediate_act_fn(self.dense(hs))))
+        if self.geglu:
+            attn_1, attn_2, conv_1, conv_2 = self.dense(hs).chunk(4, dim=-1)
+            hs = torch.cat((attn_1 * self.intermediate_act_fn(attn_2), conv_1 * self.intermediate_act_fn(conv_2)), -1)
+        else:
+            hs = self.intermediate_act_fn(self.dense(hs))
+        hidden_states += self.dense_last(self.dropout(hs))
         return hidden_states
 
 

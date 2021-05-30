@@ -21,6 +21,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 from transformers import AutoModel, RobertaTokenizerFast
 
+from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
 
 try:
@@ -78,20 +79,24 @@ def temperature_sampling(logits, temperature=0.5):
 
 
 def get_mtt_backbone(model_name, cls_tokens, reinit=False):
-    model = AutoModel.from_pretrained(model_name)
-    vocab_size, dims = model.embeddings.word_embeddings.weight.size(0), model.embeddings.word_embeddings.weight.size(1)
-    if reinit:
-        model.init_weights()
-
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
     if "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        model = AutoModel.from_pretrained(model_name)
     elif "bert" in model_name:
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        model = AutoModel.from_pretrained(model_name)
+    elif "fast-conv" in model_name:
+        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        model = ConvBertModel(ConvBertConfig())
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModel.from_pretrained(model_name)
+
+    if reinit:
+        model.init_weights()
 
     with torch.no_grad():
         if cls_tokens > 1:
