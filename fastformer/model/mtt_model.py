@@ -21,7 +21,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 from transformers import AutoModel, RobertaTokenizerFast
 
-from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
+from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig, get_rolling_diagonal_weights
 from fastformer.model.fastformer_vision_model import PatchCLR
 
 try:
@@ -129,6 +129,7 @@ class PositionwiseFFN(nn.Module):
 class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
+                 attention_penalty_w=0.0,
                  dropout=0.1,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
@@ -145,6 +146,11 @@ class MTTModel(FastFormerPreTrainedModel):
         norm_last_layer = True
         bottleneck_dim = 256
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
+        self.attention_penalty_w = attention_penalty_w
+        if attention_penalty_w > 0:
+            attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length,
+                                                                  backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
+            self.register_buffer("attention_penalty", attention_penalty)
         assert generator_w > 0 or dino_w > 0
         if discriminator_w > 0:
             assert generator_w > 0
@@ -224,7 +230,9 @@ class MTTModel(FastFormerPreTrainedModel):
             labels_segment_index=None,
             char_ids=None, char_offsets=None,
     ):
-        backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask, char_ids=char_ids, char_offsets=char_offsets, output_hidden_states=True)
+        backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
+                               char_ids=char_ids, char_offsets=char_offsets,
+                               output_hidden_states=True, output_attentions=self.attention_penalty_w > 0)
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         masked_lm_loss = None
@@ -242,7 +250,15 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_extra_accuracy = None
         mask_indices_mean = None
         masked_accuracy = None
+        attention_penalty_loss = None
         active_locations = attention_mask.bool()
+
+        if self.attention_penalty_w > 0:
+            attentions = outputs["attentions"]
+            attentions = sum([a/(len(attentions) - i) for i, a in enumerate(attentions)]).mean(0).mean(0)
+            penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
+            attentions = attentions * penalty
+            attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
@@ -306,7 +322,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss,
-                    sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss,
+                    sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss, attention_penalty_loss=attention_penalty_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
                     mask_indices_mean=mask_indices_mean)
 

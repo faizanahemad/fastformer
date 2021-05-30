@@ -120,6 +120,9 @@ def training_args():
     parser.add_argument('--discriminator_w', type=float, required=False, default=0.0,
                         help='discriminator_w weight')
 
+    parser.add_argument('--attention_penalty_w', type=float, required=False, default=0.0,
+                        help='attention_penalty_w weight')
+
     parser.add_argument('--shuffle_dataset', action="store_true", default=False,
                         help='Shuffle Train')
 
@@ -301,13 +304,14 @@ def train(local_rank, args):
     discriminator_w = args["discriminator_w"] if "discriminator_w" in args else 0.0
     dino_w = args["dino_w"] if "dino_w" in args else 0.0
     sentence_order_prediction_w = args["sentence_order_prediction_w"] if "sentence_order_prediction_w" in args else 0.0
+    attention_penalty_w = args["attention_penalty_w"] if "attention_penalty_w" in args else 0.0
 
     student = MTTModel(backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
-                       dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w)
+                       dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w)
     teacher = MTTModel(teacher_backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
-                       dino_w=1.0, sentence_order_prediction_w=0.0)
+                       dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0)
     model = MultiTaskHighwayCLSPretraining(student, teacher, eps).to(device)
     trainable_model = student
 
