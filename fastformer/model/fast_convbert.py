@@ -158,6 +158,10 @@ logger = logging.get_logger(__name__)
 base_fast_conv_config = ConvBertConfig()
 
 
+def get_rolling_diagonal_weights(size=512, window=9):
+    return sum([torch.diag(torch.ones(size), diagonal=i)[:-i, :-i] for i in range(1, window // 2 + 1)] + [torch.diag(torch.ones(size), diagonal=-i)[i:, i:] for i in range(window // 2 + 1)])
+
+
 class ConvBertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
@@ -213,7 +217,6 @@ class GroupedLinearLayer(nn.Module):
         self.register_parameter("bias", self.bias)
         trunc_normal_(self.weight, std=0.02)
         trunc_normal_(self.bias, std=0.02)
-
 
     def forward(self, hidden_states):
         batch_size = list(hidden_states.size())[0]
@@ -282,7 +285,7 @@ class SeparableConv1D(nn.Module):
     def forward(self, hidden_states):
         x = self.depthwise(hidden_states)
         x = self.pointwise(x)
-        x += self.bias
+        x = x + self.bias
         return x
 
 
@@ -497,7 +500,7 @@ class ConvBertIntermediate(nn.Module):
             hs = torch.cat((attn_1 * self.intermediate_act_fn(attn_2), conv_1 * self.intermediate_act_fn(conv_2)), -1)
         else:
             hs = self.intermediate_act_fn(self.dense(hs))
-        hidden_states += self.dense_last(self.dropout(hs))
+        hidden_states = hidden_states + self.dense_last(self.dropout(hs))
         return hidden_states
 
 
