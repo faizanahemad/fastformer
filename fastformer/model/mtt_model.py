@@ -338,6 +338,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.teacher = teacher
         for p in teacher.parameters():
             p.requires_grad = False
+        for p in student.parameters():
+            p.requires_grad = True
         teacher.generator_w = 0.0
         teacher.discriminator_w = 0.0
         teacher.sentence_order_prediction_w = 0.0
