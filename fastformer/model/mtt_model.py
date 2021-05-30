@@ -123,7 +123,7 @@ class PositionwiseFFN(nn.Module):
 
 class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
-                 generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.1,
+                 generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  dropout=0.1,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
