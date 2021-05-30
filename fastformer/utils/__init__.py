@@ -752,7 +752,6 @@ def get_image_augmetations(mode, teacher=True, dims=224):
                 inv_normalize=inv_normalize, normalize=normalize, crop_224=crop_224, to_pytorch=to_pytorch, from_pytorch=from_pytorch)
 
 
-
 def worker_init_fn(worker_id):
     random.seed(tuple(np.array(random.getstate()[1]) + worker_id))
     np.random.seed(np.random.get_state()[1] + worker_id)
