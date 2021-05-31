@@ -873,6 +873,7 @@ class ConvBertModel(ConvBertPreTrainedModel):
 
         if config.embedding_size != config.hidden_size:
             self.embeddings_project = nn.Linear(config.embedding_size, config.hidden_size)
+            self.embeddings_reverse_project = nn.Linear(config.hidden_size, config.embedding_size)
 
         self.encoder = ConvBertEncoder(config)
         self.config = config

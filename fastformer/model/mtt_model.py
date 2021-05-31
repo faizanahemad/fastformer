@@ -301,7 +301,7 @@ class MTTModel(FastFormerPreTrainedModel):
             generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 else -1]
             generator_output = self.generator_ffn(generator_output)
             if hasattr(self.backbone, "embeddings_project"):
-                generator_output = self.backbone.embeddings_project(generator_output)
+                generator_output = self.backbone.embeddings_reverse_project(generator_output)
             lm_logits = self.lm_head(generator_output)
             lm_out_ids = lm_logits.detach().argmax(dim=-1)
             if self.generator_w > 0:
