@@ -320,7 +320,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
             if self.discriminator_w > 0:
                 new_input_ids = input_ids.clone()
-                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())
+                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)["hidden_states"][-1]
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
