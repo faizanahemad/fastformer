@@ -337,7 +337,7 @@ class ConvBertSelfAttention(nn.Module):
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)
+        return x.permute(0, 2, 1, 3).contiguous()
 
     def forward(
         self,
@@ -364,8 +364,8 @@ class ConvBertSelfAttention(nn.Module):
             mixed_key_layer = self.key(hidden_states_attn)
             mixed_value_layer = self.value(hidden_states_attn)
 
-        mixed_key_conv_attn_layer = self.key_conv_attn_layer(hidden_states_conv.transpose(1, 2))
-        mixed_key_conv_attn_layer = mixed_key_conv_attn_layer.transpose(1, 2)
+        mixed_key_conv_attn_layer = self.key_conv_attn_layer(hidden_states_conv.transpose(1, 2).contiguous())
+        mixed_key_conv_attn_layer = mixed_key_conv_attn_layer.transpose(1, 2).contiguous()
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
@@ -394,7 +394,7 @@ class ConvBertSelfAttention(nn.Module):
         conv_out_layer = torch.reshape(conv_out_layer, [-1, self.all_head_size])
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2).contiguous())
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in ConvBertModel forward() function)
@@ -495,9 +495,10 @@ class ConvBertIntermediate(nn.Module):
         self.num_groups = config.num_groups
 
     def forward(self, hidden_states):
-        hs = self.LayerNorm(hidden_states)
+        hs = self.LayerNorm(hidden_states.contiguous())
         if self.geglu:
             attn_1, attn_2, conv_1, conv_2 = self.dense(hs).chunk(4, dim=-1)
+            attn_1, attn_2, conv_1, conv_2 = attn_1.contiguous(), attn_2.contiguous(), conv_1.contiguous(), conv_2.contiguous()
             hs = torch.cat((attn_1 * self.intermediate_act_fn(attn_2), conv_1 * self.intermediate_act_fn(conv_2)), -1)
         else:
             hs = self.intermediate_act_fn(self.dense(hs))
