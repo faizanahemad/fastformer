@@ -158,11 +158,6 @@ logger = logging.get_logger(__name__)
 base_fast_conv_config = ConvBertConfig()
 
 
-def get_rolling_diagonal_weights(size=512, window=9):
-    diag_mat = sum([torch.diag(torch.ones(size), diagonal=i)[:-i, :-i] for i in range(1, window // 2 + 1)] + [torch.diag(torch.ones(size), diagonal=-i)[i:, i:] for i in range(window // 2 + 1)])
-    return diag_mat
-
-
 class ConvBertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 

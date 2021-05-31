@@ -795,5 +795,11 @@ def student_teacher_param_update(student, teacher, m):
         param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
 
+def get_rolling_diagonal_weights(size=512, window=9):
+    diag_mat = sum([torch.diag(torch.ones(size), diagonal=i)[:-i, :-i] for i in range(1, window // 2 + 1)] + [torch.diag(torch.ones(size), diagonal=-i)[i:, i:] for i in range(window // 2 + 1)])
+    return diag_mat
+
+
+
 
 
