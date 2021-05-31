@@ -306,18 +306,17 @@ class MTTModel(FastFormerPreTrainedModel):
             generator_output = self.generator_ffn(generator_output)
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
-            lm_logits = self.lm_head(generator_output)
+            lm_logits = self.lm_head(generator_output[mask_indices])
 
             if self.generator_w > 0:
                 active_labels = labels[mask_indices].reshape(-1)
-                active_prediction_logits = lm_logits[mask_indices].reshape(-1, self.vocab_size)
+                active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
                 masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).float().mean().item()
 
             if self.discriminator_w > 0:
-
                 new_input_ids = input_ids.clone()
-                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())[mask_indices]
+                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach())
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
                 discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)["hidden_states"][-1]
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
