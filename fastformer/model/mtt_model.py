@@ -261,7 +261,6 @@ class MTTModel(FastFormerPreTrainedModel):
             # attentions = sum([a/(len(attentions) - i) for i, a in enumerate(attentions)]).mean(0).mean(0)
             attentions = sum([a for i, a in enumerate(attentions[1:-1])]).mean(0).mean(0)
             penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
-            attentions = attentions * penalty
             attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
