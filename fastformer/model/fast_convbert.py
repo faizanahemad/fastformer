@@ -114,7 +114,7 @@ class ConvBertConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=50265,
+        vocab_size=30522,
         hidden_size=768,
         is_encoder_decoder=False,
         num_hidden_layers=12,
@@ -130,7 +130,7 @@ class ConvBertConfig(PretrainedConfig):
         pad_token_id=1,
         bos_token_id=0,
         eos_token_id=2,
-        embedding_size=128,
+        embedding_size=768,
         head_ratio=2,
         conv_kernel_size=9,
         num_groups=1,
