@@ -580,7 +580,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     with autocast(is_fp16):
         output = ddp_model(**batch, dino_center=dino_center)
         last_layer = ddp_model.get_last_dino_layer()
-        if freeze_last_layer:
+        if freeze_last_layer and last_layer is not None:
             for p in last_layer.parameters():
                 p.grad = None
 
