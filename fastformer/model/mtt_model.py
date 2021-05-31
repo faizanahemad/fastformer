@@ -74,7 +74,9 @@ def temperature_sampling(logits, temperature=0.5):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
     probs = F.softmax(logits / temperature)
-    pred_ids = probs.view(-1, probs.size(-1)).multinomial(1, replacement=False).view(*probs.shape[:2])
+    pred_ids = probs.view(-1, probs.size(-1)).multinomial(1, replacement=False)
+    if logits.ndim == 3:
+        pred_ids = pred_ids.view(*probs.shape[:2])
     return pred_ids
 
 
@@ -306,7 +308,9 @@ class MTTModel(FastFormerPreTrainedModel):
             generator_output = self.generator_ffn(generator_output)
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
-            lm_logits = self.lm_head(generator_output[mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))].reshape(mask_indices.size(0), mask_indices.size(1), generator_output.size(-1)))
+            lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
+            lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
+
 
             if self.generator_w > 0:
                 active_labels = labels[mask_indices].reshape(-1)
