@@ -114,7 +114,7 @@ class ConvBertConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=30522,
+        vocab_size=50265,
         hidden_size=768,
         is_encoder_decoder=False,
         num_hidden_layers=12,
