@@ -307,13 +307,12 @@ class MTTModel(FastFormerPreTrainedModel):
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
             lm_logits = self.lm_head(generator_output)
-            lm_out_ids = lm_logits.detach().argmax(dim=-1)
+
             if self.generator_w > 0:
-                active_labels = labels.reshape(-1)
-                active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
+                active_labels = labels[mask_indices].reshape(-1)
+                active_prediction_logits = lm_logits[mask_indices].reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-            lm_accuracy = (lm_out_ids == labels)[active_locations].float().mean().item()
-            masked_accuracy = (lm_out_ids[mask_indices] == labels[mask_indices]).float().mean().item()
+                masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).float().mean().item()
 
             if self.discriminator_w > 0:
 
