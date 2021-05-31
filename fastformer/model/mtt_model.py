@@ -306,7 +306,7 @@ class MTTModel(FastFormerPreTrainedModel):
             generator_output = self.generator_ffn(generator_output)
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
-            lm_logits = self.lm_head(generator_output[mask_indices])
+            lm_logits = self.lm_head(generator_output[mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))])
 
             if self.generator_w > 0:
                 active_labels = labels[mask_indices].reshape(-1)
