@@ -89,7 +89,8 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         model = AutoModel.from_pretrained(model_name)
     elif "fast-conv" in model_name:
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        # tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        tokenizer = AutoTokenizer.from_pretrained("YituTech/conv-bert-base")
         model = ConvBertModel(ConvBertConfig())
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
