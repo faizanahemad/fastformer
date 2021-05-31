@@ -707,7 +707,7 @@ class MTTDataset(Dataset):
             dtype = inp["input_ids"].dtype
             inp["input_ids"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), inp["input_ids"]))
             dtype = inp["attention_mask"].dtype
-            inp["attention_mask"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), inp["attention_mask"]))
+            inp["attention_mask"] = torch.cat((torch.ones(self.cls_tokens - 1).type(dtype), inp["attention_mask"]))
             if "label_mlm_input_ids" in results:
                 results["label_mlm_input_ids"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), results["label_mlm_input_ids"]))
 

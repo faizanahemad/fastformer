@@ -1180,7 +1180,8 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"], args["cls_tokens"], args["hpo"], args["dataset_key"], False)()
+        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"],
+                          args["cls_tokens"], args["hpo"], args["dataset_key"], False)()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
