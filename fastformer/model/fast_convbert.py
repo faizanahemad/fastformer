@@ -222,10 +222,10 @@ class GroupedLinearLayer(nn.Module):
     def forward(self, hidden_states):
         batch_size = list(hidden_states.size())[0]
         x = torch.reshape(hidden_states, [-1, self.num_groups, self.group_in_dim])
-        x = x.permute(1, 0, 2)
+        x = x.permute(1, 0, 2).contiguous()
         x = torch.matmul(x, self.weight)
         x = x.permute(1, 0, 2)
-        x = torch.reshape(x, [batch_size, -1, self.output_size])
+        x = torch.reshape(x, [batch_size, -1, self.output_size]).contiguous()
         x = x + self.bias
         return x
 
@@ -350,8 +350,8 @@ class ConvBertSelfAttention(nn.Module):
         hidden_states_skip = hidden_states
         hidden_states = self.LayerNorm(hidden_states)
 
-        hidden_states_conv = hidden_states[:, :, self.all_head_size:]
-        hidden_states_attn = hidden_states[:, :, :self.all_head_size]
+        hidden_states_conv = hidden_states[:, :, self.all_head_size:].contiguous()
+        hidden_states_attn = hidden_states[:, :, :self.all_head_size].contiguous()
         mixed_query_layer = self.query(hidden_states_attn)
         batch_size = hidden_states.size(0)
         # If this is instantiated as a cross-attention module, the keys
