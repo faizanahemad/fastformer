@@ -130,7 +130,7 @@ class ConvBertConfig(PretrainedConfig):
         pad_token_id=1,
         bos_token_id=0,
         eos_token_id=2,
-        embedding_size=768,
+        embedding_size=128,
         head_ratio=2,
         conv_kernel_size=9,
         num_groups=1,
