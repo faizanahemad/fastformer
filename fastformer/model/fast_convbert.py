@@ -423,15 +423,15 @@ class ConvBertSelfAttention(nn.Module):
         self.attention_head_size = config.hidden_size // config.num_attention_heads
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
+        self.query = nn.Linear(self.all_head_size, self.all_head_size)
+        self.key = nn.Linear(self.all_head_size, self.all_head_size)
+        self.value = nn.Linear(self.all_head_size, self.all_head_size)
 
         self.key_conv_attn_layer = SeparableConv1D(
-            config, config.hidden_size, self.all_head_size, self.conv_kernel_size
+            config, self.all_head_size, self.all_head_size, self.conv_kernel_size
         )
         self.conv_kernel_layer = nn.Linear(self.all_head_size, self.num_attention_heads * self.conv_kernel_size)
-        self.conv_out_layer = nn.Linear(config.hidden_size, self.all_head_size)
+        self.conv_out_layer = nn.Linear(self.all_head_size, self.all_head_size)
 
         self.unfold = nn.Unfold(
             kernel_size=[self.conv_kernel_size, 1], padding=[int((self.conv_kernel_size - 1) / 2), 0]
@@ -455,31 +455,31 @@ class ConvBertSelfAttention(nn.Module):
         hidden_states_conv = hidden_states[:, :, self.all_head_size:].contiguous()
         hidden_states_attn = hidden_states[:, :, :self.all_head_size].contiguous()
 
-        mixed_query_layer = self.query(hidden_states)
+        mixed_query_layer = self.query(hidden_states_attn)
         batch_size = hidden_states.size(0)
         # If this is instantiated as a cross-attention module, the keys
         # and values come from an encoder; the attention mask needs to be
         # such that the encoder's padding tokens are not attended to.
         if encoder_hidden_states is not None:
-            mixed_key_layer = self.key(encoder_hidden_states)
-            mixed_value_layer = self.value(encoder_hidden_states)
+            mixed_key_layer = self.key(encoder_hidden_states[:, :, :self.all_head_size].contiguous())
+            mixed_value_layer = self.value(encoder_hidden_states[:, :, :self.all_head_size].contiguous())
         else:
-            mixed_key_layer = self.key(hidden_states)
-            mixed_value_layer = self.value(hidden_states)
+            mixed_key_layer = self.key(hidden_states_attn)
+            mixed_value_layer = self.value(hidden_states_attn)
 
-        mixed_key_conv_attn_layer = self.key_conv_attn_layer(hidden_states.transpose(1, 2))
+        mixed_key_conv_attn_layer = self.key_conv_attn_layer(hidden_states_conv.transpose(1, 2))
         mixed_key_conv_attn_layer = mixed_key_conv_attn_layer.transpose(1, 2)
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
-        conv_attn_layer = torch.multiply(mixed_key_conv_attn_layer, mixed_query_layer)
+        conv_attn_layer = torch.multiply(mixed_key_conv_attn_layer, hidden_states_conv)
 
         conv_kernel_layer = self.conv_kernel_layer(conv_attn_layer)
         conv_kernel_layer = torch.reshape(conv_kernel_layer, [-1, self.conv_kernel_size, 1])
         conv_kernel_layer = torch.softmax(conv_kernel_layer, dim=1)
 
-        conv_out_layer = self.conv_out_layer(hidden_states)
+        conv_out_layer = self.conv_out_layer(hidden_states_conv)
         conv_out_layer = torch.reshape(conv_out_layer, [batch_size, -1, self.all_head_size])
         conv_out_layer = conv_out_layer.transpose(1, 2).contiguous().unsqueeze(-1)
         conv_out_layer = nn.functional.unfold(
