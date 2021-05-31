@@ -44,6 +44,8 @@ from transformers.modeling_utils import (
 )
 from transformers.utils import logging
 
+from fastformer.utils import numel
+
 CONVBERT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
     "YituTech/conv-bert-base": "https://huggingface.co/YituTech/conv-bert-base/resolve/main/config.json",
     "YituTech/conv-bert-medium-small": "https://huggingface.co/YituTech/conv-bert-medium-small/resolve/main/config.json",
@@ -450,6 +452,9 @@ class ConvBertSelfAttention(nn.Module):
         encoder_hidden_states=None,
         output_attentions=False,
     ):
+        hidden_states_conv = hidden_states[:, :, self.all_head_size:].contiguous()
+        hidden_states_attn = hidden_states[:, :, :self.all_head_size].contiguous()
+
         mixed_query_layer = self.query(hidden_states)
         batch_size = hidden_states.size(0)
         # If this is instantiated as a cross-attention module, the keys
@@ -1429,5 +1434,6 @@ class ConvBertForQuestionAnswering(ConvBertPreTrainedModel):
 
 if __name__ == "__main__":
     model = ConvBertModel(ConvBertConfig())
+    print(numel(model)/1_000_000)
     print(model(torch.tensor([[0, 1, 2, 200, 500]]), output_hidden_states=True)["hidden_states"])
 

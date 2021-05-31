@@ -317,9 +317,9 @@ def train(local_rank, args):
 
 
     if local_rank == 0 and rank == 0:
-        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model.student if hasattr(model, "student") else model) / 1_000_000))
+        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
         print(type(model))
-        print(model)
+        print(trainable_model)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -371,7 +371,8 @@ def train(local_rank, args):
         trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
         model.student = trainable_model
 
-    student_teacher_param_update(model.student, model.teacher, 0.95)
+    if dino_w > 0:
+        student_teacher_param_update(model.student, model.teacher, 0.95)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
