@@ -19,7 +19,7 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
-from transformers import AutoModel, RobertaTokenizerFast
+from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer
 
 from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
@@ -90,7 +90,9 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
         model = AutoModel.from_pretrained(model_name)
     elif "fast-conv" in model_name:
         # tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-        tokenizer = AutoTokenizer.from_pretrained("YituTech/conv-bert-base")
+        # tokenizer = AutoTokenizer.from_pretrained("YituTech/conv-bert-base")
+        # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        tokenizer = ConvBertTokenizer.from_pretrained("YituTech/conv-bert-base")
         model = ConvBertModel(ConvBertConfig())
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
