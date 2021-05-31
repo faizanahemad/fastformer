@@ -109,8 +109,9 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     with torch.no_grad():
         if cls_tokens > 1:
             std = model.embeddings.word_embeddings.weight.std()
+            dims = model.embeddings.word_embeddings.weight.shape[1]
             mean = model.embeddings.word_embeddings.weight.mean()
-            extras = nn.Parameter(torch.randn(cls_tokens - 1, 768) * std + mean)
+            extras = nn.Parameter(torch.randn(cls_tokens - 1, dims) * std + mean)
             extras.requires_grad = True
             model.embeddings.word_embeddings.weight = nn.Parameter(torch.cat((model.embeddings.word_embeddings.weight, extras)))
             setattr(model, "cls_tokens", cls_tokens)
