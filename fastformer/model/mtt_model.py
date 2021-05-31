@@ -152,6 +152,7 @@ class MTTModel(FastFormerPreTrainedModel):
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length,
                                                                   backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
+            attention_penalty.requires_grad = False
             self.register_buffer("attention_penalty", attention_penalty)
         assert generator_w > 0 or dino_w > 0
         if discriminator_w > 0:
