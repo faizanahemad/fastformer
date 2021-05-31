@@ -288,13 +288,15 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
-            sent_order_logits = self.sent_order_nn(outputs["hidden_states"][-1][:, self.cls_tokens - 1]).squeeze(-1)
+            sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
+            sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
             sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(torch.float)
             sent_order_accuracy = (sent_order_preds == labels_segment_index).float().mean()
 
         if self.dino_w > 0:
-            dino = self.ffn(outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0])
+            dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
+            dino = self.ffn(dino_hidden)
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
             mask_indices = (input_ids.long() != labels.long())

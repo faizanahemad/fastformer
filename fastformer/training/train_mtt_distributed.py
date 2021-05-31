@@ -591,7 +591,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
         loss.backward()
     _ = output.pop("predictions", None)
 
-    print([name for name, params in (ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).named_parameters() if params.grad is None])
+    # print([name for name, params in (ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).named_parameters() if params.grad is None])
     if not no_sync:
         if is_fp16:
             scaler.unscale_(optimizer)
