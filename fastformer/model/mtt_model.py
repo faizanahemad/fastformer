@@ -21,7 +21,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 from transformers import AutoModel, RobertaTokenizerFast
 
-from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig, get_rolling_diagonal_weights
+from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
 
 try:
