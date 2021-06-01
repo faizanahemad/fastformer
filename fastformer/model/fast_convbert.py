@@ -488,7 +488,6 @@ class BertIntermediate(nn.Module):
             self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.num_groups = config.num_groups
 
     def forward(self, hidden_states):
         hs = self.LayerNorm(hidden_states.contiguous())
