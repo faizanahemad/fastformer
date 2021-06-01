@@ -573,6 +573,7 @@ class ConvBertEncoder(nn.Module):
         output_hidden_states=False,
         return_dict=True,
         num_layers=None,
+        rng_seed=None,
     ):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
@@ -764,6 +765,7 @@ class ConvBertModel(ConvBertPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
         num_layers=None,
+        rng_seed=None,
     ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -805,6 +807,7 @@ class ConvBertModel(ConvBertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             num_layers=num_layers,
+            rng_seed=rng_seed,
         )
 
         return hidden_states

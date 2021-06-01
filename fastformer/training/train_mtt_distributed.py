@@ -513,14 +513,14 @@ def train(local_rank, args):
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=True,
                                               dino_center=dino_center,
-                                              freeze_last_layer=epoch < args["freeze_last_layer"])
+                                              freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done)
                 model_times.append(time.time() - model_start)
             else:
                 output = train_inner_loop(inner_args, model, batch, optimizer,
                                           scheduler, gradient_clipping, iter_size=iter_size,
                                           no_sync=False,
                                           dino_center=dino_center,
-                                          freeze_last_layer=epoch < args["freeze_last_layer"])
+                                          freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done)
                 optimizer.zero_grad(set_to_none=True)
                 model_times.append(time.time() - model_start)
 
@@ -575,10 +575,10 @@ def train(local_rank, args):
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
                      no_sync=False, dino_center=None,
-                     scaler=None, freeze_last_layer=False):
+                     scaler=None, freeze_last_layer=False, step=None):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
-        output = ddp_model(**batch, dino_center=dino_center)
+        output = ddp_model(**batch, dino_center=dino_center, rng_seed=step)
         last_layer = ddp_model.get_last_dino_layer()
         if freeze_last_layer and last_layer is not None:
             for p in last_layer.parameters():

@@ -247,10 +247,9 @@ class MTTModel(FastFormerPreTrainedModel):
             self,
             input_ids,
             attention_mask,
-
             labels=None,
             labels_segment_index=None,
-            char_ids=None, char_offsets=None,
+            char_ids=None, char_offsets=None, rng_seed=None,
     ):
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                char_ids=char_ids, char_offsets=char_offsets,
@@ -258,6 +257,7 @@ class MTTModel(FastFormerPreTrainedModel):
                                )
         if self.lm_layers is not None:
             backbone_inputs["num_layers"] = self.lm_layers
+            backbone_inputs["rng_seed"] = rng_seed
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         masked_lm_loss = None
@@ -316,7 +316,7 @@ class MTTModel(FastFormerPreTrainedModel):
             mask_indices = (input_ids.long() != labels.long())
             mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
             lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 or self.lm_layers is None else -1]
+            generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and self.lm_layers is None else -1]
             generator_output = self.generator_ffn(generator_output)
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
@@ -337,8 +337,10 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                 if self.electra_layers is not None:
                     discriminator_inputs["num_layers"] = self.electra_layers
+                    discriminator_inputs["rng_seed"] = rng_seed
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
+                _ = discriminator_inputs.pop("rng_seed", None)
 
                 if self.dino_w > 0:
                     dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
@@ -403,9 +405,10 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             attention_mask_teacher=None,
             char_ids_teacher=None, char_offsets_teacher=None,
             dino_center=None,
+            rng_seed=None,
     ):
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
-                                   char_ids=char_ids, char_offsets=char_offsets)
+                                   char_ids=char_ids, char_offsets=char_offsets, rng_seed=rng_seed)
         with torch.no_grad():
             teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher,
                                        char_ids=char_ids_teacher, char_offsets=char_offsets_teacher)

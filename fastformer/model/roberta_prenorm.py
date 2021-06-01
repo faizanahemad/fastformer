@@ -423,6 +423,7 @@ class RobertaEncoder(nn.Module):
         output_hidden_states=False,
         return_dict=True,
         num_layers=None,
+        rng_seed=None,
     ):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
@@ -692,6 +693,7 @@ class RobertaModel(RobertaPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
         num_layers=None,
+        rng_seed=None,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -783,6 +785,7 @@ class RobertaModel(RobertaPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             num_layers=num_layers,
+            rng_seed=rng_seed,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
