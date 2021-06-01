@@ -578,7 +578,7 @@ class ConvBertEncoder(nn.Module):
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         layers = self.layer
-        if num_layers < len(self.layer):
+        if num_layers is not None and num_layers < len(self.layer):
             selected_layers = sorted(torch.multinomial(torch.tensor([1.0/len(self.layer)] * len(self.layer)), num_layers, replacement=False).long().tolist())
             layers = [self.layer[i] for i in selected_layers]
         for i, layer_module in enumerate(layers):
