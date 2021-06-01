@@ -147,7 +147,7 @@ class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  attention_penalty_w=0.0,
-                 dropout=0.1,
+                 dropout=0.1, lm_layers=4, electra_layers=8,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -164,8 +164,8 @@ class MTTModel(FastFormerPreTrainedModel):
         bottleneck_dim = 256
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.attention_penalty_w = attention_penalty_w
-        self.lm_layers = 4
-        self.electra_layers = 8
+        self.lm_layers = lm_layers
+        self.electra_layers = electra_layers
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
