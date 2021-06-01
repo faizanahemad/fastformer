@@ -164,8 +164,8 @@ class MTTModel(FastFormerPreTrainedModel):
         bottleneck_dim = 256
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.attention_penalty_w = attention_penalty_w
-        self.lm_layers = 6
-        self.electra_layers = 6
+        self.lm_layers = 4
+        self.electra_layers = 8
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
@@ -275,6 +275,8 @@ class MTTModel(FastFormerPreTrainedModel):
         mask_indices_mean = None
         masked_accuracy = None
         attention_penalty_loss = None
+        discriminator_dino = None
+        discriminator_inputs = None
         active_locations = attention_mask.bool()
 
         if self.attention_penalty_w > 0:
@@ -331,7 +333,16 @@ class MTTModel(FastFormerPreTrainedModel):
                 new_input_ids = input_ids.clone()
                 new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
-                discriminator_outputs = self.backbone(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)["hidden_states"][-1]
+                discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
+                if self.electra_layers is not None:
+                    discriminator_inputs["num_layers"] = self.electra_layers
+                discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
+                _ = discriminator_inputs.pop("num_layers", None)
+
+                if self.dino_w > 0:
+                    dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
+                    discriminator_dino = self.ffn(dino_hidden)
+
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
@@ -352,7 +363,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss,
                     sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss, attention_penalty_loss=attention_penalty_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
-                    mask_indices_mean=mask_indices_mean)
+                    mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs)
 
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):
@@ -397,6 +408,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         with torch.no_grad():
             teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher,
                                        char_ids=char_ids_teacher, char_offsets=char_offsets_teacher)
+            discriminator_inputs = student_rep.pop("discriminator_inputs", None)
+            discriminator_teacher_rep = self.teacher(**discriminator_inputs)
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
         loss = sum(losses)
@@ -404,6 +417,9 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_results = self.dino_loss(student_rep.pop("dino").unsqueeze(0), teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
+            dino_results = self.dino_loss(student_rep.pop("discriminator_dino").unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
+            dino_center = dino_results["dino_center"]
+            dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         return dict(loss=loss, dino_center=dino_center, dino_loss=dino_loss, **student_rep)
 
