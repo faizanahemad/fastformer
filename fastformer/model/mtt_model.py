@@ -276,13 +276,13 @@ class MTTModel(FastFormerPreTrainedModel):
             attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
         if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
-            inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens]
+            inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens]
             inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
             input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls ** 2) ** 0.5).mean()
         elif self.cls_tokens > 1:
-            inputs_embeds_cls = outputs["hidden_states"][-12][:, :self.cls_tokens].detach()
+            inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens].detach()
             inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
