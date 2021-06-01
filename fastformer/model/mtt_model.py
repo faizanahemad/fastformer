@@ -247,6 +247,7 @@ class MTTModel(FastFormerPreTrainedModel):
             self,
             input_ids,
             attention_mask,
+
             labels=None,
             labels_segment_index=None,
             char_ids=None, char_offsets=None,

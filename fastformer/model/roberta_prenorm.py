@@ -318,7 +318,6 @@ class RobertaAttention(nn.Module):
             past_key_value,
             output_attentions,
         )
-        attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (self_outputs[0],) + self_outputs[1:]
         return outputs
 
