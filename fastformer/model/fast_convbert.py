@@ -414,7 +414,7 @@ class ConvBertSelfAttention(nn.Module):
 
         new_context_layer_shape = context_layer.size()[:-2] + (self.head_ratio * self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
-        context_layer = hidden_states_skip + self.dense(self.hidden_dropout(context_layer))
+        context_layer = hidden_states_skip + self.hidden_dropout(self.dense(context_layer))
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
         return outputs
 
@@ -462,7 +462,7 @@ class ConvBertAttention(nn.Module):
         return outputs
 
 
-class ConvBertIntermediate(nn.Module):
+class BertIntermediate(nn.Module):
     def __init__(self, config: ConvBertConfig):
         super().__init__()
         self.geglu = False
@@ -474,10 +474,8 @@ class ConvBertIntermediate(nn.Module):
                 self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
             self.intermediate_act_fn = config.hidden_act
-        if config.num_groups == 1:
-            self.dense = nn.Linear(config.hidden_size, config.intermediate_size * (2 if self.geglu else 1))
-            self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
-        else:
+
+        if hasattr(config, "num_groups") and config.num_groups > 1:
             self.dense = GroupedLinearLayer(
                 input_size=config.hidden_size, output_size=config.intermediate_size * (2 if self.geglu else 1),
                 num_groups=config.num_groups,
@@ -485,6 +483,9 @@ class ConvBertIntermediate(nn.Module):
             self.dense_last = GroupedLinearLayer(
                 input_size=config.intermediate_size, output_size=config.hidden_size, num_groups=config.num_groups
             )
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.intermediate_size * (2 if self.geglu else 1))
+            self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.num_groups = config.num_groups
@@ -512,7 +513,7 @@ class ConvBertLayer(nn.Module):
         if self.add_cross_attention:
             assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
             self.crossattention = ConvBertAttention(config)
-        self.intermediate = ConvBertIntermediate(config)
+        self.intermediate = BertIntermediate(config)
 
     def forward(
         self,
@@ -578,8 +579,9 @@ class ConvBertEncoder(nn.Module):
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         layers = self.layer
-        if num_layers is not None and num_layers < len(self.layer):
-            selected_layers = sorted(torch.multinomial(torch.tensor([1.0/len(self.layer)] * len(self.layer)), num_layers, replacement=False).long().tolist())
+        total_layers = len(self.layer)
+        if num_layers is not None and num_layers < total_layers:
+            selected_layers = sorted(torch.multinomial(torch.tensor([(total_layers - i)/total_layers for i in range(total_layers)]), num_layers, replacement=False).long().tolist())
             layers = [self.layer[i] for i in selected_layers]
         for i, layer_module in enumerate(layers):
             if output_hidden_states:

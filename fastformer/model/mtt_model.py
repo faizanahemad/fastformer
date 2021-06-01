@@ -19,10 +19,11 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
-from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer
+from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer, RobertaConfig
 
 from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
+from fastformer.model.roberta_prenorm import RobertaModel
 
 try:
     from performer_pytorch import SelfAttention, FastAttention
@@ -87,6 +88,9 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     if "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
         model = AutoModel.from_pretrained(model_name)
+    elif "prenorm-roberta" in model_name:
+        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        model = RobertaModel(RobertaConfig.from_pretrained("roberta-base"))
     elif "bert" in model_name:
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         model = AutoModel.from_pretrained(model_name)
@@ -161,6 +165,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.attention_penalty_w = attention_penalty_w
         self.lm_layers = 6
+        self.electra_layers = 6
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
