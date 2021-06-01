@@ -85,12 +85,12 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
-    if "roberta" in model_name:
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-        model = AutoModel.from_pretrained(model_name)
-    elif "prenorm-roberta" in model_name:
+    if "prenorm-roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
         model = RobertaModel(RobertaConfig.from_pretrained("roberta-base"))
+    elif "roberta" in model_name:
+        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        model = AutoModel.from_pretrained(model_name)
     elif "bert" in model_name:
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         model = AutoModel.from_pretrained(model_name)
