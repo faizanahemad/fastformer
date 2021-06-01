@@ -433,6 +433,7 @@ class RobertaEncoder(nn.Module):
         layers = self.layer
         total_layers = len(self.layer)
         if num_layers is not None and num_layers < total_layers:
+            # if rng_seed is
             selected_layers = sorted(torch.multinomial(torch.tensor([(total_layers - i) / total_layers for i in range(total_layers)]), num_layers,
                                                        replacement=False).long().tolist())
             layers = [self.layer[i] for i in selected_layers]

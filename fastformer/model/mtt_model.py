@@ -341,6 +341,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
+                _ = discriminator_inputs.pop("output_hidden_states", None)
 
                 if self.dino_w > 0:
                     dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
