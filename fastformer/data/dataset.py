@@ -711,6 +711,9 @@ class MTTDataset(Dataset):
             if "label_mlm_input_ids" in results:
                 results["label_mlm_input_ids"] = torch.cat((torch.tensor([self.vocab_size + i for i in range(self.cls_tokens - 1)]).type(dtype), results["label_mlm_input_ids"]))
 
+        if "label_mlm_input_ids" in results:
+            results["labels"] = results.pop("label_mlm_input_ids", None)
+
         # acc = (inp["input_ids"] != results["label_mlm_input_ids"]).float().mean()
         # print(acc.item(), acc2)
         # print(text,"\n",mlm_text)
@@ -812,6 +815,8 @@ class get_collate_fn:
             del samples['token_type_ids']
         if "char_offsets" in samples:
             samples['char_offsets'] = samples['char_offsets'][:, :samples['input_ids'].shape[1]]
+        if "label_mlm_input_ids" in samples:
+            samples["labels"] = samples.pop("label_mlm_input_ids", None)
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         # {k: (v.size() if hasattr(v, "size") else len(v), type(v)) for k, v in samples.items()}
         # mxoff = samples['char_offsets'].max().item()

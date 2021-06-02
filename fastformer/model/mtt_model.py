@@ -151,7 +151,7 @@ class PositionwiseFFN(nn.Module):
 
 
 class MTTModel(FastFormerPreTrainedModel):
-    def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
+    def __init__(self, backbone, tokenizer, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  attention_penalty_w=0.0,
                  dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
@@ -188,6 +188,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.dino_w = dino_w
         self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0)
         embedding_dims = self.backbone.embeddings.word_embeddings.weight.size(1)
+        num_features = self.backbone.embeddings.position_embeddings.weight.size(1)
         self.lm_head = nn.Linear(embedding_dims, self.vocab_size, bias=False)
         self.sentence_order_prediction_w = sentence_order_prediction_w
         if reinit:
@@ -213,15 +214,14 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if generator_w > 0:
             self.generator_ffn = nn.Sequential(PositionwiseFFN(num_features, dropout, 1e-5),
-                                               nn.Linear(num_features, num_features * 2),
+                                               nn.Linear(num_features, num_features),
                                                nn.GELU(),
-                                               nn.Linear(num_features * 2, num_features),  # nn.Tanh()
+                                               nn.Linear(num_features, num_features),  # nn.Tanh()
                                                )
             init_weights(self.generator_ffn, 0.01)
 
         if discriminator_w > 0:
-            self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features),
-                                                   nn.Linear(num_features, num_features),
+            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
                                                    nn.GELU(),
                                                    nn.Linear(num_features, 1))
 
@@ -419,7 +419,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    rng_seed=rng_seed)
         with torch.no_grad():
-            teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher, num_layers_total=self.teacher.lm_layers_total)
+            teacher_rep = self.teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
             # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total

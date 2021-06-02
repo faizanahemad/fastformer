@@ -213,8 +213,7 @@ class CLRDataset(torch.utils.data.Dataset):
 def dataset_builder(location, params):
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     dataset = Dataset.load_from_disk(location)
-    dataset = MTTDataset(dataset=dataset,
-                         **params)
+    dataset = MTTDataset(dataset=dataset, **params)
     return dataset
 
 
@@ -224,22 +223,13 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     import os
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
 
-    teacher_args = dict(cls_tokens=cls_tokens,vocab_size=len(tokenizer), tokenizer=tokenizer,
-                        tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
-                        word_mask_proba=((0, 0.0), (32, 0.05), (128, 0.1), (512, 0.125)),
-                        max_span_length=1, max_jumbling_span_length=1, jumble_sentence=True)
-
     student_args = dict(cls_tokens=cls_tokens, vocab_size=len(tokenizer), tokenizer=tokenizer,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
                         word_mask_proba=((0, 0.15), (32, 0.15), (128, 0.2), (512, 0.2)),
                         max_span_length=1, max_jumbling_span_length=2, jumble_sentence=True)
 
-    train_dataset = Dataset.load_from_disk(location)
-    dataset_length = len(train_dataset)
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
-    dataset = CLRDataset(student_args, teacher_args, dataset_length, location)
-    # for i in range(len(dataset) - 1000, len(dataset)):
-    #     k = dataset[i]
+    dataset = dataset_builder(location, student_args)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
@@ -300,7 +290,6 @@ def train(local_rank, args):
     optimizer_config.warmup_steps = args["warmup_steps"]
     optimizer_config.gradient_clipping = args["gradient_clipping"]
 
-    hidden_dims = 768
     eps = 1e-4
     if args["no_autocast"]:
         optimizer_config.eps = 1e-7
@@ -319,12 +308,12 @@ def train(local_rank, args):
     attention_penalty_w = args["attention_penalty_w"] if "attention_penalty_w" in args else 0.0
 
 
-    student = MTTModel(backbone, tokenizer, hidden_dims, args["cls_tokens"],
+    student = MTTModel(backbone, tokenizer, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
-    teacher = MTTModel(teacher_backbone, tokenizer, hidden_dims, args["cls_tokens"],
+    teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
