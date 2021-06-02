@@ -434,7 +434,9 @@ class RobertaEncoder(nn.Module):
         total_layers = len(self.layer) if num_layers_total is None else num_layers_total
         layers = [self.layer[i] for i in range(total_layers)]
         for i in range(total_layers):
-            layers[i].requires_grad_(True)
+            layers[i].requires_grad_(self.training)
+            if self.training:
+                layers[i].train()
         if num_layers is not None and num_layers < total_layers:
             g_cpu = None
             if rng_seed is not None:
@@ -445,9 +447,10 @@ class RobertaEncoder(nn.Module):
 
             for i in range(total_layers):
                 if i in selected_layers:
-                    layers[i].requires_grad_(True)
+                    layers[i].requires_grad_(self.training)
                 else:
                     layers[i].requires_grad_(False)
+                    layers[i].eval()
 
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
@@ -781,16 +784,7 @@ class RobertaModel(RobertaPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        if no_grad_embedding:
-            with torch.no_grad():
-                embedding_output = self.embeddings(
-                    input_ids=input_ids,
-                    position_ids=position_ids,
-                    token_type_ids=token_type_ids,
-                    inputs_embeds=inputs_embeds,
-                    past_key_values_length=past_key_values_length,
-                )
-        else:
+        with torch.set_grad_enabled(not no_grad_embedding and self.training):
             embedding_output = self.embeddings(
                 input_ids=input_ids,
                 position_ids=position_ids,
@@ -798,6 +792,7 @@ class RobertaModel(RobertaPreTrainedModel):
                 inputs_embeds=inputs_embeds,
                 past_key_values_length=past_key_values_length,
             )
+
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,

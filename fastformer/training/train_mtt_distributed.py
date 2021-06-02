@@ -329,6 +329,7 @@ def train(local_rank, args):
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
+    teacher = teacher.eval()
     model = MultiTaskHighwayCLSPretraining(student, teacher, eps).to(device)
     trainable_model = student
 

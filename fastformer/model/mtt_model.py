@@ -381,8 +381,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.cls_tokens = student.cls_tokens
         self.dino_dims = student.dino_dims
         self.student = student
-        self.teacher = teacher
-        for p in teacher.parameters():
+        self.teacher = teacher.eval()
+        for p in self.teacher.parameters():
             p.requires_grad = False
         for p in student.parameters():
             p.requires_grad = True
