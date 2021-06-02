@@ -195,11 +195,11 @@ if __name__ == "__main__":
     lm_cmd += " --log_every_steps 200 --num_workers 1 --save_every_steps 1000"
     # lm_cmd += " --wandb_dryrun"
     lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 1"
-    lm_cmd += " --epochs 1 --lr 0.0003 --batch_size 12 --lr_steps 1"
+    lm_cmd += " --epochs 1 --lr 0.0003 --batch_size 4 --lr_steps 1"
     lm_cmd += " --warmup_steps 1000 --gradient_clipping 3.0 --teacher_warmup_steps 1000 --total_steps 50000"
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 1.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw --no_autocast"
-    lm_cmd += " --lm_layers 3 --electra_layers 6"
+    lm_cmd += " --lm_layers 3 --electra_layers 6 --lm_layers_total 6 --electra_layers_total 12"
     # lm_cmd += " --pretrained_model roberta-base"
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
     lm_cmd += " > output.log 2>&1 & disown"
