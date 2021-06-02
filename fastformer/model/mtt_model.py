@@ -86,11 +86,15 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
     # TODO: Add extra CLS attr and tokens in embedding
 
     if "prenorm-roberta" in model_name:
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        if "large" in model_name:
+            model_name = "roberta-large"
+        else:
+            model_name = "roberta-base"
+        tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        config = RobertaConfig.from_pretrained("roberta-base")
+        config = RobertaConfig.from_pretrained(model_name)
         # config.vocab_size = 30522
-        model = RobertaModel(RobertaConfig.from_pretrained("roberta-base"))
+        model = RobertaModel(config)
     elif "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
         model = AutoModel.from_pretrained(model_name)
