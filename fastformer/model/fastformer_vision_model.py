@@ -474,7 +474,7 @@ class PatchModel(FastFormerPreTrainedModel):
 
             self.ffn = nn.Sequential(nn.Linear(self.ffn_input_features, 2048), nn.GELU(),
                                      nn.Linear(2048, 2048), nn.GELU(),
-                                     nn.Linear(2048, bottleneck_dim), nn.GELU(),
+                                     nn.Linear(2048, bottleneck_dim),
                                      Norm(),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)

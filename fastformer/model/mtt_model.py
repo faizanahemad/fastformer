@@ -147,7 +147,7 @@ class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, num_features=768, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  attention_penalty_w=0.0,
-                 dropout=0.1, lm_layers=4, electra_layers=8,
+                 dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -166,6 +166,8 @@ class MTTModel(FastFormerPreTrainedModel):
         self.attention_penalty_w = attention_penalty_w
         self.lm_layers = lm_layers
         self.electra_layers = electra_layers
+        self.lm_layers_total = lm_layers_total
+        self.electra_layers_total = electra_layers_total
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
@@ -193,9 +195,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 last_layer.weight_g.requires_grad = False
 
             self.ffn = nn.Sequential(nn.Linear(num_features, 2048), nn.GELU(),
-                                     nn.Dropout(dropout),
                                      nn.Linear(2048, 2048), nn.GELU(),
-                                     nn.Linear(2048, bottleneck_dim), nn.GELU(),
+                                     nn.Linear(2048, bottleneck_dim),
                                      Norm(),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)
@@ -205,19 +206,11 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if generator_w > 0:
             self.generator_ffn = nn.Sequential(PositionwiseFFN(num_features, dropout, 1e-5),
-                                               nn.LayerNorm(num_features),
-                                               nn.Dropout(dropout),
                                                nn.Linear(num_features, num_features * 2),
                                                nn.GELU(),
                                                nn.Linear(num_features * 2, num_features),  # nn.Tanh()
                                                )
             init_weights(self.generator_ffn, 0.01)
-
-            # self.tail_gen_ffn = nn.Sequential(nn.Linear(num_features, num_features),
-            #                                   nn.GELU(),
-            #                                   nn.Linear(num_features, num_features),  # nn.Tanh()
-            #                                   )
-            # init_weights(self.tail_gen_ffn, 0.01)
 
         if discriminator_w > 0:
             self.discriminator_ffn = nn.Sequential(nn.LayerNorm(num_features),
@@ -229,7 +222,6 @@ class MTTModel(FastFormerPreTrainedModel):
 
         if sentence_order_prediction_w > 0:
             self.sent_order_nn = nn.Sequential(nn.Linear(num_features, num_features),
-                                               nn.Dropout(dropout),
                                                nn.GELU(),
                                                nn.Linear(num_features, 1))
             init_weights(self.sent_order_nn, 0.01)
@@ -249,10 +241,9 @@ class MTTModel(FastFormerPreTrainedModel):
             attention_mask,
             labels=None,
             labels_segment_index=None,
-            char_ids=None, char_offsets=None, rng_seed=None,
+            rng_seed=None, num_layers=None, num_layers_total=None,
     ):
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
-                               char_ids=char_ids, char_offsets=char_offsets,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
         no_grad_embedding = False
@@ -261,8 +252,10 @@ class MTTModel(FastFormerPreTrainedModel):
             no_grad_embedding = gen.random() < 0.5
         backbone_inputs["no_grad_embedding"] = no_grad_embedding
         if self.lm_layers is not None:
-            backbone_inputs["num_layers"] = self.lm_layers
+            backbone_inputs["num_layers"] = self.lm_layers if num_layers is None else num_layers
             backbone_inputs["rng_seed"] = rng_seed
+        if self.lm_layers_total is not None or num_layers_total is not None:
+            backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total is None else num_layers_total
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         masked_lm_loss = None
@@ -343,8 +336,10 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_labels = (new_input_ids.long() == labels.long()).float()
                 discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                 if self.electra_layers is not None:
-                    discriminator_inputs["num_layers"] = self.electra_layers
+                    discriminator_inputs["num_layers"] = self.electra_layers if num_layers is None else num_layers
                     discriminator_inputs["rng_seed"] = rng_seed
+                if self.electra_layers_total is not None or num_layers_total is not None:
+                    discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
@@ -407,8 +402,6 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             attention_mask,
             labels=None,
             labels_segment_index=None,
-            char_ids=None, char_offsets=None,
-
             input_ids_teacher=None,
             attention_mask_teacher=None,
             char_ids_teacher=None, char_offsets_teacher=None,
@@ -417,11 +410,11 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
     ):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
-                                   char_ids=char_ids, char_offsets=char_offsets, rng_seed=rng_seed)
+                                   rng_seed=rng_seed)
         with torch.no_grad():
-            teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher,
-                                       char_ids=char_ids_teacher, char_offsets=char_offsets_teacher)
+            teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
+            discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
             discriminator_teacher_rep = self.teacher(**discriminator_inputs)
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]

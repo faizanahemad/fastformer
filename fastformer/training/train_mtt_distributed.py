@@ -73,10 +73,16 @@ def training_args():
                         help='Epochs')
     parser.add_argument('--cls_tokens', default=1, type=int,
                         help='cls_tokens')
+
     parser.add_argument('--lm_layers', type=int, required=False,
                         help='lm_layers')
     parser.add_argument('--electra_layers', type=int, required=False,
                         help='electra_layers')
+    parser.add_argument('--lm_layers_total', type=int, required=False,
+                        help='lm_layers_total')
+    parser.add_argument('--electra_layers_total', type=int, required=False,
+                        help='electra_layers_total')
+
     parser.add_argument('--total_steps', type=int, required=False,
                         help='total_steps')
     parser.add_argument('--freeze_last_layer', default=2, type=int,
@@ -316,11 +322,13 @@ def train(local_rank, args):
     student = MTTModel(backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
-                       lm_layers=args["lm_layers"], electra_layers=args["electra_layers"])
+                       lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
+                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
     teacher = MTTModel(teacher_backbone, tokenizer, hidden_dims, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
-                       lm_layers=None, electra_layers=None)
+                       lm_layers=None, electra_layers=None,
+                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
     model = MultiTaskHighwayCLSPretraining(student, teacher, eps).to(device)
     trainable_model = student
 

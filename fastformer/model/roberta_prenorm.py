@@ -423,6 +423,7 @@ class RobertaEncoder(nn.Module):
         output_hidden_states=False,
         return_dict=True,
         num_layers=None,
+        num_layers_total=None,
         rng_seed=None,
     ):
         all_hidden_states = () if output_hidden_states else None
@@ -430,8 +431,10 @@ class RobertaEncoder(nn.Module):
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
 
         next_decoder_cache = () if use_cache else None
-        layers = self.layer
-        total_layers = len(self.layer)
+        total_layers = len(self.layer) if num_layers_total is None else num_layers_total
+        layers = [self.layer[i] for i in range(total_layers)]
+        for i in range(total_layers):
+            layers[i].requires_grad_(True)
         if num_layers is not None and num_layers < total_layers:
             g_cpu = None
             if rng_seed is not None:
@@ -439,7 +442,13 @@ class RobertaEncoder(nn.Module):
                 g_cpu = g_cpu.manual_seed(rng_seed)
             selected_layers = sorted(torch.multinomial(torch.tensor([(total_layers - i) / total_layers for i in range(total_layers)]), num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
-            layers = [self.layer[i] for i in selected_layers]
+
+            for i in range(total_layers):
+                if i in selected_layers:
+                    layers[i].requires_grad_(True)
+                else:
+                    layers[i].requires_grad_(False)
+
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -697,6 +706,7 @@ class RobertaModel(RobertaPreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
         num_layers=None,
+        num_layers_total=None,
         rng_seed=None,
         no_grad_embedding=False,
     ):
@@ -800,6 +810,7 @@ class RobertaModel(RobertaPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             num_layers=num_layers,
+            num_layers_total=num_layers_total,
             rng_seed=rng_seed,
         )
         sequence_output = encoder_outputs[0]
