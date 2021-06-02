@@ -790,9 +790,13 @@ def init_weights(module, std=None):
             nn.init.constant_(module.bias, 0.0)
 
 
-def student_teacher_param_update(student, teacher, m):
+def student_teacher_param_update(student, teacher, m, device=None):
+    if device is not None:
+        teacher = teacher.to(device)
     for param_q, param_k in zip((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).parameters(), teacher.parameters()):
         param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+    if device is not None:
+        teacher = teacher.to(torch.device("cpu"))
 
 
 def get_rolling_diagonal_weights(size=512, window=9):

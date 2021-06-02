@@ -426,7 +426,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
             teacher = self.teacher
             if self.device is not None:
-                teacher = self.teacher.to(self.device)
+                teacher = self.teacher.to(self.device).eval()
             teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total

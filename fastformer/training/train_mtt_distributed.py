@@ -366,7 +366,7 @@ def train(local_rank, args):
                         trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
         if dino_w > 0:
-            student_teacher_param_update(model.student, model.teacher, 0.001)
+            student_teacher_param_update(model.student, model.teacher, 0.001, device)
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
@@ -380,7 +380,7 @@ def train(local_rank, args):
         model.student = trainable_model
 
     if dino_w > 0:
-        student_teacher_param_update(model.student, model.teacher, 0.95)
+        student_teacher_param_update(model.student, model.teacher, 0.95, device)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -535,7 +535,7 @@ def train(local_rank, args):
                 model_times.append(time.time() - model_start)
 
             if dino_w > 0:
-                student_teacher_param_update(model.student, model.teacher, teacher_update_w)
+                student_teacher_param_update(model.student, model.teacher, teacher_update_w, device)
             if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
                 dino_center = output.pop("dino_center", None)
                 if dino_center is not None:
