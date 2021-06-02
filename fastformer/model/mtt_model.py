@@ -179,7 +179,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.dino_w = dino_w
         self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0)
         embedding_dims = self.backbone.embeddings.word_embeddings.weight.size(1)
-        self.lm_head = nn.Linear(embedding_dims, self.vocab_size)
+        self.lm_head = nn.Linear(embedding_dims, self.vocab_size, bias=False)
         self.sentence_order_prediction_w = sentence_order_prediction_w
         if reinit:
             self.init_weights()
@@ -255,6 +255,11 @@ class MTTModel(FastFormerPreTrainedModel):
                                char_ids=char_ids, char_offsets=char_offsets,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
+        no_grad_embedding = False
+        if self.lm_layers is not None and self.electra_layers is not None:
+            gen = np.random.default_rng(rng_seed)
+            no_grad_embedding = gen.random() < 0.5
+        backbone_inputs["no_grad_embedding"] = no_grad_embedding
         if self.lm_layers is not None:
             backbone_inputs["num_layers"] = self.lm_layers
             backbone_inputs["rng_seed"] = rng_seed
@@ -321,8 +326,10 @@ class MTTModel(FastFormerPreTrainedModel):
             if hasattr(self.backbone, "embeddings_project"):
                 generator_output = self.backbone.embeddings_reverse_project(generator_output)
             lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
+            if no_grad_embedding:
+                self.lm_head.requires_grad_(False)
             lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
-
+            self.lm_head.requires_grad_(True)
 
             if self.generator_w > 0:
                 active_labels = labels[mask_indices].reshape(-1)
@@ -408,6 +415,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_center=None,
             rng_seed=None,
     ):
+        # TODO: Do we need to guide both students (MLM/ELECTRA)
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    char_ids=char_ids, char_offsets=char_offsets, rng_seed=rng_seed)
         with torch.no_grad():

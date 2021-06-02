@@ -433,9 +433,12 @@ class RobertaEncoder(nn.Module):
         layers = self.layer
         total_layers = len(self.layer)
         if num_layers is not None and num_layers < total_layers:
-            # if rng_seed is
+            g_cpu = None
+            if rng_seed is not None:
+                g_cpu = torch.Generator()
+                g_cpu = g_cpu.manual_seed(rng_seed)
             selected_layers = sorted(torch.multinomial(torch.tensor([(total_layers - i) / total_layers for i in range(total_layers)]), num_layers,
-                                                       replacement=False).long().tolist())
+                                                       replacement=False, generator=g_cpu).long().tolist())
             layers = [self.layer[i] for i in selected_layers]
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
@@ -695,6 +698,7 @@ class RobertaModel(RobertaPreTrainedModel):
         return_dict=None,
         num_layers=None,
         rng_seed=None,
+        no_grad_embedding=False,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -767,13 +771,23 @@ class RobertaModel(RobertaPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        embedding_output = self.embeddings(
-            input_ids=input_ids,
-            position_ids=position_ids,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            past_key_values_length=past_key_values_length,
-        )
+        if no_grad_embedding:
+            with torch.no_grad():
+                embedding_output = self.embeddings(
+                    input_ids=input_ids,
+                    position_ids=position_ids,
+                    token_type_ids=token_type_ids,
+                    inputs_embeds=inputs_embeds,
+                    past_key_values_length=past_key_values_length,
+                )
+        else:
+            embedding_output = self.embeddings(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                token_type_ids=token_type_ids,
+                inputs_embeds=inputs_embeds,
+                past_key_values_length=past_key_values_length,
+            )
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
