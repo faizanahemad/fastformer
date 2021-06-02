@@ -383,7 +383,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):
-    def __init__(self, student: MTTModel, teacher: MTTModel, eps=1e-7):
+    def __init__(self, student: MTTModel, teacher: MTTModel, eps=1e-7, device=None):
         super().__init__(student, teacher, eps, 0.04, 0.1, 0.9)
         self.cls_tokens = student.cls_tokens
         self.dino_dims = student.dino_dims
@@ -399,6 +399,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         teacher.input_cls_orthogonal_w = 0.0
         self.generator_w = student.generator_w
         self.discriminator_w = student.discriminator_w
+        self.device = device
 
         self.eps = eps
         self.teacher_contrastive_temperature = 0.04
@@ -423,11 +424,16 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                    rng_seed=rng_seed)
         with torch.no_grad():
             # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
-            teacher_rep = self.teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
+            teacher = self.teacher
+            if self.device is not None:
+                teacher = self.teacher.to(self.device)
+            teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
             _ = discriminator_inputs.pop("drop_unused_layers", None)
-            discriminator_teacher_rep = self.teacher(**discriminator_inputs)
+            discriminator_teacher_rep = teacher(**discriminator_inputs)
+            if self.device is not None:
+                self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
         loss = sum(losses)

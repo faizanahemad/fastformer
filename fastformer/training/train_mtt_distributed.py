@@ -321,9 +321,8 @@ def train(local_rank, args):
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
     teacher = teacher.eval()
-    model = MultiTaskHighwayCLSPretraining(student, teacher, eps).to(device)
+    model = MultiTaskHighwayCLSPretraining(student, teacher, eps, device).to(device)
     trainable_model = student
-
 
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
