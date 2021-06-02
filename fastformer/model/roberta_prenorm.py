@@ -437,6 +437,7 @@ class RobertaEncoder(nn.Module):
             layers[i].requires_grad_(self.training)
             if self.training:
                 layers[i].train()
+        selected_layers = []
         if num_layers is not None and num_layers < total_layers:
             g_cpu = None
             if rng_seed is not None:
@@ -452,6 +453,7 @@ class RobertaEncoder(nn.Module):
                     layers[i].requires_grad_(False)
                     layers[i].eval()
 
+        # print(len(layers), len(selected_layers), selected_layers, self.training)
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)

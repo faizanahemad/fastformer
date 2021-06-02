@@ -417,6 +417,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         with torch.no_grad():
             teacher_rep = self.teacher(input_ids=input_ids_teacher, attention_mask=attention_mask_teacher, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
+            # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
             discriminator_teacher_rep = self.teacher(**discriminator_inputs)
         dino_loss = None
