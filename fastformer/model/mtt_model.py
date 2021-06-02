@@ -154,7 +154,7 @@ class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  attention_penalty_w=0.0,
-                 dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
+                 dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12, drop_unused_layers=None,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -175,6 +175,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.electra_layers = electra_layers
         self.lm_layers_total = lm_layers_total
         self.electra_layers_total = electra_layers_total
+        self.drop_unused_layers = drop_unused_layers
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
@@ -263,6 +264,7 @@ class MTTModel(FastFormerPreTrainedModel):
             backbone_inputs["rng_seed"] = rng_seed
         if self.lm_layers_total is not None or num_layers_total is not None:
             backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total is None else num_layers_total
+        backbone_inputs["drop_unused_layers"] = self.drop_unused_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         masked_lm_loss = None
@@ -347,6 +349,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["rng_seed"] = rng_seed
                 if self.electra_layers_total is not None or num_layers_total is not None:
                     discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
+                discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
@@ -419,10 +422,11 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    rng_seed=rng_seed)
         with torch.no_grad():
+            # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
             teacher_rep = self.teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
-            # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
+            _ = discriminator_inputs.pop("drop_unused_layers", None)
             discriminator_teacher_rep = self.teacher(**discriminator_inputs)
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]

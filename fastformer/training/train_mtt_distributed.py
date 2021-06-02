@@ -82,6 +82,8 @@ def training_args():
                         help='lm_layers_total')
     parser.add_argument('--electra_layers_total', type=int, required=False,
                         help='electra_layers_total')
+    parser.add_argument('--drop_unused_layers', action="store_true", default=False,
+                        help='drop_unused_layers')
 
     parser.add_argument('--total_steps', type=int, required=False,
                         help='total_steps')
@@ -312,7 +314,7 @@ def train(local_rank, args):
                        generator_w=generator_w, discriminator_w=discriminator_w,
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
-                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
+                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"], drop_unused_layers=args["drop_unused_layers"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
