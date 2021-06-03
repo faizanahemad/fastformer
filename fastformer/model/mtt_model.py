@@ -251,7 +251,7 @@ class MTTModel(FastFormerPreTrainedModel):
             labels_segment_index=None,
             rng_seed=None, num_layers=None, num_layers_total=None,
     ):
-        rng_seed = None
+        # rng_seed = None
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
