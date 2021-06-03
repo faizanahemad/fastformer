@@ -536,13 +536,13 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 model_times.append(time.time() - model_start)
 
-            if dino_w > 0:
+            if dino_w > 0 and (step + 1) % iter_size:
                 student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
             if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
                 dino_center = output.pop("dino_center", None)
                 if dino_center is not None:
                     dtype = dino_center.dtype
-                    dino_center = dino_center.type(torch.float64) / args["world_size"]
+                    dino_center = dino_center.type(torch.float32) / args["world_size"]
                     torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
                     output["dino_center"] = dino_center.type(dtype)
 

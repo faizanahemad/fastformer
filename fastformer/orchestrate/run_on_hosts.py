@@ -200,6 +200,7 @@ if __name__ == "__main__":
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 1.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw --no_autocast"
     lm_cmd += " --lm_layers 2 --electra_layers 4 --lm_layers_total 9 --electra_layers_total 24 --drop_unused_layers"
+    # lm_cmd += " --move_unused_to_cpu"
     # lm_cmd += " --pretrained_model roberta-base"
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
     lm_cmd += " > output.log 2>&1 & disown"
