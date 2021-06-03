@@ -190,7 +190,7 @@ if __name__ == "__main__":
     lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
     lm_cmd += " --model_config prenorm-roberta-large"
     lm_cmd += " --cls_tokens 2"
-    lm_cmd += " --wandb_name L_sd_3_6_dino_hway_1_1_50_1_m1"
+    lm_cmd += " --wandb_name L_sd_3_6_dino_hway_1_1_50_1_s1"
     lm_cmd += " --dataset /home/ahemf/processed_datasets/all512"
     lm_cmd += " --log_every_steps 50 --num_workers 1 --save_every_steps 1000"
     # lm_cmd += " --wandb_dryrun"
@@ -199,7 +199,7 @@ if __name__ == "__main__":
     lm_cmd += " --warmup_steps 1000 --gradient_clipping 3.0 --teacher_warmup_steps 1000 --total_steps 50000"
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 1.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw --no_autocast"
-    lm_cmd += " --lm_layers 3 --electra_layers 6 --lm_layers_total 9 --electra_layers_total 24 --drop_unused_layers"
+    lm_cmd += " --lm_layers 2 --electra_layers 4 --lm_layers_total 9 --electra_layers_total 24 --drop_unused_layers"
     # lm_cmd += " --pretrained_model roberta-base"
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
     lm_cmd += " > output.log 2>&1 & disown"
