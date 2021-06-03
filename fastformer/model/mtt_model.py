@@ -269,6 +269,7 @@ class MTTModel(FastFormerPreTrainedModel):
         if self.lm_layers_total is not None or num_layers_total is not None:
             backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total is None else num_layers_total
         backbone_inputs["drop_unused_layers"] = self.drop_unused_layers
+        backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         masked_lm_loss = None
@@ -354,6 +355,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 if self.electra_layers_total is not None or num_layers_total is not None:
                     discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
                 discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
+                discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
@@ -428,13 +430,14 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                    rng_seed=rng_seed)
         with torch.no_grad():
             # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
-            teacher = self.teacher
+            teacher = self.teacher.eval()
             if self.device is not None:
-                teacher = self.teacher.to(self.device).eval()
+                teacher = self.teacher.to(self.device)
             teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
             discriminator_inputs = student_rep.pop("discriminator_inputs", None)
             discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
             _ = discriminator_inputs.pop("drop_unused_layers", None)
+            _ = discriminator_inputs.pop("approximate_unused_layers", None)
             discriminator_teacher_rep = teacher(**discriminator_inputs)
             if self.device is not None:
                 self.teacher = self.teacher.to(torch.device("cpu"))

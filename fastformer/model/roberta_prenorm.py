@@ -467,7 +467,8 @@ class RobertaEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
-            grad_layer = i in selected_layers or drop_unused_layers or not approximate_unused_layers
+            grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training
+            # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
             if grad_layer:
                 hidden_states = temporary_hidden_state + hidden_state_jump
                 hidden_state_jump = 0
