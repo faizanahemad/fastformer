@@ -154,7 +154,8 @@ class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, cls_tokens=1,
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
                  attention_penalty_w=0.0,
-                 dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12, drop_unused_layers=None,
+                 dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
+                 drop_unused_layers=None, approximate_unused_layers=None,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -176,6 +177,8 @@ class MTTModel(FastFormerPreTrainedModel):
         self.lm_layers_total = lm_layers_total
         self.electra_layers_total = electra_layers_total
         self.drop_unused_layers = drop_unused_layers
+        self.approximate_unused_layers = approximate_unused_layers
+        assert drop_unused_layers is None or approximate_unused_layers is None or (approximate_unused_layers ^ drop_unused_layers)
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)

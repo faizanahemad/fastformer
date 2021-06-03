@@ -426,6 +426,7 @@ class RobertaEncoder(nn.Module):
         num_layers_total=None,
         rng_seed=None,
         drop_unused_layers=False,
+        approximate_unused_layers=False,
     ):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
@@ -438,7 +439,7 @@ class RobertaEncoder(nn.Module):
             layers[i].requires_grad_(self.training)
             if self.training:
                 layers[i].train()
-        selected_layers = []
+        selected_layers = list(range(total_layers))
         if num_layers is not None and num_layers < total_layers:
             g_cpu = None
             if rng_seed is not None:
@@ -457,6 +458,8 @@ class RobertaEncoder(nn.Module):
             if drop_unused_layers:
                 layers = [layers[i] for i in selected_layers]
         # print(len(layers), len(selected_layers), selected_layers, self.training)
+        hidden_state_jump = 0
+        temporary_hidden_state = hidden_states
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -464,39 +467,49 @@ class RobertaEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
-            if getattr(self.config, "gradient_checkpointing", False) and self.training:
+            grad_layer = i in selected_layers or drop_unused_layers or not approximate_unused_layers
+            if grad_layer:
+                hidden_states = temporary_hidden_state + hidden_state_jump
+                hidden_state_jump = 0
+            with torch.set_grad_enabled(grad_layer):
+                if getattr(self.config, "gradient_checkpointing", False) and self.training:
 
-                if use_cache:
-                    logger.warn(
-                        "`use_cache=True` is incompatible with `config.gradient_checkpointing=True`. Setting "
-                        "`use_cache=False`..."
+                    if use_cache:
+                        logger.warn(
+                            "`use_cache=True` is incompatible with `config.gradient_checkpointing=True`. Setting "
+                            "`use_cache=False`..."
+                        )
+                        use_cache = False
+
+                    def create_custom_forward(module):
+                        def custom_forward(*inputs):
+                            return module(*inputs, past_key_value, output_attentions)
+
+                        return custom_forward
+
+                    layer_outputs = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(layer_module),
+                        hidden_states if grad_layer else hidden_states.detach(),
+                        attention_mask,
+                        layer_head_mask,
+                        encoder_hidden_states,
+                        encoder_attention_mask,
                     )
-                    use_cache = False
+                else:
+                    layer_outputs = layer_module(
+                        hidden_states if grad_layer else hidden_states.detach(),
+                        attention_mask,
+                        layer_head_mask,
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                        past_key_value,
+                        output_attentions,
+                    )
 
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                )
+            if grad_layer:
+                temporary_hidden_state = layer_outputs[0]
             else:
-                layer_outputs = layer_module(
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
-                )
+                hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
 
             hidden_states = layer_outputs[0]
             if use_cache:
@@ -718,6 +731,7 @@ class RobertaModel(RobertaPreTrainedModel):
         rng_seed=None,
         no_grad_embedding=False,
         drop_unused_layers=False,
+        approximate_unused_layers=False,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -814,6 +828,7 @@ class RobertaModel(RobertaPreTrainedModel):
             num_layers_total=num_layers_total,
             rng_seed=rng_seed,
             drop_unused_layers=drop_unused_layers,
+            approximate_unused_layers=approximate_unused_layers,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
