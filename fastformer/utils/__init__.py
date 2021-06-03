@@ -793,8 +793,14 @@ def init_weights(module, std=None):
 def student_teacher_param_update(student, teacher, m, device=None):
     if device is not None:
         teacher = teacher.to(device)
-    for param_q, param_k in zip((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).parameters(), teacher.parameters()):
-        param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+    named_student_params = dict((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).named_parameters())
+    named_teacher_params = teacher.named_parameters()
+    with torch.no_grad():
+        for name_k, param_k in named_teacher_params:
+            if name_k in named_student_params:
+                param_k.data.mul_(m).add_((1 - m) * named_student_params[name_k].detach().data)
+    # for param_q, param_k in zip((student.module if hasattr(student, "module") and isinstance(student, DDP) else student).parameters(), teacher.parameters()):
+    #     param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
     if device is not None:
         teacher = teacher.to(torch.device("cpu"))
 
