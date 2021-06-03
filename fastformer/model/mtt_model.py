@@ -251,12 +251,13 @@ class MTTModel(FastFormerPreTrainedModel):
             labels_segment_index=None,
             rng_seed=None, num_layers=None, num_layers_total=None,
     ):
+        rng_seed = None
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
         no_grad_embedding = False
         if self.lm_layers is not None and self.electra_layers is not None:
-            gen = np.random.default_rng(rng_seed)
+            gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
             no_grad_embedding = gen.random() < 0.5
         backbone_inputs["no_grad_embedding"] = no_grad_embedding
         if self.lm_layers is not None:
