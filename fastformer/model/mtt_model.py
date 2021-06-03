@@ -452,7 +452,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_center = dino_results["dino_center"]
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
-        return dict(loss=loss, dino_center=dino_center, dino_loss=dino_loss, **student_rep)
+        student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
+        return dict(loss=loss, dino_center=dino_center.detach(), dino_loss=dino_loss.detach(), **student_rep)
 
 
 
