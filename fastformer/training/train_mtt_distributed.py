@@ -84,6 +84,8 @@ def training_args():
                         help='electra_layers_total')
     parser.add_argument('--drop_unused_layers', action="store_true", default=False,
                         help='drop_unused_layers')
+    parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
+                        help='move_unused_to_cpu')
 
     parser.add_argument('--total_steps', type=int, required=False,
                         help='total_steps')
@@ -321,7 +323,7 @@ def train(local_rank, args):
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
     teacher = teacher.eval()
-    model = MultiTaskHighwayCLSPretraining(student, teacher, eps, device).to(device)
+    model = MultiTaskHighwayCLSPretraining(student, teacher, eps, device if args["move_unused_to_cpu"] else None).to(device)
     trainable_model = student
 
     if local_rank == 0 and rank == 0:
@@ -366,7 +368,7 @@ def train(local_rank, args):
                         trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
         if dino_w > 0:
-            student_teacher_param_update(model.student, model.teacher, 0.001, device)
+            student_teacher_param_update(model.student, model.teacher, 0.001, device if args["move_unused_to_cpu"] else None)
 
         print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
         del state_dict
@@ -380,7 +382,7 @@ def train(local_rank, args):
         model.student = trainable_model
 
     if dino_w > 0:
-        student_teacher_param_update(model.student, model.teacher, 0.95, device)
+        student_teacher_param_update(model.student, model.teacher, 0.95, device if args["move_unused_to_cpu"] else None)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
@@ -535,7 +537,7 @@ def train(local_rank, args):
                 model_times.append(time.time() - model_start)
 
             if dino_w > 0:
-                student_teacher_param_update(model.student, model.teacher, teacher_update_w, device)
+                student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
             if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
                 dino_center = output.pop("dino_center", None)
                 if dino_center is not None:
