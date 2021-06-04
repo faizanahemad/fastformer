@@ -178,7 +178,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.electra_layers_total = electra_layers_total
         self.drop_unused_layers = drop_unused_layers
         self.approximate_unused_layers = approximate_unused_layers
-        assert drop_unused_layers is None or approximate_unused_layers is None or (approximate_unused_layers ^ drop_unused_layers)
+        assert drop_unused_layers is None or approximate_unused_layers is None or (approximate_unused_layers ^ drop_unused_layers) or (not drop_unused_layers and not approximate_unused_layers)
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
                                                              backbone.config.conv_kernel_size if hasattr(backbone.config, "conv_kernel_size") else 9)
