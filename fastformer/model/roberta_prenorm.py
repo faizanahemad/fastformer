@@ -695,18 +695,18 @@ class RobertaEncoder(nn.Module):
 
             if not grad_layer and approximate_unused_layers:
                 approx_layer_module = self.approximate_layers[i]
-                approx_layer_output = approx_layer_module(
-                    hidden_states.detach(),
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
-                )
-                approx_hidden_states = approx_layer_output[0]
-                approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
-                approx_loss = approx_loss + approx_layer_loss
+                # approx_layer_output = approx_layer_module(
+                #     hidden_states.detach(),
+                #     attention_mask,
+                #     layer_head_mask,
+                #     encoder_hidden_states,
+                #     encoder_attention_mask,
+                #     past_key_value,
+                #     output_attentions,
+                # )
+                # approx_hidden_states = approx_layer_output[0]
+                # approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
+                # approx_loss = approx_loss + approx_layer_loss
 
                 approx_layer_module = self.approximate_layers[i]
                 approx_layer_output = approx_layer_module(
@@ -719,6 +719,9 @@ class RobertaEncoder(nn.Module):
                     output_attentions,
                 )
                 approx_hidden_states = approx_layer_output[0]
+
+                approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
+                approx_loss = approx_loss + approx_layer_loss
 
             if grad_layer:
                 hidden_states = layer_outputs[0]
