@@ -475,6 +475,7 @@ def train(local_rank, args):
 
 
     dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
+    discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     total_steps = args["epochs"] * len(dataloader)
     for epoch in range(args["epochs"]):
 
@@ -532,6 +533,7 @@ def train(local_rank, args):
                                               scheduler, gradient_clipping, iter_size=iter_size,
                                               no_sync=True,
                                               dino_center=dino_center,
+                                              discriminator_dino_center=discriminator_dino_center,
                                               freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
                 model_times.append(time.time() - model_start)
             else:
@@ -539,21 +541,27 @@ def train(local_rank, args):
                                           scheduler, gradient_clipping, iter_size=iter_size,
                                           no_sync=False,
                                           dino_center=dino_center,
+                                          discriminator_dino_center=discriminator_dino_center,
                                           freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
                 optimizer.zero_grad(set_to_none=True)
                 model_times.append(time.time() - model_start)
 
             if dino_w > 0 and (step + 1) % iter_size:
                 student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
+            dino_center = output.pop("dino_center", None)
+            discriminator_dino_center = output.pop("discriminator_dino_center", None)
             if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
-                dino_center = output.pop("dino_center", None)
                 if dino_center is not None:
                     dtype = dino_center.dtype
                     dino_center = dino_center.type(torch.float64) / args["world_size"]
                     torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
-                    output["dino_center"] = dino_center.type(dtype)
+                    dino_center = dino_center.type(dtype)
+                if discriminator_dino_center is not None:
+                    dtype = discriminator_dino_center.dtype
+                    discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
+                    torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
+                    discriminator_dino_center = discriminator_dino_center.type(dtype)
 
-            dino_center = output.pop("dino_center", None)
             full_time = time.time() - start_time
             full_times.append(full_time)
             if step == 0 and epoch == 0:
@@ -562,6 +570,7 @@ def train(local_rank, args):
                 if local_rank == 0:
 
                     steps_remaining = total_steps - steps_done
+                    # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
                     output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
                     time.sleep(random.random() + 0.1)
@@ -593,11 +602,11 @@ def train(local_rank, args):
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
-                     no_sync=False, dino_center=None,
+                     no_sync=False, dino_center=None, discriminator_dino_center=None,
                      scaler=None, freeze_last_layer=False, step=None):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
-        output = ddp_model(**batch, dino_center=dino_center, rng_seed=step)
+        output = ddp_model(**batch, dino_center=dino_center, discriminator_dino_center=discriminator_dino_center, rng_seed=step)
         last_layer = ddp_model.get_last_dino_layer()
         if freeze_last_layer and last_layer is not None:
             for p in last_layer.parameters():

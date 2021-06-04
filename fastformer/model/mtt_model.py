@@ -68,11 +68,11 @@ def gumbel_noise(t):
     noise = torch.zeros_like(t).uniform_(0, 1)
     return -log(-log(noise))
 
-def gumbel_sample(t, temperature = 0.5):
+def gumbel_sample(t, temperature = 1.0):
     return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
 
 
-def temperature_sampling(logits, temperature=0.5):
+def temperature_sampling(logits, temperature=1.0):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
     probs = F.softmax(logits / temperature)
@@ -282,7 +282,7 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_negative_accuracy = None
         sent_order_accuracy = None
         sent_order_loss = None
-        input_cls_orthogonal_loss = None
+        input_cls_orthogonal = None
         lm_input_accuracy = None
         discriminator_extra_accuracy = None
         mask_indices_mean = None
@@ -304,7 +304,7 @@ class MTTModel(FastFormerPreTrainedModel):
             inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
-            input_cls_orthogonal_loss = ((inputs_embeds_cls ** 2) ** 0.5).mean()
+            input_cls_orthogonal = ((inputs_embeds_cls ** 2) ** 0.5).mean()
 
         if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
@@ -377,7 +377,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss,
-                    sent_order_loss=sent_order_loss, input_cls_orthogonal_loss=input_cls_orthogonal_loss, attention_penalty_loss=attention_penalty_loss,
+                    sent_order_loss=sent_order_loss, input_cls_orthogonal=input_cls_orthogonal, attention_penalty_loss=attention_penalty_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
                     mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs)
 
@@ -417,6 +417,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             attention_mask_teacher=None,
             char_ids_teacher=None, char_offsets_teacher=None,
             dino_center=None,
+            discriminator_dino_center=None,
             rng_seed=None,
     ):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
@@ -444,12 +445,13 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
             student_dino = student_rep.pop("discriminator_dino", None)
-            # dino_results = self.dino_loss(student_dino.unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
-            # dino_center = dino_results["dino_center"]
+            # dino_results = self.dino_loss(student_dino.unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), discriminator_dino_center, 1, 1)
+            # discriminator_dino_center = dino_results["dino_center"]
             # dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
         return dict(loss=loss, dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
+                    discriminator_dino_center=discriminator_dino_center.detach() if isinstance(discriminator_dino_center, torch.Tensor) else discriminator_dino_center,
                     dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep)
 
 
