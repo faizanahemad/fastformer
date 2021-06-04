@@ -580,15 +580,15 @@ class RobertaEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
-        approximate_unused_layers = getattr(self.config, "approximate_unused_layers", False)
-        if approximate_unused_layers:
-            small_config = copy.deepcopy(config)
-            small_config.hidden_size = config.hidden_size // 4
-            small_config.num_attention_heads = config.num_attention_heads // 2
-            small_config.intermediate_size = small_config.hidden_size * 2
-            small_config.attention_probs_dropout_prob = 0.0
-            small_config.hidden_dropout_prob = 0.0
-            self.approximate_layers = nn.ModuleList([ApproxRobertaLayer(small_config, config.hidden_size) for _ in range(small_config.num_hidden_layers)])
+        # approximate_unused_layers = getattr(self.config, "approximate_unused_layers", False)
+        # if approximate_unused_layers:
+        #     small_config = copy.deepcopy(config)
+        #     small_config.hidden_size = config.hidden_size // 4
+        #     small_config.num_attention_heads = config.num_attention_heads // 2
+        #     small_config.intermediate_size = small_config.hidden_size * 2
+        #     small_config.attention_probs_dropout_prob = 0.0
+        #     small_config.hidden_dropout_prob = 0.0
+        #     self.approximate_layers = nn.ModuleList([ApproxRobertaLayer(small_config, config.hidden_size) for _ in range(small_config.num_hidden_layers)])
 
     def forward(
         self,
@@ -644,7 +644,7 @@ class RobertaEncoder(nn.Module):
                 # selected_layers = list(range(len(layers)))
         # print(len(layers), len(selected_layers), selected_layers, self.training)
         # hidden_state_jump = 0
-        # temporary_hidden_state = hidden_states
+        temporary_hidden_state = hidden_states
         approx_loss = 0.0
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
@@ -655,8 +655,8 @@ class RobertaEncoder(nn.Module):
 
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from
             # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
-            # if grad_layer:
-            #     hidden_states = temporary_hidden_state + hidden_state_jump
+            if grad_layer:
+                hidden_states = temporary_hidden_state
             #     hidden_state_jump = 0
             with torch.set_grad_enabled(grad_layer):
                 if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
@@ -693,44 +693,50 @@ class RobertaEncoder(nn.Module):
                         output_attentions,
                     )
 
-            if not grad_layer and approximate_unused_layers:
-                approx_layer_module = self.approximate_layers[i]
-                # approx_layer_output = approx_layer_module(
-                #     hidden_states.detach(),
-                #     attention_mask,
-                #     layer_head_mask,
-                #     encoder_hidden_states,
-                #     encoder_attention_mask,
-                #     past_key_value,
-                #     output_attentions,
-                # )
-                # approx_hidden_states = approx_layer_output[0]
-                # approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
-                # approx_loss = approx_loss + approx_layer_loss
-
-                approx_layer_module = self.approximate_layers[i]
-                approx_layer_output = approx_layer_module(
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
-                )
-                approx_hidden_states = approx_layer_output[0]
-
-                approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
-                approx_loss = approx_loss + approx_layer_loss
+            # if not grad_layer and approximate_unused_layers:
+            #     # approx_layer_module = self.approximate_layers[i]
+            #     # approx_layer_output = approx_layer_module(
+            #     #     hidden_states.detach(),
+            #     #     attention_mask,
+            #     #     layer_head_mask,
+            #     #     encoder_hidden_states,
+            #     #     encoder_attention_mask,
+            #     #     past_key_value,
+            #     #     output_attentions,
+            #     # )
+            #     # approx_hidden_states = approx_layer_output[0]
+            #     # approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
+            #     # approx_loss = approx_loss + approx_layer_loss
+            #
+            #     approx_layer_module = self.approximate_layers[i]
+            #     approx_layer_output = approx_layer_module(
+            #         hidden_states,
+            #         attention_mask,
+            #         layer_head_mask,
+            #         encoder_hidden_states,
+            #         encoder_attention_mask,
+            #         past_key_value,
+            #         output_attentions,
+            #     )
+            #     approx_hidden_states = approx_layer_output[0]
+            #
+            #     approx_layer_loss = ((layer_outputs[0] - approx_hidden_states) ** 2).mean()
+            #     approx_loss = approx_loss + approx_layer_loss
 
             if grad_layer:
                 hidden_states = layer_outputs[0]
+                temporary_hidden_state = hidden_states
             else:
-                # hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
+                hidden_states = layer_outputs[0]
                 if self.training:
-                    hidden_states = 0.95 * approx_hidden_states + 0.05 * layer_outputs[0]
-                else:
-                    hidden_states = layer_outputs[0]
+                    approx_layer_loss = ((temporary_hidden_state - hidden_states) ** 2).mean()
+                    approx_loss = approx_loss + approx_layer_loss
+                # hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
+
+                # if self.training:
+                #     hidden_states = 0.95 * approx_hidden_states + 0.05 * layer_outputs[0]
+                # else:
+                #     hidden_states = layer_outputs[0]
 
             # hidden_states = layer_outputs[0]
             if use_cache:
