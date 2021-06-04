@@ -427,13 +427,17 @@ class RobertaEncoder(nn.Module):
         rng_seed=None,
         drop_unused_layers=False,
         approximate_unused_layers=False,
+        start_sampling_from=0,
     ):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
+        if drop_unused_layers or approximate_unused_layers:
+            assert start_sampling_from == 0
 
         next_decoder_cache = () if use_cache else None
         total_layers = len(self.layer) if num_layers_total is None else num_layers_total
+        checkpointing = getattr(self.config, "gradient_checkpointing", False)
         layers = [self.layer[i] for i in range(total_layers)]
         for i in range(total_layers):
             layers[i].requires_grad_(self.training)
@@ -445,7 +449,7 @@ class RobertaEncoder(nn.Module):
             if rng_seed is not None:
                 g_cpu = torch.Generator()
                 g_cpu = g_cpu.manual_seed(rng_seed)
-            selected_layers = sorted(torch.multinomial(torch.tensor([(total_layers - i) / total_layers for i in range(total_layers)]) ** (0.25 if approximate_unused_layers else 1.0), num_layers,
+            selected_layers = sorted(torch.multinomial(torch.tensor([((total_layers - i) / total_layers) if i >= start_sampling_from else 0.0 for i in range(total_layers)]) ** (0.25 if approximate_unused_layers else 1.0), num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
 
             for i in range(total_layers):
@@ -733,6 +737,7 @@ class RobertaModel(RobertaPreTrainedModel):
         no_grad_embedding=False,
         drop_unused_layers=False,
         approximate_unused_layers=False,
+        start_sampling_from=0,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -830,6 +835,7 @@ class RobertaModel(RobertaPreTrainedModel):
             rng_seed=rng_seed,
             drop_unused_layers=drop_unused_layers,
             approximate_unused_layers=approximate_unused_layers,
+            start_sampling_from=start_sampling_from,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None

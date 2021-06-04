@@ -94,6 +94,7 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         config = RobertaConfig.from_pretrained(model_name)
+        config.gradient_checkpointing = True
         # config.vocab_size = 30522
         model = RobertaModel(config)
     elif "roberta" in model_name:
@@ -160,6 +161,7 @@ class MTTModel(FastFormerPreTrainedModel):
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
+        self.checkpointing = getattr(backbone.config, "gradient_checkpointing", False) if hasattr(backbone, "config") else False
         self.backbone = backbone
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
@@ -350,10 +352,13 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
                 discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                 discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
+                if self.checkpointing:
+                    discriminator_inputs["start_sampling_from"] = self.lm_layers_total
                 discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
                 _ = discriminator_inputs.pop("output_hidden_states", None)
+                _ = discriminator_inputs.pop("start_sampling_from", None)
 
                 if self.dino_w > 0:
                     dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
