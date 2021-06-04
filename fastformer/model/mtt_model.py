@@ -422,19 +422,20 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    rng_seed=rng_seed)
-        with torch.no_grad():
-            # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
-            teacher = self.teacher.eval()
-            if self.device is not None:
-                teacher = self.teacher.to(self.device)
-            teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
-            discriminator_inputs = student_rep.pop("discriminator_inputs", None)
-            discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
-            _ = discriminator_inputs.pop("drop_unused_layers", None)
-            _ = discriminator_inputs.pop("approximate_unused_layers", None)
-            discriminator_teacher_rep = teacher(**discriminator_inputs)
-            if self.device is not None:
-                self.teacher = self.teacher.to(torch.device("cpu"))
+        discriminator_inputs = student_rep.pop("discriminator_inputs", None)
+        if self.dino_w > 0:
+            with torch.no_grad():
+                # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
+                teacher = self.teacher.eval()
+                if self.device is not None:
+                    teacher = self.teacher.to(self.device)
+                teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
+                discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
+                _ = discriminator_inputs.pop("drop_unused_layers", None)
+                _ = discriminator_inputs.pop("approximate_unused_layers", None)
+                discriminator_teacher_rep = teacher(**discriminator_inputs)
+                if self.device is not None:
+                    self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
         loss = sum(losses)

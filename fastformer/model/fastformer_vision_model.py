@@ -626,22 +626,26 @@ class PatchCLR:
 
     def to(self, device):
         self.student.to(device)
-        self.teacher.to(device)
+        if self.teacher is not None:
+            self.teacher.to(device)
         return self
 
     def eval(self):
         self.student.eval()
-        self.teacher.eval()
+        if self.teacher is not None:
+            self.teacher.eval()
         return self
 
     def train(self):
         self.student.train()
-        self.teacher.eval()
+        if self.teacher is not None:
+            self.teacher.eval()
         return self
 
     def zero_grad(self, set_to_none=True):
         self.student.zero_grad(set_to_none=set_to_none)
-        self.teacher.zero_grad(set_to_none=set_to_none)
+        if self.teacher is not None:
+            self.teacher.zero_grad(set_to_none=set_to_none)
 
     def calculate_contrastive_loss(self, contrastive_matrix, label_lengths, calculate_accuracy=False):
         labels = torch.arange(label_lengths, device=contrastive_matrix.device)
