@@ -545,7 +545,7 @@ def train(local_rank, args):
                 dino_center = output.pop("dino_center", None)
                 if dino_center is not None:
                     dtype = dino_center.dtype
-                    dino_center = dino_center.type(torch.float32) / args["world_size"]
+                    dino_center = dino_center.type(torch.float64) / args["world_size"]
                     torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
                     output["dino_center"] = dino_center.type(dtype)
 

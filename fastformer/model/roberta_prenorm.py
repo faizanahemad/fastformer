@@ -473,7 +473,7 @@ class RobertaEncoder(nn.Module):
                 hidden_states = temporary_hidden_state + hidden_state_jump
                 hidden_state_jump = 0
             with torch.set_grad_enabled(grad_layer):
-                if getattr(self.config, "gradient_checkpointing", False) and self.training:
+                if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
 
                     if use_cache:
                         logger.warn(
