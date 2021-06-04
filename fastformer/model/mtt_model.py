@@ -430,10 +430,10 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
                 teacher_rep = teacher(input_ids=labels, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
-                discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
-                _ = discriminator_inputs.pop("drop_unused_layers", None)
-                _ = discriminator_inputs.pop("approximate_unused_layers", None)
-                discriminator_teacher_rep = teacher(**discriminator_inputs)
+                # discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
+                # _ = discriminator_inputs.pop("drop_unused_layers", None)
+                # _ = discriminator_inputs.pop("approximate_unused_layers", None)
+                # discriminator_teacher_rep = teacher(**discriminator_inputs)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
@@ -443,9 +443,9 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_results = self.dino_loss(student_rep.pop("dino").unsqueeze(0), teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
-            dino_results = self.dino_loss(student_rep.pop("discriminator_dino").unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
-            dino_center = dino_results["dino_center"]
-            dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
+            # dino_results = self.dino_loss(student_rep.pop("discriminator_dino").unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
+            # dino_center = dino_results["dino_center"]
+            # dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
         return dict(loss=loss, dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
