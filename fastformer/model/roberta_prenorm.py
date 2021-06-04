@@ -461,6 +461,7 @@ class RobertaEncoder(nn.Module):
 
             if drop_unused_layers:
                 layers = [layers[i] for i in selected_layers]
+                # selected_layers = list(range(len(layers)))
         # print(len(layers), len(selected_layers), selected_layers, self.training)
         hidden_state_jump = 0
         temporary_hidden_state = hidden_states
@@ -663,7 +664,7 @@ ROBERTA_INPUTS_DOCSTRING = r"""
     "The bare RoBERTa Model transformer outputting raw hidden-states without any specific head on top.",
     ROBERTA_START_DOCSTRING,
 )
-class RobertaModel(RobertaPreTrainedModel):
+class PreNormRobertaModel(RobertaPreTrainedModel):
     """
 
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
