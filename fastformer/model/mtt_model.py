@@ -82,7 +82,7 @@ def temperature_sampling(logits, temperature=1.0):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, reinit=False):
+def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, reinit=False):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
@@ -96,7 +96,7 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
         config = RobertaConfig.from_pretrained(model_name)
         # config.gradient_checkpointing = True
         # config.vocab_size = 30522
-
+        config.approximate_unused_layers = approximate_unused_layers
         model = PreNormRobertaModel(config)
     elif "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
@@ -277,7 +277,8 @@ class MTTModel(FastFormerPreTrainedModel):
             backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
-        sent_hidden = outputs.pop("pooler_output") if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
+        approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
+        sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
         masked_lm_loss = None
         lm_accuracy = None
         discriminator_label_mean = None
@@ -351,7 +352,10 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     if self.checkpointing:
                         discriminator_inputs["start_sampling_from"] = self.lm_layers_total
-                discriminator_outputs = self.backbone(**discriminator_inputs)["hidden_states"][-1]
+                discriminator_outputs = self.backbone(**discriminator_inputs)
+                disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
+                discriminator_outputs = discriminator_outputs["hidden_states"][-1]
+                approx_loss = (approx_loss + disc_approx_loss) if approx_loss is not None else disc_approx_loss
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
                 _ = discriminator_inputs.pop("output_hidden_states", None)
@@ -388,7 +392,8 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_label_mean=discriminator_label_mean, discriminator_loss=discriminator_loss,
                     sent_order_loss=sent_order_loss, input_cls_orthogonal=input_cls_orthogonal, attention_penalty_loss=attention_penalty_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
-                    mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs)
+                    mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs,
+                    approx_loss=approx_loss)
 
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):
