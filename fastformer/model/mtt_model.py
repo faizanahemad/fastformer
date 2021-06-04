@@ -25,7 +25,6 @@ from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
 from fastformer.model.roberta_prenorm import RobertaModel
 
-isinstance(dino_center, torch.Tensor) = dino_center is not None
 
 try:
     from performer_pytorch import SelfAttention, FastAttention
