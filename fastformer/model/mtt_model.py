@@ -222,8 +222,7 @@ class MTTModel(FastFormerPreTrainedModel):
             last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
-            self.generator_ffn = nn.Sequential(PositionwiseFFN(num_features, dropout, 1e-5),
-                                               nn.Linear(num_features, num_features),
+            self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
                                                nn.GELU(),
                                                nn.Linear(num_features, num_features),  # nn.Tanh()
                                                )
@@ -278,6 +277,7 @@ class MTTModel(FastFormerPreTrainedModel):
             backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
+        sent_hidden = outputs.pop("pooler_output") if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
         masked_lm_loss = None
         lm_accuracy = None
         discriminator_label_mean = None
@@ -311,14 +311,6 @@ class MTTModel(FastFormerPreTrainedModel):
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
             inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
             input_cls_orthogonal = ((inputs_embeds_cls ** 2) ** 0.5).mean()
-
-        if self.sentence_order_prediction_w and labels_segment_index is not None:
-            labels_segment_index = labels_segment_index.float()
-            sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
-            sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
-            sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
-            sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(torch.float)
-            sent_order_accuracy = (sent_order_preds == labels_segment_index).float().mean()
 
         if self.dino_w > 0:
             dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
@@ -366,9 +358,9 @@ class MTTModel(FastFormerPreTrainedModel):
                 _ = discriminator_inputs.pop("start_sampling_from", None)
 
                 if self.dino_w > 0:
-                    dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
-                    discriminator_dino = self.ffn(dino_hidden)
+                    discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
 
+                sent_hidden = discriminator_outputs[:, 0]
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
@@ -382,6 +374,13 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
                 discriminator_extra_accuracy = float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean))
+
+        if self.sentence_order_prediction_w and labels_segment_index is not None:
+            labels_segment_index = labels_segment_index.float()
+            sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
+            sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
+            sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(torch.float)
+            sent_order_accuracy = (sent_order_preds == labels_segment_index).float().mean()
 
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
