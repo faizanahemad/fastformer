@@ -94,14 +94,14 @@ def get_mtt_backbone(model_name, cls_tokens, reinit=False):
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         config = RobertaConfig.from_pretrained(model_name)
-        config.gradient_checkpointing = True
+        # config.gradient_checkpointing = True
         # config.vocab_size = 30522
 
         model = PreNormRobertaModel(config)
     elif "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
         config = RobertaConfig.from_pretrained(model_name)
-        config.gradient_checkpointing = True
+        # config.gradient_checkpointing = True
         model = RobertaModel(config)
     elif "bert" in model_name:
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
