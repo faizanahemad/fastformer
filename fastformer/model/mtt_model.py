@@ -153,7 +153,7 @@ class PositionwiseFFN(nn.Module):
 
 class MTTModel(FastFormerPreTrainedModel):
     def __init__(self, backbone, tokenizer, cls_tokens=1,
-                 generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0, input_cls_orthogonal_w=0.0,
+                 generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0,
                  attention_penalty_w=0.0,
                  dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
                  drop_unused_layers=None, approximate_unused_layers=None,
@@ -171,7 +171,6 @@ class MTTModel(FastFormerPreTrainedModel):
         self.dino_dims = 2 ** 16
         norm_last_layer = True
         bottleneck_dim = 256
-        self.input_cls_orthogonal_w = input_cls_orthogonal_w
         self.attention_penalty_w = attention_penalty_w
         self.lm_layers = lm_layers
         self.electra_layers = electra_layers
@@ -300,13 +299,7 @@ class MTTModel(FastFormerPreTrainedModel):
             penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
             attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
-        if self.input_cls_orthogonal_w > 0 and self.training and self.cls_tokens > 1:
-            inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens]
-            inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True).detach() + self.config.layer_norm_eps)
-            inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
-            inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
-            input_cls_orthogonal_loss = self.input_cls_orthogonal_w * ((inputs_embeds_cls ** 2) ** 0.5).mean()
-        elif self.cls_tokens > 1:
+        if self.cls_tokens > 1:
             inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens].detach()
             inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
