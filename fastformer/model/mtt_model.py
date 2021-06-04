@@ -25,6 +25,8 @@ from fastformer.model.fast_convbert import ConvBertModel, ConvBertConfig
 from fastformer.model.fastformer_vision_model import PatchCLR
 from fastformer.model.roberta_prenorm import RobertaModel
 
+isinstance(dino_center, torch.Tensor) = dino_center is not None
+
 try:
     from performer_pytorch import SelfAttention, FastAttention
 except:
@@ -453,7 +455,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
-        return dict(loss=loss, dino_center=dino_center.detach(), dino_loss=dino_loss.detach(), **student_rep)
+        return dict(loss=loss, dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
+                    dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep)
 
 
 
