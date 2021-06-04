@@ -317,8 +317,8 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(dino_hidden)
 
         if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
-            mask_indices = (input_ids.long() != labels.long())
-            mask_indices_mean = mask_indices[active_locations].long().float().mean().item()
+            mask_indices = (input_ids.int() != labels.int())
+            mask_indices_mean = mask_indices[active_locations].float().mean().item()
             lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
             generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and self.lm_layers is None else -1]
             generator_output = self.generator_ffn(generator_output)
@@ -334,12 +334,12 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_labels = labels[mask_indices].reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-                masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).float().mean().item()
+                masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
 
             if self.discriminator_w > 0:
                 new_input_ids = input_ids.clone()
                 new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
-                discriminator_labels = (new_input_ids.long() == labels.long()).float()
+                discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
                 discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                 if isinstance(self.backbone, PreNormRobertaModel):
                     if self.electra_layers is not None:
@@ -367,8 +367,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_labels = discriminator_labels[active_locations].reshape(-1)
                 discriminator_label_mean = discriminator_labels.mean()
                 discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
-                discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(torch.float)
-                sample_accuracies = (discriminator_preds == discriminator_labels).type(torch.float)
+                discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
+                sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
                 discriminator_labels = discriminator_labels.bool()
                 discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
@@ -379,8 +379,8 @@ class MTTModel(FastFormerPreTrainedModel):
             labels_segment_index = labels_segment_index.float()
             sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
-            sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(torch.float)
-            sent_order_accuracy = (sent_order_preds == labels_segment_index).float().mean()
+            sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
+            sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean()
 
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
@@ -440,10 +440,10 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
                 teacher_rep = teacher(input_ids=labels, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
-                # discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
-                # _ = discriminator_inputs.pop("drop_unused_layers", None)
-                # _ = discriminator_inputs.pop("approximate_unused_layers", None)
-                # discriminator_teacher_rep = teacher(**discriminator_inputs)
+                discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
+                _ = discriminator_inputs.pop("drop_unused_layers", None)
+                _ = discriminator_inputs.pop("approximate_unused_layers", None)
+                discriminator_teacher_rep = teacher(**discriminator_inputs)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
@@ -454,9 +454,9 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
             student_dino = student_rep.pop("discriminator_dino", None)
-            # dino_results = self.dino_loss(student_dino.unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), discriminator_dino_center, 1, 1)
-            # discriminator_dino_center = dino_results["dino_center"]
-            # dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
+            dino_results = self.dino_loss(student_dino.unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), discriminator_dino_center, 1, 1)
+            discriminator_dino_center = dino_results["dino_center"]
+            dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
         return dict(loss=loss, dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
