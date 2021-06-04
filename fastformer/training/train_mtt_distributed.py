@@ -329,6 +329,10 @@ def train(local_rank, args):
     model = MultiTaskHighwayCLSPretraining(student, teacher, eps, device if args["move_unused_to_cpu"] else None).to(device)
     trainable_model = student
 
+    if dino_w == 0:
+        model.teacher = None
+        teacher = None
+        del teacher
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
         print(type(model))
