@@ -443,7 +443,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_results = self.dino_loss(student_rep.pop("dino").unsqueeze(0), teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
             dino_loss = dino_results["dino_loss"]
-            # dino_results = self.dino_loss(student_rep.pop("discriminator_dino").unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
+            student_dino = student_rep.pop("discriminator_dino", None)
+            # dino_results = self.dino_loss(student_dino.unsqueeze(0), discriminator_teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             # dino_center = dino_results["dino_center"]
             # dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
