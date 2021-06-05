@@ -651,8 +651,6 @@ class RobertaEncoder(nn.Module):
                     layers[i].requires_grad_(False)
                     layers[i].eval()
 
-            if drop_unused_layers:
-                layers = [layers[i] for i in selected_layers]
                 # selected_layers = list(range(len(layers)))
         # print(len(layers), len(selected_layers), selected_layers, self.training)
         hidden_state_jump = 0
@@ -660,18 +658,35 @@ class RobertaEncoder(nn.Module):
         prev_grad_layer = 0
         approx_loss = 0.0
         for i, layer_module in enumerate(layers):
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from
+
             # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
+            scale_factor = 1
+            diff_factor = 1
+            if i > prev_grad_layer + 1:
+                diff = i - prev_grad_layer - 1
+                scale_factor = (prev_grad_layer + diff)/(prev_grad_layer + 1)
+                diff_factor = (prev_grad_layer + diff)/diff
+            if drop_unused_layers and i not in selected_layers:
+                continue
+            elif drop_unused_layers:
+                hidden_states = hidden_states * scale_factor
+
             if grad_layer:
-                hidden_states = 0.9 * temporary_hidden_state + 0.1 * hidden_state_jump
+                if approximate_unused_layers:
+                    alpha = 0.99
+                    hidden_states = alpha * scale_factor * temporary_hidden_state + (1 - alpha) * diff_factor * hidden_state_jump
+
                 prev_grad_layer = i
                 hidden_state_jump = 0
+
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
             with torch.set_grad_enabled(grad_layer):
                 if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
 
