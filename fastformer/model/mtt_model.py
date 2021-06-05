@@ -267,7 +267,7 @@ class MTTModel(FastFormerPreTrainedModel):
             if self.lm_layers is not None and self.electra_layers is not None:
                 gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
                 no_grad_embedding = gen.random() < 0.5
-            backbone_inputs["no_grad_embedding"] = no_grad_embedding
+            backbone_inputs["no_grad_embedding"] = False
             if self.lm_layers is not None:
                 backbone_inputs["num_layers"] = self.lm_layers if num_layers is None else num_layers
                 backbone_inputs["rng_seed"] = rng_seed
