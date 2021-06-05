@@ -645,6 +645,7 @@ class RobertaEncoder(nn.Module):
         # print(len(layers), len(selected_layers), selected_layers, self.training)
         # hidden_state_jump = 0
         temporary_hidden_state = hidden_states
+        prev_grad_layer = 0
         approx_loss = 0.0
         for i, layer_module in enumerate(layers):
             if output_hidden_states:
@@ -657,6 +658,7 @@ class RobertaEncoder(nn.Module):
             # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
             if grad_layer:
                 hidden_states = temporary_hidden_state
+                prev_grad_layer = i
             #     hidden_state_jump = 0
             with torch.set_grad_enabled(grad_layer):
                 if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
@@ -728,7 +730,7 @@ class RobertaEncoder(nn.Module):
                 temporary_hidden_state = hidden_states
             else:
                 hidden_states = layer_outputs[0]
-                if self.training:
+                if self.training and approximate_unused_layers and i > 0 and i - prev_grad_layer == 1:
                     approx_layer_loss = ((temporary_hidden_state - hidden_states) ** 2).mean()
                     approx_loss = approx_loss + approx_layer_loss
                 # hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
