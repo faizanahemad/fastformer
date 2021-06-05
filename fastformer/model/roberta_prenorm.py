@@ -653,11 +653,11 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        # print(len(layers), len(selected_layers), selected_layers, self.training)
+        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, self.training)
         hidden_state_jump = 0
         temporary_hidden_state = hidden_states
         prev_grad_layer = 0
-        approx_loss = 0.0
+        approx_loss = None
         for i, layer_module in enumerate(layers):
 
 
@@ -666,22 +666,29 @@ class RobertaEncoder(nn.Module):
 
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from
 
-            # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
             scale_factor = 1
-            diff_factor = 1
-            if i > prev_grad_layer + 1:
+
+            if i > prev_grad_layer + 1 and drop_unused_layers:
                 diff = i - prev_grad_layer - 1
                 scale_factor = (prev_grad_layer + diff)/(prev_grad_layer + 1)
-                diff_factor = (prev_grad_layer + diff)/diff
+
+            if i > prev_grad_layer + 2 and approximate_unused_layers:
+                diff = i - prev_grad_layer - 2
+                scale_factor = (prev_grad_layer + diff) / (prev_grad_layer + 2)
+
             if drop_unused_layers and i not in selected_layers:
                 continue
             elif drop_unused_layers:
                 hidden_states = hidden_states * scale_factor
+            elif approximate_unused_layers and i > prev_grad_layer + 1 and i not in selected_layers:
+                continue
 
+            # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             if grad_layer:
                 if approximate_unused_layers:
                     alpha = self.approximate_unused_layers_alpha
-                    hidden_states = alpha * scale_factor * temporary_hidden_state + (1 - alpha) * diff_factor * hidden_state_jump
+                    # hidden_states = scale_factor * (alpha * temporary_hidden_state + (1 - alpha) * hidden_state_jump)
+                    hidden_states = scale_factor * ((1 + alpha) * temporary_hidden_state + (1 - alpha) * hidden_state_jump)
 
                 prev_grad_layer = i
                 hidden_state_jump = 0
@@ -761,7 +768,8 @@ class RobertaEncoder(nn.Module):
                 # if self.training and approximate_unused_layers and i > 0 and i - prev_grad_layer == 1:
                 #     approx_layer_loss = ((temporary_hidden_state - layer_outputs[0]) ** 2).mean()
                 #     approx_loss = approx_loss + approx_layer_loss
-                hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
+                if approximate_unused_layers:
+                    hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
                 hidden_states = layer_outputs[0]
                 approx_loss = None
 
