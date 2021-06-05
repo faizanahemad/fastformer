@@ -574,6 +574,18 @@ class ApproxRobertaLayer(nn.Module):
         return attention_output
 
 
+class ApproxFFN(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        self.d_model = d_model
+        self.ffn = nn.Sequential(nn.Linear(d_model, d_model // 2, bias=True), nn.GELU(), nn.Linear(d_model // 2, d_model, bias=False))
+
+    def forward(self, hidden):
+        h = self.ffn(hidden)
+        h = hidden + h
+        return h
+
+
 # Copied from transformers.models.bert.modeling_bert.BertEncoder with Bert->Roberta
 class RobertaEncoder(nn.Module):
     def __init__(self, config: RobertaConfig):
@@ -643,7 +655,7 @@ class RobertaEncoder(nn.Module):
                 layers = [layers[i] for i in selected_layers]
                 # selected_layers = list(range(len(layers)))
         # print(len(layers), len(selected_layers), selected_layers, self.training)
-        # hidden_state_jump = 0
+        hidden_state_jump = 0
         temporary_hidden_state = hidden_states
         prev_grad_layer = 0
         approx_loss = 0.0
@@ -657,9 +669,9 @@ class RobertaEncoder(nn.Module):
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from
             # print(i, grad_layer, drop_unused_layers, approximate_unused_layers)
             if grad_layer:
-                hidden_states = temporary_hidden_state
+                hidden_states = 0.9 * temporary_hidden_state + 0.1 * hidden_state_jump
                 prev_grad_layer = i
-            #     hidden_state_jump = 0
+                hidden_state_jump = 0
             with torch.set_grad_enabled(grad_layer):
                 if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
 
@@ -729,11 +741,12 @@ class RobertaEncoder(nn.Module):
                 hidden_states = layer_outputs[0]
                 temporary_hidden_state = hidden_states
             else:
-                hidden_states = layer_outputs[0]
+
                 if self.training and approximate_unused_layers and i > 0 and i - prev_grad_layer == 1:
-                    approx_layer_loss = ((temporary_hidden_state - hidden_states) ** 2).mean()
+                    approx_layer_loss = ((temporary_hidden_state - layer_outputs[0]) ** 2).mean()
                     approx_loss = approx_loss + approx_layer_loss
-                # hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
+                hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
+                hidden_states = layer_outputs[0]
 
                 # if self.training:
                 #     hidden_states = 0.95 * approx_hidden_states + 0.05 * layer_outputs[0]
