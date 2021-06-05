@@ -747,6 +747,7 @@ class RobertaEncoder(nn.Module):
                     approx_loss = approx_loss + approx_layer_loss
                 hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
                 hidden_states = layer_outputs[0]
+                approx_loss = 0.0
 
                 # if self.training:
                 #     hidden_states = 0.95 * approx_hidden_states + 0.05 * layer_outputs[0]
