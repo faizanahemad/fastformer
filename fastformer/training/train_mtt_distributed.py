@@ -86,6 +86,8 @@ def training_args():
                         help='drop_unused_layers')
     parser.add_argument('--approximate_unused_layers', action="store_true", default=False,
                         help='approximate_unused_layers')
+    parser.add_argument('--approximate_unused_layers_alpha', type=float, required=False,
+                        help='approximate_unused_layers_alpha weight')
     parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
                         help='move_unused_to_cpu')
 
@@ -96,8 +98,6 @@ def training_args():
 
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
-    parser.add_argument('--total_samples_simclr', default=65536, type=int,
-                        help='SimCLR Negatives')
 
     parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
                         help='warmup_steps')
@@ -194,28 +194,6 @@ def training_args():
     return vars(args)
 
 
-class CLRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_student: dict, dataset_teacher: dict, dataset_length: int, location: str):
-        self.dataset_student, self.dataset_teacher = dataset_student, dataset_teacher
-        self.initialised = False
-        self.dataset_length = dataset_length
-        self.location = location
-
-    def __getitem__(self, item):
-        if not self.initialised:
-            self.dataset_student = dataset_builder(self.location, self.dataset_student)
-            self.dataset_teacher = dataset_builder(self.location, self.dataset_teacher)
-            self.initialised = True
-        x1 = self.dataset_student[item]
-        x2 = self.dataset_teacher[item]
-        x1["labels"] = x1.pop("label_mlm_input_ids")
-        x2 = {k + "_teacher": v for k, v in x2.items() if k in ["input_ids", "attention_mask", "char_ids", "char_offsets"]}
-        return dict(**x1, **x2)
-
-    def __len__(self):
-        return self.dataset_length
-
-
 def dataset_builder(location, params):
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     dataset = Dataset.load_from_disk(location)
@@ -304,8 +282,8 @@ def train(local_rank, args):
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
     print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], reinit)
-    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, reinit)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], args["approximate_unused_layers_alpha"], reinit)
+    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, None, reinit)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     generator_w = args["generator_w"] if "generator_w" in args else 0.0

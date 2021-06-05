@@ -592,6 +592,7 @@ class RobertaEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
+        self.approximate_unused_layers_alpha = getattr(self.config, "approximate_unused_layers_alpha", 0.99)
         # approximate_unused_layers = getattr(self.config, "approximate_unused_layers", False)
         # if approximate_unused_layers:
         #     small_config = copy.deepcopy(config)
@@ -679,8 +680,8 @@ class RobertaEncoder(nn.Module):
 
             if grad_layer:
                 if approximate_unused_layers:
-                    alpha = 0.99
-                    hidden_states = alpha * scale_factor * temporary_hidden_state + (1 - alpha) * diff_factor * hidden_state_jump
+                    alpha = self.approximate_unused_layers_alpha
+                    hidden_states = alpha * scale_factor * temporary_hidden_state + (1 - alpha) * diff_factor * hidden_state_jump.detach()
 
                 prev_grad_layer = i
                 hidden_state_jump = 0
@@ -757,12 +758,12 @@ class RobertaEncoder(nn.Module):
                 temporary_hidden_state = hidden_states
             else:
 
-                if self.training and approximate_unused_layers and i > 0 and i - prev_grad_layer == 1:
-                    approx_layer_loss = ((temporary_hidden_state - layer_outputs[0]) ** 2).mean()
-                    approx_loss = approx_loss + approx_layer_loss
+                # if self.training and approximate_unused_layers and i > 0 and i - prev_grad_layer == 1:
+                #     approx_layer_loss = ((temporary_hidden_state - layer_outputs[0]) ** 2).mean()
+                #     approx_loss = approx_loss + approx_layer_loss
                 hidden_state_jump = hidden_state_jump + (layer_outputs[0].detach() - hidden_states.detach())
                 hidden_states = layer_outputs[0]
-                approx_loss = 0.0
+                approx_loss = None
 
                 # if self.training:
                 #     hidden_states = 0.95 * approx_hidden_states + 0.05 * layer_outputs[0]
