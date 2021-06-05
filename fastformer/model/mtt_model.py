@@ -175,7 +175,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.ignore_zero_ce = CrossEntropyLoss(ignore_index=0)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.tokenizer = tokenizer
-        self.dino_dims = 2 ** 16
+        self.dino_dims = 2 ** 12
         norm_last_layer = True
         bottleneck_dim = 256
         self.attention_penalty_w = attention_penalty_w
@@ -213,14 +213,12 @@ class MTTModel(FastFormerPreTrainedModel):
             if norm_last_layer:
                 last_layer.weight_g.requires_grad = False
 
-            self.ffn = nn.Sequential(nn.Linear(num_features, 2048), nn.GELU(),
-                                     nn.Linear(2048, 2048), nn.GELU(),
-                                     nn.Linear(2048, bottleneck_dim),
+            self.ffn = nn.Sequential(nn.Linear(num_features, num_features * 2), nn.GELU(),
+                                     nn.Linear(num_features * 2, bottleneck_dim),
                                      Norm(),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)
             init_weights(self.ffn[2], 0.02)
-            init_weights(self.ffn[3], 0.02)
             last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
