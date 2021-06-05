@@ -448,7 +448,8 @@ class RobertaEncoder(nn.Module):
             if grad_layer:
                 if approximate_unused_layers:
                     alpha = self.approximate_unused_layers_alpha
-                    hidden_states = scale_factor * (alpha * temporary_hidden_state + (1 - alpha) * hidden_state_jump)
+                    # hidden_states = scale_factor * (alpha * temporary_hidden_state + (1 - alpha) * hidden_state_jump)
+                    hidden_states = scale_factor * (temporary_hidden_state + hidden_state_jump)
                     # hidden_states = scale_factor * ((1 + alpha) * temporary_hidden_state + (1 - alpha) * hidden_state_jump)
 
                 prev_grad_layer = i
