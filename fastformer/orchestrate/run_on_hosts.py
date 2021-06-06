@@ -190,7 +190,7 @@ if __name__ == "__main__":
     lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
     lm_cmd += " --model_config prenorm-roberta-large"
     lm_cmd += " --cls_tokens 2"
-    lm_cmd += " --wandb_name approx_@4_8@_1_1_50_0_s1"
+    lm_cmd += " --wandb_name approx_α1_@3_9@_1_1_50_0_s1"  #
     lm_cmd += " --dataset /home/ahemf/processed_datasets/all512"
     lm_cmd += " --log_every_steps 50 --num_workers 8 --save_every_steps 1000"
     # lm_cmd += " --wandb_dryrun"
@@ -200,9 +200,9 @@ if __name__ == "__main__":
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 0.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw"
     lm_cmd += " --no_autocast"
-    lm_cmd += " --lm_layers 4 --electra_layers 8 --lm_layers_total 8 --electra_layers_total 24"
+    lm_cmd += " --lm_layers 3 --electra_layers 9 --lm_layers_total 8 --electra_layers_total 24"
     lm_cmd += " --approximate_unused_layers"
-    lm_cmd += " --approximate_unused_layers_alpha 0.9"
+    lm_cmd += " --approximate_unused_layers_alpha 1.0"
     # lm_cmd += " --move_unused_to_cpu"
     # lm_cmd += " --pretrained_model roberta-base"
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
