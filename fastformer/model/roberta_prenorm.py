@@ -413,7 +413,7 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers)
+        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers)
         prev_grad_layer = max(start_sampling_from - 1, 0)
         approx_loss = None
         next_grad_layer = selected_layers[0]
@@ -449,7 +449,7 @@ class RobertaEncoder(nn.Module):
             elif approximate_unused_layers and (next_grad_layer is not None and i == next_grad_layer - 1) and not grad_layer:
                 hidden_states = scale_factor * hidden_states
 
-            print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
+            # print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             if grad_layer:
                 prev_grad_layer = i
 
