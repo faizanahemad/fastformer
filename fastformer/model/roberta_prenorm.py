@@ -382,7 +382,9 @@ class RobertaEncoder(nn.Module):
         drop_unused_layers=False,
         approximate_unused_layers=False,
         start_sampling_from=0,
+        exclude_layers=tuple(),
     ):
+        exclude_layers = tuple() if not isinstance(exclude_layers, (list, tuple)) else exclude_layers
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
@@ -400,7 +402,7 @@ class RobertaEncoder(nn.Module):
             if rng_seed is not None:
                 g_cpu = torch.Generator()
                 g_cpu = g_cpu.manual_seed(rng_seed)
-            selected_layers = sorted(torch.multinomial(torch.tensor([((total_layers - i) / total_layers) if i >= start_sampling_from else 0.0 for i in range(total_layers)]) ** (0.25 if approximate_unused_layers else 1.0), num_layers,
+            selected_layers = sorted(torch.multinomial(torch.tensor([((total_layers - i) / total_layers) if i >= start_sampling_from and i not in exclude_layers else 0.0 for i in range(total_layers)]) ** (0.25 if approximate_unused_layers else 1.0), num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
 
             for i in range(total_layers):
@@ -411,7 +413,7 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, self.training)
+        print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers)
         prev_grad_layer = max(start_sampling_from - 1, 0)
         approx_loss = None
         next_grad_layer = selected_layers[0]
@@ -433,6 +435,8 @@ class RobertaEncoder(nn.Module):
             scale_factor = 1
             if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers):
                 scale_factor = i/(prev_grad_layer + 1)
+            if grad_layer and approximate_unused_layers:
+                scale_factor = 1
 
             if i < start_sampling_from:
                 pass
@@ -445,10 +449,7 @@ class RobertaEncoder(nn.Module):
             elif approximate_unused_layers and (next_grad_layer is not None and i == next_grad_layer - 1) and not grad_layer:
                 hidden_states = scale_factor * hidden_states
 
-            if grad_layer and approximate_unused_layers:
-                scale_factor = 1
-
-            # print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
+            print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             if grad_layer:
                 prev_grad_layer = i
 
@@ -525,6 +526,7 @@ class RobertaEncoder(nn.Module):
             cross_attentions=all_cross_attentions,
         )
         rv["approx_loss"] = approx_loss
+        rv["selected_layers"] = selected_layers
         return rv
 
 
@@ -718,6 +720,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         drop_unused_layers=False,
         approximate_unused_layers=False,
         start_sampling_from=0,
+        exclude_layers=tuple(),
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -816,6 +819,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             drop_unused_layers=drop_unused_layers,
             approximate_unused_layers=approximate_unused_layers,
             start_sampling_from=start_sampling_from,
+            exclude_layers=exclude_layers,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
@@ -832,4 +836,5 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
         rv["approx_loss"] = encoder_outputs["approx_loss"]
+        rv["selected_layers"] = encoder_outputs["selected_layers"]
         return rv

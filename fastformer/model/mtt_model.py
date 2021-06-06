@@ -279,6 +279,7 @@ class MTTModel(FastFormerPreTrainedModel):
         outputs = self.backbone(**backbone_inputs)
         approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
         sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
+        exclude_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
         masked_lm_loss = None
         lm_accuracy = None
         discriminator_label_mean = None
@@ -351,6 +352,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 1
+                    discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]
@@ -359,6 +361,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 _ = discriminator_inputs.pop("rng_seed", None)
                 _ = discriminator_inputs.pop("output_hidden_states", None)
                 _ = discriminator_inputs.pop("start_sampling_from", None)
+                _ = discriminator_inputs.pop("exclude_layers", None)
 
                 if self.dino_w > 0:
                     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
