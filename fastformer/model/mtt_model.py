@@ -350,8 +350,7 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
-                    if self.checkpointing:
-                        discriminator_inputs["start_sampling_from"] = self.lm_layers_total
+                    discriminator_inputs["start_sampling_from"] = self.lm_layers
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]

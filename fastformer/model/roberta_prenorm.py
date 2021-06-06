@@ -386,12 +386,9 @@ class RobertaEncoder(nn.Module):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
-        if drop_unused_layers or approximate_unused_layers:
-            assert start_sampling_from == 0
 
         next_decoder_cache = () if use_cache else None
         total_layers = len(self.layer) if num_layers_total is None else num_layers_total
-        checkpointing = getattr(self.config, "gradient_checkpointing", False)
         layers = [self.layer[i] for i in range(total_layers)]
         for i in range(total_layers):
             layers[i].requires_grad_(self.training)
@@ -414,8 +411,8 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        print((len(layers), len(selected_layers), start_sampling_from), selected_layers, self.training)
-        prev_grad_layer = 0
+        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, self.training)
+        prev_grad_layer = max(start_sampling_from - 1, 0)
         approx_loss = None
         next_grad_layer = selected_layers[0]
         for i, layer_module in enumerate(layers):
@@ -437,7 +434,9 @@ class RobertaEncoder(nn.Module):
             if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers):
                 scale_factor = i/(prev_grad_layer + 1)
 
-            if drop_unused_layers and i not in selected_layers:
+            if i < start_sampling_from:
+                pass
+            elif drop_unused_layers and i not in selected_layers:
                 continue
             elif drop_unused_layers:
                 hidden_states = hidden_states * scale_factor
@@ -449,7 +448,7 @@ class RobertaEncoder(nn.Module):
             if grad_layer and approximate_unused_layers:
                 scale_factor = 1
 
-            print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
+            # print((i, prev_grad_layer, next_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             if grad_layer:
                 prev_grad_layer = i
 
@@ -493,7 +492,7 @@ class RobertaEncoder(nn.Module):
             if grad_layer:
                 hidden_states = layer_outputs[0]
             else:
-                assert approximate_unused_layers
+                assert approximate_unused_layers or start_sampling_from > 0
                 hidden_states = hidden_states + (layer_outputs[0].detach() - hidden_states.detach())
 
             if use_cache:
@@ -791,7 +790,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        with torch.set_grad_enabled(not no_grad_embedding and self.training):
+        with torch.set_grad_enabled(not no_grad_embedding and self.training and start_sampling_from == 0):
             embedding_output = self.embeddings(
                 input_ids=input_ids,
                 position_ids=position_ids,
