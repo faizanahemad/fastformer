@@ -413,7 +413,7 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha)
+        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha)
         prev_grad_layer = max(start_sampling_from - 1, 0)
         approx_loss = None
         next_grad_layer = selected_layers[0]
