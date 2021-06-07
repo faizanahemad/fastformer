@@ -381,7 +381,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                 discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                 discriminator_accuracy = torch.mean(sample_accuracies).item()
-                discriminator_extra_accuracy = float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean))
+                discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
 
         if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
