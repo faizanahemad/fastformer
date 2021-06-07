@@ -86,8 +86,8 @@ def training_args():
                         help='drop_unused_layers')
     parser.add_argument('--approximate_unused_layers', action="store_true", default=False,
                         help='approximate_unused_layers')
-    parser.add_argument('--approximate_unused_layers_alpha', type=float, required=False,
-                        help='approximate_unused_layers_alpha weight')
+    parser.add_argument('--sampling_alpha', type=float, required=False,
+                        help='sampling_alpha weight')
     parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
                         help='move_unused_to_cpu')
 
@@ -111,6 +111,10 @@ def training_args():
                         help='weight_decay')
     parser.add_argument('--gradient_clipping', default=optimizer_config.gradient_clipping, type=float,
                         help='gradient_clipping')
+    parser.add_argument('--beta_1', default=optimizer_config.beta_1, type=float,
+                        help='beta_1')
+    parser.add_argument('--beta_2', default=optimizer_config.beta_2, type=float,
+                        help='beta_2')
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
@@ -274,6 +278,8 @@ def train(local_rank, args):
     optimizer_config.weight_decay = args["weight_decay"]
     optimizer_config.warmup_steps = args["warmup_steps"]
     optimizer_config.gradient_clipping = args["gradient_clipping"]
+    optimizer_config.beta_1 = args["beta_1"]
+    optimizer_config.beta_2 = args["beta_2"]
 
     eps = 1e-4
     if args["no_autocast"]:
@@ -282,7 +288,7 @@ def train(local_rank, args):
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
     print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], args["approximate_unused_layers_alpha"], reinit)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], args["sampling_alpha"], reinit)
     teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, None, reinit)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size

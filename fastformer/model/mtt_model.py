@@ -82,7 +82,7 @@ def temperature_sampling(logits, temperature=1.0):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, approximate_unused_layers_alpha, reinit=False):
+def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, sampling_alpha, reinit=False):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
@@ -97,8 +97,8 @@ def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, approxim
         # config.gradient_checkpointing = True
         # config.vocab_size = 30522
         config.approximate_unused_layers = approximate_unused_layers
-        if approximate_unused_layers_alpha is not None:
-            config.approximate_unused_layers_alpha = approximate_unused_layers_alpha
+        if sampling_alpha is not None:
+            config.sampling_alpha = sampling_alpha
         model = PreNormRobertaModel(config)
     elif "roberta" in model_name:
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
