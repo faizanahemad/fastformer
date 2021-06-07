@@ -481,6 +481,12 @@ def train(local_rank, args):
             # generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
             # discriminator_w_progressive = discriminator_w * min(1.0, max(0.001, pct_done / 100.0))
 
+            # Beta updates for AdamW
+            beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])
+            beta_2 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_2"], 0.98])
+            optimizer.param_groups[0]["betas"] = (beta_1, beta_2)
+
+
             generator_w_progressive = generator_w
             discriminator_w_progressive = discriminator_w
 
