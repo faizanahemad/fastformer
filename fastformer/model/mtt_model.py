@@ -162,7 +162,7 @@ class MTTModel(FastFormerPreTrainedModel):
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0,
                  attention_penalty_w=0.0,
                  dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
-                 drop_unused_layers=None, approximate_unused_layers=None,
+                 drop_unused_layers=None, approximate_unused_layers=None, exclude_layers=None,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -177,6 +177,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.tokenizer = tokenizer
         self.dino_dims = 2 ** 12
         norm_last_layer = True
+        self.exclude_layers = exclude_layers
         bottleneck_dim = 256
         self.attention_penalty_w = attention_penalty_w
         self.lm_layers = lm_layers
@@ -352,7 +353,8 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 0
-                    discriminator_inputs["exclude_layers"] = exclude_layers
+                    if self.exclude_layers:
+                        discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]

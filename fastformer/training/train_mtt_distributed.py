@@ -86,6 +86,8 @@ def training_args():
                         help='drop_unused_layers')
     parser.add_argument('--approximate_unused_layers', action="store_true", default=False,
                         help='approximate_unused_layers')
+    parser.add_argument('--exclude_layers', action="store_true", default=False,
+                        help='exclude_layers')
     parser.add_argument('--sampling_alpha', type=float, required=False,
                         help='sampling_alpha weight')
     parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
@@ -304,7 +306,8 @@ def train(local_rank, args):
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
-                       drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["approximate_unused_layers"])
+                       drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["approximate_unused_layers"],
+                       exclude_layers=args["exclude_layers"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
