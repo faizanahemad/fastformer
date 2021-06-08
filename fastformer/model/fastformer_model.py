@@ -957,11 +957,10 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):
-        if self.train_backbone:
+        with torch.set_grad_enabled(self.train_backbone):
             funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
-        else:
-            with torch.no_grad():
-                funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
+        if not self.train_backbone:
+            funnel_outputs = funnel_outputs.detach()
         logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:

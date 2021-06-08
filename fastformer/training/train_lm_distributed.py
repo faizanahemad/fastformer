@@ -289,7 +289,7 @@ class SuperGlueTest:
                 num_workers = 4
                 dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
             if self.finetune:
-                batch_size /= 2
+                batch_size = batch_size // 2
                 self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
