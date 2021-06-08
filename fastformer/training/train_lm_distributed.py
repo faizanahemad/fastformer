@@ -146,6 +146,9 @@ def training_args():
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
+    parser.add_argument('--finetune', action="store_true", default=False,
+                        help='finetune')
+
     parser.add_argument('--no_autocast', action="store_true", default=False,
                         help='Avoid Autocast')
 
@@ -276,7 +279,7 @@ class SuperGlueTest:
             model.config.eps = 1e-7
             tokenizer = model.tokenizer
         elif isinstance(model, str):
-            if "deberta" in model.lower():
+            if "deberta" in model.lower() or "large" in model.lower():
                 batch_size = 4
                 self.iter_size *= 2
             if "conv" in model.lower():
@@ -285,6 +288,9 @@ class SuperGlueTest:
             if "fast-conv" in model.lower():
                 num_workers = 4
                 dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
+            if self.finetune:
+                batch_size /= 2
+                self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             if os.path.exists(model):
@@ -307,7 +313,9 @@ class SuperGlueTest:
                 tokenizer = AutoTokenizer.from_pretrained(model)
                 model = AutoModel.from_pretrained(model)
             model = model.train()
-            optimizer_config.eps = 1e-5
+            optimizer_config.eps = 1e-7
+            for p in model.parameters():
+                p.requires_grad = self.finetune
         elif isinstance(model, DDP):
             tokenizer = model.module.tokenizer
             model = model.module
@@ -1180,8 +1188,8 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        _ = SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"],
-                          args["cls_tokens"], args["hpo"], args["dataset_key"], False)()
+        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"],
+                      args["cls_tokens"], args["hpo"], args["dataset_key"], args["finetune"])()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
