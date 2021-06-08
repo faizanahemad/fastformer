@@ -926,7 +926,12 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
         self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 2
-        self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Linear(self.num_features, num_classes))
+        if train_backbone:
+            self.head = nn.Sequential(nn.LayerNorm(self.num_features),
+                                      nn.Linear(self.num_features, self.num_features), nn.GELU(),
+                                      nn.Linear(self.num_features, num_classes))
+        else:
+            self.head = nn.Linear(self.num_features, num_classes)
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone

@@ -316,6 +316,8 @@ class SuperGlueTest:
             optimizer_config.eps = 1e-7
             for p in model.parameters():
                 p.requires_grad = self.finetune
+            if not self.finetune:
+                model = model.eval()
         elif isinstance(model, DDP):
             tokenizer = model.module.tokenizer
             model = model.module
