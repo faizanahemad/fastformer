@@ -493,7 +493,6 @@ class RobertaEncoder(nn.Module):
             if grad_layer:
                 hidden_states = layer_outputs[0]
             else:
-                assert approximate_unused_layers or start_sampling_from > 0
                 hidden_states = hidden_states + (layer_outputs[0].detach() - hidden_states.detach())
 
             if use_cache:
