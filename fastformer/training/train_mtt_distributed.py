@@ -519,13 +519,13 @@ def train(local_rank, args):
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"])
-
+            validation_iter = (steps_done + 1) % log_every_steps == 0 or step == 0
             model_start = time.time()
             if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
                 with trainable_model.no_sync():
                     output = train_inner_loop(inner_args, model, batch, optimizer,
                                               scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=True,
+                                              no_sync=True, validation_iter=validation_iter,
                                               dino_center=dino_center,
                                               discriminator_dino_center=discriminator_dino_center,
                                               freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
@@ -533,7 +533,7 @@ def train(local_rank, args):
             else:
                 output = train_inner_loop(inner_args, model, batch, optimizer,
                                           scheduler, gradient_clipping, iter_size=iter_size,
-                                          no_sync=False,
+                                          no_sync=False, validation_iter=validation_iter,
                                           dino_center=dino_center,
                                           discriminator_dino_center=discriminator_dino_center,
                                           freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
@@ -596,11 +596,11 @@ def train(local_rank, args):
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
-                     no_sync=False, dino_center=None, discriminator_dino_center=None,
+                     no_sync=False, validation_iter=False, dino_center=None, discriminator_dino_center=None,
                      scaler=None, freeze_last_layer=False, step=None):
     is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
     with autocast(is_fp16):
-        output = ddp_model(**batch, dino_center=dino_center, discriminator_dino_center=discriminator_dino_center, rng_seed=step)
+        output = ddp_model(**batch, validation_iter=validation_iter, dino_center=dino_center, discriminator_dino_center=discriminator_dino_center, rng_seed=step)
         last_layer = ddp_model.get_last_dino_layer()
         if freeze_last_layer and last_layer is not None:
             for p in last_layer.parameters():

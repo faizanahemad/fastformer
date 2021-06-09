@@ -257,7 +257,9 @@ class MTTModel(FastFormerPreTrainedModel):
             attention_mask,
             labels=None,
             labels_segment_index=None,
-            rng_seed=None, num_layers=None, num_layers_total=None,
+            rng_seed=None, num_layers_lm=None, num_layers_total_lm=None,
+            num_layers_electra=None, num_layers_total_electra=None,
+            discriminator_inputs=None,
     ):
         rng_seed = None
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
@@ -270,10 +272,10 @@ class MTTModel(FastFormerPreTrainedModel):
                 no_grad_embedding = gen.random() < 0.5
             backbone_inputs["no_grad_embedding"] = False
             if self.lm_layers is not None:
-                backbone_inputs["num_layers"] = self.lm_layers if num_layers is None else num_layers
+                backbone_inputs["num_layers"] = self.lm_layers if num_layers_lm is None else num_layers_lm
                 backbone_inputs["rng_seed"] = rng_seed
-            if self.lm_layers_total is not None or num_layers_total is not None:
-                backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total is None else num_layers_total
+            if self.lm_layers_total is not None or num_layers_total_lm is not None:
+                backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total_lm is None else num_layers_total_lm
             backbone_inputs["drop_unused_layers"] = self.drop_unused_layers
             backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
@@ -340,16 +342,17 @@ class MTTModel(FastFormerPreTrainedModel):
                 masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
 
             if self.discriminator_w > 0:
-                new_input_ids = input_ids.clone()
-                new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
-                discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
-                discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
+                if discriminator_inputs is None:
+                    new_input_ids = input_ids.clone()
+                    new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
+                    discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
+                    discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                 if isinstance(self.backbone, PreNormRobertaModel):
                     if self.electra_layers is not None:
-                        discriminator_inputs["num_layers"] = self.electra_layers if num_layers is None else num_layers
+                        discriminator_inputs["num_layers"] = self.electra_layers if num_layers_electra is None else num_layers_electra
                         discriminator_inputs["rng_seed"] = rng_seed
-                    if self.electra_layers_total is not None or num_layers_total is not None:
-                        discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total is None else num_layers_total
+                    if self.electra_layers_total is not None or num_layers_total_electra is not None:
+                        discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total_electra is None else num_layers_total_electra
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 0
@@ -439,21 +442,37 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_center=None,
             discriminator_dino_center=None,
             rng_seed=None,
+            validation_iter=False,
     ):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
+        all_discriminator_extra_accuracy = None
+        all_masked_accuracy = None
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    rng_seed=rng_seed)
         discriminator_inputs = student_rep.pop("discriminator_inputs", None)
+        if discriminator_inputs is not None:
+            _ = discriminator_inputs.pop("drop_unused_layers", None)
+            _ = discriminator_inputs.pop("approximate_unused_layers", None)
+        if validation_iter:
+            with torch.no_grad():
+                all_layers_accuracy = self.student(input_ids=input_ids, attention_mask=attention_mask,
+                                                   labels=labels, labels_segment_index=labels_segment_index,
+                                                   rng_seed=rng_seed,
+                                                   num_layers_lm=self.student.lm_layers_total, num_layers_total_lm=self.student.lm_layers_total,
+                                                   num_layers_electra=self.student.electra_layers_total, num_layers_total_electra=self.student.electra_layers_total,
+                                                   discriminator_inputs=discriminator_inputs)
+                all_discriminator_extra_accuracy = all_layers_accuracy["discriminator_extra_accuracy"]
+                all_masked_accuracy = all_layers_accuracy["masked_accuracy"]
         if self.dino_w > 0:
             with torch.no_grad():
                 # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
                 teacher = self.teacher.eval()
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
-                teacher_rep = teacher(input_ids=labels, attention_mask=attention_mask, num_layers_total=self.teacher.lm_layers_total)
-                discriminator_inputs["num_layers_total"] = self.teacher.electra_layers_total
-                _ = discriminator_inputs.pop("drop_unused_layers", None)
-                _ = discriminator_inputs.pop("approximate_unused_layers", None)
+                teacher_rep = teacher(input_ids=labels, attention_mask=attention_mask,
+                                      num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total)
+                discriminator_inputs["num_layers_total_electra"] = self.teacher.electra_layers_total
+                discriminator_inputs["num_layers_electra"] = self.teacher.electra_layers_total
                 discriminator_teacher_rep = teacher(**discriminator_inputs)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
@@ -470,7 +489,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
-        return dict(loss=loss, dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
+        return dict(loss=loss, all_discriminator_extra_accuracy=all_discriminator_extra_accuracy, all_masked_accuracy=all_masked_accuracy,
+                    dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
                     discriminator_dino_center=discriminator_dino_center.detach() if isinstance(discriminator_dino_center, torch.Tensor) else discriminator_dino_center,
                     dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep)
 
