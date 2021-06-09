@@ -458,8 +458,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 all_layers_accuracy = self.student(input_ids=input_ids, attention_mask=attention_mask,
                                                    labels=labels, labels_segment_index=labels_segment_index,
                                                    rng_seed=rng_seed,
-                                                   num_layers_lm=self.student.lm_layers_total, num_layers_total_lm=self.student.lm_layers_total,
-                                                   num_layers_electra=self.student.electra_layers_total, num_layers_total_electra=self.student.electra_layers_total,
+                                                   num_layers_lm=getattr(self.student, "module", self.student).lm_layers_total, num_layers_total_lm=getattr(self.student, "module", self.student).lm_layers_total,
+                                                   num_layers_electra=getattr(self.student, "module", self.student).electra_layers_total, num_layers_total_electra=getattr(self.student, "module", self.student).electra_layers_total,
                                                    discriminator_inputs=discriminator_inputs)
                 all_discriminator_extra_accuracy = all_layers_accuracy["discriminator_extra_accuracy"]
                 all_masked_accuracy = all_layers_accuracy["masked_accuracy"]
