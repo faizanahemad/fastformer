@@ -456,6 +456,7 @@ class SuperGlueTest:
                 all_train_acc.append(train_acc)
                 continue_training = torch.tensor(2).to(device)
                 per_epoch = 3 if max_allowed_epochs < 50 and not train_backbone else 5
+                model = model.eval()
                 if epochs % per_epoch == 0 and rank == 0 and self.hpo is None and False:
                     inner_model = model.module
                     labels, predictions, val_losses = [], [], []
