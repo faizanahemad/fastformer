@@ -339,7 +339,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_labels = labels[mask_indices].reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-                masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
+                if active_prediction_logits.ndim > 1 and active_prediction_logits.shape[0] > 0 and active_prediction_logits.shape[1] > 0:
+                    masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
 
             if self.discriminator_w > 0:
                 if discriminator_inputs is None:
