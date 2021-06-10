@@ -95,7 +95,7 @@ class RobertaEmbeddings(nn.Module):
         )
 
     def forward(
-        self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0
+        self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0, layer_normalizers=None,
     ):
         if position_ids is None:
             if input_ids is not None:
@@ -298,6 +298,7 @@ class RobertaLayer(nn.Module):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        layer_normalizer=None,
     ):
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
@@ -341,9 +342,7 @@ class RobertaLayer(nn.Module):
             cross_attn_present_key_value = cross_attention_outputs[-1]
             present_key_value = present_key_value + cross_attn_present_key_value
 
-        layer_output = apply_chunking_to_forward(
-            self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
-        )
+        layer_output = self.feed_forward_chunk(attention_output, hidden_states, layer_normalizer)
         outputs = (layer_output,) + outputs
 
         # if decoder, return the attn key/values as the last output
@@ -352,8 +351,8 @@ class RobertaLayer(nn.Module):
 
         return outputs
 
-    def feed_forward_chunk(self, attention_output):
-        return self.intermediate(attention_output)
+    def feed_forward_chunk(self, attention_output, hidden_states, layer_normalizer):
+        return self.intermediate(attention_output, hidden_states, layer_normalizer)
 
 
 # Copied from transformers.models.bert.modeling_bert.BertEncoder with Bert->Roberta
@@ -383,6 +382,7 @@ class RobertaEncoder(nn.Module):
         approximate_unused_layers=False,
         start_sampling_from=0,
         exclude_layers=tuple(),
+        layer_normalizers=None,
     ):
         exclude_layers = tuple() if not isinstance(exclude_layers, (list, tuple)) else exclude_layers
         all_hidden_states = () if output_hidden_states else None
@@ -478,6 +478,7 @@ class RobertaEncoder(nn.Module):
                         layer_head_mask,
                         encoder_hidden_states,
                         encoder_attention_mask,
+                        layer_normalizers[i+1] if layer_normalizers is not None else None,
                     )
                 else:
                     layer_outputs = layer_module(
@@ -488,6 +489,7 @@ class RobertaEncoder(nn.Module):
                         encoder_attention_mask,
                         past_key_value,
                         output_attentions,
+                        layer_normalizers[i + 1] if layer_normalizers is not None else None,
                     )
 
             if grad_layer:
@@ -670,6 +672,8 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
 
         self.embeddings = RobertaEmbeddings(config)
         self.encoder = RobertaEncoder(config)
+        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size)
+        self.register_buffer("layer_normalizers", layer_normalizers)
 
         self.pooler = RobertaPooler(config) if add_pooling_layer else None
 
@@ -799,6 +803,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
                 token_type_ids=token_type_ids,
                 inputs_embeds=inputs_embeds,
                 past_key_values_length=past_key_values_length,
+                layer_normalizers=self.layer_normalizers,
             )
 
         encoder_outputs = self.encoder(
@@ -819,6 +824,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             approximate_unused_layers=approximate_unused_layers,
             start_sampling_from=start_sampling_from,
             exclude_layers=exclude_layers,
+            layer_normalizers=self.layer_normalizers,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None

@@ -489,7 +489,7 @@ class BertIntermediate(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, layer_start_hidden=None, layer_normalizer=None):
         hs = self.LayerNorm(hidden_states.contiguous())
         if self.geglu:
             attn_1, attn_2, conv_1, conv_2 = self.dense(hs).chunk(4, dim=-1)
@@ -497,7 +497,21 @@ class BertIntermediate(nn.Module):
             hs = torch.cat((attn_1 * self.intermediate_act_fn(attn_2), conv_1 * self.intermediate_act_fn(conv_2)), -1)
         else:
             hs = self.intermediate_act_fn(self.dense(hs))
-        hidden_states = hidden_states + self.dense_last(self.dropout(hs))
+        gof = self.dense_last(self.dropout(hs))
+        if layer_start_hidden is not None and layer_normalizer is not None:
+            fi = hidden_states - layer_start_hidden
+            fi_gof = fi + gof
+
+            center = fi_gof.mean(0).mean(0).detach()
+            layer_normalizer[0].mul_(0.99).add_(0.01 * center)
+            fi_gof = fi_gof - layer_normalizer[0]
+
+            hidden_states = layer_start_hidden
+            gof = fi_gof
+
+        hidden_states = hidden_states + gof
+        # O = I + f(I) + g(I + f(I))
+        # hidden_states = I + f(I)
         return hidden_states
 
 
