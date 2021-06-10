@@ -489,8 +489,8 @@ class BertIntermediate(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states, layer_start_hidden=None, layer_normalizer=None):
-        hs = self.LayerNorm(hidden_states.contiguous())
+    def forward(self, hidden_states, layer_start_hidden=None, fi=None, layer_normalizer=None):
+        hs = self.LayerNorm(hidden_states)
         if self.geglu:
             attn_1, attn_2, conv_1, conv_2 = self.dense(hs).chunk(4, dim=-1)
             attn_1, attn_2, conv_1, conv_2 = attn_1.contiguous(), attn_2.contiguous(), conv_1.contiguous(), conv_2.contiguous()
@@ -498,13 +498,12 @@ class BertIntermediate(nn.Module):
         else:
             hs = self.intermediate_act_fn(self.dense(hs))
         gof = self.dense_last(self.dropout(hs))
-        if layer_start_hidden is not None and layer_normalizer is not None:
-            fi = hidden_states - layer_start_hidden
+        if layer_start_hidden is not None and layer_normalizer is not None and fi is not None:
             fi_gof = fi + gof
 
             center = fi_gof.mean(0).mean(0).detach()
             layer_normalizer[0].mul_(0.99).add_(0.01 * center)
-            fi_gof = fi_gof - layer_normalizer[0]
+            fi_gof = fi_gof - layer_normalizer[0].detach()
 
             hidden_states = layer_start_hidden
             gof = fi_gof

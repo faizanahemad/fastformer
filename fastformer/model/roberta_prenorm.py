@@ -267,11 +267,13 @@ class RobertaSelfAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
-        context_layer = hidden_states_skip + self.hidden_dropout(self.dense(context_layer))
+        fi = self.hidden_dropout(self.dense(context_layer))
+        context_layer = hidden_states_skip + fi
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
 
         if self.is_decoder:
             outputs = outputs + (past_key_value,)
+        outputs = outputs + (fi,)
         return outputs
 
 
@@ -310,6 +312,7 @@ class RobertaLayer(nn.Module):
             past_key_value=self_attn_past_key_value,
         )
         attention_output = self_attention_outputs[0]
+        fi = self_attention_outputs[-1]
 
         # if decoder, the last output is tuple of self-attn cache
         if self.is_decoder:
@@ -342,7 +345,7 @@ class RobertaLayer(nn.Module):
             cross_attn_present_key_value = cross_attention_outputs[-1]
             present_key_value = present_key_value + cross_attn_present_key_value
 
-        layer_output = self.feed_forward_chunk(attention_output, hidden_states, layer_normalizer)
+        layer_output = self.feed_forward_chunk(attention_output, hidden_states, fi, layer_normalizer)
         outputs = (layer_output,) + outputs
 
         # if decoder, return the attn key/values as the last output
@@ -351,8 +354,8 @@ class RobertaLayer(nn.Module):
 
         return outputs
 
-    def feed_forward_chunk(self, attention_output, hidden_states, layer_normalizer):
-        return self.intermediate(attention_output, hidden_states, layer_normalizer)
+    def feed_forward_chunk(self, attention_output, hidden_states, fi, layer_normalizer):
+        return self.intermediate(attention_output, hidden_states, fi, layer_normalizer)
 
 
 # Copied from transformers.models.bert.modeling_bert.BertEncoder with Bert->Roberta
@@ -672,7 +675,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
 
         self.embeddings = RobertaEmbeddings(config)
         self.encoder = RobertaEncoder(config)
-        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size)
+        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size, requires_grad=False)
         self.register_buffer("layer_normalizers", layer_normalizers)
 
         self.pooler = RobertaPooler(config) if add_pooling_layer else None
