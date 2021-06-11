@@ -129,9 +129,9 @@ class RobertaEmbeddings(nn.Module):
                 update = torch.stack((center, scale, norm))
                 layer_normalizer.mul_(0.9).add_(0.1 * update)
             center = layer_normalizer[0].detach().clone()
-            center = torch.empty_like(center).copy_(center)
+            # center = torch.empty_like(center).copy_(center)
             norm = layer_normalizer[2].detach().clone()
-            norm = torch.empty_like(norm).copy_(norm)
+            # norm = torch.empty_like(norm).copy_(norm)
             embeddings = (embeddings - center) / norm
         embeddings = self.dropout(embeddings)
         return embeddings
