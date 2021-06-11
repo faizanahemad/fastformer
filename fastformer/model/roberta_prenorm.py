@@ -124,15 +124,17 @@ class RobertaEmbeddings(nn.Module):
         if layer_normalizer is not None:
             if self.training:
                 center = embeddings.detach().mean(0).mean(0)
-                norm = (embeddings.detach().norm(2, -1).mean() + 1e-4).expand(embeddings.size(-1))
-                scale = torch.zeros(embeddings.size(-1), dtype=norm.dtype, device=norm.device)
-                update = torch.stack((center, scale, norm))
-                layer_normalizer.mul_(0.9).add_(0.1 * update)
+                layer_normalizer[0].mul_(0.9).add_(0.1 * center)
             center = layer_normalizer[0].detach().clone()
             # center = torch.empty_like(center).copy_(center)
+            embeddings = embeddings - center
+
+            if self.training:
+                norm = (embeddings.detach().norm(2, -1).mean() + 1e-4).expand(embeddings.size(-1))
+                layer_normalizer[2].mul_(0.9).add_(0.1 * norm)
             norm = layer_normalizer[2].detach().clone()
             # norm = torch.empty_like(norm).copy_(norm)
-            embeddings = (embeddings - center) / norm
+            embeddings = embeddings / norm
         embeddings = self.dropout(embeddings)
         return embeddings
 
