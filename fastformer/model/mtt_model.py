@@ -416,7 +416,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.teacher = teacher.eval()
         for p in self.teacher.parameters():
             p.requires_grad = False
-        print([n for n, p in student.named_parameters()])
+        # print([n for n, p in student.named_parameters()])
         for n, p in student.named_parameters():
             if "layer_normalizers" not in n:
                 p.requires_grad = True
