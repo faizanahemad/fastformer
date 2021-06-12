@@ -359,6 +359,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["start_sampling_from"] = 0
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
+                discriminator_inputs["output_hidden_states"] = True
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]
