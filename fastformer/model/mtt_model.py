@@ -348,6 +348,9 @@ class MTTModel(FastFormerPreTrainedModel):
                     new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
                     discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
                     discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
+                    discriminator_labels = discriminator_labels[active_locations].reshape(-1)
+                else:
+                    discriminator_labels = discriminator_inputs.pop("discriminator_labels")
                 if isinstance(self.backbone, PreNormRobertaModel):
                     if self.electra_layers is not None:
                         discriminator_inputs["num_layers"] = self.electra_layers if num_layers_electra is None else num_layers_electra
@@ -377,7 +380,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
                 discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
-                discriminator_labels = discriminator_labels[active_locations].reshape(-1)
+                discriminator_inputs["discriminator_labels"] = discriminator_labels
                 discriminator_label_mean = discriminator_labels.mean()
                 discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
                 discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
