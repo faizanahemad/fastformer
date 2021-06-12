@@ -317,7 +317,7 @@ class RobertaLayer(nn.Module):
         layer_normalizer=None,
     ):
         hidden_states_normed = hidden_states
-        if layer_normalizer is not None:
+        if layer_normalizer is not None and False:
             if self.training:
                 center = hidden_states_normed.detach().mean(0).mean(0)
                 layer_normalizer[3].mul_(0.99).add_(0.01 * center)
