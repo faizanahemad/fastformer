@@ -367,6 +367,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 _ = discriminator_inputs.pop("rng_seed", None)
                 _ = discriminator_inputs.pop("output_hidden_states", None)
                 _ = discriminator_inputs.pop("start_sampling_from", None)
+                _ = discriminator_inputs.pop("exclude_layers", None)
 
                 if self.dino_w > 0:
                     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
