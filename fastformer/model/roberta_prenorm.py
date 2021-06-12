@@ -124,14 +124,14 @@ class RobertaEmbeddings(nn.Module):
         if layer_normalizer is not None:
             if self.training:
                 center = embeddings.detach().mean(0).mean(0)
-                layer_normalizer[0].mul_(0.9).add_(0.1 * center)
+                layer_normalizer[0].mul_(0.99).add_(0.01 * center)
             center = layer_normalizer[0].detach().clone()
             # center = torch.empty_like(center).copy_(center)
             embeddings = embeddings - center
 
             if self.training:
                 norm = (embeddings.detach().norm(2, -1).mean() + 1e-4).expand(embeddings.size(-1))
-                layer_normalizer[2].mul_(0.9).add_(0.1 * norm)
+                layer_normalizer[2].mul_(0.99).add_(0.01 * norm)
             norm = layer_normalizer[2].detach().clone()
             # norm = torch.empty_like(norm).copy_(norm)
             embeddings = embeddings / norm
@@ -316,10 +316,26 @@ class RobertaLayer(nn.Module):
         output_attentions=False,
         layer_normalizer=None,
     ):
+        hidden_states_normed = hidden_states
+        if layer_normalizer is not None:
+            if self.training:
+                center = hidden_states_normed.detach().mean(0).mean(0)
+                layer_normalizer[3].mul_(0.99).add_(0.01 * center)
+            center = layer_normalizer[3].detach().clone()
+            # center = torch.empty_like(center).copy_(center)
+            hidden_states_normed = hidden_states_normed - center
+
+            if self.training:
+                norm = (hidden_states_normed.detach().norm(2, -1).mean() + 1e-4).expand(hidden_states_normed.size(-1))
+                layer_normalizer[5].mul_(0.99).add_(0.01 * norm)
+            norm = layer_normalizer[5].detach().clone()
+            # norm = torch.empty_like(norm).copy_(norm)
+            hidden_states_normed = hidden_states_normed / norm
+
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
         self_attention_outputs = self.attention(
-            hidden_states,
+            hidden_states_normed,
             attention_mask,
             head_mask,
             output_attentions=output_attentions,
@@ -689,8 +705,9 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
 
         self.embeddings = RobertaEmbeddings(config)
         self.encoder = RobertaEncoder(config)
-        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size, requires_grad=False, dtype=torch.float32)
+        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 6, config.hidden_size, requires_grad=False, dtype=torch.float32)
         layer_normalizers[:, 2] = 1.0
+        layer_normalizers[:, 5] = 1.0
         layer_normalizers = layer_normalizers.detach()
         self.register_buffer("layer_normalizers", layer_normalizers)
 

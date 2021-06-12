@@ -503,14 +503,14 @@ class BertIntermediate(nn.Module):
 
             if self.training:
                 center = fi_gof.detach().mean(0).mean(0)
-                layer_normalizer[0].mul_(0.9).add_(0.1 * center)
+                layer_normalizer[0].mul_(0.99).add_(0.01 * center)
             center = layer_normalizer[0].detach().clone()
             # center = torch.empty_like(center).copy_(center)
             fi_gof = fi_gof - center
 
             if self.training:
                 norm = (fi_gof.detach().norm(2, -1).mean() + 1e-4).expand(fi_gof.size(-1))
-                layer_normalizer[2].mul_(0.9).add_(0.1 * norm)
+                layer_normalizer[2].mul_(0.99).add_(0.01 * norm)
             norm = layer_normalizer[2].detach().clone()
             # norm = torch.empty_like(norm).copy_(norm)
             fi_gof = fi_gof / norm
