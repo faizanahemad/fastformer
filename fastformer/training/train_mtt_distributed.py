@@ -99,6 +99,9 @@ def training_args():
     parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
                         help='move_unused_to_cpu')
 
+    parser.add_argument('--start_from_proba', default=0.0, type=float,
+                        help='start_from_proba')
+
     parser.add_argument('--total_steps', type=int, required=False,
                         help='total_steps')
     parser.add_argument('--freeze_last_layer', default=2, type=int,
@@ -324,10 +327,6 @@ def train(local_rank, args):
         teacher = None
         clean_memory()
     del teacher
-    if local_rank == 0:
-        time.sleep(30)
-        print("[Train]: Time = %s, Models Initialised, Reinit = %s" % (get_time_string(), reinit))
-        print_gpustat()
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
 
@@ -396,7 +395,6 @@ def train(local_rank, args):
     del student
     clean_memory()
     barrier()
-    time.sleep(10)
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters()))
     if args["optimizer"] == "adamw":
@@ -440,8 +438,7 @@ def train(local_rank, args):
     if local_rank == 0:
         print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
               (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
-        time.sleep(10)
-        print_gpustat()
+
     barrier()
 
     gradient_clipping = optc["gradient_clipping"]
@@ -481,10 +478,6 @@ def train(local_rank, args):
     dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     total_steps = args["epochs"] * len(dataloader)
-    if local_rank == 0:
-        print("[Train]: Time = %s, Dino Centers Initialised" % (get_time_string()))
-        time.sleep(10)
-        print_gpustat()
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -497,6 +490,8 @@ def train(local_rank, args):
 
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
+            start_from_proba = np.interp(steps_done, [0, args["warmup_steps"]], [0.0, args["start_from_proba"]])
+            getattr(trainable_model, "module", trainable_model).start_from_proba = start_from_proba
 
             # Beta updates for AdamW
             # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])

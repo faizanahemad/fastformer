@@ -430,6 +430,7 @@ class RobertaEncoder(nn.Module):
             if self.training:
                 layers[i].train()
         selected_layers = list(range(total_layers))
+        probas = None
         if num_layers is not None and num_layers < total_layers:
             if approximate_unused_layers:
                 assert num_layers % 2 == 0 and total_layers % 2 == 0
@@ -442,7 +443,8 @@ class RobertaEncoder(nn.Module):
             if rng_seed is not None:
                 g_cpu = torch.Generator()
                 g_cpu = g_cpu.manual_seed(rng_seed)
-            selected_layers = sorted(torch.multinomial(torch.tensor([((total_layers - i) / total_layers) if i >= start_sampling_from and i not in exclude_layers else 0.0 for i in range(total_layers)]) ** self.sampling_alpha, num_layers,
+            probas = torch.tensor([((total_layers - i) / total_layers) if (i >= start_sampling_from and i not in exclude_layers) else 0.0 for i in range(total_layers)]) ** self.sampling_alpha
+            selected_layers = sorted(torch.multinomial(probas, num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
             if approximate_unused_layers:
                 num_layers = num_layers * 2
@@ -457,7 +459,7 @@ class RobertaEncoder(nn.Module):
                     layers[i].eval()
 
                 # selected_layers = list(range(len(layers)))
-        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha)
+        # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha, probas)
         drop_unused_layers = drop_unused_layers or approximate_unused_layers
         approximate_unused_layers = False
         prev_grad_layer = max(start_sampling_from - 1, 0)

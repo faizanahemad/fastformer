@@ -184,6 +184,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.electra_layers_total = electra_layers_total
         self.drop_unused_layers = drop_unused_layers
         self.approximate_unused_layers = approximate_unused_layers
+        self.start_from_proba = 0.0
         assert drop_unused_layers is None or approximate_unused_layers is None or (approximate_unused_layers ^ drop_unused_layers) or (not drop_unused_layers and not approximate_unused_layers)
         if attention_penalty_w > 0:
             attention_penalty = get_rolling_diagonal_weights(tokenizer.model_max_length, 
@@ -261,14 +262,16 @@ class MTTModel(FastFormerPreTrainedModel):
             discriminator_inputs=None,
     ):
         rng_seed = None
+        gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
+        start_from_proba = gen.random() < self.start_from_proba
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
         lm_layers = None
+        lm_layers_total = None
         no_grad_embedding = False
         if isinstance(self.backbone, PreNormRobertaModel):
             if self.lm_layers is not None and self.electra_layers is not None:
-                gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
                 no_grad_embedding = gen.random() < 0.5
             backbone_inputs["no_grad_embedding"] = False
             if self.lm_layers is not None or num_layers_lm is not None:
@@ -277,8 +280,12 @@ class MTTModel(FastFormerPreTrainedModel):
                 backbone_inputs["rng_seed"] = rng_seed
             if self.lm_layers_total is not None or num_layers_total_lm is not None:
                 backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total_lm is None else num_layers_total_lm
+                lm_layers_total = backbone_inputs["num_layers_total"]
             backbone_inputs["drop_unused_layers"] = self.drop_unused_layers
             backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
+            backbone_inputs["start_sampling_from"] = 0
+            if self.training and start_from_proba and lm_layers is not None:
+                backbone_inputs["start_sampling_from"] = lm_layers
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
@@ -358,7 +365,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 else:
                     discriminator_labels = discriminator_inputs.pop("discriminator_labels")
                 if isinstance(self.backbone, PreNormRobertaModel):
-                    if self.electra_layers is not None:
+                    if self.electra_layers is not None or num_layers_electra is not None:
                         discriminator_inputs["num_layers"] = self.electra_layers if num_layers_electra is None else num_layers_electra
                         discriminator_inputs["rng_seed"] = rng_seed
                     if self.electra_layers_total is not None or num_layers_total_electra is not None:
@@ -366,6 +373,8 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 0
+                    if self.training and start_from_proba and lm_layers_total is not None:
+                        discriminator_inputs["start_sampling_from"] = lm_layers_total
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_inputs["output_hidden_states"] = True
