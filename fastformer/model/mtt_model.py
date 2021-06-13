@@ -349,6 +349,9 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
                     discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                     discriminator_labels = discriminator_labels[active_locations].reshape(-1)
+                    discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
+                    discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
+                    discriminator_inputs["start_sampling_from"] = 0
                 else:
                     discriminator_labels = discriminator_inputs.pop("discriminator_labels")
                 if isinstance(self.backbone, PreNormRobertaModel):
@@ -357,9 +360,6 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_inputs["rng_seed"] = rng_seed
                     if self.electra_layers_total is not None or num_layers_total_electra is not None:
                         discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total_electra is None else num_layers_total_electra
-                    discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
-                    discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
-                    discriminator_inputs["start_sampling_from"] = 0
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_inputs["output_hidden_states"] = True
@@ -368,6 +368,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]
                 approx_loss = (approx_loss + disc_approx_loss) if approx_loss is not None else disc_approx_loss
                 _ = discriminator_inputs.pop("num_layers", None)
+                _ = discriminator_inputs.pop("num_layers_total", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
                 _ = discriminator_inputs.pop("output_hidden_states", None)
                 _ = discriminator_inputs.pop("start_sampling_from", None)
@@ -476,11 +477,11 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 teacher = self.teacher.eval()
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
-                teacher_rep = teacher(input_ids=labels, attention_mask=attention_mask,
-                                      num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total)
                 discriminator_inputs["num_layers_total_electra"] = self.teacher.electra_layers_total
                 discriminator_inputs["num_layers_electra"] = self.teacher.electra_layers_total
-                discriminator_teacher_rep = teacher(**discriminator_inputs)
+                teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask,
+                                      num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total,
+                                      discriminator_inputs=discriminator_inputs)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
