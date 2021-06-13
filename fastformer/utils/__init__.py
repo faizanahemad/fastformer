@@ -802,7 +802,7 @@ def student_teacher_param_update(student, teacher, m, device=None):
         backbone = getattr(student, "module", student).backbone
         if hasattr(backbone, "layer_normalizers"):
             layer_normalizers = backbone.layer_normalizers
-            teacher.layer_normalizers.mul_(m).add_((1 - m) * layer_normalizers)
+            teacher.backbone.layer_normalizers.mul_(m).add_((1 - m) * layer_normalizers)
 
     if device is not None:
         teacher = teacher.to(torch.device("cpu"))
