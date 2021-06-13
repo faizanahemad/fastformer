@@ -393,6 +393,8 @@ def train(local_rank, args):
 
     del backbone
     del teacher_backbone
+    del student
+    del teacher
     clean_memory()
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters()))
@@ -637,7 +639,6 @@ def forward_backward(is_fp16, batch, validation_iter, dino_center, discriminator
     loss_float = loss.detach().cpu().item()
     del loss
     return output, loss_float
-
 
 
 def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
