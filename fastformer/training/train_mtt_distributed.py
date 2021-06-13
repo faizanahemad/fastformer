@@ -495,26 +495,21 @@ def train(local_rank, args):
 
         start_time = time.time()
         for step, batch in enumerate(dataloader):
-            # if batch_size == 1:
-            #     batch = {k: v.unsqueeze(0) if isinstance(v, torch.Tensor) else [v] for k, v in batch.items()}
-            #     print({k: v.size() if isinstance(v, torch.Tensor) else v for k , v in batch.items()})
+
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
-            pct_done = (100 * steps_done / total_steps)
-            # generator_w_progressive = generator_w * min(1.0, max(0.01, pct_done / 100.0))
-            # discriminator_w_progressive = discriminator_w * min(1.0, max(0.001, pct_done / 100.0))
 
             # Beta updates for AdamW
-            beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])
-            beta_2 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_2"], 0.98])
-            optimizer.param_groups[0]["betas"] = (beta_1, beta_2)
-
-
-            generator_w_progressive = generator_w
-            discriminator_w_progressive = discriminator_w
-
-            model.generator_w = generator_w_progressive
-            model.discriminator_w = discriminator_w_progressive
+            # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])
+            # beta_2 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_2"], 0.98])
+            # optimizer.param_groups[0]["betas"] = (beta_1, beta_2)
+            #
+            #
+            # generator_w_progressive = generator_w
+            # discriminator_w_progressive = discriminator_w
+            #
+            # model.generator_w = generator_w_progressive
+            # model.discriminator_w = discriminator_w_progressive
 
             if isinstance(batch, dict):
                 key = list(batch.keys())[0]
@@ -613,8 +608,8 @@ def train(local_rank, args):
                 model_times = []
                 samples_processed_this_log_iter = 0
 
-                clean_memory()
-                barrier()
+                # clean_memory()
+                # barrier()
             del output
             del bs_size
             start_time = time.time()
