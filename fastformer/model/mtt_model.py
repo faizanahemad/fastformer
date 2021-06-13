@@ -193,8 +193,7 @@ class MTTModel(FastFormerPreTrainedModel):
             attention_penalty.requires_grad = False
             self.register_buffer("attention_penalty", attention_penalty)
         assert generator_w > 0 or dino_w > 0
-        if discriminator_w > 0:
-            assert generator_w > 0
+
         self.generator_w = generator_w
         self.discriminator_w = discriminator_w
         self.dino_w = dino_w
@@ -320,21 +319,23 @@ class MTTModel(FastFormerPreTrainedModel):
             dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
             dino = self.ffn(dino_hidden)
 
-        if (self.generator_w > 0 or self.discriminator_w > 0) and labels is not None:
-            mask_indices = (input_ids.int() != labels.int())
-            mask_indices_mean = mask_indices[active_locations].float().mean().item()
-            lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
-            generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and self.lm_layers is None else -1]
-            generator_output = self.generator_ffn(generator_output)
-            if hasattr(self.backbone, "embeddings_project"):
-                generator_output = self.backbone.embeddings_reverse_project(generator_output)
-            lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
-            if no_grad_embedding:
-                self.lm_head.requires_grad_(False)
-            lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
-            self.lm_head.requires_grad_(True)
+        if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
+            if self.generator_w > 0 or discriminator_inputs is None:
+                mask_indices = (input_ids.int() != labels.int())
+                mask_indices_mean = mask_indices[active_locations].float().mean().item()
+                lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
+                generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and self.lm_layers is None else -1]
+                generator_output = self.generator_ffn(generator_output)
+                if hasattr(self.backbone, "embeddings_project"):
+                    generator_output = self.backbone.embeddings_reverse_project(generator_output)
+                lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
+                if no_grad_embedding:
+                    self.lm_head.requires_grad_(False)
+                lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
+                if no_grad_embedding:
+                    self.lm_head.requires_grad_(True)
 
-            if self.generator_w > 0:
+            if self.generator_w > 0 and labels is not None:
                 active_labels = labels[mask_indices].reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = 0.0
@@ -342,7 +343,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
                     masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
 
-            if self.discriminator_w > 0:
+            if self.discriminator_w > 0 or discriminator_inputs is not None:
                 if discriminator_inputs is None:
                     new_input_ids = input_ids.clone()
                     new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
@@ -477,10 +478,10 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 teacher = self.teacher.eval()
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
-                discriminator_inputs["num_layers_total_electra"] = self.teacher.electra_layers_total
-                discriminator_inputs["num_layers_electra"] = self.teacher.electra_layers_total
                 teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask,
                                       num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total,
+                                      num_layers_electra=self.teacher.electra_layers_total,
+                                      num_layers_total_electra=self.teacher.electra_layers_total,
                                       discriminator_inputs=discriminator_inputs)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
