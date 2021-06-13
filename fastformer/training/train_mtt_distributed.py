@@ -397,6 +397,7 @@ def train(local_rank, args):
     del teacher
     clean_memory()
     barrier()
+    time.sleep(10)
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters()))
     if args["optimizer"] == "adamw":
