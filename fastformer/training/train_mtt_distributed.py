@@ -322,8 +322,8 @@ def train(local_rank, args):
     if dino_w == 0:
         model.teacher = None
         teacher = None
-        del teacher
         clean_memory()
+    del teacher
     if local_rank == 0:
         time.sleep(30)
         print("[Train]: Time = %s, Models Initialised, Reinit = %s" % (get_time_string(), reinit))
@@ -394,7 +394,6 @@ def train(local_rank, args):
     del backbone
     del teacher_backbone
     del student
-    del teacher
     clean_memory()
     barrier()
     time.sleep(10)
