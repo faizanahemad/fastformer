@@ -216,7 +216,7 @@ class MTTModel(FastFormerPreTrainedModel):
             self.ffn = nn.Sequential(nn.Linear(num_features, bottleneck_dim),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)
-            init_weights(self.ffn[2], 0.02)
+            init_weights(self.ffn[1], 0.02)
             last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
