@@ -617,7 +617,6 @@ def train(local_rank, args):
 
                 clean_memory()
                 barrier()
-            del batch
             del output
             del bs_size
             start_time = time.time()
