@@ -396,6 +396,7 @@ def train(local_rank, args):
     del student
     del teacher
     clean_memory()
+    barrier()
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters()))
     if args["optimizer"] == "adamw":
@@ -441,6 +442,7 @@ def train(local_rank, args):
               (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
         time.sleep(10)
         print_gpustat()
+    barrier()
 
     gradient_clipping = optc["gradient_clipping"]
 
