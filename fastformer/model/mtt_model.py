@@ -425,7 +425,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             if "layer_normalizers" not in n:
                 p.requires_grad = True
         teacher.generator_w = 0.0
-        teacher.discriminator_w = 0.0
+        teacher.discriminator_w = student.discriminator_w
         teacher.sentence_order_prediction_w = 0.0
         teacher.input_cls_orthogonal_w = 0.0
         self.generator_w = student.generator_w
