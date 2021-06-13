@@ -378,7 +378,7 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         # model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
-        trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
+        trainable_model = DDP(trainable_model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=50)  # find_unused_parameters=True
         model.student = trainable_model
 
     if dino_w > 0:
