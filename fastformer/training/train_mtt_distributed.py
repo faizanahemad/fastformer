@@ -623,6 +623,8 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     else:
         loss.backward()
     _ = output.pop("predictions", None)
+    loss_float = loss.detach().cpu().item()
+    del loss
 
     # print([name for name, params in (ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).named_parameters() if params.grad is None])
     if not no_sync:
@@ -645,13 +647,13 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             else:
                 scheduler.step()
 
-    if np.isnan(loss.detach().cpu().item()):
+    if np.isnan(loss_float):
         es = "[Train-Exception]: Time = %s, NAN Loss, Scale = %s, loss_dict = %s, lr = %s" % (
-            get_time_string(), None, loss, optimizer.param_groups[0]['lr'])
+            get_time_string(), None, loss_float, optimizer.param_groups[0]['lr'])
         raise ValueError(es)
     _ = output.pop("logits", None)
     _ = output.pop("predictions", None)
-    return dict(loss=loss, **output)
+    return dict(loss=loss_float, **output)
 
 
 def train_catch_exception(local_rank, args):
