@@ -48,6 +48,12 @@ from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
 from torch.multiprocessing import Process, ProcessContext
 
 try:
+    from gpustat import print_gpustat
+except:
+    def print_gpustat(*args, **kwargs):
+        print("NO GPUSTAT")
+
+try:
     from torch.cuda.amp import GradScaler, autocast
 except:
     pass
@@ -238,7 +244,7 @@ def train(local_rank, args):
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     # gpu_device = 0
     gpu_device = local_rank
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
@@ -300,7 +306,6 @@ def train(local_rank, args):
     sentence_order_prediction_w = args["sentence_order_prediction_w"] if "sentence_order_prediction_w" in args else 0.0
     attention_penalty_w = args["attention_penalty_w"] if "attention_penalty_w" in args else 0.0
 
-
     student = MTTModel(backbone, tokenizer, args["cls_tokens"],
                        generator_w=generator_w, discriminator_w=discriminator_w,
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
@@ -321,6 +326,9 @@ def train(local_rank, args):
         model.teacher = None
         teacher = None
         del teacher
+        clean_memory()
+    print("[Train]: Time = %s, Models Initialised" % (get_time_string()))
+    print_gpustat()
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
         print(type(model))
@@ -387,6 +395,7 @@ def train(local_rank, args):
         print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
 
     del backbone
+    del teacher_backbone
     clean_memory()
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, trainable_model.parameters()))
@@ -402,6 +411,7 @@ def train(local_rank, args):
     else:
         raise ValueError
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in trainable_model.named_parameters() if v.requires_grad}))
+    del trainable_params
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
@@ -427,6 +437,9 @@ def train(local_rank, args):
     # scheduler1 = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
     # scheduler = [scheduler1, scheduler2]
+    print("[Train]: Time = %s, Optimizer and Scheduler Initialised" % (get_time_string()))
+    print_gpustat()
+
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
           (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
@@ -466,6 +479,8 @@ def train(local_rank, args):
     dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     total_steps = args["epochs"] * len(dataloader)
+    print("[Train]: Time = %s, Dino Centers Initialised" % (get_time_string()))
+    print_gpustat()
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
@@ -544,6 +559,7 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 model_times.append(time.time() - model_start)
 
+            del batch
             if dino_w > 0 and (step + 1) % iter_size:
                 student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
             dino_center = output.pop("dino_center", None)
