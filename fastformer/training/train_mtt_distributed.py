@@ -260,7 +260,6 @@ def train(local_rank, args):
     else:
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
-    print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
     if args["init_method"] == "tcp":
         if args["nr"] == 0:
             args["master_addr"] = "0.0.0.0"
@@ -271,7 +270,6 @@ def train(local_rank, args):
         raise ValueError
 
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-    print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
     barrier = get_barrier(True)
     rnd = torch.tensor(int(time.time())).to(device)
     dist.broadcast(rnd, 0)
@@ -333,8 +331,6 @@ def train(local_rank, args):
         print_gpustat()
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
-        print(type(model))
-        print(trainable_model)
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -440,13 +436,12 @@ def train(local_rank, args):
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
     # scheduler = [scheduler1, scheduler2]
     if local_rank == 0:
-        print("[Train]: Time = %s, Optimizer and Scheduler Initialised" % (get_time_string()))
+        print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
+              (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
         time.sleep(10)
         print_gpustat()
 
     gradient_clipping = optc["gradient_clipping"]
-    print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
-          (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
 
     if local_rank == 0:
         group = "%s-%s-%s-%sN-%s" % (args["wandb_name"], ds_name, args["model_config"], args["nodes"], time_string)
@@ -491,7 +486,6 @@ def train(local_rank, args):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
-            print("Time = %s: Distributed Sampler Epoch = %s" % (get_time_string(), epoch))
         else:
             print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), epoch))
 
@@ -591,7 +585,7 @@ def train(local_rank, args):
 
             full_time = time.time() - start_time
             full_times.append(full_time)
-            if step == 0 and epoch == 0:
+            if step == 0 and epoch == 0 and local_rank == 0:
                 print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
             if (steps_done + 1) % log_every_steps == 0 or step == 0:
                 if local_rank == 0:
