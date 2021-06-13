@@ -620,10 +620,7 @@ def train(local_rank, args):
     del model
 
 
-def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
-                     no_sync=False, validation_iter=False, dino_center=None, discriminator_dino_center=None,
-                     scaler=None, freeze_last_layer=False, step=None):
-    is_fp16 = isinstance(ddp_model, DDP) and scaler is not None
+def forward_backward(is_fp16, batch, validation_iter, dino_center, discriminator_dino_center, step, ddp_model, freeze_last_layer, iter_size, scaler):
     with autocast(is_fp16):
         output = ddp_model(**batch, validation_iter=validation_iter, dino_center=dino_center, discriminator_dino_center=discriminator_dino_center, rng_seed=step)
         last_layer = ddp_model.get_last_dino_layer()
@@ -639,12 +636,28 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
     _ = output.pop("predictions", None)
     loss_float = loss.detach().cpu().item()
     del loss
+    return output, loss_float
+
+
+
+def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clipping, iter_size=1,
+                     no_sync=False, validation_iter=False, dino_center=None, discriminator_dino_center=None,
+                     scaler=None, freeze_last_layer=False, step=None):
+    trainable_model = ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model
+    is_fp16 = isinstance(trainable_model, DDP) and scaler is not None
+    if no_sync:
+        with trainable_model.no_sync():
+            output, loss_float = forward_backward(is_fp16, batch, validation_iter, dino_center, discriminator_dino_center, step, ddp_model, freeze_last_layer,
+                                                  iter_size, scaler)
+    else:
+        output, loss_float = forward_backward(is_fp16, batch, validation_iter, dino_center, discriminator_dino_center, step, ddp_model, freeze_last_layer,
+                                              iter_size, scaler)
 
     # print([name for name, params in (ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).named_parameters() if params.grad is None])
     if not no_sync:
         if is_fp16:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_((ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).parameters(), gradient_clipping)
+            torch.nn.utils.clip_grad_norm_(trainable_model.parameters(), gradient_clipping)
             scaler.step(optimizer)
             scaler.update()
             if isinstance(scheduler, list):
@@ -653,7 +666,7 @@ def train_inner_loop(args, ddp_model, batch, optimizer, scheduler, gradient_clip
             else:
                 scheduler.step()
         else:
-            ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_((ddp_model.student if isinstance(ddp_model, PatchCLR) else ddp_model).parameters(), gradient_clipping)
+            trainable_model.clip_grad_norm_(gradient_clipping) if isinstance(trainable_model, FSDP) else torch.nn.utils.clip_grad_norm_(trainable_model.parameters(), gradient_clipping)
             optimizer.step()
             if isinstance(scheduler, list):
                 for sch in scheduler:
