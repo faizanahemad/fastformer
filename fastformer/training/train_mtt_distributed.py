@@ -327,8 +327,10 @@ def train(local_rank, args):
         teacher = None
         del teacher
         clean_memory()
-    print("[Train]: Time = %s, Models Initialised" % (get_time_string()))
-    print_gpustat()
+    if local_rank == 0:
+        print("[Train]: Time = %s, Models Initialised" % (get_time_string()))
+        time.sleep(10)
+        print_gpustat()
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
         print(type(model))
@@ -437,8 +439,10 @@ def train(local_rank, args):
     # scheduler1 = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
     # scheduler = [scheduler1, scheduler2]
-    print("[Train]: Time = %s, Optimizer and Scheduler Initialised" % (get_time_string()))
-    print_gpustat()
+    if local_rank == 0:
+        print("[Train]: Time = %s, Optimizer and Scheduler Initialised" % (get_time_string()))
+        time.sleep(10)
+        print_gpustat()
 
     gradient_clipping = optc["gradient_clipping"]
     print("[Train]: Time = %s, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
@@ -479,8 +483,10 @@ def train(local_rank, args):
     dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     total_steps = args["epochs"] * len(dataloader)
-    print("[Train]: Time = %s, Dino Centers Initialised" % (get_time_string()))
-    print_gpustat()
+    if local_rank == 0:
+        print("[Train]: Time = %s, Dino Centers Initialised" % (get_time_string()))
+        time.sleep(10)
+        print_gpustat()
     for epoch in range(args["epochs"]):
 
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
