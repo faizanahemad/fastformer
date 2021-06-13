@@ -309,7 +309,7 @@ def train(local_rank, args):
                        drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["approximate_unused_layers"],
                        exclude_layers=args["exclude_layers"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
-                       generator_w=0.0, discriminator_w=0.0,
+                       generator_w=0.0, discriminator_w=1.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
