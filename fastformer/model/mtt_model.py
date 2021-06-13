@@ -264,14 +264,16 @@ class MTTModel(FastFormerPreTrainedModel):
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
+        lm_layers = None
         no_grad_embedding = False
         if isinstance(self.backbone, PreNormRobertaModel):
             if self.lm_layers is not None and self.electra_layers is not None:
                 gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
                 no_grad_embedding = gen.random() < 0.5
             backbone_inputs["no_grad_embedding"] = False
-            if self.lm_layers is not None:
+            if self.lm_layers is not None or num_layers_lm is not None:
                 backbone_inputs["num_layers"] = self.lm_layers if num_layers_lm is None else num_layers_lm
+                lm_layers = backbone_inputs["num_layers"]
                 backbone_inputs["rng_seed"] = rng_seed
             if self.lm_layers_total is not None or num_layers_total_lm is not None:
                 backbone_inputs["num_layers_total"] = self.lm_layers_total if num_layers_total_lm is None else num_layers_total_lm
@@ -324,7 +326,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 mask_indices = (input_ids.int() != labels.int())
                 mask_indices_mean = mask_indices[active_locations].float().mean().item()
                 lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
-                generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and self.lm_layers is None else -1]
+                generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
                 generator_output = self.generator_ffn(generator_output)
                 if hasattr(self.backbone, "embeddings_project"):
                     generator_output = self.backbone.embeddings_reverse_project(generator_output)
@@ -379,19 +381,20 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
 
                 sent_hidden = discriminator_outputs[:, 0]
-                discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
+                if self.discriminator_w > 0:
+                    discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
 
-                discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
-                discriminator_inputs["discriminator_labels"] = discriminator_labels
-                discriminator_label_mean = discriminator_labels.mean()
-                discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
-                discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
-                sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
-                discriminator_labels = discriminator_labels.bool()
-                discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
-                discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
-                discriminator_accuracy = torch.mean(sample_accuracies).item()
-                discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
+                    discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
+                    discriminator_inputs["discriminator_labels"] = discriminator_labels
+                    discriminator_label_mean = discriminator_labels.mean()
+                    discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
+                    discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
+                    sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
+                    discriminator_labels = discriminator_labels.bool()
+                    discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
+                    discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
+                    discriminator_accuracy = torch.mean(sample_accuracies).item()
+                    discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
 
         if self.sentence_order_prediction_w and labels_segment_index is not None:
             labels_segment_index = labels_segment_index.float()
@@ -426,9 +429,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             if "layer_normalizers" not in n:
                 p.requires_grad = True
         teacher.generator_w = 0.0
-        teacher.discriminator_w = student.discriminator_w
+        teacher.discriminator_w = 0.0
         teacher.sentence_order_prediction_w = 0.0
-        teacher.input_cls_orthogonal_w = 0.0
         self.generator_w = student.generator_w
         self.discriminator_w = student.discriminator_w
         self.device = device
@@ -437,7 +439,6 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.teacher_contrastive_temperature = 0.04
         self.student_contrastive_temperature = 0.1
         self.dino_w = student.dino_w
-        self.dino_cw = 0.9
 
     def __call__(
             self,
@@ -475,7 +476,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         if self.dino_w > 0:
             with torch.no_grad():
                 # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
-                teacher = self.teacher.eval()
+                teacher = self.teacher  # .eval()
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
                 teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask,

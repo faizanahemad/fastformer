@@ -309,7 +309,7 @@ def train(local_rank, args):
                        drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["approximate_unused_layers"],
                        exclude_layers=args["exclude_layers"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
-                       generator_w=0.0, discriminator_w=1.0,
+                       generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
@@ -377,7 +377,8 @@ def train(local_rank, args):
         model.student = trainable_model
 
     if dino_w > 0:
-        student_teacher_param_update(model.student, model.teacher, 0.95, device if args["move_unused_to_cpu"] else None)
+        model.teacher = model.teacher.eval()
+        student_teacher_param_update(model.student, model.teacher, 0.01, device if args["move_unused_to_cpu"] else None)
     try:
         from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
         trainable_model.register_comm_hook(state=None, hook=fp16_compress_hook)
