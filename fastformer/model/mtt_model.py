@@ -363,6 +363,9 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_inputs["rng_seed"] = rng_seed
                     if self.electra_layers_total is not None or num_layers_total_electra is not None:
                         discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total_electra is None else num_layers_total_electra
+                    discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
+                    discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
+                    discriminator_inputs["start_sampling_from"] = 0
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_inputs["output_hidden_states"] = True
