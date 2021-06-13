@@ -607,7 +607,7 @@ def train(local_rank, args):
                 model_times = []
                 samples_processed_this_log_iter = 0
 
-                # clean_memory()
+                clean_memory()
                 # barrier()
             del output
             del bs_size
