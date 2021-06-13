@@ -170,9 +170,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.backbone = backbone
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
-        self.ce = CrossEntropyLoss(ignore_index=-100)
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-        self.ignore_zero_ce = CrossEntropyLoss(ignore_index=0)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.tokenizer = tokenizer
         self.dino_dims = 2 ** 12
@@ -200,8 +198,10 @@ class MTTModel(FastFormerPreTrainedModel):
         self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0)
         embedding_dims = self.backbone.embeddings.word_embeddings.weight.size(1)
         num_features = self.backbone.embeddings.position_embeddings.weight.size(1)
-        self.lm_head = nn.Linear(embedding_dims, self.vocab_size, bias=False)
         self.sentence_order_prediction_w = sentence_order_prediction_w
+        if self.generator_w > 0 or self.discriminator_w > 0:
+            self.lm_head = nn.Linear(embedding_dims, self.vocab_size, bias=False)
+            self.tie_weights()
         if reinit:
             self.init_weights()
 

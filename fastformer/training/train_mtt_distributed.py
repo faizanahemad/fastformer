@@ -293,7 +293,6 @@ def train(local_rank, args):
         eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    print("[Train]: Time = %s, Reinit = %s" % (get_time_string(), reinit))
     backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], args["sampling_alpha"], reinit)
     teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, None, reinit)
 
@@ -326,8 +325,8 @@ def train(local_rank, args):
         del teacher
         clean_memory()
     if local_rank == 0:
-        print("[Train]: Time = %s, Models Initialised" % (get_time_string()))
-        time.sleep(10)
+        time.sleep(30)
+        print("[Train]: Time = %s, Models Initialised, Reinit = %s" % (get_time_string(), reinit))
         print_gpustat()
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(trainable_model) / 1_000_000))
