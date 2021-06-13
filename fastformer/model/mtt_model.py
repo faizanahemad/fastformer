@@ -213,32 +213,23 @@ class MTTModel(FastFormerPreTrainedModel):
             if norm_last_layer:
                 last_layer.weight_g.requires_grad = False
 
-            self.ffn = nn.Sequential(nn.Linear(num_features, num_features), nn.GELU(),
-                                     nn.Linear(num_features, bottleneck_dim),
-                                     Norm(),
+            self.ffn = nn.Sequential(nn.Linear(num_features, bottleneck_dim),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)
             init_weights(self.ffn[2], 0.02)
             last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
-            self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
-                                               nn.GELU(),
-                                               nn.Linear(num_features, num_features),  # nn.Tanh()
-                                               )
+            self.generator_ffn = nn.Linear(num_features, num_features)
             init_weights(self.generator_ffn, 0.01)
 
         if discriminator_w > 0:
-            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
-                                                   nn.GELU(),
-                                                   nn.Linear(num_features, 1))
+            self.discriminator_ffn = nn.Linear(num_features, 1)
 
             init_weights(self.discriminator_ffn, 0.01)
 
         if sentence_order_prediction_w > 0:
-            self.sent_order_nn = nn.Sequential(nn.Linear(num_features, num_features),
-                                               nn.GELU(),
-                                               nn.Linear(num_features, 1))
+            self.sent_order_nn = nn.Linear(num_features, 1)
             init_weights(self.sent_order_nn, 0.01)
 
     def get_input_embeddings(self):
