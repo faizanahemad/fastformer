@@ -373,8 +373,8 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 0
-                    if self.training and start_from_proba and lm_layers_total is not None:
-                        discriminator_inputs["start_sampling_from"] = lm_layers_total
+                    if self.training and start_from_proba and lm_layers is not None:
+                        discriminator_inputs["start_sampling_from"] = lm_layers
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_inputs["output_hidden_states"] = True

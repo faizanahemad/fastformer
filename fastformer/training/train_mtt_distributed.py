@@ -490,7 +490,7 @@ def train(local_rank, args):
 
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
-            start_from_proba = np.interp(steps_done, [0, args["warmup_steps"]], [0.0, args["start_from_proba"]])
+            start_from_proba = np.interp(steps_done, [0, args["warmup_steps"] * 10], [0.0, args["start_from_proba"]])
             getattr(trainable_model, "module", trainable_model).start_from_proba = start_from_proba
 
             # Beta updates for AdamW
