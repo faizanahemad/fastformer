@@ -195,7 +195,7 @@ if __name__ == "__main__":
     lm_cmd += " --log_every_steps 50 --num_workers 8 --save_every_steps 2000"
     # lm_cmd += " --wandb_dryrun"
     lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 4"
-    lm_cmd += " --epochs 1 --lr 0.001 --batch_size 2 --lr_steps 1 --weight_decay 0.01"
+    lm_cmd += " --epochs 1 --lr 0.0005 --batch_size 2 --lr_steps 1 --weight_decay 0.01"
     lm_cmd += " --warmup_steps 10000 --gradient_clipping 3.0 --teacher_warmup_steps 1000"
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 0.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw"
@@ -261,8 +261,10 @@ if __name__ == "__main__":
     if args["lm"]:
         cmd4 = cmd_dir + " && " + lm_cmd
         if "tcp" in main_cmd:
-            ip_address_cmd = cmd_dir + " && " + "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
-            ipaddr = one_run(hosts[0], ip_address_cmd)["stdout"].strip().split()[1]
+            ip_address_cmd = "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            addr = one_run(hosts[0], ip_address_cmd)["stdout"]
+            print(addr)
+            ipaddr = addr.strip().split()[1]
             part0, part1 = cmd4.split("--master_addr")
             part1 = part1.strip().split()[1:]
             part1[1] = "9999"

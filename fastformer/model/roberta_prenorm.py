@@ -435,7 +435,7 @@ class RobertaEncoder(nn.Module):
         if num_layers is not None and num_layers < total_layers:
             if approximate_unused_layers:
                 assert num_layers % 2 == 0 and total_layers % 2 == 0
-                assert start_sampling_from == 0
+                start_sampling_from = start_sampling_from / 2
                 num_layers = int(num_layers / 2)
                 total_layers = int(total_layers / 2)
                 assert exclude_layers is None or len(exclude_layers) == 0
@@ -452,6 +452,7 @@ class RobertaEncoder(nn.Module):
                 selected_layers[-1] = total_layers - 1
             if approximate_unused_layers:
                 num_layers = num_layers * 2
+                start_sampling_from = int(start_sampling_from*2)
                 total_layers = total_layers * 2
                 selected_layers = [i for s in selected_layers for i in [2*s, 2*s + 1]]
 
