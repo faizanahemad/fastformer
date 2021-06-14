@@ -162,7 +162,7 @@ class MTTModel(FastFormerPreTrainedModel):
                  generator_w=0.0, discriminator_w=0.0, dino_w=1.0, sentence_order_prediction_w=1.0,
                  attention_penalty_w=0.0,
                  dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
-                 drop_unused_layers=None, approximate_unused_layers=None, exclude_layers=None,
+                 drop_unused_layers=None, approximate_unused_layers=None, exclude_layers=None, keep_last_layer=False,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -186,6 +186,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.electra_layers_total = electra_layers_total
         self.drop_unused_layers = drop_unused_layers
         self.approximate_unused_layers = approximate_unused_layers
+        self.keep_last_layer = keep_last_layer
         self.start_from_proba = 0.0
         assert drop_unused_layers is None or approximate_unused_layers is None or (approximate_unused_layers ^ drop_unused_layers) or (not drop_unused_layers and not approximate_unused_layers)
         if attention_penalty_w > 0:
@@ -295,6 +296,7 @@ class MTTModel(FastFormerPreTrainedModel):
                                        range(lm_layers_total)]) ** self.sampling_alpha
                 start_sampling_from = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
                 backbone_inputs["start_sampling_from"] = start_sampling_from
+            backbone_inputs["keep_last_layer"] = self.keep_last_layer
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
@@ -391,6 +393,7 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_inputs["start_sampling_from"] = start_sampling_from
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
+                    discriminator_inputs["keep_last_layer"] = self.keep_last_layer
                 discriminator_inputs["output_hidden_states"] = True
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None

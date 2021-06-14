@@ -416,6 +416,7 @@ class RobertaEncoder(nn.Module):
         start_sampling_from=0,
         exclude_layers=tuple(),
         layer_normalizers=None,
+        keep_last_layer=False,
     ):
         exclude_layers = tuple() if not isinstance(exclude_layers, (list, tuple)) else exclude_layers
         all_hidden_states = () if output_hidden_states else None
@@ -447,6 +448,8 @@ class RobertaEncoder(nn.Module):
             # print((total_layers, start_sampling_from), "Probas = ", probas)
             selected_layers = sorted(torch.multinomial(probas, num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
+            if keep_last_layer:
+                selected_layers[-1] = total_layers - 1
             if approximate_unused_layers:
                 num_layers = num_layers * 2
                 total_layers = total_layers * 2
@@ -762,6 +765,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         approximate_unused_layers=False,
         start_sampling_from=0,
         exclude_layers=tuple(),
+        keep_last_layer=False,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -863,6 +867,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             start_sampling_from=start_sampling_from,
             exclude_layers=exclude_layers,
             layer_normalizers=self.layer_normalizers,
+            keep_last_layer=keep_last_layer,
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None

@@ -315,7 +315,7 @@ def train(local_rank, args):
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
                        drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["consecutive_layers"],
-                       exclude_layers=args["exclude_layers"])
+                       exclude_layers=args["exclude_layers"], keep_last_layer=args["keep_last_layer"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
