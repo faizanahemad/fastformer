@@ -90,12 +90,16 @@ def training_args():
                         help='electra_layers_total')
     parser.add_argument('--drop_unused_layers', action="store_true", default=False,
                         help='drop_unused_layers')
-    parser.add_argument('--approximate_unused_layers', action="store_true", default=False,
-                        help='approximate_unused_layers')
+    parser.add_argument('--consecutive_layers', action="store_true", default=False,
+                        help='consecutive_layers')
     parser.add_argument('--exclude_layers', action="store_true", default=False,
                         help='exclude_layers')
     parser.add_argument('--sampling_alpha', type=float, required=False,
                         help='sampling_alpha weight')
+    parser.add_argument('--schedule_sampling_alpha', action="store_true", default=False,
+                        help='schedule_sampling_alpha')
+    parser.add_argument('--keep_last_layer', action="store_true", default=False,
+                        help='keep_last_layer')
     parser.add_argument('--move_unused_to_cpu', action="store_true", default=False,
                         help='move_unused_to_cpu')
 
@@ -110,9 +114,9 @@ def training_args():
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
 
-    parser.add_argument('--warmup_steps', default=optimizer_config.warmup_steps, type=int,
+    parser.add_argument('--warmup_steps', default=1_000, type=int,
                         help='warmup_steps')
-    parser.add_argument('--teacher_warmup_steps', default=optimizer_config.warmup_steps, type=int,
+    parser.add_argument('--teacher_warmup_steps', default=1_000, type=int,
                         help='teacher_warmup_steps')
     parser.add_argument('--lr', default=optimizer_config.lr, type=float,
                         help='lr')
@@ -285,7 +289,6 @@ def train(local_rank, args):
 
     optimizer_config.lr = args["lr"]
     optimizer_config.weight_decay = args["weight_decay"]
-    optimizer_config.warmup_steps = args["warmup_steps"]
     optimizer_config.gradient_clipping = args["gradient_clipping"]
     optimizer_config.beta_1 = args["beta_1"]
     optimizer_config.beta_2 = args["beta_2"]
@@ -296,7 +299,7 @@ def train(local_rank, args):
         eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["approximate_unused_layers"], args["sampling_alpha"], reinit)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["consecutive_layers"], args["sampling_alpha"], reinit)
     teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, None, reinit)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
@@ -311,7 +314,7 @@ def train(local_rank, args):
                        dino_w=dino_w, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=attention_penalty_w,
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
-                       drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["approximate_unused_layers"],
+                       drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["consecutive_layers"],
                        exclude_layers=args["exclude_layers"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
@@ -490,8 +493,14 @@ def train(local_rank, args):
 
             steps_done = epoch * len(dataloader) + step
             teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
-            start_from_proba = np.interp(steps_done, [0, args["warmup_steps"] * 10], [0.0, args["start_from_proba"]])
-            getattr(trainable_model, "module", trainable_model).start_from_proba = start_from_proba
+            inner_model = getattr(trainable_model, "module", trainable_model)
+            if hasattr(inner_model, "start_from_proba"):
+                start_from_proba = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [0.0, 0.0, args["start_from_proba"]])
+                inner_model.start_from_proba = start_from_proba
+            if hasattr(inner_model.backbone.encoder, "sampling_alpha") and args["sampling_alpha"] is not None and args["sampling_alpha"] != 1.0:
+                sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
+                inner_model.backbone.encoder.sampling_alpha = sampling_alpha
+                inner_model.sampling_alpha = sampling_alpha
 
             # Beta updates for AdamW
             # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])

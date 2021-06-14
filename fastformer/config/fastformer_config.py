@@ -63,12 +63,11 @@ class OptimizerConfig:
 
     batch_size: int
     test_batch_size: int
-    warmup_steps: int
     gradient_clipping: float
 
 
 optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-4, 0.9, 0.98,
-                                   8, 8, 10000, 0.1)
+                                   8, 8, 0.1)
 
 
 @dataclass_json

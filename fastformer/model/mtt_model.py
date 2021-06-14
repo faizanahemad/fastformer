@@ -177,6 +177,8 @@ class MTTModel(FastFormerPreTrainedModel):
         norm_last_layer = True
         self.exclude_layers = exclude_layers
         bottleneck_dim = 256
+        self.n_layers = len(self.backbone.encoder.layer)
+        self.sampling_alpha = getattr(self.config, "sampling_alpha", 1.0)
         self.attention_penalty_w = attention_penalty_w
         self.lm_layers = lm_layers
         self.electra_layers = electra_layers
@@ -262,18 +264,21 @@ class MTTModel(FastFormerPreTrainedModel):
             discriminator_inputs=None,
     ):
         rng_seed = None
+        g_cpu = None
+        if rng_seed is not None:
+            g_cpu = torch.Generator()
+            g_cpu = g_cpu.manual_seed(rng_seed)
         gen = np.random.default_rng(rng_seed) if rng_seed is not None else random
         start_from_proba = gen.random() < self.start_from_proba
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
         lm_layers = None
+        electra_layers = None
+        electra_layers_total = None
         lm_layers_total = None
         no_grad_embedding = False
         if isinstance(self.backbone, PreNormRobertaModel):
-            if self.lm_layers is not None and self.electra_layers is not None:
-                no_grad_embedding = gen.random() < 0.5
-            backbone_inputs["no_grad_embedding"] = False
             if self.lm_layers is not None or num_layers_lm is not None:
                 backbone_inputs["num_layers"] = self.lm_layers if num_layers_lm is None else num_layers_lm
                 lm_layers = backbone_inputs["num_layers"]
@@ -284,8 +289,12 @@ class MTTModel(FastFormerPreTrainedModel):
             backbone_inputs["drop_unused_layers"] = self.drop_unused_layers
             backbone_inputs["approximate_unused_layers"] = self.approximate_unused_layers
             backbone_inputs["start_sampling_from"] = 0
-            if self.training and start_from_proba and lm_layers is not None:
-                backbone_inputs["start_sampling_from"] = lm_layers
+            if self.training and start_from_proba and lm_layers is not None and torch.is_grad_enabled():
+                lm_layers_total = lm_layers_total if lm_layers_total is not None else self.n_layers
+                probas = torch.tensor([((lm_layers_total - i) / lm_layers_total) if (i < lm_layers_total - lm_layers) else 0.0 for i in
+                                       range(lm_layers_total)]) ** self.sampling_alpha
+                start_sampling_from = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
+                backbone_inputs["start_sampling_from"] = start_sampling_from
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
@@ -367,14 +376,19 @@ class MTTModel(FastFormerPreTrainedModel):
                 if isinstance(self.backbone, PreNormRobertaModel):
                     if self.electra_layers is not None or num_layers_electra is not None:
                         discriminator_inputs["num_layers"] = self.electra_layers if num_layers_electra is None else num_layers_electra
+                        electra_layers = discriminator_inputs["num_layers"]
                         discriminator_inputs["rng_seed"] = rng_seed
                     if self.electra_layers_total is not None or num_layers_total_electra is not None:
                         discriminator_inputs["num_layers_total"] = self.electra_layers_total if num_layers_total_electra is None else num_layers_total_electra
                     discriminator_inputs["drop_unused_layers"] = self.drop_unused_layers
                     discriminator_inputs["approximate_unused_layers"] = self.approximate_unused_layers
                     discriminator_inputs["start_sampling_from"] = 0
-                    if self.training and start_from_proba and lm_layers is not None:
-                        discriminator_inputs["start_sampling_from"] = lm_layers
+                    if self.training and start_from_proba and electra_layers is not None and torch.is_grad_enabled():
+                        electra_layers_total = electra_layers_total if electra_layers_total is not None else self.n_layers
+                        probas = torch.tensor([((electra_layers_total - i) / electra_layers_total) if (i < electra_layers_total - electra_layers) else 0.0 for i in
+                                               range(electra_layers_total)]) ** self.sampling_alpha
+                        start_sampling_from = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
+                        discriminator_inputs["start_sampling_from"] = start_sampling_from
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                 discriminator_inputs["output_hidden_states"] = True
