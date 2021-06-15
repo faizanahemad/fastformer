@@ -111,6 +111,8 @@ def training_args():
                         help='Gradient Accumulation')
     parser.add_argument('--batch_size', required=False, type=int,
                         help='Batch Size')
+    parser.add_argument('--seed', required=False, type=int, default=3123,
+                        help='seed')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
@@ -195,8 +197,6 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 7919
-    args.seed = seed
     assert hasattr(args, "test_dataset") or not args["test_only"]
     assert hasattr(args, "validation_dataset") or not args["validate_only"]
     return vars(args)
@@ -230,7 +230,9 @@ def wsc_proc(x):
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, weight_decay, cls_tokens=1, hpo=None, dataset_key=None, finetune=True):
+    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, 
+                 seed, batch_size, accumulation_steps,
+                 weight_decay, cls_tokens=1, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -242,12 +244,14 @@ class SuperGlueTest:
         self.finetune = finetune
         self.cls_tokens = cls_tokens
         self.hpo = eval(hpo) if hpo is not None else None
+        self.seed = seed
 
         self.lr = lr
         self.epochs = epochs
         self.weight_decay = weight_decay
 
-        self.iter_size = 2
+        self.batch_size = batch_size
+        self.iter_size = accumulation_steps
         self.dataset_key = dataset_key
         self.task_word_map = dict(boolq=dict(true="true", false="false", yes="true", no="false"),
                                   cb=dict(agree="entailment", entailment="entailment", entail="entailment", contradiction="contradiction",
@@ -268,8 +272,9 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=True):
-        batch_size = 8
+    def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=False):
+        set_seeds(self.seed)
+        batch_size = self.batch_size
         train_backbone = self.finetune
         num_workers = 4
         dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
@@ -280,7 +285,7 @@ class SuperGlueTest:
             tokenizer = model.tokenizer
         elif isinstance(model, str):
             if "deberta" in model.lower() or "large" in model.lower():
-                batch_size = 4
+                batch_size = batch_size // 2
                 self.iter_size *= 2
             if "conv" in model.lower():
                 num_workers = 0
@@ -328,7 +333,7 @@ class SuperGlueTest:
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
-        set_seeds(3431)
+
         optc = optimizer_config.to_dict()
         optimizer = None
         scheduler = None
@@ -349,7 +354,6 @@ class SuperGlueTest:
             optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
-            scheduler = optimization.get_constant_schedule_with_warmup(optimizer, 200)
 
         collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0, tokenizer.pad_token_id)
 
@@ -746,6 +750,11 @@ class SuperGlueTest:
         model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
         size_dicts = self.size_dicts
         pred_datas = []
+
+        # glue = dict()
+        # for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
+        #     glue[gl] = load_dataset("glue", gl)
+
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic',]  # 'axb', 'axg'
         if self.hpo is not None:
@@ -1191,7 +1200,8 @@ def train(local_rank, args):
         model = args["pretrained_model"]
 
     if args["test_only"]:
-        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"], args["weight_decay"],
+        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
+                      args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
                       args["cls_tokens"], args["hpo"], args["dataset_key"], args["finetune"])()
         return
 
