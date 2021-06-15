@@ -202,31 +202,40 @@ def training_args():
     return vars(args)
 
 
-def rproc(x):
-    answers = x["answers"][0]
-    entities = x["entities"][0]
-    idx = x["idx"][0]["query"]
-    passage = x["passage"][0]
-    query = x["query"][0]
+class rproc:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+    def __call__(self, x):
+        tokenizer = self.tokenizer
+        answers = x["answers"][0]
+        entities = x["entities"][0]
+        idx = x["idx"][0]["query"]
+        passage = x["passage"][0]
+        query = x["query"][0]
 
-    text = "passage: " + passage + " query: " + query
-    rd = defaultdict(list)
-    for i, e in enumerate(entities):
-        rd['idx'].append(idx)
-        rd['text'].append(text + " answer: " + e)
-        rd['choice'].append(i)
-        rd['label'].append(e in answers)
-        rd['entities'].append(entities)
-    return rd
+        text = passage + f" {tokenizer.sep_token} " + query
+        rd = defaultdict(list)
+        for i, e in enumerate(entities):
+            rd['idx'].append(idx)
+            rd['text'].append(text + f" {tokenizer.sep_token} " + e)
+            rd['choice'].append(i)
+            rd['label'].append(e in answers)
+            rd['entities'].append(entities)
+        return rd
 
 
-def wsc_proc(x):
-    words = x["text"].split()
-    words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + [
-        "[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
-    modified_text = " ".join(words)
-    text = "original: " + x["text"] + " modified: " + modified_text + " word1: " + words[x["span1_index"]] + " word2: " + words[x["span2_index"]]
-    return dict(text=text)
+class wsc_proc:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def __call__(self, x):
+        tokenizer = self.tokenizer
+        words = x["text"].split()
+        words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + [
+            "[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
+        modified_text = " ".join(words)
+        text = x["text"] + f" {tokenizer.sep_token} " + modified_text + f" {tokenizer.sep_token} " + words[x["span1_index"]] + f" {tokenizer.sep_token} " + words[x["span2_index"]]
+        return dict(text=text)
 
 
 class SuperGlueTest:
@@ -272,11 +281,9 @@ class SuperGlueTest:
                                              ["BoolQ.jsonl", "CB.jsonl", "COPA.jsonl", "MultiRC.jsonl", "ReCoRD.jsonl", "RTE.jsonl",
                                               "WiC.jsonl", "WSC.jsonl", "AX-b.jsonl", "AX-g.jsonl"]))
 
-    def prepare_classifier(self, model, dataset, device, num_classes, dataset_key, rank, reinit=False):
+    def build_model(self, model):
         set_seeds(self.seed)
         batch_size = self.batch_size
-        train_backbone = self.finetune
-        num_workers = 4
         dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
         if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, FastFormerForClassification, FastFormerForFusedELECTRAPretraining)):
             model = model.train()
@@ -288,10 +295,10 @@ class SuperGlueTest:
                 batch_size = batch_size // 2
                 self.iter_size *= 2
             if "conv" in model.lower():
-                num_workers = 0
+
                 dataloader_params = dict()
             if "fast-conv" in model.lower():
-                num_workers = 4
+
                 dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
             if self.finetune:
                 batch_size = batch_size // 2
@@ -330,6 +337,16 @@ class SuperGlueTest:
         else:
             print(type(model))
             raise ValueError
+        return dict(model=model, tokenizer=tokenizer, dataloader_params=dataloader_params, batch_size=batch_size)
+
+    def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False):
+        set_seeds(self.seed)
+        train_backbone = self.finetune
+        num_workers = 4
+        model = model_dict["model"]
+        tokenizer = model_dict["tokenizer"]
+        dataloader_params = model_dict["dataloader_params"]
+        batch_size = model_dict["batch_size"]
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
@@ -392,7 +409,7 @@ class SuperGlueTest:
             test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers,
                               shuffle=False, **dataloader_params)
 
-        return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train,
+        return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train, tokenizer=tokenizer,
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
                     dataset_key=dataset_key, rank=rank, train_backbone=train_backbone)
 
@@ -593,8 +610,10 @@ class SuperGlueTest:
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken, val_loss=val_loss)
 
     def boolq(self, model, boolq, device, dataset_key, rank):
-        boolq = boolq.map(lambda x: dict(text='passage: ' + x["passage"] + " question: " + x["question"]), remove_columns=['question', 'passage'])
-        classifier_data = self.prepare_classifier(model, boolq, device, 1, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        boolq = boolq.map(lambda x: dict(text=x["passage"] + f" {tokenizer.sep_token} " + x["question"]), remove_columns=['question', 'passage'])
+        classifier_data = self.prepare_classifier(model_dict, boolq, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
@@ -608,8 +627,13 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def wic(self, model, wic, device, dataset_key, rank):
-        wic = wic.map(lambda x: dict(text='sentence1: ' + x["sentence1"] + " sentence2: " + x["sentence2"] + " word: " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
-        classifier_data = self.prepare_classifier(model, wic, device, 1, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        wic_reversed = wic.map(lambda x: dict(text=x["sentence2"] + f" {tokenizer.sep_token} " + x["sentence1"] + f" {tokenizer.sep_token} " + x["word"]),
+                remove_columns=['sentence1', 'sentence2', "word"])
+        wic = wic.map(lambda x: dict(text=x["sentence1"] + f" {tokenizer.sep_token} " + x["sentence2"] + f" {tokenizer.sep_token} " + x["word"]), remove_columns=['sentence1', 'sentence2', "word"])
+        wic["train"] = concatenate_datasets((wic["train"], wic_reversed["train"]))
+        classifier_data = self.prepare_classifier(model_dict, wic, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
@@ -622,8 +646,10 @@ class SuperGlueTest:
                                        epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
     
     def cb(self, model, cb, device, dataset_key, rank):
-        cb = cb.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, cb, device, 3, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        cb = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model_dict, cb, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
@@ -636,8 +662,10 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
-        rte = rte.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(model, rte, device, 1, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model_dict, rte, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None, None, None
@@ -649,13 +677,13 @@ class SuperGlueTest:
 
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
-        axb = axb.map(lambda x: dict(text="premise: " + x["sentence1"] + " hypothesis: " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
+        axb = axb.map(lambda x: dict(text=x["sentence1"] + f" {tokenizer.sep_token} " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         test_idx = classifier_data["test_idx"]
         final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
-        axg = axg.map(lambda x: dict(text="premise: " + x["premise"] + " hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        axg = axg.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         test_idx = classifier_data["test_idx"]
@@ -665,8 +693,10 @@ class SuperGlueTest:
         return final_predictions, rte_res, final_predictions_axb, final_predictions_axg
 
     def multirc(self, model, multirc, device, dataset_key, rank):
-        multirc = multirc.map(lambda x: dict(text="paragraph: " + x["paragraph"] + " question: " + x["question"] + "answer: " + x["answer"]), remove_columns=["paragraph", "question", "answer"])
-        classifier_data = self.prepare_classifier(model, multirc, device, 1, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        multirc = multirc.map(lambda x: dict(text=x["paragraph"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer"]), remove_columns=["paragraph", "question", "answer"])
+        classifier_data = self.prepare_classifier(model_dict, multirc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
@@ -686,12 +716,15 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def copa(self, model, copa, device, dataset_key, rank):
-        copa_c1 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice1"], label=x["label"] == 0, choice=0), remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_c2 = copa.map(lambda x: dict(text="premise: " + x["premise"] + " question: " + x["question"] + "answer: " + x["choice2"], label=x["label"] == 1, choice=1),
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        copa_c1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0, choice=0),
+                           remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_c2 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"] == 1, choice=1),
                            remove_columns=["premise", 'question', "choice1", "choice2"])
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
-        classifier_data = self.prepare_classifier(model, copa, device, 1, dataset_key, rank)
+        classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
@@ -706,10 +739,11 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def record(self, model, record, device, dataset_key, rank):
-
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
         rtest = record["test"]
-        record = record.map(rproc, batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
-        classifier_data = self.prepare_classifier(model, record, device, 1, dataset_key, rank)
+        record = record.map(rproc(tokenizer), batched=True, batch_size=1, remove_columns=["answers", "passage", "query"])
+        classifier_data = self.prepare_classifier(model_dict, record, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=False)
         if rank != 0:
             return None, None
@@ -731,9 +765,10 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
 
     def wsc(self, model, wsc, device, dataset_key, rank):
-            
-        wsc = wsc.map(wsc_proc, remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
-        classifier_data = self.prepare_classifier(model, wsc, device, 1, dataset_key, rank)
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        wsc = wsc.map(wsc_proc(tokenizer), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
             return None, None
