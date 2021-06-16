@@ -265,7 +265,7 @@ class MTTModel(FastFormerPreTrainedModel):
             num_layers_electra=None, num_layers_total_electra=None,
             discriminator_inputs=None,
     ):
-        # rng_seed = None
+        rng_seed = None
         g_cpu = None
         if rng_seed is not None:
             g_cpu = torch.Generator()
@@ -365,7 +365,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = 0.0
                 if active_prediction_logits.ndim > 1 and active_prediction_logits.shape[0] > 0 and active_prediction_logits.shape[1] > 0:
-                    masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
+                    if self.training and torch.is_grad_enabled():
+                        masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
                     masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
 
             if self.discriminator_w > 0 or discriminator_inputs is not None:
@@ -422,17 +423,18 @@ class MTTModel(FastFormerPreTrainedModel):
 
                     discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
                     discriminator_inputs["discriminator_labels"] = discriminator_labels
-                    discriminator_label_mean = discriminator_labels.mean()
-                    discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
                     discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
                     sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
-                    discriminator_labels = discriminator_labels.bool()
-                    discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
-                    discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
                     discriminator_accuracy = torch.mean(sample_accuracies).item()
+                    discriminator_label_mean = discriminator_labels.mean()
                     discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
+                    if self.training and torch.is_grad_enabled():
+                        discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
+                        discriminator_labels = discriminator_labels.bool()
+                        discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
+                        discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
 
-        if self.sentence_order_prediction_w and labels_segment_index is not None:
+        if self.sentence_order_prediction_w and labels_segment_index is not None and self.training and torch.is_grad_enabled():
             labels_segment_index = labels_segment_index.float()
             sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
