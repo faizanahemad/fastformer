@@ -184,6 +184,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.electra_layers = electra_layers
         self.lm_layers_total = lm_layers_total
         self.electra_layers_total = electra_layers_total
+        self.layer_ratio = int(self.electra_layers_total / self.lm_layers_total)
         self.drop_unused_layers = drop_unused_layers
         self.approximate_unused_layers = approximate_unused_layers
         self.keep_last_layer = keep_last_layer
