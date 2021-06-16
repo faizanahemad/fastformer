@@ -265,7 +265,7 @@ class MTTModel(FastFormerPreTrainedModel):
             num_layers_electra=None, num_layers_total_electra=None,
             discriminator_inputs=None,
     ):
-        rng_seed = None
+        # rng_seed = None
         g_cpu = None
         if rng_seed is not None:
             g_cpu = torch.Generator()
