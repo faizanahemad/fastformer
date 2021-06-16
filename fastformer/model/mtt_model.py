@@ -264,6 +264,7 @@ class MTTModel(FastFormerPreTrainedModel):
             rng_seed=None, num_layers_lm=None, num_layers_total_lm=None,
             num_layers_electra=None, num_layers_total_electra=None,
             discriminator_inputs=None,
+            validation_iter=False,
     ):
         rng_seed = None
         g_cpu = None
@@ -333,7 +334,7 @@ class MTTModel(FastFormerPreTrainedModel):
             penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
             attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
-        if self.cls_tokens > 1:
+        if self.cls_tokens > 1 and validation_iter:
             inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens].detach()
             inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
             inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
@@ -347,8 +348,6 @@ class MTTModel(FastFormerPreTrainedModel):
         if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
             if self.generator_w > 0 or discriminator_inputs is None:
                 mask_indices = (input_ids.int() != labels.int())
-                mask_indices_mean = mask_indices[active_locations].float().mean().item()
-                lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
                 generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
                 generator_output = self.generator_ffn(generator_output)
                 if hasattr(self.backbone, "embeddings_project"):
@@ -360,6 +359,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 if no_grad_embedding:
                     self.lm_head.requires_grad_(True)
 
+
             if self.generator_w > 0 and labels is not None:
                 active_labels = labels[mask_indices].reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
@@ -367,7 +367,10 @@ class MTTModel(FastFormerPreTrainedModel):
                 if active_prediction_logits.ndim > 1 and active_prediction_logits.shape[0] > 0 and active_prediction_logits.shape[1] > 0:
                     if self.training and torch.is_grad_enabled():
                         masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
-                    masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
+                    if validation_iter:
+                        masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
+                        mask_indices_mean = mask_indices[active_locations].float().mean().item()
+                        lm_input_accuracy = (input_ids == labels)[active_locations].type(torch.int32).float().mean().item()
 
             if self.discriminator_w > 0 or discriminator_inputs is not None:
                 if discriminator_inputs is None:
@@ -404,9 +407,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 discriminator_outputs = self.backbone(**discriminator_inputs)
                 n_grad_forward_layers_electra = discriminator_outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in discriminator_outputs else None
                 n_forward_layers_electra = discriminator_outputs["n_forward_layers"] if "n_forward_layers" in discriminator_outputs else None
-                disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]
-                approx_loss = (approx_loss + disc_approx_loss) if approx_loss is not None else disc_approx_loss
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("num_layers_total", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
@@ -423,26 +424,28 @@ class MTTModel(FastFormerPreTrainedModel):
 
                     discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
                     discriminator_inputs["discriminator_labels"] = discriminator_labels
-                    discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
-                    sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
-                    discriminator_accuracy = torch.mean(sample_accuracies).item()
-                    discriminator_label_mean = discriminator_labels.mean()
-                    discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
                     if self.training and torch.is_grad_enabled():
                         discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
+                    if validation_iter:
+                        discriminator_label_mean = discriminator_labels.mean()
                         discriminator_labels = discriminator_labels.bool()
+                        discriminator_preds = (torch.sigmoid(discriminator_outputs.detach()) > 0.5).type(discriminator_outputs.dtype)
+                        sample_accuracies = (discriminator_preds == discriminator_labels).type(discriminator_preds.dtype)
+                        discriminator_accuracy = torch.mean(sample_accuracies).item()
+                        discriminator_extra_accuracy = max(0.0, float((discriminator_accuracy - discriminator_label_mean) / (1.0 - discriminator_label_mean)))
                         discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                         discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
+
 
         if self.sentence_order_prediction_w and labels_segment_index is not None and self.training and torch.is_grad_enabled():
             labels_segment_index = labels_segment_index.float()
             sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
-            sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
-            sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
-            sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean().item()
+            if self.training and torch.is_grad_enabled():
+                sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
+            if validation_iter:
+                sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
+                sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean().item()
 
-        if approx_loss is not None:
-            approx_loss = approx_loss * 0.01
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
@@ -497,10 +500,11 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             validation_iter=False,
     ):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
-        all_discriminator_extra_accuracy = None
-        all_masked_accuracy = None
+        temp_input_ids = input_ids.clone()
+        temp_labels = labels.clone()
+        temp_attention_mask = attention_mask.clone()
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
-                                   rng_seed=rng_seed)
+                                   rng_seed=rng_seed, validation_iter=validation_iter)
         discriminator_inputs = student_rep.pop("discriminator_inputs", None)
         if discriminator_inputs is not None:
             _ = discriminator_inputs.pop("drop_unused_layers", None)
@@ -508,14 +512,17 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         all_stats = dict()
         if validation_iter:
             with torch.no_grad():
+                print(torch.all(input_ids == temp_input_ids), torch.all(temp_labels == labels), torch.all(attention_mask == temp_attention_mask))
+                # print(discriminator_inputs)
                 all_layers_accuracy = self.student(input_ids=input_ids, attention_mask=attention_mask,
                                                    labels=labels, labels_segment_index=labels_segment_index,
                                                    rng_seed=rng_seed,
                                                    num_layers_lm=getattr(self.student, "module", self.student).lm_layers_total, num_layers_total_lm=getattr(self.student, "module", self.student).lm_layers_total,
                                                    num_layers_electra=getattr(self.student, "module", self.student).electra_layers_total, num_layers_total_electra=getattr(self.student, "module", self.student).electra_layers_total,
-                                                   discriminator_inputs=discriminator_inputs)
+                                                   discriminator_inputs=discriminator_inputs, validation_iter=validation_iter)
                 all_stats = dict(
                     all_discriminator_extra_accuracy=all_layers_accuracy["discriminator_extra_accuracy"],
+                    all_discriminator_accuracy=all_layers_accuracy["discriminator_accuracy"],
                     all_masked_accuracy=all_layers_accuracy["masked_accuracy"],
                     all_n_forward_layers_lm=all_layers_accuracy["n_forward_layers_lm"],
                     all_n_grad_forward_layers_lm=all_layers_accuracy["n_grad_forward_layers_lm"],
@@ -535,7 +542,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                       num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total,
                                       num_layers_electra=self.teacher.electra_layers_total,
                                       num_layers_total_electra=self.teacher.electra_layers_total,
-                                      discriminator_inputs=discriminator_inputs)
+                                      discriminator_inputs=discriminator_inputs, validation_iter=False)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
