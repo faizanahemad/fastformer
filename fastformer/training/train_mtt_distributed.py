@@ -433,7 +433,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / iter_size))
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
-                                                    div_factor=1e3, three_phase=False, pct_start=0.05, anneal_strategy="linear", cycle_momentum=False)
+                                                    div_factor=1e4, three_phase=False, pct_start=0.06, anneal_strategy="linear", cycle_momentum=False)
 
     # scheduler1 = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
