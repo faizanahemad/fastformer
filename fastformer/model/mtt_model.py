@@ -500,9 +500,9 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             validation_iter=False,
     ):
         # TODO: Do we need to guide both students (MLM/ELECTRA)
-        temp_input_ids = input_ids.clone()
-        temp_labels = labels.clone()
-        temp_attention_mask = attention_mask.clone()
+        # temp_input_ids = input_ids.clone()
+        # temp_labels = labels.clone()
+        # temp_attention_mask = attention_mask.clone()
         student_rep = self.student(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                    rng_seed=rng_seed, validation_iter=validation_iter)
         discriminator_inputs = student_rep.pop("discriminator_inputs", None)
@@ -512,7 +512,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         all_stats = dict()
         if validation_iter:
             with torch.no_grad():
-                print(torch.all(input_ids == temp_input_ids), torch.all(temp_labels == labels), torch.all(attention_mask == temp_attention_mask))
+                # print(torch.all(input_ids == temp_input_ids), torch.all(temp_labels == labels), torch.all(attention_mask == temp_attention_mask))
                 # print(discriminator_inputs)
                 all_layers_accuracy = self.student(input_ids=input_ids, attention_mask=attention_mask,
                                                    labels=labels, labels_segment_index=labels_segment_index,
