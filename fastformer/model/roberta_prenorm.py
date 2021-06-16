@@ -477,7 +477,7 @@ class RobertaEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
-            grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from
+            grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from and torch.is_grad_enabled()
 
             scale_factor = 1
             if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers):

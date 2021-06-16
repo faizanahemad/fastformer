@@ -450,7 +450,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs,
                     n_grad_forward_layers_electra=n_grad_forward_layers_electra, n_forward_layers_electra=n_forward_layers_electra,
                     n_forward_layers_lm=n_forward_layers_lm, n_grad_forward_layers_lm=n_grad_forward_layers_lm,
-                    approx_loss=approx_loss, start_from_proba=start_from_proba, sampling_alpha=self.sampling_alpha,
+                    approx_loss=approx_loss, start_from_proba=self.start_from_proba, sampling_alpha=self.sampling_alpha,
                     start_sampling_from_lm=start_sampling_from_lm, start_sampling_from_electra=start_sampling_from_electra,
                     electra_to_lm_layer_ratio=n_forward_layers_electra/n_forward_layers_lm)
 
