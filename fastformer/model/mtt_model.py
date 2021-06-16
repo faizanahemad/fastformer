@@ -275,6 +275,8 @@ class MTTModel(FastFormerPreTrainedModel):
         backbone_inputs = dict(input_ids=input_ids, attention_mask=attention_mask,
                                output_hidden_states=True, output_attentions=self.attention_penalty_w > 0,
                                )
+        start_sampling_from_lm = None
+        start_sampling_from_electra = None
         lm_layers = None
         electra_layers = None
         electra_layers_total = None
@@ -295,14 +297,16 @@ class MTTModel(FastFormerPreTrainedModel):
                 lm_layers_total = lm_layers_total if lm_layers_total is not None else self.n_layers
                 probas = torch.tensor([((lm_layers_total - i) / lm_layers_total) if (i < lm_layers_total - lm_layers) else 0.0 for i in
                                        range(lm_layers_total)]) ** self.sampling_alpha
-                start_sampling_from = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
-                backbone_inputs["start_sampling_from"] = start_sampling_from
+                start_sampling_from_lm = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
+                backbone_inputs["start_sampling_from"] = start_sampling_from_lm
             backbone_inputs["keep_last_layer"] = self.keep_last_layer
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
         sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
         exclude_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
+        n_grad_forward_layers_lm = outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in outputs else None
+        n_forward_layers_lm = outputs["n_forward_layers"] if "n_forward_layers" in outputs else None
         masked_lm_loss = None
         lm_accuracy = None
         discriminator_label_mean = None
@@ -390,13 +394,15 @@ class MTTModel(FastFormerPreTrainedModel):
                         electra_layers_total = electra_layers_total if electra_layers_total is not None else self.n_layers
                         probas = torch.tensor([((electra_layers_total - i) / electra_layers_total) if (i < electra_layers_total - electra_layers) else 0.0 for i in
                                                range(electra_layers_total)]) ** self.sampling_alpha
-                        start_sampling_from = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
-                        discriminator_inputs["start_sampling_from"] = start_sampling_from
+                        start_sampling_from_electra = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
+                        discriminator_inputs["start_sampling_from"] = start_sampling_from_electra
                     if self.exclude_layers:
                         discriminator_inputs["exclude_layers"] = exclude_layers
                     discriminator_inputs["keep_last_layer"] = self.keep_last_layer
                 discriminator_inputs["output_hidden_states"] = True
                 discriminator_outputs = self.backbone(**discriminator_inputs)
+                n_grad_forward_layers_electra = discriminator_outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in discriminator_outputs else None
+                n_forward_layers_electra = discriminator_outputs["n_forward_layers"] if "n_forward_layers" in discriminator_outputs else None
                 disc_approx_loss = discriminator_outputs["approx_loss"] if "approx_loss" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["hidden_states"][-1]
                 approx_loss = (approx_loss + disc_approx_loss) if approx_loss is not None else disc_approx_loss
@@ -431,7 +437,7 @@ class MTTModel(FastFormerPreTrainedModel):
             sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
             sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
             sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
-            sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean()
+            sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean().item()
 
         if approx_loss is not None:
             approx_loss = approx_loss * 0.01
@@ -442,7 +448,11 @@ class MTTModel(FastFormerPreTrainedModel):
                     sent_order_loss=sent_order_loss, input_cls_orthogonal=input_cls_orthogonal, attention_penalty_loss=attention_penalty_loss,
                     discriminator_positive_accuracy=discriminator_positive_accuracy, discriminator_negative_accuracy=discriminator_negative_accuracy,
                     mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs,
-                    approx_loss=approx_loss)
+                    n_grad_forward_layers_electra=n_grad_forward_layers_electra, n_forward_layers_electra=n_forward_layers_electra,
+                    n_forward_layers_lm=n_forward_layers_lm, n_grad_forward_layers_lm=n_grad_forward_layers_lm,
+                    approx_loss=approx_loss, start_from_proba=start_from_proba, sampling_alpha=self.sampling_alpha,
+                    start_sampling_from_lm=start_sampling_from_lm, start_sampling_from_electra=start_sampling_from_electra,
+                    electra_to_lm_layer_ratio=n_forward_layers_electra/n_forward_layers_lm)
 
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):
@@ -493,6 +503,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         if discriminator_inputs is not None:
             _ = discriminator_inputs.pop("drop_unused_layers", None)
             _ = discriminator_inputs.pop("approximate_unused_layers", None)
+        all_stats = dict()
         if validation_iter:
             with torch.no_grad():
                 all_layers_accuracy = self.student(input_ids=input_ids, attention_mask=attention_mask,
@@ -501,8 +512,17 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                                    num_layers_lm=getattr(self.student, "module", self.student).lm_layers_total, num_layers_total_lm=getattr(self.student, "module", self.student).lm_layers_total,
                                                    num_layers_electra=getattr(self.student, "module", self.student).electra_layers_total, num_layers_total_electra=getattr(self.student, "module", self.student).electra_layers_total,
                                                    discriminator_inputs=discriminator_inputs)
-                all_discriminator_extra_accuracy = all_layers_accuracy["discriminator_extra_accuracy"]
-                all_masked_accuracy = all_layers_accuracy["masked_accuracy"]
+                all_stats = dict(
+                    all_discriminator_extra_accuracy=all_layers_accuracy["discriminator_extra_accuracy"],
+                    all_masked_accuracy=all_layers_accuracy["masked_accuracy"],
+                    all_n_forward_layers_lm=all_layers_accuracy["n_forward_layers_lm"],
+                    all_n_grad_forward_layers_lm=all_layers_accuracy["n_grad_forward_layers_lm"],
+                    all_n_grad_forward_layers_electra=all_layers_accuracy["n_grad_forward_layers_electra"],
+                    all_n_forward_layers_electra=all_layers_accuracy["n_forward_layers_electra"],
+                    all_start_sampling_from_lm=all_layers_accuracy["start_sampling_from_lm"],
+                    all_start_sampling_from_electra=all_layers_accuracy["start_sampling_from_electra"],
+                )
+
         if self.dino_w > 0:
             with torch.no_grad():
                 # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
@@ -529,10 +549,10 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
             loss += dino_loss
         student_rep = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in student_rep.items()}
-        return dict(loss=loss, all_discriminator_extra_accuracy=all_discriminator_extra_accuracy, all_masked_accuracy=all_masked_accuracy,
+        return dict(loss=loss,
                     dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
                     discriminator_dino_center=discriminator_dino_center.detach() if isinstance(discriminator_dino_center, torch.Tensor) else discriminator_dino_center,
-                    dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep)
+                    dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep, **all_stats)
 
 
 

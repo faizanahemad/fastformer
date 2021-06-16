@@ -422,6 +422,8 @@ class RobertaEncoder(nn.Module):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
+        n_forward_layers = 0
+        n_grad_forward_layers = 0
 
         next_decoder_cache = () if use_cache else None
         total_layers = len(self.layer) if num_layers_total is None else num_layers_total
@@ -533,8 +535,10 @@ class RobertaEncoder(nn.Module):
 
             if grad_layer:
                 hidden_states = layer_outputs[0]
+                n_grad_forward_layers += 1
             else:
                 hidden_states = hidden_states + (layer_outputs[0].detach() - hidden_states.detach())
+            n_forward_layers += 1
 
             if use_cache:
                 next_decoder_cache += (layer_outputs[-1],)
@@ -567,6 +571,8 @@ class RobertaEncoder(nn.Module):
         )
         rv["approx_loss"] = approx_loss
         rv["selected_layers"] = selected_layers
+        rv["n_grad_forward_layers"] = n_grad_forward_layers
+        rv["n_forward_layers"] = n_forward_layers
         return rv
 
 
@@ -886,4 +892,6 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         )
         rv["approx_loss"] = encoder_outputs["approx_loss"]
         rv["selected_layers"] = encoder_outputs["selected_layers"]
+        rv["n_grad_forward_layers"] = encoder_outputs["n_grad_forward_layers"]
+        rv["n_forward_layers"] = encoder_outputs["n_forward_layers"]
         return rv
