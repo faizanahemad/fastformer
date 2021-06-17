@@ -208,7 +208,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 313
+    seed = 61687
     args.seed = seed
     return vars(args)
 
@@ -276,10 +276,12 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-    dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-    barrier = get_barrier(True)
-    rnd = torch.tensor(int(time.time())).to(device)
-    dist.broadcast(rnd, 0)
+    rnd = torch.tensor(0.0, device="cpu")
+    if args["world_size"] > 1:
+        dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
+        rnd = torch.tensor(int(time.time())).to(device)
+        dist.broadcast(rnd, 0)
+    barrier = get_barrier(args["world_size"] > 1)
     format = "%Y-%m-%d %H-%M %Z"
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
@@ -528,7 +530,6 @@ def train(local_rank, args):
             batch_times.append(gen_batch_time)
             if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
                 state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
-                barrier()
                 if local_rank == 0:
                     torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
                 del state_dict
@@ -596,22 +597,21 @@ def train(local_rank, args):
                     # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
                     output = {k: float(v) if v else v for k, v in output.items()}
                     samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-                    time.sleep(random.random() + 0.1)
                     wandb_log = dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                                   batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
-                                   **{k: v for k, v in output.items() if v is not None})
+                                     batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                                     **{k: v for k, v in output.items() if v is not None})
 
                     wandb.log(wandb_log)
                     print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                           (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                     print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
+                        get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
                 batch_times = []
                 full_times = []
                 model_times = []
                 samples_processed_this_log_iter = 0
 
-                clean_memory()
+                # clean_memory()
                 # barrier()
             del output
             del bs_size
@@ -637,7 +637,7 @@ def forward_backward(is_fp16, batch, validation_iter, dino_center, discriminator
     else:
         loss.backward()
     _ = output.pop("predictions", None)
-    loss_float = loss.detach().cpu().item()
+    loss_float = loss.item()
     del loss
     return output, loss_float
 

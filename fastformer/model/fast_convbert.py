@@ -501,14 +501,14 @@ class BertIntermediate(nn.Module):
         if layer_start_hidden is not None and layer_normalizer is not None and fi is not None and False:
             fi_gof = fi + gof
 
-            if self.training:
+            if self.training and torch.is_grad_enabled():
                 center = fi_gof.detach().mean(0).mean(0)
                 layer_normalizer[0].mul_(0.999).add_(0.001 * center)
             center = layer_normalizer[0].detach().clone()
             # center = torch.empty_like(center).copy_(center)
             fi_gof = fi_gof - center
 
-            if self.training:
+            if self.training and torch.is_grad_enabled():
                 norm = (fi_gof.detach().norm(2, -1).mean() + 1e-5).expand(fi_gof.size(-1))
                 layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
             norm = layer_normalizer[2].detach().clone()

@@ -1,4 +1,5 @@
 import argparse
+from typing import Iterable
 
 import dill
 import numpy as np
@@ -811,6 +812,37 @@ def student_teacher_param_update(student, teacher, m, device=None):
 def get_rolling_diagonal_weights(size=512, window=9):
     diag_mat = sum([torch.diag(torch.ones(size), diagonal=i)[:-i, :-i] for i in range(1, window // 2 + 1)] + [torch.diag(torch.ones(size), diagonal=-i)[i:, i:] for i in range(window // 2 + 1)])
     return diag_mat
+
+
+def remove_dropout(module: nn.Module):
+    str_attrs = dir(module)
+    attrs = [(attr, getattr(module, attr, None)) for attr in str_attrs if attr not in  ["base_model", "base_model_prefix"]]
+    attrs = [(str_attr, attr) for (str_attr, attr) in attrs if isinstance(attr, (nn.Module, nn.ModuleList, nn.ModuleDict))]
+    attrs = [x for (str_attr, attr) in attrs for x in (attr if isinstance(attr, nn.ModuleList) else (attr.values() if isinstance(attr, nn.ModuleDict) else [attr]))]
+    for attr in attrs:
+        remove_dropout(attr)
+    if hasattr(module, "dropout"):
+        module.dropout.p = 0.0
+    if hasattr(module, "hidden_dropout"):
+        module.hidden_dropout.p = 0.0
+    if hasattr(module, "attention_dropout"):
+        module.attention_dropout.p = 0.0
+
+
+def get_loggable_dict(d):
+    rd = dict()
+    for k, v in d.items():
+        if isinstance(v, (int, float)):
+            rd[k] = v
+        elif isinstance(v, torch.Tensor):
+            try:
+                rd[k] = v.item()
+            except:
+                pass
+        else:
+            pass
+    return rd
+
 
 
 

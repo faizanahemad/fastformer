@@ -122,14 +122,14 @@ class RobertaEmbeddings(nn.Module):
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
         if layer_normalizer is not None:
-            if self.training:
+            if self.training and torch.is_grad_enabled():
                 center = embeddings.detach().mean(0).mean(0)
                 layer_normalizer[0].mul_(0.999).add_(0.001 * center)
             center = layer_normalizer[0].detach().clone()
             # center = torch.empty_like(center).copy_(center)
             embeddings = embeddings - center
 
-            if self.training:
+            if self.training and torch.is_grad_enabled():
                 norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
                 layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
             norm = layer_normalizer[2].detach().clone()
@@ -428,10 +428,6 @@ class RobertaEncoder(nn.Module):
         next_decoder_cache = () if use_cache else None
         total_layers = len(self.layer) if num_layers_total is None else num_layers_total
         layers = [self.layer[i] for i in range(total_layers)]
-        for i in range(total_layers):
-            layers[i].requires_grad_(self.training)
-            if self.training:
-                layers[i].train()
         selected_layers = list(range(total_layers))
         probas = None
         if num_layers is not None and num_layers < total_layers:
@@ -458,13 +454,6 @@ class RobertaEncoder(nn.Module):
                 total_layers = total_layers * 2
                 selected_layers = [i for s in selected_layers for i in [2*s, 2*s + 1]]
 
-            for i in range(total_layers):
-                if i in selected_layers:
-                    layers[i].requires_grad_(self.training)
-                else:
-                    layers[i].requires_grad_(False)
-                    layers[i].eval()
-
                 # selected_layers = list(range(len(layers)))
         # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha, probas)
         drop_unused_layers = drop_unused_layers or approximate_unused_layers
@@ -472,7 +461,6 @@ class RobertaEncoder(nn.Module):
         prev_grad_layer = max(start_sampling_from - 1, 0)
         approx_loss = None
         for i, layer_module in enumerate(layers):
-
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
@@ -491,8 +479,7 @@ class RobertaEncoder(nn.Module):
                 hidden_states = hidden_states * scale_factor
 
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
-            if grad_layer:
-                prev_grad_layer = i
+            prev_grad_layer = i
 
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -845,7 +832,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        with torch.set_grad_enabled(not no_grad_embedding and self.training and start_sampling_from == 0):
+        with torch.set_grad_enabled(not no_grad_embedding and self.training and start_sampling_from == 0 and torch.is_grad_enabled()):
             embedding_output = self.embeddings(
                 input_ids=input_ids,
                 position_ids=position_ids,
@@ -854,6 +841,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
                 past_key_values_length=past_key_values_length,
                 layer_normalizer=self.layer_normalizers[0],
             )
+        # print(embedding_output[:, :6, :6])
 
         encoder_outputs = self.encoder(
             embedding_output,
