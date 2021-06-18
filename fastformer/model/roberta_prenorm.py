@@ -122,20 +122,18 @@ class RobertaEmbeddings(nn.Module):
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
-        if layer_normalizer is not None:
-            if self.training and torch.is_grad_enabled():
-                center = embeddings.detach().mean(0).mean(0)
-                layer_normalizer[0].mul_(0.999).add_(0.001 * center)
-            center = layer_normalizer[0].detach().clone()
-            # center = torch.empty_like(center).copy_(center)
-            embeddings = embeddings - center
-
-            if self.training and torch.is_grad_enabled():
-                norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
-                layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
-            norm = layer_normalizer[2].detach().clone()
-            # norm = torch.empty_like(norm).copy_(norm)
-            embeddings = embeddings / norm
+        # if layer_normalizer is not None:
+        #     if self.training and torch.is_grad_enabled():
+        #         center = embeddings.detach().mean(0).mean(0)
+        #         layer_normalizer[0].mul_(0.999).add_(0.001 * center)
+        #     center = layer_normalizer[0].detach().clone()
+        #     embeddings = embeddings - center
+        #
+        #     if self.training and torch.is_grad_enabled():
+        #         norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
+        #         layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
+        #     norm = layer_normalizer[2].detach().clone()
+        #     embeddings = embeddings / norm
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -484,7 +482,8 @@ class RobertaEncoder(nn.Module):
             elif drop_unused_layers and i not in selected_layers:
                 continue
             elif drop_unused_layers:
-                hidden_states = hidden_states * scale_factor
+                # hidden_states = hidden_states * scale_factor
+                pass
 
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
