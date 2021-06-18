@@ -578,13 +578,13 @@ def train(local_rank, args):
                     discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
                     torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
                     discriminator_dino_center = discriminator_dino_center.type(dtype)
-            # if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
-            #     layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
-            #     dtype = layer_normalizers.dtype
-            #     layer_normalizers = layer_normalizers.type(torch.float64)
-            #     torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
-            #     layer_normalizers = layer_normalizers / args["world_size"]
-            #     getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
+            if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
+                layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
+                dtype = layer_normalizers.dtype
+                layer_normalizers = layer_normalizers.type(torch.float64)
+                torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
+                layer_normalizers = layer_normalizers / args["world_size"]
+                getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
 
             full_time = time.time() - start_time
             full_times.append(full_time)
