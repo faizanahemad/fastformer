@@ -190,7 +190,7 @@ if __name__ == "__main__":
     lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
     lm_cmd += " --model_config prenorm-roberta-base"
     lm_cmd += " --cls_tokens 1"
-    lm_cmd += " --wandb_name base_drop_tricks_α0_sf1_40kW_@3_12_9@_1_1_50_0_h32"  #
+    lm_cmd += " --wandb_name base_drop_no_tricks_α1_sf1_40kW_@2_12_6@_1_1_50_0_s2"  #
     lm_cmd += " --dataset /home/ahemf/processed_datasets/all512"
     lm_cmd += " --log_every_steps 50 --num_workers 8 --save_every_steps 2000"
     # lm_cmd += " --wandb_dryrun"
@@ -200,10 +200,10 @@ if __name__ == "__main__":
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 0.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw"
     lm_cmd += " --no_autocast"
-    lm_cmd += " --lm_layers 3 --electra_layers 9 --lm_layers_total 12 --electra_layers_total 12"
+    lm_cmd += " --lm_layers 2 --electra_layers 6 --lm_layers_total 12 --electra_layers_total 12"
     lm_cmd += " --drop_unused_layers"
     # lm_cmd += " --consecutive_layers"
-    lm_cmd += " --sampling_alpha 0.0"
+    lm_cmd += " --sampling_alpha 1.0"
     lm_cmd += " --start_from_proba 1.0"
     # lm_cmd += " --keep_last_layer"
     # lm_cmd += " --exclude_layers"
