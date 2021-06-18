@@ -68,11 +68,11 @@ def gumbel_noise(t):
     noise = torch.zeros_like(t).uniform_(0, 1)
     return -log(-log(noise))
 
-def gumbel_sample(t, temperature = 1.0):
+def gumbel_sample(t, temperature=2.0):
     return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
 
 
-def temperature_sampling(logits, temperature=1.0):
+def temperature_sampling(logits, temperature=2.0):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
     probs = F.softmax(logits / temperature)
@@ -283,7 +283,6 @@ class MTTModel(FastFormerPreTrainedModel):
         electra_layers = None
         electra_layers_total = None
         lm_layers_total = None
-        no_grad_embedding = False
         if isinstance(self.backbone, PreNormRobertaModel):
             if self.lm_layers is not None or num_layers_lm is not None:
                 backbone_inputs["num_layers"] = self.lm_layers if num_layers_lm is None else num_layers_lm
@@ -298,7 +297,7 @@ class MTTModel(FastFormerPreTrainedModel):
             if self.training and start_from_proba and lm_layers is not None and torch.is_grad_enabled():
                 lm_layers_total = lm_layers_total if lm_layers_total is not None else self.n_layers
                 probas = torch.tensor([((lm_layers_total - i) / lm_layers_total) if (i < lm_layers_total - lm_layers) else 0.0 for i in
-                                       range(lm_layers_total)]) ** self.sampling_alpha
+                                       range(lm_layers_total)]) ** 2.0
                 start_sampling_from_lm = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
                 backbone_inputs["start_sampling_from"] = start_sampling_from_lm
             backbone_inputs["keep_last_layer"] = self.keep_last_layer
