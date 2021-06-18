@@ -122,18 +122,18 @@ class RobertaEmbeddings(nn.Module):
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
-        # if layer_normalizer is not None:
-        #     if self.training and torch.is_grad_enabled():
-        #         center = embeddings.detach().mean(0).mean(0)
-        #         layer_normalizer[0].mul_(0.999).add_(0.001 * center)
-        #     center = layer_normalizer[0].detach().clone()
-        #     embeddings = embeddings - center
-        #
-        #     if self.training and torch.is_grad_enabled():
-        #         norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
-        #         layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
-        #     norm = layer_normalizer[2].detach().clone()
-        #     embeddings = embeddings / norm
+        if layer_normalizer is not None:
+            if self.training and torch.is_grad_enabled():
+                center = embeddings.detach().mean(0).mean(0)
+                layer_normalizer[0].mul_(0.999).add_(0.001 * center)
+            center = layer_normalizer[0].detach().clone()
+            embeddings = embeddings - center
+
+            if self.training and torch.is_grad_enabled():
+                norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
+                layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
+            norm = layer_normalizer[2].detach().clone()
+            embeddings = embeddings / norm
         embeddings = self.dropout(embeddings)
         return embeddings
 
