@@ -170,6 +170,7 @@ class MTTModel(FastFormerPreTrainedModel):
                  attention_penalty_w=0.0,
                  dropout=0.1, lm_layers=4, electra_layers=8, lm_layers_total=6, electra_layers_total=12,
                  drop_unused_layers=None, approximate_unused_layers=None, exclude_layers=None, keep_last_layer=False,
+                 lm_temperature=1.0,
                  reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.cls_tokens = cls_tokens
@@ -182,6 +183,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.tokenizer = tokenizer
         self.dino_dims = 2 ** 12
         norm_last_layer = True
+        self.lm_temperature = lm_temperature
         self.exclude_layers = exclude_layers
         bottleneck_dim = 256
         self.n_layers = len(self.backbone.encoder.layer)
@@ -386,7 +388,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 if discriminator_inputs is None:
                     if lm_replace_possible:
                         new_input_ids = input_ids.clone()
-                        new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
+                        new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach(), self.lm_temperature).view(-1)
                     else:
                         new_input_ids = input_ids
                     discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)

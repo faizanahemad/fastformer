@@ -106,6 +106,9 @@ def training_args():
     parser.add_argument('--start_from_proba', default=0.0, type=float,
                         help='start_from_proba')
 
+    parser.add_argument('--lm_temperature', default=2.0, type=float,
+                        help='lm_temperature')
+
     parser.add_argument('--total_steps', type=int, required=False,
                         help='total_steps')
     parser.add_argument('--freeze_last_layer', default=2, type=int,
@@ -317,12 +320,14 @@ def train(local_rank, args):
                        lm_layers=args["lm_layers"], electra_layers=args["electra_layers"],
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
                        drop_unused_layers=args["drop_unused_layers"], approximate_unused_layers=args["consecutive_layers"],
-                       exclude_layers=args["exclude_layers"], keep_last_layer=args["keep_last_layer"])
+                       exclude_layers=args["exclude_layers"], keep_last_layer=args["keep_last_layer"],
+                       lm_temperature=args["lm_temperature"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
                        generator_w=0.0, discriminator_w=0.0,
                        dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
-                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"])
+                       lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
+                       lm_temperature=args["lm_temperature"])
     teacher = teacher.eval()
     model = MultiTaskHighwayCLSPretraining(student, teacher, eps, device if args["move_unused_to_cpu"] else None).to(device)
     trainable_model = student
