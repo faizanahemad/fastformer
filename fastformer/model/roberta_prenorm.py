@@ -456,8 +456,11 @@ class RobertaEncoder(nn.Module):
                 start_sampling_from = int(start_sampling_from*2)
                 total_layers = total_layers * 2
                 selected_layers = [i for s in selected_layers for i in [2*s, 2*s + 1]]
-                if keep_last_layer and odd and random.random() < 0.5:
-                    selected_layers = selected_layers[:-1]
+                if odd:
+                    if random.random() < 0.5:
+                        selected_layers = selected_layers[:-1]
+                    else:
+                        selected_layers = selected_layers[:-2] + [selected_layers[-1]]
 
                 # selected_layers = list(range(len(layers)))
         # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha, probas)

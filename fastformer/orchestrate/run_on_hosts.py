@@ -205,7 +205,7 @@ if __name__ == "__main__":
     lm_cmd += " --consecutive_layers"
     lm_cmd += " --sampling_alpha 0.0"
     lm_cmd += " --start_from_proba 1.0"
-    # lm_cmd += " --keep_last_layer"
+    lm_cmd += " --keep_last_layer"
     # lm_cmd += " --exclude_layers"
     lm_cmd += " --beta_1 0.9 --beta_2 0.98"
     # lm_cmd += " --move_unused_to_cpu"
