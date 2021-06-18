@@ -319,6 +319,7 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_label_mean = None
         discriminator_loss = None
         dino = None
+        lm_replace_possible = False
         discriminator_accuracy = None
         discriminator_positive_accuracy = None
         discriminator_negative_accuracy = None
@@ -361,7 +362,6 @@ class MTTModel(FastFormerPreTrainedModel):
         if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
             if self.generator_w > 0 or discriminator_inputs is None:
                 mask_indices = (input_ids.int() != labels.int())
-                generator_hidden_states = outputs["hidden_states"]
                 generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
                 generator_output = self.generator_ffn(generator_output)
                 if hasattr(self.backbone, "embeddings_project"):
@@ -374,6 +374,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = 0.0
                 if active_prediction_logits.ndim > 1 and active_prediction_logits.shape[0] > 0 and active_prediction_logits.shape[1] > 0:
+                    lm_replace_possible = True
                     if self.training and torch.is_grad_enabled():
                         masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
                     if validation_iter:
@@ -383,8 +384,11 @@ class MTTModel(FastFormerPreTrainedModel):
 
             if self.discriminator_w > 0 or discriminator_inputs is not None:
                 if discriminator_inputs is None:
-                    new_input_ids = input_ids.clone()
-                    new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
+                    if lm_replace_possible:
+                        new_input_ids = input_ids.clone()
+                        new_input_ids[mask_indices] = temperature_sampling(lm_logits.detach()).view(-1)
+                    else:
+                        new_input_ids = input_ids
                     discriminator_labels = (new_input_ids.int() == labels.int()).type(lm_logits.dtype)
                     discriminator_inputs = dict(input_ids=new_input_ids, attention_mask=attention_mask, output_hidden_states=True)
                     discriminator_labels = discriminator_labels[active_locations].reshape(-1)

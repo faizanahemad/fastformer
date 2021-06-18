@@ -200,7 +200,7 @@ if __name__ == "__main__":
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 0.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw"
     lm_cmd += " --no_autocast"
-    lm_cmd += " --lm_layers 4 --electra_layers 12 --lm_layers_total 48 --electra_layers_total 48"
+    lm_cmd += " --lm_layers 3 --electra_layers 11 --lm_layers_total 48 --electra_layers_total 48"
     # lm_cmd += " --drop_unused_layers"
     lm_cmd += " --consecutive_layers"
     lm_cmd += " --sampling_alpha 0.0"
