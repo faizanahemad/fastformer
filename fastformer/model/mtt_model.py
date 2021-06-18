@@ -76,7 +76,7 @@ def temperature_sampling(logits, temperature=2.0):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
     probs = F.softmax(logits / temperature)
-    pred_ids = probs.view(-1, probs.size(-1)).multinomial(1, replacement=False)
+    pred_ids = probs.view(-1, probs.size(-1)).clip(0.0, 1.0).multinomial(1, replacement=False)
     if logits.ndim == 3:
         pred_ids = pred_ids.view(*probs.shape[:2])
     return pred_ids
