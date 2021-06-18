@@ -90,6 +90,7 @@ def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, sampling
         if "xlarge" in model_name:
             config = RobertaConfig.from_pretrained("roberta-large")
             config.num_hidden_layers = 48
+            model_name = "roberta-large"
         elif "large" in model_name:
             model_name = "roberta-large"
             config = RobertaConfig.from_pretrained(model_name)
