@@ -1,5 +1,6 @@
 import copy
 import math
+import random
 
 import torch
 import torch.nn as nn
@@ -431,10 +432,12 @@ class RobertaEncoder(nn.Module):
         selected_layers = list(range(total_layers))
         probas = None
         if num_layers is not None and num_layers < total_layers:
+            odd = False
             if approximate_unused_layers:
-                assert num_layers % 2 == 0 and total_layers % 2 == 0
+                assert total_layers % 2 == 0
+                odd = num_layers % 2 != 0
                 start_sampling_from = start_sampling_from / 2
-                num_layers = int(num_layers / 2)
+                num_layers = int(num_layers / 2) + (1 if odd else 0)
                 total_layers = int(total_layers / 2)
                 assert exclude_layers is None or len(exclude_layers) == 0
 
@@ -449,10 +452,12 @@ class RobertaEncoder(nn.Module):
             if keep_last_layer:
                 selected_layers[-1] = total_layers - 1
             if approximate_unused_layers:
-                num_layers = num_layers * 2
+                num_layers = num_layers * 2 - (1 if odd else 0)
                 start_sampling_from = int(start_sampling_from*2)
                 total_layers = total_layers * 2
                 selected_layers = [i for s in selected_layers for i in [2*s, 2*s + 1]]
+                if keep_last_layer and odd and random.random() < 0.5:
+                    selected_layers = selected_layers[:-1]
 
                 # selected_layers = list(range(len(layers)))
         # print((len(layers), len(selected_layers), start_sampling_from), selected_layers, exclude_layers, self.sampling_alpha, probas)
