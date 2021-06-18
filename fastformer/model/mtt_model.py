@@ -87,13 +87,18 @@ def get_mtt_backbone(model_name, cls_tokens, approximate_unused_layers, sampling
     # TODO: Add extra CLS attr and tokens in embedding
 
     if "prenorm-roberta" in model_name:
-        if "large" in model_name:
+        if "xlarge" in model_name:
+            config = RobertaConfig.from_pretrained("roberta-large")
+            config.num_hidden_layers = 48
+        elif "large" in model_name:
             model_name = "roberta-large"
+            config = RobertaConfig.from_pretrained(model_name)
         else:
             model_name = "roberta-base"
+            config = RobertaConfig.from_pretrained(model_name)
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        config = RobertaConfig.from_pretrained(model_name)
+
         # config.gradient_checkpointing = True
         # config.vocab_size = 30522
         config.approximate_unused_layers = approximate_unused_layers
