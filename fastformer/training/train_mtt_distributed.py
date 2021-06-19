@@ -513,6 +513,9 @@ def train(local_rank, args):
                 sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
                 inner_model.backbone.encoder.sampling_alpha = max(sampling_alpha, 0.01)
                 inner_model.sampling_alpha = max(sampling_alpha, 0.01)
+                if args["dino_w"] > 0:
+                    dino_w = np.interp(steps_done, [0, 2 * args["warmup_steps"], args["warmup_steps"] * 3], [0.0, 0.0, args["dino_w"]])
+                    inner_model.dino_w = dino_w
 
             # Beta updates for AdamW
             # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])
