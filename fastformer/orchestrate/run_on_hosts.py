@@ -190,7 +190,7 @@ if __name__ == "__main__":
     lm_cmd = "python train_mtt_distributed.py -n %s -g 8 --nr %s --model_save_dir /home/ahemf/model_save_dir --model_save_name mtt.pth"
     lm_cmd += " --model_config prenorm-roberta-base"
     lm_cmd += " --cls_tokens 1"
-    lm_cmd += " --wandb_name drop_tricks_α0_sf1_10kW_@2_12_6@_1_1_50_0_m1"  #
+    lm_cmd += " --wandb_name drop_tricks_α0_sf1_10kW_@2_12_6@_1_1_50_0_md"  #
     lm_cmd += " --dataset /home/ahemf/processed_datasets/all512"
     lm_cmd += " --log_every_steps 50 --num_workers 8 --save_every_steps 2000"
     # lm_cmd += " --wandb_dryrun"
@@ -203,11 +203,10 @@ if __name__ == "__main__":
     lm_cmd += " --lm_layers 2 --electra_layers 6 --lm_layers_total 12 --electra_layers_total 12"
     lm_cmd += " --drop_unused_layers"
     # lm_cmd += " --consecutive_layers"
-    # lm_cmd += " --enable_layer_normalizers"
+    lm_cmd += " --enable_layer_normalizers"
     lm_cmd += " --sampling_alpha 0.0"
     lm_cmd += " --start_from_proba 1.0"
     # lm_cmd += " --keep_last_layer"
-    # lm_cmd += " --exclude_layers"
     lm_cmd += " --lm_temperature 1.0"
     lm_cmd += " --beta_1 0.9 --beta_2 0.98"
     # lm_cmd += " --move_unused_to_cpu"
