@@ -209,6 +209,9 @@ def training_args():
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
 
+    if hasattr(args, "sampling_alpha") and args.sampling_alpha is not None:
+        args.sampling_alpha = max(args.sampling_alpha, 0.01)
+
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -508,8 +511,8 @@ def train(local_rank, args):
                 inner_model.start_from_proba = start_from_proba
             if hasattr(inner_model.backbone.encoder, "sampling_alpha") and args["sampling_alpha"] is not None and args["sampling_alpha"] != 1.0:
                 sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
-                inner_model.backbone.encoder.sampling_alpha = sampling_alpha
-                inner_model.sampling_alpha = sampling_alpha
+                inner_model.backbone.encoder.sampling_alpha = max(sampling_alpha, 0.01)
+                inner_model.sampling_alpha = max(sampling_alpha, 0.01)
 
             # Beta updates for AdamW
             # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])

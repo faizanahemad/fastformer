@@ -305,7 +305,7 @@ class MTTModel(FastFormerPreTrainedModel):
             if self.training and start_from_proba and lm_layers is not None and torch.is_grad_enabled():
                 lm_layers_total = lm_layers_total if lm_layers_total is not None else self.n_layers
                 probas = torch.tensor([((lm_layers_total - i) / lm_layers_total) if (i < lm_layers_total - lm_layers) else 0.0 for i in
-                                       range(lm_layers_total)]) ** 2.0
+                                       range(lm_layers_total)]) ** 4.0
                 start_sampling_from_lm = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
                 backbone_inputs["start_sampling_from"] = start_sampling_from_lm
             backbone_inputs["keep_last_layer"] = self.keep_last_layer
@@ -412,7 +412,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     if self.training and start_from_proba and electra_layers is not None and torch.is_grad_enabled():
                         electra_layers_total = electra_layers_total if electra_layers_total is not None else self.n_layers
                         probas = torch.tensor([((electra_layers_total - i) / electra_layers_total) if (i < electra_layers_total - electra_layers) else 0.0 for i in
-                                               range(electra_layers_total)]) ** self.sampling_alpha
+                                               range(electra_layers_total)]) ** max(self.sampling_alpha, 0.01)
                         start_sampling_from_electra = torch.multinomial(probas, 1, replacement=False, generator=g_cpu).long().item()
                         discriminator_inputs["start_sampling_from"] = start_sampling_from_electra
                     if self.exclude_layers:

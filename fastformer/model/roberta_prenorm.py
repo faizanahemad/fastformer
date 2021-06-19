@@ -429,7 +429,7 @@ class RobertaEncoder(nn.Module):
             if rng_seed is not None:
                 g_cpu = torch.Generator()
                 g_cpu = g_cpu.manual_seed(rng_seed)
-            probas = torch.tensor([((total_layers - i) / total_layers) if (i >= start_sampling_from and i not in exclude_layers) else 0.0 for i in range(total_layers)]) ** self.sampling_alpha
+            probas = torch.tensor([((total_layers - i) / total_layers) if (i >= start_sampling_from and i not in exclude_layers) else 0.0 for i in range(total_layers)]) ** max(self.sampling_alpha, 0.01)
             # print((total_layers, start_sampling_from), "Probas = ", probas)
             selected_layers = sorted(torch.multinomial(probas, num_layers,
                                                        replacement=False, generator=g_cpu).long().tolist())
