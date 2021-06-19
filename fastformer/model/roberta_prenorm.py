@@ -316,20 +316,6 @@ class RobertaLayer(nn.Module):
         layer_normalizer=None,
     ):
         hidden_states_normed = hidden_states
-        if layer_normalizer is not None and False:
-            if self.training:
-                center = hidden_states_normed.detach().mean(0).mean(0)
-                layer_normalizer[3].mul_(0.99).add_(0.01 * center)
-            center = layer_normalizer[3].detach().clone()
-            # center = torch.empty_like(center).copy_(center)
-            hidden_states_normed = hidden_states_normed - center
-
-            if self.training:
-                norm = (hidden_states_normed.detach().norm(2, -1).mean() + 1e-4).expand(hidden_states_normed.size(-1))
-                layer_normalizer[5].mul_(0.99).add_(0.01 * norm)
-            norm = layer_normalizer[5].detach().clone()
-            # norm = torch.empty_like(norm).copy_(norm)
-            hidden_states_normed = hidden_states_normed / norm
 
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
@@ -481,9 +467,8 @@ class RobertaEncoder(nn.Module):
                 pass
             elif drop_unused_layers and i not in selected_layers:
                 continue
-            elif drop_unused_layers:
-                # hidden_states = hidden_states * scale_factor
-                pass
+            elif drop_unused_layers and layer_normalizers is not None:
+                hidden_states = hidden_states * scale_factor
 
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
@@ -711,11 +696,16 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
 
         self.embeddings = RobertaEmbeddings(config)
         self.encoder = RobertaEncoder(config)
-        layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 6, config.hidden_size, requires_grad=False, dtype=torch.float32)
-        layer_normalizers[:, 2] = 1.0
-        layer_normalizers[:, 5] = 1.0
-        layer_normalizers = layer_normalizers.detach()
-        self.register_buffer("layer_normalizers", layer_normalizers)
+        enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
+        layer_normalizers = None
+        if enable_layer_normalizers:
+            layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size, requires_grad=False, dtype=torch.float32)
+            layer_normalizers[:, 2] = 1.0
+            # layer_normalizers[:, 5] = 1.0
+            layer_normalizers = layer_normalizers.detach()
+            self.register_buffer("layer_normalizers", layer_normalizers)
+        else:
+            self.layer_normalizers = layer_normalizers
 
         self.pooler = RobertaPooler(config) if add_pooling_layer else None
 
@@ -846,7 +836,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
                 token_type_ids=token_type_ids,
                 inputs_embeds=inputs_embeds,
                 past_key_values_length=past_key_values_length,
-                layer_normalizer=self.layer_normalizers[0],
+                layer_normalizer=self.layer_normalizers[0] if self.layer_normalizers is not None else None,
             )
         # print(embedding_output[:, :6, :6])
 

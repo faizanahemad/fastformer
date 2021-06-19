@@ -92,6 +92,8 @@ def training_args():
                         help='drop_unused_layers')
     parser.add_argument('--consecutive_layers', action="store_true", default=False,
                         help='consecutive_layers')
+    parser.add_argument('--enable_layer_normalizers', action="store_true", default=False,
+                        help='enable_layer_normalizers')
     parser.add_argument('--exclude_layers', action="store_true", default=False,
                         help='exclude_layers')
     parser.add_argument('--sampling_alpha', type=float, required=False,
@@ -304,8 +306,8 @@ def train(local_rank, args):
         eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["consecutive_layers"], args["sampling_alpha"], reinit)
-    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], False, None, reinit)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], args["sampling_alpha"], reinit)
+    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], None, reinit)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     generator_w = args["generator_w"] if "generator_w" in args else 0.0
@@ -585,11 +587,12 @@ def train(local_rank, args):
                     discriminator_dino_center = discriminator_dino_center.type(dtype)
             if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
                 layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
-                dtype = layer_normalizers.dtype
-                layer_normalizers = layer_normalizers.type(torch.float64)
-                torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
-                layer_normalizers = layer_normalizers / args["world_size"]
-                getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
+                if layer_normalizers is not None:
+                    dtype = layer_normalizers.dtype
+                    layer_normalizers = layer_normalizers.type(torch.float64)
+                    torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
+                    layer_normalizers = layer_normalizers / args["world_size"]
+                    getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
 
             full_time = time.time() - start_time
             full_times.append(full_time)

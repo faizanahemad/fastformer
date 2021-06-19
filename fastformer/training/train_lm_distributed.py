@@ -113,6 +113,8 @@ def training_args():
                         help='Batch Size')
     parser.add_argument('--seed', required=False, type=int, default=3123,
                         help='seed')
+    parser.add_argument('--enable_layer_normalizers', action="store_true", default=False,
+                        help='enable_layer_normalizers')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
@@ -241,7 +243,7 @@ class wsc_proc:
 class SuperGlueTest:
     def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr, 
                  seed, batch_size, accumulation_steps,
-                 weight_decay, cls_tokens=1, hpo=None, dataset_key=None, finetune=True):
+                 weight_decay, cls_tokens=1, enable_layer_normalizers=False, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.config = config
@@ -254,6 +256,7 @@ class SuperGlueTest:
         self.cls_tokens = cls_tokens
         self.hpo = eval(hpo) if hpo is not None else None
         self.seed = seed
+        self.enable_layer_normalizers = enable_layer_normalizers
 
         self.lr = lr
         self.epochs = epochs
@@ -308,9 +311,9 @@ class SuperGlueTest:
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
                 try:
-                    main_model, tokenizer = get_mtt_backbone(model_name, self.cls_tokens, None, None, reinit=False)
+                    main_model, tokenizer = get_mtt_backbone(model_name, self.cls_tokens, self.enable_layer_normalizers, None, reinit=False)
                 except:
-                    main_model, tokenizer = get_mtt_backbone(model, self.cls_tokens, None, None, reinit=False)
+                    main_model, tokenizer = get_mtt_backbone(model, self.cls_tokens, self.enable_layer_normalizers, None, reinit=False)
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
                 state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -1237,7 +1240,7 @@ def train(local_rank, args):
     if args["test_only"]:
         SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
                       args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
-                      args["cls_tokens"], args["hpo"], args["dataset_key"], args["finetune"])()
+                      args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
         return
 
     if args["validate_on_start"] or args["validate_only"]:
