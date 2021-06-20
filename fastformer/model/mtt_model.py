@@ -311,7 +311,7 @@ class MTTModel(FastFormerPreTrainedModel):
             backbone_inputs["keep_last_layer"] = self.keep_last_layer
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
-        approx_loss = outputs["approx_loss"] if "approx_loss" in outputs else None
+        layer_scales_loss = outputs["layer_scales_loss"] if "layer_scales_loss" in outputs else None
         sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
         exclude_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
         n_grad_forward_layers_lm = outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in outputs else None
@@ -420,6 +420,8 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_inputs["keep_last_layer"] = self.keep_last_layer
                 discriminator_inputs["output_hidden_states"] = True
                 discriminator_outputs = self.backbone(**discriminator_inputs)
+                discriminator_layer_scales_loss = discriminator_outputs["layer_scales_loss"] if "layer_scales_loss" in discriminator_outputs else None
+                layer_scales_loss = layer_scales_loss + discriminator_layer_scales_loss
                 discriminator_selected_layers = discriminator_outputs["selected_layers"] if "selected_layers" in discriminator_outputs else []
                 n_grad_forward_layers_electra = discriminator_outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in discriminator_outputs else None
                 n_forward_layers_electra = discriminator_outputs["n_forward_layers"] if "n_forward_layers" in discriminator_outputs else None
@@ -463,6 +465,8 @@ class MTTModel(FastFormerPreTrainedModel):
                 sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
                 sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean().item()
 
+        if layer_scales_loss is not None:
+            layer_scales_loss = 0.01 * layer_scales_loss
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
@@ -472,7 +476,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     mask_indices_mean=mask_indices_mean, discriminator_dino=discriminator_dino, discriminator_inputs=discriminator_inputs,
                     n_grad_forward_layers_electra=n_grad_forward_layers_electra, n_forward_layers_electra=n_forward_layers_electra,
                     n_forward_layers_lm=n_forward_layers_lm, n_grad_forward_layers_lm=n_grad_forward_layers_lm,
-                    approx_loss=approx_loss, start_from_proba=self.start_from_proba, sampling_alpha=self.sampling_alpha,
+                    layer_scales_loss=layer_scales_loss, start_from_proba=self.start_from_proba, sampling_alpha=self.sampling_alpha,
                     start_sampling_from_lm=start_sampling_from_lm, start_sampling_from_electra=start_sampling_from_electra,
                     electra_to_lm_layer_ratio=n_forward_layers_electra/n_forward_layers_lm,
                     generator_output=generator_output, discriminator_outputs=discriminator_outputs, discriminator_outputs_raw=discriminator_outputs_raw,
