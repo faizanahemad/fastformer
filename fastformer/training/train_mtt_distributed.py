@@ -28,7 +28,7 @@ from torch.cuda.amp import GradScaler, autocast
 from fastformer.data import *
 from fastformer.config import *
 from fastformer.optimizers import Novograd, RangerLars
-from fastformer.data.dataset import datadict_iterator, MTTDataset
+from fastformer.data.dataset import datadict_iterator, MTTDataset, get_simple_collate_fn, get_next
 from fastformer.utils import *
 from fastformer.model import *
 from transformers import optimization
@@ -75,8 +75,6 @@ def training_args():
     parser.add_argument('--wandb_name', required=False, type=str, default="",
                         help='wandb_name')
 
-    parser.add_argument('--epochs', default=10, type=int,
-                        help='Epochs')
     parser.add_argument('--cls_tokens', default=1, type=int,
                         help='cls_tokens')
 
@@ -228,14 +226,14 @@ def dataset_builder(location, params):
     return dataset
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, world_size=1, num_workers=None):
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_tokens, world_size=1, num_workers=None, max_length=512):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
 
     student_args = dict(cls_tokens=cls_tokens, vocab_size=len(tokenizer), tokenizer=tokenizer,
-                        tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (cls_tokens - 1)),
+                        tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length - (cls_tokens - 1)),
                         word_mask_proba=((0, 0.15), (32, 0.15), (128, 0.2), (512, 0.2)),
                         max_span_length=1, max_jumbling_span_length=2, jumble_sentence=True)
 
@@ -243,6 +241,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, cls_token
     dataset = dataset_builder(location, student_args)
     train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
+                              collate_fn=get_simple_collate_fn(cls_tokens - 1, tokenizer.pad_token_id),
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
     return train_loader
@@ -436,23 +435,34 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
     dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
                                   tokenizer, args["cls_tokens"],
-                                  world_size=args["world_size"], num_workers=args["num_workers"])
-    log_every_steps = args["log_every_steps"]
-    save_every_steps = args["save_every_steps"]
+                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
+    dataloader128 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 4,
+                                  tokenizer, args["cls_tokens"],
+                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
+    dataloader256 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 2,
+                                  tokenizer, args["cls_tokens"],
+                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
     iter_size = max(args["accumulation_steps"], 1)
     no_sync = iter_size > 1
+    steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / iter_size))
+    if local_rank == 0:
+        print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
+              (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
+
+    dataloader = get_next(dataloader)
+    dataloader128 = get_next(dataloader128)
+    dataloader256 = get_next(dataloader256)
+    log_every_steps = args["log_every_steps"]
+    save_every_steps = args["save_every_steps"]
+
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
-    steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / iter_size))
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], epochs=args["epochs"], steps_per_epoch=steps_per_epoch,
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
                                                     div_factor=1e4, three_phase=False, pct_start=0.06, anneal_strategy="linear", cycle_momentum=False)
 
     # scheduler1 = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
     # scheduler = [scheduler1, scheduler2]
-    if local_rank == 0:
-        print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, epochs = %s, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
-              (get_time_string(), optc["lr"], args["epochs"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
 
     barrier()
 
@@ -492,144 +502,153 @@ def train(local_rank, args):
 
     dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
     discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
-    total_steps = args["epochs"] * len(dataloader)
-    for epoch in range(args["epochs"]):
+    total_steps = args["total_steps"]
+    steps_done = 0
+    step = 0
 
-        if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
-            dataloader.sampler.set_epoch(epoch)
+    start_time = time.time()
+    while steps_done < total_steps:
+        random.seed(step)
+        len_proba = random.random()
+        if len_proba < 0.9 or steps_done < args["warmup_steps"]:
+            batch = dataloader128()
+        elif len_proba < 0.95 or steps_done < 4 * args["warmup_steps"]:
+            batch = dataloader256()
         else:
-            print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), epoch))
+            batch = dataloader()
 
-        start_time = time.time()
-        for step, batch in enumerate(dataloader):
+        # batch = None
+        # if len_proba < 0.9:
+        #     batches = [dataloader128() for _ in range(4)]
+        # elif len_proba < 0.97:
+        #     batches = [dataloader256() for _ in range(2)]
+        # else:
+        #     batch = dataloader()
+        #
+        # if batch is None:
+        #     keys = batches[0].keys()
+        #     batch = dict()
+        #     for k in keys:
+        #         elems = [b[k] for b in batches]
+        #         if isinstance(elems[0], (list, tuple)):
+        #             new_elems = [i for e in elems for i in e]
+        #         elif isinstance(elems[0], torch.Tensor):
+        #             new_elems = torch.cat(elems, 0)
+        #         else:
+        #             raise TypeError("Expected List or Tensor")
+        #         batch[k] = new_elems
 
-            steps_done = epoch * len(dataloader) + step
-            teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
-            inner_model = getattr(trainable_model, "module", trainable_model)
-            if hasattr(inner_model, "start_from_proba"):
-                start_from_proba = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [0.0, 0.0, args["start_from_proba"]])
-                inner_model.start_from_proba = start_from_proba
-            if hasattr(inner_model.backbone.encoder, "sampling_alpha") and args["sampling_alpha"] is not None and args["sampling_alpha"] != 1.0:
-                sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
-                inner_model.backbone.encoder.sampling_alpha = max(sampling_alpha, 0.01)
-                inner_model.sampling_alpha = max(sampling_alpha, 0.01)
-                if args["dino_w"] > 0:
-                    dino_w = np.interp(steps_done, [0, 2 * args["warmup_steps"], args["warmup_steps"] * 3], [0.0, 0.0, args["dino_w"]])
-                    inner_model.dino_w = dino_w
+        key = list(batch.keys())[0]
+        bs_size = list(batch[key].size())
+        batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
 
-            # Beta updates for AdamW
-            # beta_1 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_1"], 0.9])
-            # beta_2 = np.interp(steps_done, [0, args["warmup_steps"]], [optc["beta_2"], 0.98])
-            # optimizer.param_groups[0]["betas"] = (beta_1, beta_2)
-            #
-            #
-            # generator_w_progressive = generator_w
-            # discriminator_w_progressive = discriminator_w
-            #
-            # model.generator_w = generator_w_progressive
-            # model.discriminator_w = discriminator_w_progressive
+        gen_batch_time = time.time() - start_time
 
-            if isinstance(batch, dict):
-                key = list(batch.keys())[0]
-                bs_size = list(batch[key].size())
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-            else:
-                batch[0] = batch[0].to(device, non_blocking=True)
-                batch[1] = batch[1].to(device, non_blocking=True)
-                bs_size = list(batch[0].size())
-                key = 0
+        teacher_update_w = np.interp(steps_done, [0, args["teacher_warmup_steps"]], [0.95, 0.999])
+        inner_model = getattr(trainable_model, "module", trainable_model)
+        if hasattr(inner_model, "start_from_proba"):
+            start_from_proba = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [0.0, 0.0, args["start_from_proba"]])
+            inner_model.start_from_proba = start_from_proba
+        if hasattr(inner_model.backbone.encoder, "sampling_alpha") and args["sampling_alpha"] is not None and args["sampling_alpha"] != 1.0:
+            sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
+            inner_model.backbone.encoder.sampling_alpha = max(sampling_alpha, 0.01)
+            inner_model.sampling_alpha = max(sampling_alpha, 0.01)
+            if args["dino_w"] > 0:
+                dino_w = np.interp(steps_done, [0, 2 * args["warmup_steps"], args["warmup_steps"] * 3], [0.0, 0.0, args["dino_w"]])
+                inner_model.dino_w = dino_w
 
-            gen_batch_time = time.time() - start_time
-            batch_times.append(gen_batch_time)
-            if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
-                state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
-                if local_rank == 0:
-                    torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
-                del state_dict
-                clean_memory()
-                barrier()
-                if args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]:
-                    return
+        batch_times.append(gen_batch_time)
+        if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
+            state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
+            if local_rank == 0:
+                torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
+            del state_dict
+            clean_memory()
+            barrier()
+            if args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]:
+                return
 
-            samples_processed += int(batch[key].size(0))
-            samples_processed_this_log_iter += int(batch[key].size(0))
-            inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"])
-            validation_iter = (steps_done + 1) % log_every_steps == 0 or step == 0
-            model_start = time.time()
-            if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
-                with trainable_model.no_sync():
-                    output = train_inner_loop(inner_args, model, batch, optimizer,
-                                              scheduler, gradient_clipping, iter_size=iter_size,
-                                              no_sync=True, validation_iter=validation_iter,
-                                              dino_center=dino_center,
-                                              discriminator_dino_center=discriminator_dino_center,
-                                              freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
-                model_times.append(time.time() - model_start)
-            else:
+        samples_processed += int(batch[key].size(0))
+        samples_processed_this_log_iter += int(batch[key].size(0))
+        inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"])
+        validation_iter = (steps_done + 1) % log_every_steps == 0 or step == 0
+        model_start = time.time()
+        if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
+            with trainable_model.no_sync():
                 output = train_inner_loop(inner_args, model, batch, optimizer,
                                           scheduler, gradient_clipping, iter_size=iter_size,
-                                          no_sync=False, validation_iter=validation_iter,
+                                          no_sync=True, validation_iter=validation_iter,
                                           dino_center=dino_center,
                                           discriminator_dino_center=discriminator_dino_center,
-                                          freeze_last_layer=epoch < args["freeze_last_layer"], step=steps_done + 1)
-                optimizer.zero_grad(set_to_none=True)
-                model_times.append(time.time() - model_start)
+                                          freeze_last_layer=steps_done < args["freeze_last_layer"], step=step + 1)
+            model_times.append(time.time() - model_start)
+        else:
+            output = train_inner_loop(inner_args, model, batch, optimizer,
+                                      scheduler, gradient_clipping, iter_size=iter_size,
+                                      no_sync=False, validation_iter=validation_iter,
+                                      dino_center=dino_center,
+                                      discriminator_dino_center=discriminator_dino_center,
+                                      freeze_last_layer=steps_done < args["freeze_last_layer"], step=step + 1)
+            optimizer.zero_grad(set_to_none=True)
+            steps_done += 1
+            model_times.append(time.time() - model_start)
 
-            del batch
-            if dino_w > 0 and (step + 1) % iter_size:
-                student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
-            dino_center = output.pop("dino_center", None)
-            discriminator_dino_center = output.pop("discriminator_dino_center", None)
-            if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
-                if dino_center is not None:
-                    dtype = dino_center.dtype
-                    dino_center = dino_center.type(torch.float64) / args["world_size"]
-                    torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
-                    dino_center = dino_center.type(dtype)
-                if discriminator_dino_center is not None:
-                    dtype = discriminator_dino_center.dtype
-                    discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
-                    torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
-                    discriminator_dino_center = discriminator_dino_center.type(dtype)
-            if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
-                layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
-                if layer_normalizers is not None:
-                    dtype = layer_normalizers.dtype
-                    layer_normalizers = layer_normalizers.type(torch.float64)
-                    torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
-                    layer_normalizers = layer_normalizers / args["world_size"]
-                    getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
+        step += 1
+        del batch
+        if dino_w > 0 and (step + 1) % iter_size:
+            student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
+        dino_center = output.pop("dino_center", None)
+        discriminator_dino_center = output.pop("discriminator_dino_center", None)
+        if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
+            if dino_center is not None:
+                dtype = dino_center.dtype
+                dino_center = dino_center.type(torch.float64) / args["world_size"]
+                torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
+                dino_center = dino_center.type(dtype)
+            if discriminator_dino_center is not None:
+                dtype = discriminator_dino_center.dtype
+                discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
+                torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
+                discriminator_dino_center = discriminator_dino_center.type(dtype)
+        if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
+            layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
+            if layer_normalizers is not None:
+                dtype = layer_normalizers.dtype
+                layer_normalizers = layer_normalizers.type(torch.float64)
+                torch.distributed.all_reduce(layer_normalizers, torch.distributed.ReduceOp.SUM)
+                layer_normalizers = layer_normalizers / args["world_size"]
+                getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
 
-            full_time = time.time() - start_time
-            full_times.append(full_time)
-            if step == 0 and epoch == 0 and local_rank == 0:
-                print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
-            if (steps_done + 1) % log_every_steps == 0 or step == 0:
-                if local_rank == 0:
+        full_time = time.time() - start_time
+        full_times.append(full_time)
+        if step == 0 and local_rank == 0:
+            print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
+        if (steps_done + 1) % log_every_steps == 0 or step == 0:
+            if local_rank == 0:
 
-                    steps_remaining = total_steps - steps_done
-                    # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
-                    output = {k: float(v) if v else v for k, v in output.items()}
-                    samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-                    wandb_log = dict(lr=optimizer.param_groups[0]['lr'], epoch=epoch+1, step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                                     batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
-                                     **{k: v for k, v in output.items() if v is not None})
+                steps_remaining = total_steps - steps_done
+                # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
+                output = {k: float(v) if v else v for k, v in output.items()}
+                samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
+                wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
+                                 batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                                 **{k: v for k, v in output.items() if v is not None})
 
-                    wandb.log(wandb_log)
-                    print("[Train]: Time = %s, Epoch = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
-                          (get_time_string(), epoch+1, rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                    print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
-                        get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
-                batch_times = []
-                full_times = []
-                model_times = []
-                samples_processed_this_log_iter = 0
+                wandb.log(wandb_log)
+                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
+                      (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
+                print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
+                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
+            batch_times = []
+            full_times = []
+            model_times = []
+            samples_processed_this_log_iter = 0
 
-                # clean_memory()
-                # barrier()
-            del output
-            del bs_size
-            start_time = time.time()
+            # clean_memory()
+            # barrier()
+        del output
+        del bs_size
+        start_time = time.time()
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
     state_dict = trainable_model.state_dict() if not isinstance(trainable_model, DDP) else trainable_model.module.state_dict()
     if local_rank == 0:

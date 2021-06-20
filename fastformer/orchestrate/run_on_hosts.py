@@ -195,7 +195,7 @@ if __name__ == "__main__":
     lm_cmd += " --log_every_steps 50 --num_workers 8 --save_every_steps 2000"
     # lm_cmd += " --wandb_dryrun"
     lm_cmd += " --init_method=tcp  --master_addr 0.0.0.0 --master_port 9998 --shuffle_dataset --accumulation_steps 1"
-    lm_cmd += " --epochs 3 --lr 0.004 --batch_size 16 --lr_steps 1 --weight_decay 0.005"
+    lm_cmd += " --total_steps 1000000 --lr 0.004 --batch_size 16 --lr_steps 1 --weight_decay 0.005"
     lm_cmd += " --warmup_steps 10000 --gradient_clipping 3.0 --teacher_warmup_steps 1000"
     lm_cmd += " --sentence_order_prediction_w 1.0 --generator_w 1.0 --discriminator_w 50.0 --dino_w 0.0"  # --attention_penalty_w 100.0
     lm_cmd += " --optimizer adamw"

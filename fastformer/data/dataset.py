@@ -618,7 +618,7 @@ class MTTDataset(Dataset):
         self.wj_l, self.wj_p = zip(*word_jumble_proba)
         self.max_jumbling_span_length = max_jumbling_span_length
         self.jumble_sentence = jumble_sentence
-        self.allowed_raw_length = self.tokenizer_args["max_length"] - 48
+        self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
         
     def train(self):
@@ -726,6 +726,79 @@ class MTTDataset(Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+
+class get_simple_collate_fn:
+    def __init__(self, num_cls, padding_index):
+        self.num_cls = num_cls
+        self.padding_index = padding_index
+        self.non_reduced_keys = ["token_type_ids", 'labels_segment_index',
+                                 'attention_mask', 'label',]
+
+    def __call__(self, samples):
+        num_cls = self.num_cls
+        padding_index = self.padding_index
+        for s in samples:
+            for k, v in s.items():
+                if isinstance(v, torch.Tensor):
+                    if v.size() != samples[0][k].size():
+                        print("Collate size mismatch Key = %s, size_zero = %s, size_cur = %s" % (k, samples[0][k].size(), v.size()))
+
+        samples = default_collate(samples)
+        samples = {k: squeeze_after(v, 0) if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        input_reduce_key = "labels" if "labels" in samples else 'input_ids'
+        other_non_reduced_pair = "labels" if "labels" not in samples else 'input_ids'
+        reduced_keys = [input_reduce_key]
+
+        for k, v in samples.items():
+            if k in self.non_reduced_keys or len(v.size()) < 2 or k not in reduced_keys:
+                continue
+
+            step_size = 32
+            while len(v[:, -step_size:].unique()) == 1 and v[:, -step_size:].unique().item() == padding_index and v.shape[1] > step_size:
+                v = v[:, :-step_size]
+
+            step_size = 8
+            while len(v[:, -step_size:].unique()) == 1 and v[:, -step_size:].unique().item() == padding_index and v.shape[1] > step_size:
+                v = v[:, :-step_size]
+
+            required_len = int(step_size * np.ceil(v.shape[1]/step_size))
+            required_len = required_len - step_size + (step_size - num_cls)
+            padding = required_len - v.shape[-1]
+            if padding > 0:
+                v = torch.cat([v, v.new(v.shape[0], padding).fill_(padding_index)], 1)
+            elif padding < 0:
+                v = v[:, :padding]
+            samples[k] = v
+        # print(type(samples), samples.keys(), {k: v.size() for k, v in samples.items() if hasattr(v, "size")})
+        if other_non_reduced_pair in samples:
+            samples[other_non_reduced_pair] = samples[other_non_reduced_pair][:, :samples[input_reduce_key].shape[1]]
+        samples['attention_mask'] = samples['attention_mask'][:, :samples['input_ids'].shape[1]]
+        if "token_type_ids" in samples:
+            del samples['token_type_ids']
+        samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
+        return samples
+
+
+class get_next:
+    def __init__(self, dataloader):
+        self.dataloader = dataloader
+        self.iter = iter(dataloader)
+        self.epoch = 0
+
+    def __call__(self):
+        try:
+            return next(self.iter)
+        except StopIteration as st:
+            self.epoch += 1
+            dataloader = self.dataloader
+            if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
+                dataloader.sampler.set_epoch(self.epoch)
+            else:
+                print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), self.epoch))
+            self.iter = iter(dataloader)
+            return next(self.iter)
+
 
 
 class get_collate_fn:
