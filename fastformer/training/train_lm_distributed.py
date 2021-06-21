@@ -358,7 +358,7 @@ class SuperGlueTest:
         optimizer = None
         scheduler = None
         ddp_model = model
-        if reinit or not isinstance(model, FastFormerForClassification):
+        if reinit or not isinstance(model, (FastFormerForClassification, DDP)):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer, train_backbone=train_backbone)
             classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
             classifier = classifier.to(device)
