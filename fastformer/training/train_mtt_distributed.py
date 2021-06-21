@@ -433,13 +433,13 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
-    dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
+    dataloader = build_dataloader(os.path.join(args["dataset"], "all_512_only"), args["shuffle_dataset"], batch_size,
                                   tokenizer, args["cls_tokens"],
                                   world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
-    dataloader128 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 4,
+    dataloader128 = build_dataloader(os.path.join(args["dataset"], "all_128_only"), args["shuffle_dataset"], batch_size * 4,
                                   tokenizer, args["cls_tokens"],
                                   world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
-    dataloader256 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 2,
+    dataloader256 = build_dataloader(os.path.join(args["dataset"], "all_256_only"), args["shuffle_dataset"], batch_size * 2,
                                   tokenizer, args["cls_tokens"],
                                   world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
     iter_size = max(args["accumulation_steps"], 1)
