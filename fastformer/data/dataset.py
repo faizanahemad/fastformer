@@ -40,6 +40,7 @@ import nltk.data
 from collections import defaultdict
 import re
 import random
+from more_itertools import windowed
 
 
 def isnumber(text):
@@ -49,6 +50,27 @@ def isnumber(text):
     except:
         pass
     return False
+
+
+def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, required_length_max):
+    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+    sents = sent_detector.tokenize(text)
+    tokenizer_args = dict(padding="none", truncation=True, return_tensors="pt", max_length=512)
+    sent_lengths = [tokenizer(s, return_offsets_mapping=False, **tokenizer_args)["attention_mask"].squeeze().sum() for s in sents]
+    valid_pairs = []
+    sents_n_lengths = list(zip(sents, sent_lengths))
+    for wlen in range(1, len(sents_n_lengths)):
+        for ws in windowed(sents_n_lengths, wlen):
+            current_sents, current_lengths = zip(*ws)
+            tl = sum(current_lengths)
+            if tl >= required_length_min and tl < required_length_max - 2:
+                valid_pairs.append(" ".join(current_sents))
+    if len(valid_pairs) > 0:
+        text = random.choice(valid_pairs)
+    else:
+        raise ValueError
+
+    return text
 
 
 def segment(text, n_segments, sent_detector, pad_token):
@@ -633,18 +655,18 @@ class MTTDataset(Dataset):
         label = item["label"] if "label" in item else 0.0
 
         text = item["text"]
-        length = len(text.strip().split())
-        if length == 0:
-            text = "empty empty no text empty"
-        if length > self.allowed_raw_length:
-            text = " ".join(text.split()[:self.allowed_raw_length])
-            length = len(text.strip().split())
-
         text = unidecode.unidecode(text)
         text = " ".join([x.strip() for x in text.split()])
-        text = " " + text.strip()
+        length = len(text.strip().split())
+
+        if length > self.allowed_raw_length:
+            try:
+                text = get_valid_sentences(text, self.sent_detector, tokenizer, self.tokenizer_args["max_length"] // 2, self.tokenizer_args["max_length"])
+            except:
+                text = " ".join(text.split()[:self.allowed_raw_length])
+            length = len(text.strip().split())
+
         results = dict()
-        acc2 = -1
         if self.training:
             seg_sep_token = f" {tokenizer.sep_token} "
 

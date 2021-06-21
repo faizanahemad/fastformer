@@ -681,13 +681,14 @@ class SuperGlueTest:
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
         axb = axb.map(lambda x: dict(text=x["sentence1"] + f" {tokenizer.sep_token} " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
-        classifier_data = self.prepare_classifier(classifier_data["model"], axb, device, 1, dataset_key, rank, reinit=False)
+        model_dict["model"] = classifier_data["model"]
+        classifier_data = self.prepare_classifier(model_dict, axb, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         test_idx = classifier_data["test_idx"]
         final_predictions_axb = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         axg = axg.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        classifier_data = self.prepare_classifier(classifier_data["model"], axg, device, 1, dataset_key, rank, reinit=False)
+        classifier_data = self.prepare_classifier(model_dict, axg, device, 1, dataset_key, rank, reinit=False)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, predict_only=True)
         test_idx = classifier_data["test_idx"]
         final_predictions_axg = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in
