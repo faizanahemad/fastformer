@@ -571,7 +571,7 @@ def train(local_rank, args):
         samples_processed += int(batch[key].size(0))
         samples_processed_this_log_iter += int(batch[key].size(0))
         inner_args = dict(no_autocast=args["no_autocast"], cpu=args["cpu"])
-        validation_iter = (steps_done + 1) % log_every_steps == 0 or step == 0
+        validation_iter = (step + 1) % log_every_steps == 0 or step == 0
         model_start = time.time()
         if no_sync and (step + 1) % iter_size != 0 and hasattr(trainable_model, "no_sync"):
             with trainable_model.no_sync():
@@ -599,7 +599,7 @@ def train(local_rank, args):
             student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
         dino_center = output.pop("dino_center", None)
         discriminator_dino_center = output.pop("discriminator_dino_center", None)
-        if dino_w > 0 and (step + 1) % (4 * iter_size) == 0 and args["world_size"] > 1:
+        if dino_w > 0 and (step + 1) % (1 * iter_size) == 0 and args["world_size"] > 1:
             if dino_center is not None:
                 dtype = dino_center.dtype
                 dino_center = dino_center.type(torch.float64) / args["world_size"]
@@ -624,17 +624,16 @@ def train(local_rank, args):
         if step == 0 and local_rank == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if (step + 1) % log_every_steps == 0 or step == 0:
+            steps_remaining = total_steps - steps_done
+            # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
+            output = {k: float(v) if v else v for k, v in output.items()}
+            samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
+            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
+                             batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                             **{k: v for k, v in output.items() if v is not None})
+
+            wandb.log(wandb_log)
             if local_rank == 0:
-
-                steps_remaining = total_steps - steps_done
-                # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
-                output = {k: float(v) if v else v for k, v in output.items()}
-                samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-                wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                                 batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
-                                 **{k: v for k, v in output.items() if v is not None})
-
-                wandb.log(wandb_log)
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
                       (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
