@@ -468,15 +468,13 @@ def train(local_rank, args):
 
     gradient_clipping = optc["gradient_clipping"]
 
-    if local_rank == 0:
-        group = "%s-%s-%s-%sN-%s" % (args["wandb_name"], ds_name, args["model_config"], args["nodes"], time_string)
-        wandb_init_args = dict(project="de_lm", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
-                               config={"args":args, "optimizer_config": optc},
-                               settings=wandb.Settings(start_method="fork"))
+    group = "%s-%s-%s-%sN-%s" % (args["wandb_name"], ds_name, args["model_config"], args["nodes"], time_string)
+    wandb_init_args = dict(project="de_lm", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
+                           config={"args":args, "optimizer_config": optc},
+                           settings=wandb.Settings(start_method="fork"))
 
-        time.sleep(random.random() * 5)
-        wandb.init(**wandb_init_args)
-        print("[Train]: WandB-watch added over model for Rank = %s" % rank)
+    time.sleep(random.random())
+    wandb.init(**wandb_init_args)
 
     full_times = []
     batch_times = []
