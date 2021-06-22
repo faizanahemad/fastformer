@@ -452,7 +452,7 @@ def train(local_rank, args):
     dataloader = get_next(dataloader)
     dataloader128 = get_next(dataloader128)
     dataloader256 = get_next(dataloader256)
-    log_every_steps = args["log_every_steps"]
+    log_every_steps = args["log_every_steps"] * iter_size
     save_every_steps = args["save_every_steps"]
 
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
@@ -623,7 +623,7 @@ def train(local_rank, args):
         full_times.append(full_time)
         if step == 0 and local_rank == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
-        if (steps_done + 1) % log_every_steps == 0 or step == 0:
+        if (step + 1) % log_every_steps == 0 or step == 0:
             if local_rank == 0:
 
                 steps_remaining = total_steps - steps_done
@@ -639,7 +639,7 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
-                print("Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s" % (steps_done, log_every_steps, total_steps, steps_remaining))
+                # print("Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s" % (steps_done, log_every_steps, total_steps, steps_remaining))
             batch_times = []
             full_times = []
             model_times = []
