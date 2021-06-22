@@ -58,6 +58,7 @@ def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, req
     tokenizer_args = dict(padding="none", truncation=True, return_tensors="pt", max_length=512)
     sent_lengths = [tokenizer(s, return_offsets_mapping=False, **tokenizer_args)["attention_mask"].squeeze().sum() for s in sents]
     valid_pairs = []
+    valid_lengths = []
     sents_n_lengths = list(zip(sents, sent_lengths))
     for wlen in range(1, len(sents_n_lengths)):
         for ws in windowed(sents_n_lengths, wlen):
@@ -65,8 +66,9 @@ def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, req
             tl = sum(current_lengths)
             if tl >= required_length_min and tl < required_length_max - 2:
                 valid_pairs.append(" ".join(current_sents))
+                valid_lengths.append(tl)
     if len(valid_pairs) > 0:
-        text = random.choice(valid_pairs)
+        text = random.choices(valid_pairs, np.array(valid_lengths)/sum(valid_lengths), k=1)[0]
     else:
         raise ValueError
 
@@ -661,7 +663,7 @@ class MTTDataset(Dataset):
 
         if length > self.allowed_raw_length:
             try:
-                text = get_valid_sentences(text, self.sent_detector, tokenizer, self.tokenizer_args["max_length"] // 2, self.tokenizer_args["max_length"])
+                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.6), self.tokenizer_args["max_length"])
             except:
                 text = " ".join(text.split()[:self.allowed_raw_length])
             length = len(text.strip().split())
