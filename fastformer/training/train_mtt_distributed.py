@@ -433,15 +433,28 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
-    dataloader = build_dataloader(os.path.join(args["dataset"], "all_512_only"), args["shuffle_dataset"], batch_size,
-                                  tokenizer, args["cls_tokens"],
-                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
-    dataloader128 = build_dataloader(os.path.join(args["dataset"], "all_128_only"), args["shuffle_dataset"], batch_size * 4,
-                                  tokenizer, args["cls_tokens"],
-                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
-    dataloader256 = build_dataloader(os.path.join(args["dataset"], "all_256_only"), args["shuffle_dataset"], batch_size * 2,
-                                  tokenizer, args["cls_tokens"],
-                                  world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
+
+    try:
+        dataloader = build_dataloader(os.path.join(args["dataset"], "all_512_only"), args["shuffle_dataset"], batch_size,
+                                      tokenizer, args["cls_tokens"],
+                                      world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
+        dataloader128 = build_dataloader(os.path.join(args["dataset"], "all_128_only"), args["shuffle_dataset"], batch_size * 4,
+                                      tokenizer, args["cls_tokens"],
+                                      world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
+        dataloader256 = build_dataloader(os.path.join(args["dataset"], "all_256_only"), args["shuffle_dataset"], batch_size * 2,
+                                      tokenizer, args["cls_tokens"],
+                                      world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
+    except:
+        dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
+                                      tokenizer, args["cls_tokens"],
+                                      world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
+        dataloader128 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 4,
+                                         tokenizer, args["cls_tokens"],
+                                         world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
+        dataloader256 = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size * 2,
+                                         tokenizer, args["cls_tokens"],
+                                         world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
+
     iter_size = max(args["accumulation_steps"], 1)
     no_sync = iter_size > 1
     steps_per_epoch = int(np.ceil(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / iter_size))
@@ -621,7 +634,7 @@ def train(local_rank, args):
         full_times.append(full_time)
         if step == 0 and local_rank == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
-        if (step + 1) % log_every_steps == 0 or step == 0:
+        if validation_iter:
             steps_remaining = total_steps - steps_done
             # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
             output = {k: float(v) if v else v for k, v in output.items()}
@@ -636,7 +649,7 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
-                # print("Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s" % (steps_done, log_every_steps, total_steps, steps_remaining))
+                # print("Step = %s, Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s, validation_iter = %s, %s" % (step, steps_done, log_every_steps, total_steps, steps_remaining, validation_iter, (step + 1) % log_every_steps == 0))
             batch_times = []
             full_times = []
             model_times = []
