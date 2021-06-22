@@ -97,6 +97,8 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
         else:
             model_name = "roberta-base"
             config = RobertaConfig.from_pretrained(model_name)
+        config.hidden_dropout_prob = 0.02
+        config.attention_probs_dropout_prob = 0.02
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
