@@ -474,7 +474,7 @@ class RobertaEncoder(nn.Module):
                 continue
             elif drop_unused_layers and layer_normalizers is not None:
                 hidden_states = hidden_states * scale_factor
-                layer_scales_loss = layer_scales_loss + (scale_factor - 1) ** 2
+                layer_scales_loss = layer_scales_loss + (scale_factor - 1) ** 2 + (scale_factor.clip(-1e8, 1.0) - 1) ** 2
 
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
