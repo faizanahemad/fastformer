@@ -639,6 +639,7 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
+                print("Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s" % (steps_done, log_every_steps, total_steps, steps_remaining))
             batch_times = []
             full_times = []
             model_times = []
