@@ -506,11 +506,11 @@ class BertIntermediate(nn.Module):
             center = layer_normalizer[0].detach().clone()
             hidden_states = hidden_states - center
 
-            if self.training and torch.is_grad_enabled():
-                std = hidden_states.detach().view(-1, hidden_states.size(-1)).std(0)
-                layer_normalizer[1].mul_(0.999).add_(0.001 * std)
-            std = layer_normalizer[1].detach().clone()
-            hidden_states = hidden_states / std
+            # if self.training and torch.is_grad_enabled():
+            #     std = hidden_states.detach().view(-1, hidden_states.size(-1)).std(0)
+            #     layer_normalizer[1].mul_(0.999).add_(0.001 * std)
+            # std = layer_normalizer[1].detach().clone()
+            # hidden_states = hidden_states / std
 
             if self.training and torch.is_grad_enabled():
                 norm = (hidden_states.detach().norm(2, -1).mean() + 1e-5).expand(hidden_states.size(-1))
