@@ -498,23 +498,26 @@ class BertIntermediate(nn.Module):
         else:
             hs = self.intermediate_act_fn(self.dense(hs))
         gof = self.dense_last(self.dropout(hs))
-        if layer_start_hidden is not None and layer_normalizer is not None and fi is not None:
-            fi_gof = fi + gof
+        hidden_states = hidden_states + gof
+        if layer_start_hidden is not None and layer_normalizer is not None:
             if self.training and torch.is_grad_enabled():
-                center = fi_gof.detach().mean(0).mean(0)
+                center = hidden_states.detach().mean(0).mean(0)
                 layer_normalizer[0].mul_(0.999).add_(0.001 * center)
             center = layer_normalizer[0].detach().clone()
-            fi_gof = fi_gof - center
+            hidden_states = hidden_states - center
 
             if self.training and torch.is_grad_enabled():
-                norm = (fi_gof.detach().norm(2, -1).mean() + 1e-5).expand(fi_gof.size(-1))
+                std = hidden_states.detach().view(-1, hidden_states.size(-1)).std(0)
+                layer_normalizer[1].mul_(0.999).add_(0.001 * std)
+            std = layer_normalizer[1].detach().clone()
+            hidden_states = hidden_states / std
+
+            if self.training and torch.is_grad_enabled():
+                norm = (hidden_states.detach().norm(2, -1).mean() + 1e-5).expand(hidden_states.size(-1))
                 layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
             norm = layer_normalizer[2].detach().clone()
-            fi_gof = fi_gof / norm
-            hidden_states = layer_start_hidden
-            gof = fi_gof
+            hidden_states = hidden_states / norm
 
-        hidden_states = hidden_states + gof
         # O = I + f(I) + g(I + f(I))
         # hidden_states = I + f(I)
         return hidden_states

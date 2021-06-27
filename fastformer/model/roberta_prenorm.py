@@ -130,6 +130,12 @@ class RobertaEmbeddings(nn.Module):
             embeddings = embeddings - center
 
             if self.training and torch.is_grad_enabled():
+                std = embeddings.detach().view(-1, embeddings.size(-1)).std(0)
+                layer_normalizer[1].mul_(0.999).add_(0.001 * std)
+            std = layer_normalizer[1].detach().clone()
+            embeddings = embeddings / std
+
+            if self.training and torch.is_grad_enabled():
                 norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
                 layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
             norm = layer_normalizer[2].detach().clone()
@@ -380,10 +386,6 @@ class RobertaEncoder(nn.Module):
         self.config = config
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
         self.sampling_alpha = getattr(self.config, "sampling_alpha", 1.0)
-        self.scale_factors_idx = [(i, j) for i in range(config.num_hidden_layers) for j in range(i + 2, config.num_hidden_layers)]
-        scale_factor_values = [j / (i + 1) for i in range(config.num_hidden_layers) for j in range(i + 2, config.num_hidden_layers)]
-        scale_factors_emb = nn.Parameter(torch.tensor(scale_factor_values))
-        self.register_parameter("scale_factors_emb", scale_factors_emb)
 
     def forward(
         self,
@@ -455,7 +457,6 @@ class RobertaEncoder(nn.Module):
         drop_unused_layers = drop_unused_layers or approximate_unused_layers
         approximate_unused_layers = False
         prev_grad_layer = max(start_sampling_from - 1, 0)
-        layer_scales = dict(zip(self.scale_factors_idx, self.scale_factors_emb))
         layer_scales_loss = 0.0
         for i, layer_module in enumerate(layers):
 
@@ -465,8 +466,6 @@ class RobertaEncoder(nn.Module):
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from and torch.is_grad_enabled()
 
             scale_factor = 1
-            if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers) and layer_normalizers is not None:
-                scale_factor = layer_scales[(prev_grad_layer, i)]
 
             if i < start_sampling_from:
                 pass
@@ -474,9 +473,6 @@ class RobertaEncoder(nn.Module):
                 continue
             elif drop_unused_layers and layer_normalizers is not None:
                 hidden_states = hidden_states * scale_factor
-                if isinstance(scale_factor, torch.Tensor):
-                    layer_scales_loss = layer_scales_loss + (scale_factor - 1) ** 2 + (scale_factor.clip(-1e8, 1.0) - 1) ** 2
-
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
 
@@ -707,6 +703,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         layer_normalizers = None
         if enable_layer_normalizers:
             layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size, requires_grad=False, dtype=torch.float32)
+            layer_normalizers[:, 1] = 1.0
             layer_normalizers[:, 2] = 1.0
             # layer_normalizers[:, 5] = 1.0
             layer_normalizers = layer_normalizers.detach()
