@@ -468,7 +468,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 sent_order_accuracy = (sent_order_preds == labels_segment_index).type(sent_order_logits.dtype).mean().item()
 
         if layer_scales_loss is not None:
-            layer_scales_loss = 0.01 * layer_scales_loss
+            layer_scales_loss = 0.001 * layer_scales_loss
         return dict(masked_lm_loss=masked_lm_loss, lm_accuracy=lm_accuracy, lm_input_accuracy=lm_input_accuracy,
                     dino=dino, discriminator_accuracy=discriminator_accuracy, sent_order_accuracy=sent_order_accuracy,
                     discriminator_extra_accuracy=discriminator_extra_accuracy, masked_accuracy=masked_accuracy,
