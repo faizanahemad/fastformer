@@ -564,9 +564,9 @@ def train(local_rank, args):
             sampling_alpha = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2], [1.0, 1.0, args["sampling_alpha"]])
             inner_model.backbone.encoder.sampling_alpha = max(sampling_alpha, 0.01)
             inner_model.sampling_alpha = max(sampling_alpha, 0.01)
-            if args["dino_w"] > 0:
-                dino_w = np.interp(steps_done, [0, 2 * args["warmup_steps"], args["warmup_steps"] * 3], [0.0, 0.0, args["dino_w"]])
-                inner_model.dino_w = dino_w
+        if args["dino_w"] > 0:
+            dino_w = np.interp(steps_done, [0, args["teacher_warmup_steps"], args["teacher_warmup_steps"] * 2], [0.0, 0.0, args["dino_w"]])
+            inner_model.dino_w = dino_w
 
         batch_times.append(gen_batch_time)
         if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
