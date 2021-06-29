@@ -229,8 +229,8 @@ class MTTModel(FastFormerPreTrainedModel):
             if norm_last_layer:
                 last_layer.weight_g.requires_grad = False
 
-            self.ffn = nn.Sequential(nn.Linear(num_features, bottleneck_dim), nn.GELU(),
-                                     # nn.Linear(num_features, bottleneck_dim),
+            self.ffn = nn.Sequential(nn.Linear(num_features, num_features), nn.GELU(),
+                                     nn.Linear(num_features, bottleneck_dim),
                                      # Norm(),
                                      last_layer)  # weight_norm
             init_weights(self.ffn[0], 0.02)
@@ -562,22 +562,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                     all_discriminator_selected_layers=all_layers_accuracy["discriminator_selected_layers"],
 
                 )
-                # print("#" * 80)
-                # print({k: v for k, v in student_rep.items() if "accuracy" in k or "selected_layers" in k})
-                # print(all_stats)
-                # for i, (x, y) in enumerate(zip(all_layers_accuracy["discriminator_outputs_raw"], student_rep["discriminator_outputs_raw"])):
-                #     diff = ((x - y) ** 2) ** 0.5
-                #     print(i, torch.mean(diff), torch.max(diff))
-                # # print(all_layers_accuracy["generator_output"][:, :6, :6], "\n", student_rep["generator_output"][:, :6, :6])
-                # # print(all_layers_accuracy["discriminator_outputs_raw"][:, :6, :4], "\n", student_rep["discriminator_outputs_raw"][:, :6, :4])
-                # # print(all_layers_accuracy["discriminator_outputs"][:6], "\n", student_rep["discriminator_outputs"][:6])
-                # diff = ((all_layers_accuracy["discriminator_ffn_outputs"] - student_rep["discriminator_ffn_outputs"]) ** 2) ** 0.5
-                # print("diff_discriminator_ffn_outputs", torch.mean(diff), torch.max(diff))
-                # diff = ((all_layers_accuracy["discriminator_ffn_inputs"] - student_rep["discriminator_ffn_inputs"]) ** 2) ** 0.5
-                # print("discriminator_ffn_inputs", torch.mean(diff), torch.max(diff))
-                # exit()
-                # print("#" * 80)
 
+        teacher_stats = dict()
         if self.dino_w > 0:
             with torch.no_grad():
                 # print("teacher layers = ", self.teacher.lm_layers_total, self.teacher.electra_layers_total)
@@ -589,26 +575,36 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                       num_layers_electra=self.teacher.electra_layers_total,
                                       num_layers_total_electra=self.teacher.electra_layers_total,
                                       discriminator_inputs=discriminator_inputs, validation_iter=False)
+                # teacher_stats = dict(
+                #     teacher_masked_lm_loss=teacher_rep["masked_lm_loss"].item(),
+                #     teacher_discriminator_loss=teacher_rep["discriminator_loss"].item(),
+                # )
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
         loss = sum(losses)
-        if self.dino_w > 0:
-            dino_results = self.dino_loss(student_rep.pop("dino").unsqueeze(0), teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
+        if self.student.dino_w > 0:
+            student_dino = student_rep.pop("dino").unsqueeze(0)
+            dino_results = self.dino_loss(student_dino, teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
+            # dino_loss = 0
+            # if teacher_stats["teacher_masked_lm_loss"] < student_rep["masked_lm_loss"].item():
             dino_loss = dino_results["dino_loss"]
+
             student_dino = student_rep.pop("discriminator_dino", None)
             dino_results = self.dino_loss(student_dino.unsqueeze(0), teacher_rep.pop("discriminator_dino").detach().unsqueeze(0), discriminator_dino_center, 1, 1)
             discriminator_dino_center = dino_results["dino_center"]
+            # if teacher_stats["teacher_discriminator_loss"] < student_rep["discriminator_loss"].item():
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
-            loss += dino_loss
+            loss = loss + self.student.dino_w * dino_loss
         student_rep = get_loggable_dict(student_rep)
         all_stats = get_loggable_dict(all_stats)
+        teacher_stats = get_loggable_dict(teacher_stats)
         return dict(loss=loss,
                     dino_center=dino_center.detach() if isinstance(dino_center, torch.Tensor) else dino_center,
                     discriminator_dino_center=discriminator_dino_center.detach() if isinstance(discriminator_dino_center, torch.Tensor) else discriminator_dino_center,
-                    dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep, **all_stats)
+                    dino_loss=dino_loss.detach() if isinstance(dino_loss, torch.Tensor) else dino_loss, **student_rep, **all_stats, **teacher_stats)
 
 
 
