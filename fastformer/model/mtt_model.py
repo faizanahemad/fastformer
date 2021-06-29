@@ -345,12 +345,12 @@ class MTTModel(FastFormerPreTrainedModel):
         generator_selected_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
         active_locations = attention_mask.bool()
 
-        if self.attention_penalty_w > 0:
-            attentions = outputs["attentions"]
-            # attentions = sum([a/(len(attentions) - i) for i, a in enumerate(attentions)]).mean(0).mean(0)
-            attentions = sum([a for i, a in enumerate(attentions[1:-1])]).mean(0).mean(0)
-            penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
-            attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
+        # if self.attention_penalty_w > 0:
+        #     attentions = outputs["attentions"]
+        #     # attentions = sum([a/(len(attentions) - i) for i, a in enumerate(attentions)]).mean(0).mean(0)
+        #     attentions = sum([a for i, a in enumerate(attentions[1:-1])]).mean(0).mean(0)
+        #     penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
+        #     attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
 
         if self.cls_tokens > 1 and validation_iter:
             inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens].detach()
@@ -379,7 +379,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 masked_lm_loss = 0.0
                 if active_prediction_logits.ndim > 1 and active_prediction_logits.shape[0] > 0 and active_prediction_logits.shape[1] > 0:
                     lm_replace_possible = True
-                    if self.training and torch.is_grad_enabled():
+                    if (self.training and torch.is_grad_enabled()) or validation_iter:
                         masked_lm_loss = self.generator_w * self.loss_ce(active_prediction_logits, active_labels)
                     if validation_iter:
                         masked_accuracy = (active_prediction_logits.detach().argmax(dim=-1) == active_labels).type(active_prediction_logits.dtype).mean().item()
@@ -440,13 +440,13 @@ class MTTModel(FastFormerPreTrainedModel):
                     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
 
                 sent_hidden = discriminator_outputs[:, 0]
-                if self.discriminator_w > 0:
+                if self.discriminator_w > 0 or validation_iter:
                     discriminator_ffn_inputs = discriminator_outputs
                     discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
                     discriminator_ffn_outputs = discriminator_outputs
                     discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
                     discriminator_inputs["discriminator_labels"] = discriminator_labels
-                    if self.training and torch.is_grad_enabled():
+                    if (self.training and torch.is_grad_enabled()) or validation_iter:
                         discriminator_loss = self.discriminator_w * self.loss_bce(discriminator_outputs, discriminator_labels)
                     if validation_iter:
                         discriminator_label_mean = discriminator_labels.mean()
@@ -458,10 +458,10 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_positive_accuracy = sample_accuracies[discriminator_labels].mean().item()
                         discriminator_negative_accuracy = sample_accuracies[torch.logical_not(discriminator_labels)].mean().item()
 
-        if self.sentence_order_prediction_w and labels_segment_index is not None and self.training and torch.is_grad_enabled():
+        if self.sentence_order_prediction_w and labels_segment_index is not None and ((self.training and torch.is_grad_enabled()) or validation_iter):
             labels_segment_index = labels_segment_index.float()
             sent_order_logits = self.sent_order_nn(sent_hidden).squeeze(-1)
-            if self.training and torch.is_grad_enabled():
+            if (self.training and torch.is_grad_enabled()) or validation_iter:
                 sent_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, labels_segment_index)
             if validation_iter:
                 sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
@@ -582,6 +582,8 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                     teacher_discriminator_extra_accuracy=teacher_rep["discriminator_extra_accuracy"],
                     teacher_sent_order_accuracy=teacher_rep["sent_order_accuracy"],
                 )
+                if validation_iter:
+                    print(teacher_stats)
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
