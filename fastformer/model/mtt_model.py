@@ -364,7 +364,7 @@ class MTTModel(FastFormerPreTrainedModel):
             dino = self.ffn(dino_hidden)
 
         if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
-            if self.generator_w > 0 or discriminator_inputs is None:
+            if self.generator_w > 0 or discriminator_inputs is None or validation_iter:
                 mask_indices = (input_ids.int() != labels.int())
                 generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
                 generator_output = self.generator_ffn(generator_output)
@@ -373,7 +373,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
                 lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
 
-            if self.generator_w > 0 and labels is not None:
+            if (self.generator_w > 0 or validation_iter) and labels is not None:
                 active_labels = labels[mask_indices].reshape(-1)
                 active_prediction_logits = lm_logits.reshape(-1, self.vocab_size)
                 masked_lm_loss = 0.0
@@ -570,15 +570,18 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                 teacher = self.teacher  # .eval()
                 if self.device is not None:
                     teacher = self.teacher.to(self.device)
-                teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask,
+                teacher_rep = teacher(input_ids=input_ids, attention_mask=attention_mask, labels=labels, labels_segment_index=labels_segment_index,
                                       num_layers_lm=self.teacher.lm_layers_total, num_layers_total_lm=self.teacher.lm_layers_total,
                                       num_layers_electra=self.teacher.electra_layers_total,
                                       num_layers_total_electra=self.teacher.electra_layers_total,
-                                      discriminator_inputs=discriminator_inputs, validation_iter=False)
-                # teacher_stats = dict(
-                #     teacher_masked_lm_loss=teacher_rep["masked_lm_loss"].item(),
-                #     teacher_discriminator_loss=teacher_rep["discriminator_loss"].item(),
-                # )
+                                      discriminator_inputs=discriminator_inputs, validation_iter=validation_iter)
+                teacher_stats = dict(
+                    teacher_masked_lm_loss=teacher_rep["masked_lm_loss"],
+                    teacher_discriminator_loss=teacher_rep["discriminator_loss"],
+                    teacher_masked_accuracy=teacher_rep["masked_accuracy"],
+                    teacher_discriminator_extra_accuracy=teacher_rep["discriminator_extra_accuracy"],
+                    teacher_sent_order_accuracy=teacher_rep["sent_order_accuracy"],
+                )
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None

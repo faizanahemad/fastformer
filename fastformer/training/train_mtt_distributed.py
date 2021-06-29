@@ -327,8 +327,8 @@ def train(local_rank, args):
                        exclude_layers=args["exclude_layers"], keep_last_layer=args["keep_last_layer"],
                        lm_temperature=args["lm_temperature"])
     teacher = MTTModel(teacher_backbone, tokenizer, args["cls_tokens"],
-                       generator_w=0.0, discriminator_w=0.0,
-                       dino_w=1.0, sentence_order_prediction_w=0.0, attention_penalty_w=0.0,
+                       generator_w=generator_w, discriminator_w=discriminator_w,
+                       dino_w=1.0, sentence_order_prediction_w=sentence_order_prediction_w, attention_penalty_w=0.0,
                        lm_layers=None, electra_layers=None,
                        lm_layers_total=args["lm_layers_total"], electra_layers_total=args["electra_layers_total"],
                        lm_temperature=args["lm_temperature"])
