@@ -597,7 +597,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
             discriminator_dino_center = dino_results["dino_center"]
             # if teacher_stats["teacher_discriminator_loss"] < student_rep["discriminator_loss"].item():
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0
-            loss = loss + self.student.dino_w * dino_loss
+            loss = loss + getattr(self.student, "module", self.student).dino_w * dino_loss
         student_rep = get_loggable_dict(student_rep)
         all_stats = get_loggable_dict(all_stats)
         teacher_stats = get_loggable_dict(teacher_stats)
