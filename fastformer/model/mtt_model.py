@@ -183,7 +183,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.tokenizer = tokenizer
-        self.dino_dims = 2 ** 12
+        self.dino_dims = 2 ** 14
         norm_last_layer = True
         self.lm_temperature = lm_temperature
         self.exclude_layers = exclude_layers
@@ -499,9 +499,9 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         for n, p in student.named_parameters():
             if "layer_normalizers" not in n:
                 p.requires_grad = True
-        teacher.generator_w = 0.0
-        teacher.discriminator_w = 0.0
-        teacher.sentence_order_prediction_w = 0.0
+        teacher.generator_w = student.generator_w
+        teacher.discriminator_w = student.discriminator_w
+        teacher.sentence_order_prediction_w = student.sentence_order_prediction_w
         self.generator_w = student.generator_w
         self.discriminator_w = student.discriminator_w
         self.device = device
@@ -575,15 +575,15 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
                                       num_layers_electra=self.teacher.electra_layers_total,
                                       num_layers_total_electra=self.teacher.electra_layers_total,
                                       discriminator_inputs=discriminator_inputs, validation_iter=validation_iter)
-                teacher_stats = dict(
-                    teacher_masked_lm_loss=teacher_rep["masked_lm_loss"],
-                    teacher_discriminator_loss=teacher_rep["discriminator_loss"],
-                    teacher_masked_accuracy=teacher_rep["masked_accuracy"],
-                    teacher_discriminator_extra_accuracy=teacher_rep["discriminator_extra_accuracy"],
-                    teacher_sent_order_accuracy=teacher_rep["sent_order_accuracy"],
-                )
+
                 if validation_iter:
-                    print(teacher_stats)
+                    teacher_stats = dict(
+                        teacher_masked_lm_loss=teacher_rep["masked_lm_loss"].item(),
+                        teacher_discriminator_loss=teacher_rep["discriminator_loss"].item(),
+                        teacher_masked_accuracy=teacher_rep["masked_accuracy"],
+                        teacher_discriminator_extra_accuracy=teacher_rep["discriminator_extra_accuracy"],
+                        teacher_sent_order_accuracy=teacher_rep["sent_order_accuracy"],
+                    )
                 if self.device is not None:
                     self.teacher = self.teacher.to(torch.device("cpu"))
         dino_loss = None
