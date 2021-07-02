@@ -214,7 +214,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 61687
+    seed = 61567
     args.seed = seed
     return vars(args)
 
@@ -521,7 +521,7 @@ def train(local_rank, args):
     while steps_done < total_steps:
         random.seed(step)
         len_proba = random.random()
-        if len_proba < 0.9 or steps_done < args["warmup_steps"]:
+        if len_proba < 0.85 or steps_done < args["warmup_steps"]:
             batch = dataloader128()
         elif len_proba < 0.95 or steps_done < 4 * args["warmup_steps"]:
             batch = dataloader256()
