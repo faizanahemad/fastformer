@@ -503,19 +503,19 @@ class BertIntermediate(nn.Module):
             fi_gof = fi + gof
             if self.training and torch.is_grad_enabled():
                 center = fi_gof.detach().mean(0).mean(0)
-                layer_normalizer[0].mul_(0.999).add_(0.001 * center)
+                layer_normalizer[0].mul_(0.9999).add_(0.0001 * center)
             center = layer_normalizer[0].detach().clone()
             fi_gof = fi_gof - center
 
             if self.training and torch.is_grad_enabled():
                 std = fi_gof.detach().view(-1, fi_gof.size(-1)).std(0)
-                layer_normalizer[1].mul_(0.999).add_(0.001 * std)
+                layer_normalizer[1].mul_(0.9999).add_(0.0001 * std)
             std = layer_normalizer[1].detach().clone()
             fi_gof = fi_gof / std
 
             if self.training and torch.is_grad_enabled():
-                norm = (fi_gof.detach().norm(2, -1).mean() + 1e-7).expand(hidden_states.size(-1))
-                layer_normalizer[2].mul_(0.999).add_(0.001 * norm)
+                norm = (fi_gof.detach().norm(2, -1).mean() + 1e-5).expand(hidden_states.size(-1))
+                layer_normalizer[2].mul_(0.9999).add_(0.0001 * norm)
             norm = layer_normalizer[2].detach().clone()
             fi_gof = fi_gof / norm
             hidden_states = layer_start_hidden

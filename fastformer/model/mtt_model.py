@@ -221,21 +221,21 @@ class MTTModel(FastFormerPreTrainedModel):
         if reinit:
             self.init_weights()
 
-        if dino_w > 0:
-            last_layer = nn.Linear(bottleneck_dim, self.dino_dims, bias=False)
-            init_weights(last_layer, 0.02)
-            last_layer = nn.utils.weight_norm(last_layer)
-            last_layer.weight_g.data.fill_(1)
-            if norm_last_layer:
-                last_layer.weight_g.requires_grad = False
-
-            self.ffn = nn.Sequential(nn.Linear(num_features, num_features), nn.GELU(),
-                                     nn.Linear(num_features, bottleneck_dim),
-                                     # Norm(),
-                                     last_layer)  # weight_norm
-            init_weights(self.ffn[0], 0.02)
-            init_weights(self.ffn[2], 0.02)
-            last_layer.weight_g.data.fill_(1)
+        # if dino_w > 0:
+        #     last_layer = nn.Linear(bottleneck_dim, self.dino_dims, bias=False)
+        #     init_weights(last_layer, 0.02)
+        #     last_layer = nn.utils.weight_norm(last_layer)
+        #     last_layer.weight_g.data.fill_(1)
+        #     if norm_last_layer:
+        #         last_layer.weight_g.requires_grad = False
+        #
+        #     self.ffn = nn.Sequential(nn.Linear(num_features, num_features), nn.GELU(),
+        #                              nn.Linear(num_features, bottleneck_dim),
+        #                              # Norm(),
+        #                              last_layer)
+        #     init_weights(self.ffn[0], 0.02)
+        #     init_weights(self.ffn[2], 0.02)
+        #     last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
             self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
@@ -359,12 +359,12 @@ class MTTModel(FastFormerPreTrainedModel):
             inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
             input_cls_orthogonal = ((inputs_embeds_cls ** 2) ** 0.5).mean()
 
-        if self.dino_w > 0:
-            dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
-            dino = self.ffn(dino_hidden)
+        # if self.dino_w > 0:
+        #     dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
+        #     dino = self.ffn(dino_hidden)
 
         if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
-            if self.generator_w > 0 or discriminator_inputs is None or validation_iter:
+            if self.generator_w > 0 or discriminator_inputs is None or validation_iter or self.dino_w > 0:
                 mask_indices = (input_ids.int() != labels.int())
                 generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
                 generator_output = self.generator_ffn(generator_output)
@@ -372,6 +372,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     generator_output = self.backbone.embeddings_reverse_project(generator_output)
                 lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
                 lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
+                dino = lm_logits
 
             if (self.generator_w > 0 or validation_iter) and labels is not None:
                 active_labels = labels[mask_indices].reshape(-1)
@@ -436,13 +437,14 @@ class MTTModel(FastFormerPreTrainedModel):
                 _ = discriminator_inputs.pop("start_sampling_from", None)
                 _ = discriminator_inputs.pop("exclude_layers", None)
 
-                if self.dino_w > 0:
-                    discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
+                # if self.dino_w > 0:
+                #     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
 
                 sent_hidden = discriminator_outputs[:, 0]
-                if self.discriminator_w > 0 or validation_iter:
+                if self.discriminator_w > 0 or validation_iter or self.dino_w > 0:
                     discriminator_ffn_inputs = discriminator_outputs
                     discriminator_outputs = self.discriminator_ffn(discriminator_outputs)
+                    discriminator_dino = discriminator_outputs.reshape(-1, discriminator_outputs.size(-1))
                     discriminator_ffn_outputs = discriminator_outputs
                     discriminator_outputs = discriminator_outputs.squeeze(-1)[active_locations].reshape(-1)
                     discriminator_inputs["discriminator_labels"] = discriminator_labels
@@ -488,7 +490,7 @@ class MTTModel(FastFormerPreTrainedModel):
 
 class MultiTaskHighwayCLSPretraining(PatchCLR):
     def __init__(self, student: MTTModel, teacher: MTTModel, eps=1e-7, device=None):
-        super().__init__(student, teacher, eps, 0.04, 0.1, 0.9)
+        super().__init__(student, teacher, eps, 10, 10, 0.9)
         self.cls_tokens = student.cls_tokens
         self.dino_dims = student.dino_dims
         self.student = student
@@ -507,9 +509,21 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         self.device = device
 
         self.eps = eps
-        self.teacher_contrastive_temperature = 0.04
-        self.student_contrastive_temperature = 0.1
+        self.teacher_contrastive_temperature = 10.0
+        self.student_contrastive_temperature = 10.0
         self.dino_w = student.dino_w
+
+    def get_last_dino_layer(self):
+        return None
+
+    def dino_loss(self, x1_dino, x2_dino, dino_center, student_crops, teacher_crops):
+        x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, -1)
+        x2_dino = x2_dino / self.teacher_contrastive_temperature
+        x2_dino = torch.softmax(x2_dino, -1)
+
+        dino_loss = (-1 * self.teacher_contrastive_temperature * self.student_contrastive_temperature) * (x2_dino * x1_dino).sum(dim=-1).mean()
+        dino_loss = self.dino_w * dino_loss
+        return dict(dino_loss=dino_loss, dino_center=dino_center)
 
     def __call__(
             self,
@@ -590,15 +604,15 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         losses = [v for k, v in student_rep.items() if "_loss" in k and v is not None]
         loss = sum(losses)
         if getattr(self.student, "module", self.student).dino_w > 0:
-            student_dino = student_rep.pop("dino").unsqueeze(0)
-            dino_results = self.dino_loss(student_dino, teacher_rep.pop("dino").detach().unsqueeze(0), dino_center, 1, 1)
+            student_dino = student_rep.pop("dino")
+            dino_results = self.dino_loss(student_dino, teacher_rep.pop("dino").detach(), dino_center, 1, 1)
             dino_center = dino_results["dino_center"]
             # dino_loss = 0
             # if teacher_stats["teacher_masked_lm_loss"] < student_rep["masked_lm_loss"].item():
             dino_loss = dino_results["dino_loss"]
 
             student_dino = student_rep.pop("discriminator_dino", None)
-            dino_results = self.dino_loss(student_dino.unsqueeze(0), teacher_rep.pop("discriminator_dino").detach().unsqueeze(0), discriminator_dino_center, 1, 1)
+            dino_results = self.dino_loss(student_dino, teacher_rep.pop("discriminator_dino").detach(), discriminator_dino_center, 1, 1)
             discriminator_dino_center = dino_results["dino_center"]
             # if teacher_stats["teacher_discriminator_loss"] < student_rep["discriminator_loss"].item():
             dino_loss = (dino_loss + dino_results["dino_loss"]) / 2.0

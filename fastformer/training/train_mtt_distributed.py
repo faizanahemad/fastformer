@@ -511,8 +511,8 @@ def train(local_rank, args):
             param.register_hook(hook)
 
 
-    dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
-    discriminator_dino_center = torch.zeros(model.dino_dims, device=device) if dino_w > 0 else None
+    dino_center = None
+    discriminator_dino_center = None
     total_steps = args["total_steps"]
     steps_done = 0
     step = 0
@@ -610,17 +610,17 @@ def train(local_rank, args):
             student_teacher_param_update(model.student, model.teacher, teacher_update_w, device if args["move_unused_to_cpu"] else None)
         dino_center = output.pop("dino_center", None)
         discriminator_dino_center = output.pop("discriminator_dino_center", None)
-        if dino_w > 0 and (step + 1) % (1 * iter_size) == 0 and args["world_size"] > 1:
-            if dino_center is not None:
-                dtype = dino_center.dtype
-                dino_center = dino_center.type(torch.float64) / args["world_size"]
-                torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
-                dino_center = dino_center.type(dtype)
-            if discriminator_dino_center is not None:
-                dtype = discriminator_dino_center.dtype
-                discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
-                torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
-                discriminator_dino_center = discriminator_dino_center.type(dtype)
+        # if dino_w > 0 and (step + 1) % (1 * iter_size) == 0 and args["world_size"] > 1:
+        #     if dino_center is not None:
+        #         dtype = dino_center.dtype
+        #         dino_center = dino_center.type(torch.float64) / args["world_size"]
+        #         torch.distributed.all_reduce(dino_center, torch.distributed.ReduceOp.SUM)
+        #         dino_center = dino_center.type(dtype)
+        #     if discriminator_dino_center is not None:
+        #         dtype = discriminator_dino_center.dtype
+        #         discriminator_dino_center = discriminator_dino_center.type(torch.float64) / args["world_size"]
+        #         torch.distributed.all_reduce(discriminator_dino_center, torch.distributed.ReduceOp.SUM)
+        #         discriminator_dino_center = discriminator_dino_center.type(dtype)
         if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers") and args["world_size"] > 1:
             layer_normalizers = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers
             if layer_normalizers is not None:
