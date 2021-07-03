@@ -371,8 +371,9 @@ class MTTModel(FastFormerPreTrainedModel):
                 if hasattr(self.backbone, "embeddings_project"):
                     generator_output = self.backbone.embeddings_reverse_project(generator_output)
                 lm_mask = mask_indices.unsqueeze(-1).expand(-1, -1, generator_output.size(-1))
-                lm_logits = self.lm_head(generator_output[lm_mask].reshape(-1, generator_output.size(-1)))
+                lm_logits = generator_output[lm_mask].reshape(-1, generator_output.size(-1))
                 dino = lm_logits
+                lm_logits = self.lm_head(lm_logits)
 
             if (self.generator_w > 0 or validation_iter) and labels is not None:
                 active_labels = labels[mask_indices].reshape(-1)
