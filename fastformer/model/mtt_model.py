@@ -518,11 +518,7 @@ class MultiTaskHighwayCLSPretraining(PatchCLR):
         return None
 
     def dino_loss(self, x1_dino, x2_dino, dino_center, student_crops, teacher_crops):
-        x1_dino = torch.log_softmax(x1_dino / self.student_contrastive_temperature, -1)
-        x2_dino = x2_dino / self.teacher_contrastive_temperature
-        x2_dino = torch.softmax(x2_dino, -1)
-
-        dino_loss = (-1 * self.teacher_contrastive_temperature * self.student_contrastive_temperature) * (x2_dino * x1_dino).sum(dim=-1).mean()
+        dino_loss = ((x1_dino - x2_dino) ** 2).sum(dim=-1).mean()
         dino_loss = self.dino_w * dino_loss
         return dict(dino_loss=dino_loss, dino_center=dino_center)
 
