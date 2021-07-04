@@ -82,7 +82,7 @@ def temperature_sampling(logits, temperature=2.0):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_alpha, reinit=False):
+def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_alpha, reinit=False, train_layer_normalizers=True):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
@@ -105,6 +105,7 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
         # config.gradient_checkpointing = True
         # config.vocab_size = 30522
         config.enable_layer_normalizers = enable_layer_normalizers
+        config.train_layer_normalizers = train_layer_normalizers
         if sampling_alpha is not None:
             config.sampling_alpha = sampling_alpha
         model = PreNormRobertaModel(config)

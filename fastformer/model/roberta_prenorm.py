@@ -94,6 +94,7 @@ class RobertaEmbeddings(nn.Module):
         self.position_embeddings = nn.Embedding(
             config.max_position_embeddings, config.hidden_size, padding_idx=self.padding_idx
         )
+        self.train_layer_normalizers = getattr(config, "train_layer_normalizers", False)
 
     def forward(
         self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0, layer_normalizer=None,
@@ -123,19 +124,19 @@ class RobertaEmbeddings(nn.Module):
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
         if layer_normalizer is not None:
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 center = embeddings.detach().mean(0).mean(0)
                 layer_normalizer[0].mul_(0.9999).add_(0.0001 * center)
             center = layer_normalizer[0].detach().clone()
             embeddings = embeddings - center
 
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 std = embeddings.detach().view(-1, embeddings.size(-1)).std(0)
                 layer_normalizer[1].mul_(0.9999).add_(0.0001 * std)
             std = layer_normalizer[1].detach().clone()
             embeddings = embeddings / std
 
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
                 layer_normalizer[2].mul_(0.9999).add_(0.0001 * norm)
             norm = layer_normalizer[2].detach().clone()

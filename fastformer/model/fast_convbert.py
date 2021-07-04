@@ -488,6 +488,7 @@ class BertIntermediate(nn.Module):
             self.dense_last = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.train_layer_normalizers = getattr(config, "train_layer_normalizers", False)
 
     def forward(self, hidden_states, layer_start_hidden=None, fi=None, layer_normalizer=None):
         hs = self.LayerNorm(hidden_states)
@@ -501,19 +502,19 @@ class BertIntermediate(nn.Module):
 
         if layer_start_hidden is not None and layer_normalizer is not None and fi is not None:
             fi_gof = fi + gof
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 center = fi_gof.detach().mean(0).mean(0)
                 layer_normalizer[0].mul_(0.9999).add_(0.0001 * center)
             center = layer_normalizer[0].detach().clone()
             fi_gof = fi_gof - center
 
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 std = fi_gof.detach().view(-1, fi_gof.size(-1)).std(0)
                 layer_normalizer[1].mul_(0.9999).add_(0.0001 * std)
             std = layer_normalizer[1].detach().clone()
             fi_gof = fi_gof / std
 
-            if self.training and torch.is_grad_enabled():
+            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
                 norm = (fi_gof.detach().norm(2, -1).mean() + 1e-5).expand(hidden_states.size(-1))
                 layer_normalizer[2].mul_(0.9999).add_(0.0001 * norm)
             norm = layer_normalizer[2].detach().clone()
