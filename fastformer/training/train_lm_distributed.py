@@ -625,13 +625,14 @@ class SuperGlueTest:
         mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
-        test_accuracy = accuracy_score(test_labels, classifier_results["predictions"])
         if rank != 0:
             return None, None
         elif self.hpo is not None:
+            test_accuracy = accuracy_score(test_labels, classifier_results["predictions"])
             return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                               val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"],
                               test_accuracy=test_accuracy)
+        test_accuracy = accuracy_score(test_labels, classifier_results["predictions"])
         return None, dict(dataset="mnli", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
                           epochs=classifier_results["epochs"], test_acc=test_accuracy,
                           val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
