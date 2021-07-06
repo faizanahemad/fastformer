@@ -973,7 +973,7 @@ class SuperGlueTest:
             _ = gc.collect()
             if self.rank == 0:
                 if "model" in pred_data:
-                    torch.save(pred_data["model"], model+("" if model.endswith("."+dk) else ("."+dk)))
+                    torch.save(pred_data.pop("model"), model+("" if model.endswith("."+dk) else ("."+dk)))
                 print("val_acc: %s" % pred_data["val_acc"])
                 print("train_acc: %s" % pred_data["train_acc"])
                 print("val_loss: %s" % pred_data["val_loss_hist"][0])
