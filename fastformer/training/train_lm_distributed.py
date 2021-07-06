@@ -408,7 +408,10 @@ class SuperGlueTest:
                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
                               dataset["test"])
             test.training = False
-            test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
+            if "idx" in dataset["test"][0]:
+                test_idx = [dataset["test"][i]["idx"] for i in range(len(dataset["test"]))]
+            else:
+                test_idx = list(range(len(dataset["test"])))
             test = DataLoader(test, sampler=None, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers,
                               shuffle=False, **dataloader_params)
 
