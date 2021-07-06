@@ -157,7 +157,7 @@ class LargeValidator:
                                                  char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
                                                  run_decoder=False,
                                                  run_answering=True)
-                            output = model.module.module.funnel(**funnel_inputs)
+                            output = model.module.module.backbone(**funnel_inputs)
                             answering_predictions = output["answering_logits"].argmax(dim=-1)
                             answering_predictions = answer_decoder(answering_predictions, tokenizer)
                             predictions.extend(answering_predictions)

@@ -632,7 +632,7 @@ class DiscriminatorPredictions(nn.Module):
 
 class FastFormerPreTrainedModel(PreTrainedModel):
     config_class = FastFormerConfig
-    base_model_prefix = "funnel"
+    base_model_prefix = "backbone"
 
     def _init_weights(self, module):
         from timm.models.layers.weight_init import trunc_normal_
@@ -915,7 +915,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             raise ValueError
 
-        self.funnel: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
+        self.backbone: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
         # if num_classes == 1:
         #     self.ce = BCELossFocal()
         # else:
@@ -949,11 +949,11 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                              char_ids=char_ids, char_offsets=char_offsets,
                              run_decoder=False,
                              run_answering=False)
-        if isinstance(self.funnel, (FastFormerModel)):
-            funnel_outputs = self.funnel(**funnel_inputs)
+        if isinstance(self.backbone, (FastFormerModel)):
+            funnel_outputs = self.backbone(**funnel_inputs)
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
-            funnel_outputs = self.funnel(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
+            funnel_outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
             if self.cls_tokens > 1:
                 funnel_outputs = torch.cat((funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-1][:, 1], funnel_outputs["hidden_states"][-2][:, 0], funnel_outputs["hidden_states"][-2][:, 1]), -1)
             else:

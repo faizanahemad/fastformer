@@ -360,7 +360,7 @@ class SuperGlueTest:
         ddp_model = model
         if reinit or not isinstance(model, (FastFormerForClassification, DDP)):
             classifier = FastFormerForClassification(model.config if hasattr(model, "config") else None, num_classes, model, tokenizer, train_backbone=train_backbone)
-            classifier.funnel = copy.deepcopy(model.funnel if hasattr(model, "funnel") else model)
+            classifier.backbone = copy.deepcopy(model.backbone if hasattr(model, "backbone") else model)
             classifier = classifier.to(device)
             del model
             model = classifier
@@ -1124,8 +1124,8 @@ class LargeValidator:
                                              char_ids=pt_batch["char_ids"], char_offsets=pt_batch["char_offsets"],
                                              run_decoder=False,
                                              run_answering=True)
-                        output = model.funnel(**funnel_inputs)
-                        # print("[Validation]: Time = %s, Rank = %s, run-funnel-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
+                        output = model.backbone(**funnel_inputs)
+                        # print("[Validation]: Time = %s, Rank = %s, run-backbone-validation, Val for dataset = %s, Funnel model run" % (get_time_string(), self.rank, k))
                         answering_predictions = output["answering_logits"].detach().argmax(dim=-1)
                     # debug_answering_predictions = answer_decoder_debug(answering_predictions, tokenizer)
                     # print("[Validation]: Time = %s, Rank = %s, Mid-Validation, Val for dataset = %s, Answering preds = %s, inps = %s" % (get_time_string(), self.rank, k, debug_answering_predictions, answering_predictions[:, :8].tolist()))
@@ -1337,8 +1337,8 @@ def train(local_rank, args):
             model.load_state_dict(state_dict, strict=False)
         except:
 
-            pos_emb = state_dict["funnel.embeddings.position_embeddings.weight"]
-            state_dict["funnel.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[-5:]), 0)
+            pos_emb = state_dict["backbone.embeddings.position_embeddings.weight"]
+            state_dict["backbone.embeddings.position_embeddings.weight"] = torch.cat((pos_emb[:4], pos_emb, pos_emb[-5:]), 0)
             model.load_state_dict(state_dict, strict=False)
         del state_dict
     elif args["pretrained_model"] is not None and args["test_only"]:
