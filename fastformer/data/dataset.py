@@ -686,8 +686,6 @@ class MTTDataset(Dataset):
                 else:
                     labels_segment_index = 1
                     segments[0], segments[1] = segments[1], segments[0]
-                if random.random() < 0.5:
-                    seg_sep_token = " "
 
             results.update(dict(labels_segment_index=labels_segment_index))
 

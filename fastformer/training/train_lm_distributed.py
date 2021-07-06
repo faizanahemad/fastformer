@@ -612,6 +612,79 @@ class SuperGlueTest:
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
                     all_train_acc=all_train_acc, epochs=epochs, broken=broken, val_loss=val_loss)
 
+    def mnli(self, model, mnli, device, dataset_key, rank):
+        mnli = load_dataset("multi_nli")
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
+        mnli["test"] = mnli["validation_mismatched"]
+        test_labels = [m["label"] for m in mnli["test"]]
+        mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, dataset_key, rank)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        test_accuracy = accuracy_score(test_labels, classifier_results["predictions"])
+        if rank != 0:
+            return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"], val_loss=classifier_results["val_loss"],
+                              test_accuracy=test_accuracy)
+        return None, dict(dataset="mnli", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
+                          epochs=classifier_results["epochs"], test_acc=test_accuracy,
+                          val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                          model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
+
+    def swag(self, model, swag, device, dataset_key, rank):
+        swag = load_dataset("swag", "regular")
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        swag_c1 = swag.map(
+            lambda x: dict(text=x["startphrase"] + f" {tokenizer.sep_token} " + x["ending0"], label=x["label"] == 0,
+                           choice=0),
+            remove_columns=["startphrase", 'ending0', "ending1", "ending2", "ending3", "sent1", "sent2"])
+        swag_c2 = swag.map(
+            lambda x: dict(text=x["startphrase"] + f" {tokenizer.sep_token} " + x["ending1"], label=x["label"] == 1,
+                           choice=1),
+            remove_columns=["startphrase", 'ending0', "ending1", "ending2", "ending3", "sent1", "sent2"])
+        swag_c3 = swag.map(
+            lambda x: dict(text=x["startphrase"] + f" {tokenizer.sep_token} " + x["ending2"], label=x["label"] == 2,
+                           choice=2),
+            remove_columns=["startphrase", 'ending0', "ending1", "ending2", "ending3", "sent1", "sent2"])
+        swag_c4 = swag.map(
+            lambda x: dict(text=x["startphrase"] + f" {tokenizer.sep_token} " + x["ending3"], label=x["label"] == 3,
+                           choice=3),
+            remove_columns=["startphrase", 'ending0', "ending1", "ending2", "ending3", "sent1", "sent2"])
+        swag = DatasetDict({k: concatenate_datasets([v, swag_c2[k], swag_c3[k], swag_c4[k],]) for k, v in swag_c1.items()})
+        classifier_data = self.prepare_classifier(model_dict, swag, device, 1, dataset_key, rank)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        if rank != 0:
+            return None, None
+        elif self.hpo is not None:
+            return None, dict(train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
+                              val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                              val_loss=classifier_results["val_loss"])
+        test_idx = classifier_data["test_idx"]
+        choices = [swag["test"][i]["choice"] for i in range(len(swag["test"]))]
+        final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
+        final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(
+            lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
+        return final_predictions, dict(dataset="copa", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
+                                       epochs=classifier_results["epochs"],
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
+
+    def hellaswag(self):
+        pass
+
+    def anli(self):
+        pass
+
+    def esnli(self):
+        pass
+
+    def snli(self):
+        pass
+
     def boolq(self, model, boolq, device, dataset_key, rank):
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
@@ -627,7 +700,8 @@ class SuperGlueTest:
         # print(classifier_results["predictions"])
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="boolq", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def wic(self, model, wic, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -646,7 +720,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wic", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
-                                       epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       epochs=classifier_results["epochs"], val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
     
     def cb(self, model, cb, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -662,7 +737,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -679,7 +755,8 @@ class SuperGlueTest:
         final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
 
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
         axb = axb.map(lambda x: dict(text=x["sentence1"] + f" {tokenizer.sep_token} " + x["sentence2"]), remove_columns=["sentence1", "sentence2"])
         model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, axb, device, 1, dataset_key, rank, reinit=False)
@@ -717,7 +794,8 @@ class SuperGlueTest:
             for k, v in sorted(mrcp.items())]
         final_predictions = mrcp
         return final_predictions, dict(dataset="multirc", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"], 
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def copa(self, model, copa, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -740,7 +818,8 @@ class SuperGlueTest:
         final_predictions = [dict(idx=idx, label=pred, choice=ch) for idx, pred, ch in zip(test_idx, classifier_results["predictions"], choices)]
         final_predictions = pd.DataFrame.from_records(final_predictions).groupby("idx", group_keys=False).apply(lambda x: x[x.label >= x.label.max()][["idx", "choice"]].rename(columns={"choice": "label"})).to_dict('records')
         return final_predictions, dict(dataset="copa", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def record(self, model, record, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -766,7 +845,8 @@ class SuperGlueTest:
                 print(en, fp["choice"], fp["idx"])
         final_predictions = [dict(idx=fp["idx"], label=en[fp["choice"]]) for fp, en in zip(final_predictions, entities)]
         return final_predictions, dict(dataset="record", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def wsc(self, model, wsc, device, dataset_key, rank):
         model_dict = self.build_model(model)
@@ -782,7 +862,8 @@ class SuperGlueTest:
         test_idx = classifier_data["test_idx"]
         final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
         return final_predictions, dict(dataset="wsc.fixed", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
-                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"])
+                                       val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
+                                       model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
@@ -823,6 +904,14 @@ class SuperGlueTest:
                     _, pred_data = self.wsc(model, dataset, self.device, dk, self.rank)
                 elif dk == "rte":
                     _, pred_data, _, _ = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
+                elif dk == "swag":
+                    _, pred_data = self.swag(model, None, self.device, dk, self.rank)
+                elif dk == "mnli":
+                    _, pred_data = self.mnli(model, None, self.device, dk, self.rank)
+                elif dk == "hellaswag":
+                    _, pred_data = self.hellaswag(model, None, self.device, dk, self.rank)
+                elif dk == "anli":
+                    _, pred_data = self.anli(model, dataset, self.device, dk, self.rank)
                 else:
                     raise NotImplementedError
                 if self.rank == 0:
@@ -830,6 +919,8 @@ class SuperGlueTest:
                     res_dict["val_acc"] = pred_data["val_acc"]
                     res_dict["train_acc"] = pred_data["train_acc"]
                     res_dict["val_loss"] = pred_data["val_loss"]
+                    if "test_acc" in pred_data:
+                        res_dict["test_acc"] = pred_data["test_acc"]
                     results.append(res_dict)
             if self.rank == 0:
                 print(tabulate(results, headers="keys", tablefmt="grid"))
@@ -848,7 +939,7 @@ class SuperGlueTest:
 
         for idx, dk in enumerate(keys):
             print("[SUPERGLUE]: Time = %s, Train for Rank = %s/%s, dataset = %s, device = %s, idx = %s" % (get_time_string(), self.rank, self.world_size, dk, self.device, idx))
-            dataset = super_glue[dk]
+            dataset = super_glue[dk] if dk in super_glue else None
             torch.distributed.barrier()
             if dk == "boolq":
                 final_predictions, pred_data = self.boolq(model, dataset, self.device, dk, self.rank)
@@ -866,22 +957,33 @@ class SuperGlueTest:
                 final_predictions, pred_data = self.wsc(model, dataset, self.device, dk, self.rank)
             elif dk == "rte":
                 final_predictions, pred_data, final_predictions_axb, final_predictions_axg = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
+            elif dk == "mnli":
+                final_predictions, pred_data = self.mnli(model, None, self.device, dk, self.rank)
+            elif dk == "swag":
+                final_predictions, pred_data = self.swag(model, None, self.device, dk, self.rank)
+            elif dk == "anli":
+                final_predictions, pred_data = self.anli(model, None, self.device, dk, self.rank)
+            elif dk == "hellaswag":
+                final_predictions, pred_data = self.hellaswag(model, None, self.device, dk, self.rank)
 
             _ = gc.collect()
             if self.rank == 0:
+                if "model" in pred_data:
+                    torch.save(pred_data["model"], model+"."+dk)
                 print("val_acc: %s" % pred_data["val_acc"])
                 print("train_acc: %s" % pred_data["train_acc"])
                 print("val_loss: %s" % pred_data["val_loss_hist"][0])
-                with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
-                    writer.write_all(final_predictions)
-                if dk == "rte":
-                    with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
-                        writer.write_all(final_predictions_axb)
-                    with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
-                        writer.write_all(final_predictions_axg)
-                pred_datas.append(pred_data)
-                # with jsonlines.open('validation.txt', mode='a') as writer:
-                #     writer.write_all([pred_data])
+                if dk in self.superglue_file_names:
+                    with jsonlines.open(self.superglue_file_names[dk], mode='w') as writer:
+                        writer.write_all(final_predictions)
+                    if dk == "rte":
+                        with jsonlines.open(self.superglue_file_names["axb"], mode='w') as writer:
+                            writer.write_all(final_predictions_axb)
+                        with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
+                            writer.write_all(final_predictions_axg)
+                    pred_datas.append(pred_data)
+                    # with jsonlines.open('validation.txt', mode='a') as writer:
+                    #     writer.write_all([pred_data])
                 with open('validation.txt', 'a') as f:
                     print(str(pred_data), file=f)
             # import pandas as pd
