@@ -973,7 +973,7 @@ class SuperGlueTest:
             _ = gc.collect()
             if self.rank == 0:
                 if "model" in pred_data:
-                    torch.save(pred_data["model"], model+"."+dk)
+                    torch.save(pred_data["model"], model+("" if model.endswith("."+dk) else ("."+dk)))
                 print("val_acc: %s" % pred_data["val_acc"])
                 print("train_acc: %s" % pred_data["train_acc"])
                 print("val_loss: %s" % pred_data["val_loss_hist"][0])
@@ -985,9 +985,7 @@ class SuperGlueTest:
                             writer.write_all(final_predictions_axb)
                         with jsonlines.open(self.superglue_file_names["axg"], mode='w') as writer:
                             writer.write_all(final_predictions_axg)
-                    pred_datas.append(pred_data)
-                    # with jsonlines.open('validation.txt', mode='a') as writer:
-                    #     writer.write_all([pred_data])
+                pred_datas.append(pred_data)
                 with open('validation.txt', 'a') as f:
                     print(str(pred_data), file=f)
             # import pandas as pd
