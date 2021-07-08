@@ -308,8 +308,8 @@ def train(local_rank, args):
         eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], args["sampling_alpha"], reinit)
-    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], None, reinit)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], args["sampling_alpha"], reinit, dropout_prob=0.01)
+    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], None, reinit, dropout_prob=0.0)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     generator_w = args["generator_w"] if "generator_w" in args else 0.0
