@@ -801,7 +801,7 @@ def student_teacher_param_update(student, teacher, m, device=None):
             if name_k in named_student_params:
                 param_k.data.mul_(m).add_((1 - m) * named_student_params[name_k].detach().data)
         backbone = getattr(student, "module", student).backbone
-        if hasattr(backbone, "layer_normalizers"):
+        if hasattr(backbone, "layer_normalizers") and getattr(backbone, "layer_normalizers", None) is not None:
             layer_normalizers = backbone.layer_normalizers
             teacher.backbone.layer_normalizers.mul_(m).add_((1 - m) * layer_normalizers)
 

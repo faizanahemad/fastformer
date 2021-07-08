@@ -219,6 +219,7 @@ class MTTModel(FastFormerPreTrainedModel):
         self.vocab_size = self.backbone.embeddings.word_embeddings.weight.size(0)
         embedding_dims = self.backbone.embeddings.word_embeddings.weight.size(1)
         num_features = self.backbone.embeddings.position_embeddings.weight.size(1)
+        num_features_small = self.backbone.small_config.hidden_size
         self.sentence_order_prediction_w = sentence_order_prediction_w
         if self.generator_w > 0 or self.discriminator_w > 0:
             self.lm_head = nn.Linear(embedding_dims, self.vocab_size, bias=False)
@@ -243,21 +244,21 @@ class MTTModel(FastFormerPreTrainedModel):
         #     last_layer.weight_g.data.fill_(1)
 
         if generator_w > 0:
-            self.generator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
+            self.generator_ffn = nn.Sequential(nn.Linear(num_features_small, num_features),
                                                nn.GELU(),
                                                nn.Linear(num_features, num_features),  # nn.Tanh()
                                                )
             init_weights(self.generator_ffn, 0.01)
 
         if discriminator_w > 0:
-            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
+            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features + num_features_small, num_features),
                                                    nn.GELU(),
                                                    nn.Linear(num_features, 1))
 
             init_weights(self.discriminator_ffn, 0.01)
 
         if sentence_order_prediction_w > 0:
-            self.sent_order_nn = nn.Sequential(nn.Linear(num_features, num_features),
+            self.sent_order_nn = nn.Sequential(nn.Linear(num_features + 2 * num_features_small, num_features),
                                                nn.GELU(),
                                                nn.Linear(num_features, 1))
             init_weights(self.sent_order_nn, 0.01)
@@ -319,7 +320,7 @@ class MTTModel(FastFormerPreTrainedModel):
         backbone_inputs = {k: v for k, v in backbone_inputs.items() if v is not None}
         outputs = self.backbone(**backbone_inputs)
         layer_scales_loss = outputs["layer_scales_loss"] if "layer_scales_loss" in outputs else None
-        sent_hidden = outputs["pooler_output"] if "pooler_output" in outputs else outputs["hidden_states"][-1][:, 0]
+        sent_hidden = outputs["last_hidden_state"][:, 0]
         exclude_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
         n_grad_forward_layers_lm = outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in outputs else None
         n_forward_layers_lm = outputs["n_forward_layers"] if "n_forward_layers" in outputs else None
@@ -346,32 +347,13 @@ class MTTModel(FastFormerPreTrainedModel):
         discriminator_outputs = None
         discriminator_ffn_inputs = None
         discriminator_ffn_outputs = None
-        discriminator_outputs_raw = None
         generator_selected_layers = outputs["selected_layers"] if "selected_layers" in outputs else []
         active_locations = attention_mask.bool()
-
-        # if self.attention_penalty_w > 0:
-        #     attentions = outputs["attentions"]
-        #     # attentions = sum([a/(len(attentions) - i) for i, a in enumerate(attentions)]).mean(0).mean(0)
-        #     attentions = sum([a for i, a in enumerate(attentions[1:-1])]).mean(0).mean(0)
-        #     penalty = self.attention_penalty[:attentions.size(0), :attentions.size(1)]
-        #     attention_penalty_loss = self.attention_penalty_w * attentions[penalty != 0].mean()
-
-        if self.cls_tokens > 1 and validation_iter:
-            inputs_embeds_cls = outputs["hidden_states"][0][:, :self.cls_tokens].detach()
-            inputs_embeds_cls = inputs_embeds_cls / (inputs_embeds_cls.norm(2, -1, True) + self.config.layer_norm_eps)
-            inputs_embeds_cls = inputs_embeds_cls.bmm(inputs_embeds_cls.transpose(1, 2))
-            inputs_embeds_cls = inputs_embeds_cls * (1 - torch.eye(inputs_embeds_cls.size(-1), device=inputs_embeds_cls.device).unsqueeze(0))
-            input_cls_orthogonal = ((inputs_embeds_cls ** 2) ** 0.5).mean()
-
-        # if self.dino_w > 0:
-        #     dino_hidden = outputs["hidden_states"][-1][:, self.cls_tokens - 1]
-        #     dino = self.ffn(dino_hidden)
 
         if self.generator_w > 0 or self.discriminator_w > 0 or discriminator_inputs is not None:
             if self.generator_w > 0 or discriminator_inputs is None or validation_iter or self.dino_w > 0:
                 mask_indices = (input_ids.int() != labels.int())
-                generator_output = outputs["hidden_states"][-7 if self.discriminator_w > 0 and lm_layers is None else -1]
+                generator_output = outputs["last_hidden_state"]
                 generator_output = self.generator_ffn(generator_output)
                 if hasattr(self.backbone, "embeddings_project"):
                     generator_output = self.backbone.embeddings_reverse_project(generator_output)
@@ -428,14 +410,25 @@ class MTTModel(FastFormerPreTrainedModel):
                         discriminator_inputs["exclude_layers"] = exclude_layers
                     discriminator_inputs["keep_last_layer"] = self.keep_last_layer
                 discriminator_inputs["output_hidden_states"] = True
+
+                discriminator_inputs["run_large_encoder"] = True
                 discriminator_outputs = self.backbone(**discriminator_inputs)
+
                 discriminator_layer_scales_loss = discriminator_outputs["layer_scales_loss"] if "layer_scales_loss" in discriminator_outputs else None
-                layer_scales_loss = layer_scales_loss + discriminator_layer_scales_loss
+                if layer_scales_loss is not None:
+                    layer_scales_loss = layer_scales_loss + discriminator_layer_scales_loss
                 discriminator_selected_layers = discriminator_outputs["selected_layers"] if "selected_layers" in discriminator_outputs else []
                 n_grad_forward_layers_electra = discriminator_outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in discriminator_outputs else None
                 n_forward_layers_electra = discriminator_outputs["n_forward_layers"] if "n_forward_layers" in discriminator_outputs else None
-                discriminator_outputs_raw = discriminator_outputs["hidden_states"]
-                discriminator_outputs = discriminator_outputs["hidden_states"][-1]
+                discriminator_outputs = discriminator_outputs["last_hidden_state"]
+
+                discriminator_inputs["run_large_encoder"] = False
+                discriminator_outputs_small = self.backbone(**discriminator_inputs)
+                discriminator_layer_scales_loss = discriminator_outputs_small["layer_scales_loss"] if "layer_scales_loss" in discriminator_outputs_small else None
+                if layer_scales_loss is not None:
+                    layer_scales_loss = layer_scales_loss + discriminator_layer_scales_loss
+                discriminator_outputs = torch.cat((discriminator_outputs, discriminator_outputs_small["last_hidden_state"]), -1)
+
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("num_layers_total", None)
                 _ = discriminator_inputs.pop("rng_seed", None)
@@ -446,7 +439,7 @@ class MTTModel(FastFormerPreTrainedModel):
                 # if self.dino_w > 0:
                 #     discriminator_dino = self.ffn(discriminator_outputs[:, self.cls_tokens - 1])
 
-                sent_hidden = discriminator_outputs[:, 0]
+                sent_hidden = torch.cat((discriminator_outputs[:, 0], sent_hidden), -1)
                 if self.discriminator_w > 0 or validation_iter or self.dino_w > 0:
                     discriminator_ffn_inputs = discriminator_outputs
                     discriminator_dino = discriminator_outputs.reshape(-1, discriminator_outputs.size(-1))
@@ -489,7 +482,7 @@ class MTTModel(FastFormerPreTrainedModel):
                     layer_scales_loss=layer_scales_loss, start_from_proba=self.start_from_proba, sampling_alpha=self.sampling_alpha,
                     start_sampling_from_lm=start_sampling_from_lm, start_sampling_from_electra=start_sampling_from_electra,
                     electra_to_lm_layer_ratio=n_forward_layers_electra/n_forward_layers_lm,
-                    generator_output=generator_output, discriminator_outputs=discriminator_outputs, discriminator_outputs_raw=discriminator_outputs_raw,
+                    generator_output=generator_output, discriminator_outputs=discriminator_outputs,
                     discriminator_ffn_inputs=discriminator_ffn_inputs, discriminator_ffn_outputs=discriminator_ffn_outputs,
                     discriminator_selected_layers=discriminator_selected_layers, generator_selected_layers=generator_selected_layers)
 

@@ -704,12 +704,19 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Roberta
-    def __init__(self, config: RobertaConfig, add_pooling_layer=False):
+    def __init__(self, config: RobertaConfig):
         super().__init__(config)
         self.config = config
-
+        self.small_config = copy.deepcopy(config)
+        assert config.hidden_size % 3 == 0
+        self.small_config.hidden_size = config.hidden_size // 3
+        assert config.num_attention_heads % 3 == 0
+        self.small_config.num_attention_heads = 2 * config.num_attention_heads // 3
         self.embeddings = RobertaEmbeddings(config)
         self.encoder = RobertaEncoder(config)
+        self.small_encoder = RobertaEncoder(self.small_config)
+        self.embedding2encoder = nn.Linear(config.hidden_size, self.small_config.hidden_size)
+        # self.embeddings_project = nn.Linear(self.small_config.hidden_size, config.hidden_size)
         enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
         layer_normalizers = None
         if enable_layer_normalizers:
@@ -721,8 +728,6 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             self.register_buffer("layer_normalizers", layer_normalizers)
         else:
             self.layer_normalizers = layer_normalizers
-
-        self.pooler = RobertaPooler(config) if add_pooling_layer else None
 
         self.init_weights()
 
@@ -772,6 +777,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         start_sampling_from=0,
         exclude_layers=tuple(),
         keep_last_layer=False,
+        run_large_encoder=False,
     ):
         r"""
         encoder_hidden_states  (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`):
@@ -855,8 +861,7 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             )
         # print(embedding_output[:, :6, :6])
 
-        encoder_outputs = self.encoder(
-            embedding_output,
+        encoder_inputs = dict(
             attention_mask=extended_attention_mask,
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
@@ -876,15 +881,18 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             layer_normalizers=self.layer_normalizers,
             keep_last_layer=keep_last_layer,
         )
+        if run_large_encoder:
+            encoder_outputs = self.encoder(embedding_output, **encoder_inputs)
+        else:
+            encoder_outputs = self.small_encoder(self.embedding2encoder(embedding_output), **encoder_inputs)
         sequence_output = encoder_outputs[0]
-        pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
+            return (sequence_output, None) + encoder_outputs[1:]
 
         rv = BaseModelOutputWithPoolingAndCrossAttentions(
             last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
+            pooler_output=None,
             past_key_values=encoder_outputs.past_key_values,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
