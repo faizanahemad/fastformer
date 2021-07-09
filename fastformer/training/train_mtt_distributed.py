@@ -438,10 +438,10 @@ def train(local_rank, args):
         dataloader = build_dataloader(os.path.join(args["dataset"], "all_512_only"), args["shuffle_dataset"], batch_size,
                                       tokenizer, args["cls_tokens"],
                                       world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
-        dataloader128 = build_dataloader(os.path.join(args["dataset"], "all_128_only"), args["shuffle_dataset"], batch_size * 4,
+        dataloader128 = build_dataloader(os.path.join(args["dataset"], "all_128_only"), args["shuffle_dataset"], batch_size * 6,
                                       tokenizer, args["cls_tokens"],
                                       world_size=args["world_size"], num_workers=args["num_workers"], max_length=128)
-        dataloader256 = build_dataloader(os.path.join(args["dataset"], "all_256_only"), args["shuffle_dataset"], batch_size * 2,
+        dataloader256 = build_dataloader(os.path.join(args["dataset"], "all_256_only"), args["shuffle_dataset"], batch_size * 3,
                                       tokenizer, args["cls_tokens"],
                                       world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
     except:
