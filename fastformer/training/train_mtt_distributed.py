@@ -45,6 +45,7 @@ import torchvision.transforms as transforms
 import multiprocessing
 import signal
 from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
+from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
 
 try:
@@ -665,6 +666,26 @@ def train(local_rank, args):
             full_times = []
             model_times = []
             samples_processed_this_log_iter = 0
+            if args["enable_layer_normalizers_statistics"] and local_rank == 0:
+                backbone = getattr(model.student, "module", model.student).backbone
+                stats = backbone.layer_normalizers
+                inp_stats=backbone.encoder.layer_normalizers_statistics
+                norms = stats[:, 2, 0].tolist()
+                inp_norms = inp_stats[:, 2, 0].tolist()
+                centers = stats[:, 0, 0:16].tolist()
+                inp_centers = inp_stats[:, 0, 0:16].tolist()
+                stds = stats[:, 1, 0:16].tolist()
+                inp_stds = inp_stats[:, 1, 0:16].tolist()
+
+                print("Branch Norms = \n", tabulate(pd.DataFrame(norms), tablefmt="psql"))
+                print("Skip Norms = \n", tabulate(pd.DataFrame(inp_norms), tablefmt="psql"))
+
+                print("Branch centers = \n", tabulate(pd.DataFrame(centers), tablefmt="psql"))
+                print("Skip centers = \n", tabulate(pd.DataFrame(inp_centers), tablefmt="psql"))
+
+                print("Branch stds = \n", tabulate(pd.DataFrame(stds), tablefmt="psql"))
+                print("Skip stds = \n", tabulate(pd.DataFrame(inp_stds), tablefmt="psql"))
+
 
             # clean_memory()
             # barrier()
