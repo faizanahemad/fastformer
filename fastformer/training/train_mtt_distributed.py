@@ -672,10 +672,10 @@ def train(local_rank, args):
                 inp_stats=backbone.encoder.layer_normalizers_statistics
                 norms = stats[:, 2, 0].tolist()
                 inp_norms = inp_stats[:, 2, 0].tolist()
-                centers = stats[:, 0, 0:16].tolist()
-                inp_centers = inp_stats[:, 0, 0:16].tolist()
-                stds = stats[:, 1, 0:16].tolist()
-                inp_stds = inp_stats[:, 1, 0:16].tolist()
+                centers = stats[:, 0, 0:8].tolist()
+                inp_centers = inp_stats[:, 0, 0:8].tolist()
+                stds = stats[:, 1, 0:8].tolist()
+                inp_stds = inp_stats[:, 1, 0:8].tolist()
 
                 print("Branch Norms = \n", tabulate(pd.DataFrame(norms), tablefmt="psql"))
                 print("Skip Norms = \n", tabulate(pd.DataFrame(inp_norms), tablefmt="psql"))
