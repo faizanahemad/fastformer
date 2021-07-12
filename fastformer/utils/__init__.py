@@ -805,6 +805,10 @@ def student_teacher_param_update(student, teacher, m, device=None):
             layer_normalizers = backbone.layer_normalizers
             teacher.backbone.layer_normalizers.mul_(m).add_((1 - m) * layer_normalizers)
 
+        if hasattr(backbone, "layer_normalizers_small") and getattr(backbone, "layer_normalizers_small", None) is not None:
+            layer_normalizers_small = backbone.layer_normalizers_small
+            teacher.backbone.layer_normalizers_small.mul_(m).add_((1 - m) * layer_normalizers_small)
+
     if device is not None:
         teacher = teacher.to(torch.device("cpu"))
 
@@ -842,6 +846,29 @@ def get_loggable_dict(d):
         else:
             pass
     return rd
+
+def layer_normalizer_fn(embeddings, layer_normalizer, training, train_layer_normalizers, enable_layer_normalizers, enable_layer_normalizers_statistics):
+    if layer_normalizer is not None:
+        if (training and torch.is_grad_enabled() and train_layer_normalizers) or enable_layer_normalizers_statistics:
+            center = embeddings.detach().mean(0).mean(0)
+            layer_normalizer[0].mul_(0.9999).add_(0.0001 * center)
+        if enable_layer_normalizers:
+            embeddings = embeddings - layer_normalizer[0].detach().clone()
+
+        if (training and torch.is_grad_enabled() and train_layer_normalizers) or enable_layer_normalizers_statistics:
+            std = embeddings.detach().view(-1, embeddings.size(-1)).std(0)
+            layer_normalizer[1].mul_(0.9999).add_(0.0001 * std)
+        if enable_layer_normalizers:
+            embeddings = embeddings / layer_normalizer[1].detach().clone()
+
+        if (training and torch.is_grad_enabled() and train_layer_normalizers) or enable_layer_normalizers_statistics:
+            ne = embeddings.detach() if enable_layer_normalizers else (embeddings.detach() / layer_normalizer[1].detach().clone())
+            norm = (ne.norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
+            layer_normalizer[2].mul_(0.9999).add_(0.0001 * norm)
+        if enable_layer_normalizers:
+            embeddings = embeddings / layer_normalizer[2].detach().clone()
+
+    return embeddings
 
 
 

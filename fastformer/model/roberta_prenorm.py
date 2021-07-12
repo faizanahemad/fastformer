@@ -34,6 +34,7 @@ from transformers.utils import logging
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
 from fastformer.model.fast_convbert import BertIntermediate
+from fastformer.utils import layer_normalizer_fn
 
 
 def create_position_ids_from_input_ids(input_ids, padding_idx, past_key_values_length=0):
@@ -69,6 +70,7 @@ ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
 ]
 
 
+
 class RobertaEmbeddings(nn.Module):
     """
     Same as BertEmbeddings with a tiny tweak for positional embeddings indexing.
@@ -95,6 +97,8 @@ class RobertaEmbeddings(nn.Module):
             config.max_position_embeddings, config.hidden_size, padding_idx=self.padding_idx
         )
         self.train_layer_normalizers = getattr(config, "train_layer_normalizers", False)
+        self.enable_layer_normalizers_statistics = getattr(config, "enable_layer_normalizers_statistics", False)
+        self.enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
 
     def forward(
         self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0, layer_normalizer=None,
@@ -123,24 +127,7 @@ class RobertaEmbeddings(nn.Module):
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
-        if layer_normalizer is not None:
-            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
-                center = embeddings.detach().mean(0).mean(0)
-                layer_normalizer[0].mul_(0.9999).add_(0.0001 * center)
-            center = layer_normalizer[0].detach().clone()
-            embeddings = embeddings - center
-
-            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
-                std = embeddings.detach().view(-1, embeddings.size(-1)).std(0)
-                layer_normalizer[1].mul_(0.9999).add_(0.0001 * std)
-            std = layer_normalizer[1].detach().clone()
-            embeddings = embeddings / std
-
-            if self.training and torch.is_grad_enabled() and self.train_layer_normalizers:
-                norm = (embeddings.detach().norm(2, -1).mean() + 1e-5).expand(embeddings.size(-1))
-                layer_normalizer[2].mul_(0.9999).add_(0.0001 * norm)
-            norm = layer_normalizer[2].detach().clone()
-            embeddings = embeddings / norm
+        layer_normalizer_fn(embeddings, layer_normalizer, self.training, self.train_layer_normalizers, self.enable_layer_normalizers, self.enable_layer_normalizers_statistics)
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -392,6 +379,14 @@ class RobertaEncoder(nn.Module):
         scale_factor_values = [v ** 0.5 if v > 1 else v ** 2 for v in scale_factor_values]
         scale_factors_emb = nn.Parameter(torch.tensor(scale_factor_values))
         self.register_parameter("scale_factors_emb", scale_factors_emb)
+        self.enable_layer_normalizers_statistics = getattr(config, "enable_layer_normalizers_statistics", False)
+        self.train_layer_normalizers = False
+        if self.enable_layer_normalizers_statistics:
+            layer_normalizers_statistics = torch.zeros(config.num_hidden_layers, 3, config.hidden_size, requires_grad=False, dtype=torch.float32)
+            layer_normalizers_statistics[:, 1] = 1.0
+            layer_normalizers_statistics[:, 2] = 1.0
+            self.register_buffer("layer_normalizers_statistics", layer_normalizers_statistics)
+        self.enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
 
     def forward(
         self,
@@ -473,19 +468,21 @@ class RobertaEncoder(nn.Module):
             grad_layer = (i in selected_layers or drop_unused_layers or not approximate_unused_layers) and self.training and i >= start_sampling_from and torch.is_grad_enabled()
 
             scale_factor = 1
-            if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers) and layer_normalizers is not None:
+            if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers) and layer_normalizers is not None and self.enable_layer_normalizers:
                 scale_factor = 1 + layer_scales[(prev_grad_layer, i)]
 
             if i < start_sampling_from:
                 pass
             elif drop_unused_layers and i not in selected_layers:
                 continue
-            elif drop_unused_layers and layer_normalizers is not None:
+            elif drop_unused_layers and layer_normalizers is not None and self.enable_layer_normalizers:
                 hidden_states = hidden_states * scale_factor
                 if isinstance(scale_factor, torch.Tensor):
                     layer_scales_loss = layer_scales_loss + layer_scales[(prev_grad_layer, i)]
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
+            layer_normalizer_fn(hidden_states, self.layer_normalizers_statistics[i], self.training, self.train_layer_normalizers, False,
+                                self.enable_layer_normalizers_statistics)
 
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -718,16 +715,24 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
         self.embedding2encoder = nn.Linear(config.hidden_size, self.small_config.hidden_size)
         # self.embeddings_project = nn.Linear(self.small_config.hidden_size, config.hidden_size)
         enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
-        layer_normalizers = None
-        if enable_layer_normalizers:
+        enable_layer_normalizers_statistics = getattr(config, "enable_layer_normalizers_statistics", False)
+        if enable_layer_normalizers or enable_layer_normalizers_statistics:
             layer_normalizers = torch.zeros(config.num_hidden_layers + 1, 3, config.hidden_size, requires_grad=False, dtype=torch.float32)
             layer_normalizers[:, 1] = 1.0
             layer_normalizers[:, 2] = 1.0
             # layer_normalizers[:, 5] = 1.0
             layer_normalizers = layer_normalizers.detach()
             self.register_buffer("layer_normalizers", layer_normalizers)
+
+            layer_normalizers_small = torch.zeros(self.small_config.num_hidden_layers + 1, 3, self.small_config.hidden_size, requires_grad=False, dtype=torch.float32)
+            layer_normalizers_small[:, 1] = 1.0
+            layer_normalizers_small[:, 2] = 1.0
+            # layer_normalizers[:, 5] = 1.0
+            layer_normalizers_small = layer_normalizers_small.detach()
+            self.register_buffer("layer_normalizers_small", layer_normalizers_small)
         else:
-            self.layer_normalizers = layer_normalizers
+            self.layer_normalizers = None
+            self.layer_normalizers_small = None
 
         self.init_weights()
 
@@ -878,12 +883,13 @@ class PreNormRobertaModel(RobertaPreTrainedModel):
             approximate_unused_layers=approximate_unused_layers,
             start_sampling_from=start_sampling_from,
             exclude_layers=exclude_layers,
-            layer_normalizers=self.layer_normalizers,
             keep_last_layer=keep_last_layer,
         )
         if run_large_encoder:
+            encoder_inputs.update(dict(layer_normalizers=self.layer_normalizers))
             encoder_outputs = self.encoder(embedding_output, **encoder_inputs)
         else:
+            encoder_inputs.update(dict(layer_normalizers=self.layer_normalizers_small))
             encoder_outputs = self.small_encoder(self.embedding2encoder(embedding_output), **encoder_inputs)
         sequence_output = encoder_outputs[0]
 

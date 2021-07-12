@@ -92,6 +92,8 @@ def training_args():
                         help='consecutive_layers')
     parser.add_argument('--enable_layer_normalizers', action="store_true", default=False,
                         help='enable_layer_normalizers')
+    parser.add_argument('--enable_layer_normalizers_statistics', action="store_true", default=False,
+                        help='enable_layer_normalizers_statistics')
     parser.add_argument('--exclude_layers', action="store_true", default=False,
                         help='exclude_layers')
     parser.add_argument('--sampling_alpha', type=float, required=False,
@@ -308,8 +310,10 @@ def train(local_rank, args):
         eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], args["sampling_alpha"], reinit, dropout_prob=0.01)
-    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], None, reinit, dropout_prob=0.0)
+    backbone, tokenizer = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], args["sampling_alpha"], reinit,
+                                           args["enable_layer_normalizers"], args["enable_layer_normalizers_statistics"], dropout_prob=0.01)
+    teacher_backbone, _ = get_mtt_backbone(args["model_config"], args["cls_tokens"], args["enable_layer_normalizers"], None, reinit, args["enable_layer_normalizers"],
+                                           args["enable_layer_normalizers_statistics"], dropout_prob=0.0)
 
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     generator_w = args["generator_w"] if "generator_w" in args else 0.0
@@ -445,6 +449,7 @@ def train(local_rank, args):
                                       tokenizer, args["cls_tokens"],
                                       world_size=args["world_size"], num_workers=args["num_workers"], max_length=256)
     except:
+        print("[WARN] [Train]: Time = %s, All dataloaders and datasets are same = %s" % (get_time_string(), args["dataset"]))
         dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size,
                                       tokenizer, args["cls_tokens"],
                                       world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
@@ -527,6 +532,10 @@ def train(local_rank, args):
             batch = dataloader256()
         else:
             batch = dataloader()
+
+        epoch_128 = dataloader128.epoch
+        epoch_256 = dataloader256.epoch
+        epoch_512 = dataloader.epoch
 
         # batch = None
         # if len_proba < 0.9:
@@ -640,7 +649,9 @@ def train(local_rank, args):
             output = {k: float(v) if v else v for k, v in output.items()}
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
             wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
-                             batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times), steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                             batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),
+                             steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                             epoch_128=epoch_128, epoch_256=epoch_256, epoch_512=epoch_512,
                              **{k: v for k, v in output.items() if v is not None})
 
             wandb.log(wandb_log)

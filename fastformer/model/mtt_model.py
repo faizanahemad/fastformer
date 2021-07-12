@@ -82,7 +82,7 @@ def temperature_sampling(logits, temperature=2.0):
     return pred_ids
 
 
-def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_alpha, reinit=False, train_layer_normalizers=True, dropout_prob=0.05):
+def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_alpha, reinit=False, train_layer_normalizers=True, enable_layer_normalizers_statistics=False, dropout_prob=0.05):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
 
@@ -103,6 +103,7 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
             config = RobertaConfig.from_pretrained(model_name)
         config.hidden_dropout_prob = dropout_prob
         config.attention_probs_dropout_prob = dropout_prob
+        config.enable_layer_normalizers_statistics = enable_layer_normalizers_statistics
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
