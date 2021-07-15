@@ -871,6 +871,10 @@ def layer_normalizer_fn(embeddings, layer_normalizer, training, train_layer_norm
     return embeddings
 
 
+def sync_layer_normalizers():
+    pass
+
+
 
 
 
