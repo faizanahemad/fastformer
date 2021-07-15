@@ -104,7 +104,7 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
         config.hidden_dropout_prob = dropout_prob
         config.attention_probs_dropout_prob = dropout_prob
         config.enable_layer_normalizers_statistics = enable_layer_normalizers_statistics
-        # config.gradient_checkpointing = True
+        config.gradient_checkpointing = not enable_layer_normalizers and not enable_layer_normalizers_statistics
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         # tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
