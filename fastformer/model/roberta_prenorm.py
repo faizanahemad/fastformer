@@ -485,8 +485,9 @@ class RobertaEncoder(nn.Module):
                     layer_scales_loss = layer_scales_loss + layer_scales[(prev_grad_layer, i)]
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
-            layer_normalizer_fn(hidden_states, self.layer_normalizers_statistics[i], self.training, self.train_layer_normalizers, False,
-                                self.enable_layer_normalizers_statistics)
+            if self.enable_layer_normalizers_statistics:
+                layer_normalizer_fn(hidden_states, self.layer_normalizers_statistics[i], self.training, self.train_layer_normalizers, False,
+                                    self.enable_layer_normalizers_statistics)
 
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
