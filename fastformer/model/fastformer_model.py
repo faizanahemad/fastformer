@@ -20,8 +20,6 @@ from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
 
-from fastformer.model import PreNormRobertaModel
-
 try:
     from performer_pytorch import SelfAttention, FastAttention
 except:
@@ -923,7 +921,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         #     self.ce = BCELossFocal()
         # else:
         #     self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
-
+        from fastformer.model import PreNormRobertaModel
         dropout = 0.1
         if num_classes == 1:
             self.ce = nn.BCEWithLogitsLoss()
@@ -963,7 +961,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = self.backbone(**funnel_inputs)
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
-
+            from fastformer.model import PreNormRobertaModel
             inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
             if isinstance(self.backbone, PreNormRobertaModel):
                 inputs["run_large_encoder"] = True
