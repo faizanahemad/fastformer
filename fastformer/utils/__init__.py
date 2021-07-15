@@ -847,6 +847,7 @@ def get_loggable_dict(d):
             pass
     return rd
 
+
 def layer_normalizer_fn(embeddings, layer_normalizer, training, train_layer_normalizers, enable_layer_normalizers, enable_layer_normalizers_statistics):
     if layer_normalizer is not None:
         if (training and torch.is_grad_enabled() and train_layer_normalizers) or enable_layer_normalizers_statistics:

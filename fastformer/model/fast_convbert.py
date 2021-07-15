@@ -506,8 +506,7 @@ class BertIntermediate(nn.Module):
 
         if layer_start_hidden is not None and layer_normalizer is not None and fi is not None:
             fi_gof = fi + gof
-            layer_normalizer_fn(fi_gof, layer_normalizer, self.training, self.train_layer_normalizers, self.enable_layer_normalizers,
-                                self.enable_layer_normalizers_statistics)
+            fi_gof = layer_normalizer_fn(fi_gof, layer_normalizer, self.training, self.train_layer_normalizers, self.enable_layer_normalizers, self.enable_layer_normalizers_statistics)
             hidden_states = layer_start_hidden
             gof = fi_gof
         hidden_states = hidden_states + gof

@@ -127,7 +127,7 @@ class RobertaEmbeddings(nn.Module):
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
-        layer_normalizer_fn(embeddings, layer_normalizer, self.training, self.train_layer_normalizers, self.enable_layer_normalizers, self.enable_layer_normalizers_statistics)
+        embeddings = layer_normalizer_fn(embeddings, layer_normalizer, self.training, self.train_layer_normalizers, self.enable_layer_normalizers, self.enable_layer_normalizers_statistics)
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -305,9 +305,9 @@ class RobertaLayer(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        layer_normalizer=None,
         past_key_value=None,
         output_attentions=False,
-        layer_normalizer=None,
     ):
         hidden_states_normed = hidden_states
 
@@ -486,11 +486,17 @@ class RobertaEncoder(nn.Module):
             # print((i, prev_grad_layer, len(layers)), (grad_layer, drop_unused_layers, approximate_unused_layers,), scale_factor)
             prev_grad_layer = i
             if self.enable_layer_normalizers_statistics:
-                layer_normalizer_fn(hidden_states, self.layer_normalizers_statistics[i], self.training, self.train_layer_normalizers, False,
+                layer_normalizer_fn(hidden_states.detach(), self.layer_normalizers_statistics[i].detach(), self.training, self.train_layer_normalizers, False,
                                     self.enable_layer_normalizers_statistics)
 
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs, past_key_value, output_attentions)
+
+                return custom_forward
             with torch.set_grad_enabled(grad_layer):
                 if getattr(self.config, "gradient_checkpointing", False) and self.training and grad_layer:
 
@@ -501,12 +507,6 @@ class RobertaEncoder(nn.Module):
                         )
                         use_cache = False
 
-                    def create_custom_forward(module):
-                        def custom_forward(*inputs):
-                            return module(*inputs, past_key_value, output_attentions)
-
-                        return custom_forward
-
                     layer_outputs = torch.utils.checkpoint.checkpoint(
                         create_custom_forward(layer_module),
                         hidden_states if grad_layer else hidden_states.detach(),
@@ -514,17 +514,15 @@ class RobertaEncoder(nn.Module):
                         layer_head_mask,
                         encoder_hidden_states,
                         encoder_attention_mask,
-                        layer_normalizers[i+1] if layer_normalizers is not None else None,
+                        layer_normalizers[i + 1] if layer_normalizers is not None else None,
                     )
                 else:
-                    layer_outputs = layer_module(
+                    layer_outputs = create_custom_forward(layer_module)(
                         hidden_states if grad_layer else hidden_states.detach(),
                         attention_mask,
                         layer_head_mask,
                         encoder_hidden_states,
                         encoder_attention_mask,
-                        past_key_value,
-                        output_attentions,
                         layer_normalizers[i + 1] if layer_normalizers is not None else None,
                     )
 
