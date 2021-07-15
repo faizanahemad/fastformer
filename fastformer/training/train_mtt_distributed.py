@@ -579,7 +579,7 @@ def train(local_rank, args):
             dino_w = np.interp(steps_done, [0, args["teacher_warmup_steps"], args["teacher_warmup_steps"] * 2], [0.0, 0.0, args["dino_w"]])
             inner_model.dino_w = dino_w
         lm_temperature = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2],
-                                   [args["lm_temperature"], args["lm_temperature"], args["lm_temperature"] + 2.0])
+                                   [args["lm_temperature"], args["lm_temperature"], args["lm_temperature"] + 1.0])
         inner_model.lm_temperature = lm_temperature
 
         batch_times.append(gen_batch_time)
