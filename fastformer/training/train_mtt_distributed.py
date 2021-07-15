@@ -476,8 +476,9 @@ def train(local_rank, args):
 
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
+    div_factor = optc["lr"]/1e-6
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
-                                                    div_factor=1e4, three_phase=False, pct_start=0.06, anneal_strategy="linear", cycle_momentum=False)
+                                                    div_factor=div_factor, three_phase=False, pct_start=0.06, anneal_strategy="linear", cycle_momentum=False)
 
     # scheduler1 = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer, step_size=(steps_per_epoch * args["epochs"]) // args["lr_steps"], gamma=0.5)
@@ -527,9 +528,9 @@ def train(local_rank, args):
     while steps_done < total_steps:
         random.seed(step)
         len_proba = random.random()
-        if len_proba < 0.85:
+        if len_proba < 0.75:
             batch = dataloader128()
-        elif len_proba < 0.92:
+        elif len_proba < 0.85:
             batch = dataloader256()
         else:
             batch = dataloader()
