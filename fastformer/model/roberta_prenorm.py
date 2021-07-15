@@ -375,8 +375,7 @@ class RobertaEncoder(nn.Module):
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
         self.sampling_alpha = getattr(self.config, "sampling_alpha", 1.0)
         self.scale_factors_idx = [(i, j) for i in range(config.num_hidden_layers) for j in range(i + 2, config.num_hidden_layers)]
-        scale_factor_values = [((j - i - 1) / (i + 1)) for i in range(config.num_hidden_layers) for j in range(i + 2, config.num_hidden_layers)]
-        scale_factor_values = [v ** 0.5 if v > 1 else v ** 2 for v in scale_factor_values]
+        scale_factor_values = [((j - i - 1) / (i + 1)) * 0.01 for i in range(config.num_hidden_layers) for j in range(i + 2, config.num_hidden_layers)]
         scale_factors_emb = nn.Parameter(torch.tensor(scale_factor_values))
         self.register_parameter("scale_factors_emb", scale_factors_emb)
         self.enable_layer_normalizers_statistics = getattr(config, "enable_layer_normalizers_statistics", False)
@@ -386,6 +385,9 @@ class RobertaEncoder(nn.Module):
             layer_normalizers_statistics[:, 1] = 1.0
             layer_normalizers_statistics[:, 2] = 1.0
             self.register_buffer("layer_normalizers_statistics", layer_normalizers_statistics)
+
+            distance_statistics = torch.zeros(config.num_hidden_layers, requires_grad=False, dtype=torch.float32)
+            self.register_buffer("distance_statistics", distance_statistics)
         self.enable_layer_normalizers = getattr(config, "enable_layer_normalizers", False)
 
     def forward(
@@ -470,6 +472,8 @@ class RobertaEncoder(nn.Module):
             scale_factor = 1
             if i > prev_grad_layer + 1 and (drop_unused_layers or approximate_unused_layers) and layer_normalizers is not None and self.enable_layer_normalizers:
                 scale_factor = 1 + layer_scales[(prev_grad_layer, i)]
+                if self.enable_layer_normalizers_statistics:
+                    self.distance_statistics[i - prev_grad_layer].mul_(0.999).add_(0.001 * scale_factor.detach())
 
             if i < start_sampling_from:
                 pass

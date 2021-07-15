@@ -19,6 +19,9 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.nn import functional as F
+
+from fastformer.model import PreNormRobertaModel
+
 try:
     from performer_pytorch import SelfAttention, FastAttention
 except:
@@ -921,13 +924,20 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         # else:
         #     self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
 
+        dropout = 0.1
         if num_classes == 1:
             self.ce = nn.BCEWithLogitsLoss()
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
-        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
+        if isinstance(self.backbone, PreNormRobertaModel):
+            num_features = self.backbone.embeddings.position_embeddings.weight.size(1)
+            num_features_small = self.backbone.small_config.hidden_size
+            self.num_features = (num_features + num_features_small) * 4
+            dropout = 0.15
+        else:
+            self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
         if train_backbone:
-            self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Dropout(0.1),
+            self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Dropout(dropout),
                                       nn.Linear(self.num_features, self.num_features // 4), nn.GELU(),
                                       nn.Linear(self.num_features // 4, num_classes))
         else:
@@ -953,12 +963,20 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             funnel_outputs = self.backbone(**funnel_inputs)
             funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
         else:
-            funnel_outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-            if self.cls_tokens > 1:
-                funnel_outputs = torch.cat((funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-1][:, 1], funnel_outputs["hidden_states"][-2][:, 0], funnel_outputs["hidden_states"][-2][:, 1]), -1)
+
+            inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
+            if isinstance(self.backbone, PreNormRobertaModel):
+                inputs["run_large_encoder"] = True
+                funnel_outputs = self.backbone(**inputs)["hidden_states"]
+                inputs["run_large_encoder"] = False
+                funnel_outputs_small = self.backbone(**inputs)["hidden_states"]
+                hidden_states = [torch.cat((h1, h2), -1) for h1, h2 in zip(funnel_outputs, funnel_outputs_small)]
             else:
-                funnel_outputs = torch.cat((funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0], funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
-            # funnel_outputs = torch.cat((funnel_outputs["pooler_output"] if "pooler_output" in funnel_outputs else funnel_outputs["hidden_states"][-1][:, 0], funnel_outputs["hidden_states"][-2][:, 0], funnel_outputs["hidden_states"][-3][:, 0], funnel_outputs["hidden_states"][-4][:, 0]), -1)
+                hidden_states = self.backbone(**inputs)["hidden_states"]
+            if self.cls_tokens > 1:
+                funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-1][:, 1], hidden_states[-2][:, 0], hidden_states[-2][:, 1]), -1)
+            else:
+                funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):

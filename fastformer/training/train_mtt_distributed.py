@@ -109,7 +109,7 @@ def training_args():
     parser.add_argument('--start_from_proba', default=0.0, type=float,
                         help='start_from_proba')
 
-    parser.add_argument('--lm_temperature', default=2.0, type=float,
+    parser.add_argument('--lm_temperature', default=1.0, type=float,
                         help='lm_temperature')
 
     parser.add_argument('--total_steps', type=int, required=False,
@@ -529,7 +529,7 @@ def train(local_rank, args):
         len_proba = random.random()
         if len_proba < 0.85:
             batch = dataloader128()
-        elif len_proba < 0.95:
+        elif len_proba < 0.92:
             batch = dataloader256()
         else:
             batch = dataloader()
@@ -577,6 +577,9 @@ def train(local_rank, args):
         if args["dino_w"] > 0:
             dino_w = np.interp(steps_done, [0, args["teacher_warmup_steps"], args["teacher_warmup_steps"] * 2], [0.0, 0.0, args["dino_w"]])
             inner_model.dino_w = dino_w
+        lm_temperature = np.interp(steps_done, [0, args["warmup_steps"], args["warmup_steps"] * 2],
+                                   [args["lm_temperature"], args["lm_temperature"], args["lm_temperature"] + 0.5])
+        inner_model.lm_temperature = lm_temperature
 
         batch_times.append(gen_batch_time)
         if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
@@ -640,6 +643,15 @@ def train(local_rank, args):
                 layer_normalizers = layer_normalizers / args["world_size"]
                 getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers = layer_normalizers.type(dtype)
 
+        if (step + 1) % (4 * iter_size) == 0 and hasattr(getattr(trainable_model, "module", trainable_model).backbone, "layer_normalizers_small") and args["world_size"] > 1:
+            layer_normalizers_small = getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers_small
+            if layer_normalizers_small is not None:
+                dtype = layer_normalizers_small.dtype
+                layer_normalizers_small = layer_normalizers_small.type(torch.float64)
+                torch.distributed.all_reduce(layer_normalizers_small, torch.distributed.ReduceOp.SUM)
+                layer_normalizers_small = layer_normalizers_small / args["world_size"]
+                getattr(trainable_model, "module", trainable_model).backbone.layer_normalizers_small = layer_normalizers_small.type(dtype)
+
         full_time = time.time() - start_time
         full_times.append(full_time)
         if step == 0 and local_rank == 0:
@@ -677,8 +689,10 @@ def train(local_rank, args):
                 stds = stats[:, 1, 0:8].tolist()
                 inp_stds = inp_stats[:, 1, 0:8].tolist()
 
+                dist_stats = backbone.encoder.distance_statistics.tolist()
+
                 print("Branch Norms = \n", tabulate(pd.DataFrame(norms), tablefmt="psql"))
-                print("Skip Norms = \n", tabulate(pd.DataFrame(inp_norms), tablefmt="psql"))
+                print("Skip Norms = \n", tabulate(pd.DataFrame({"norm": inp_norms, "dist": dist_stats}), tablefmt="psql"))
 
                 print("Branch centers = \n", tabulate(pd.DataFrame(centers), tablefmt="psql"))
                 print("Skip centers = \n", tabulate(pd.DataFrame(inp_centers), tablefmt="psql"))

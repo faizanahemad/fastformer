@@ -252,14 +252,14 @@ class MTTModel(FastFormerPreTrainedModel):
             init_weights(self.generator_ffn, 0.01)
 
         if discriminator_w > 0:
-            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features + num_features_small, num_features),
+            self.discriminator_ffn = nn.Sequential(nn.Linear(num_features, num_features),
                                                    nn.GELU(),
                                                    nn.Linear(num_features, 1))
 
             init_weights(self.discriminator_ffn, 0.01)
 
         if sentence_order_prediction_w > 0:
-            self.sent_order_nn = nn.Sequential(nn.Linear(num_features + 2 * num_features_small, num_features),
+            self.sent_order_nn = nn.Sequential(nn.Linear(num_features + num_features_small, num_features),
                                                nn.GELU(),
                                                nn.Linear(num_features, 1))
             init_weights(self.sent_order_nn, 0.01)
@@ -422,13 +422,6 @@ class MTTModel(FastFormerPreTrainedModel):
                 n_grad_forward_layers_electra = discriminator_outputs["n_grad_forward_layers"] if "n_grad_forward_layers" in discriminator_outputs else None
                 n_forward_layers_electra = discriminator_outputs["n_forward_layers"] if "n_forward_layers" in discriminator_outputs else None
                 discriminator_outputs = discriminator_outputs["last_hidden_state"]
-
-                discriminator_inputs["run_large_encoder"] = False
-                discriminator_outputs_small = self.backbone(**discriminator_inputs)
-                discriminator_layer_scales_loss = discriminator_outputs_small["layer_scales_loss"] if "layer_scales_loss" in discriminator_outputs_small else None
-                if layer_scales_loss is not None:
-                    layer_scales_loss = layer_scales_loss + discriminator_layer_scales_loss
-                discriminator_outputs = torch.cat((discriminator_outputs, discriminator_outputs_small["last_hidden_state"]), -1)
 
                 _ = discriminator_inputs.pop("num_layers", None)
                 _ = discriminator_inputs.pop("num_layers_total", None)
