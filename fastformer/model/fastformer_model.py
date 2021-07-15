@@ -934,12 +934,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             dropout = 0.15
         else:
             self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
-        if train_backbone:
-            self.head = nn.Sequential(nn.LayerNorm(self.num_features), nn.Dropout(dropout),
-                                      nn.Linear(self.num_features, self.num_features // 4), nn.GELU(),
-                                      nn.Linear(self.num_features // 4, num_classes))
-        else:
-            self.head = nn.Linear(self.num_features, num_classes)
+        self.head = nn.Linear(self.num_features, num_classes)
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
