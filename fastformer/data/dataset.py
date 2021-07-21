@@ -12,7 +12,7 @@ import nlpaug.augmenter.char as nac
 import unidecode
 import os
 
-from fastformer.utils import squeeze_after, get_time_string, recursive_op, gcd_array
+from fastformer.utils import squeeze_after, get_time_string, recursive_op, gcd_array, clean_text, get_text_mapper
 from collections import deque
 from functools import partial
 
@@ -658,7 +658,7 @@ class MTTDataset(Dataset):
 
         text = item["text"]
         text = unidecode.unidecode(text)
-        text = " ".join([x.strip() for x in text.split()])
+        text = clean_text(text)
         length = len(text.strip().split())
 
         if length > self.allowed_raw_length:
@@ -1402,72 +1402,6 @@ def all_datasets():
     # wiki_bio  = load_dataset("wiki_bio", script_version="master")
     # t2s = train_10_20_ds.map(get_text_mapper(["title", "text"], 512, tokenizer, sent_detector), batched=True, remove_columns=["title"])
     # train_10_20_ds = datasets.load_dataset('wikipedia', '20200501.en', split='train[10:20]')
-
-def clean_text(text):
-    if isinstance(text, (list, tuple)):
-        text = " ".join(text)
-    text = str(text)
-    text = text.lower()
-    EMPTY = ' '
-
-    def replace_link(match):
-        return EMPTY if re.match('[a-z]+://', match.group(1)) else match.group(1)
-
-    text = re.sub('<a[^>]*>(.*)</a>', replace_link, text)
-    text = re.sub('<.*?>', EMPTY, text)
-    text.replace("\\'", "'")
-    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    text = re.sub('<pre><code>.*?</code></pre>', EMPTY, text)
-    text = re.sub('<code>.*?</code>', EMPTY, text)
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    text = re.sub('[ ]+', ' ', text)
-
-    return text
-
-
-def get_text_mapper(text_cols, total_tokens, tokenizer, sent_detector):
-    def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
-        # TODO: remove duplicates after merging for main dataset of MLM
-        # TODO: add an id column after making MLM set
-        texts = []
-
-        for tcol in text_cols:
-            if isinstance(tcol, str):
-                texts.append(list(map(clean_text, examples[tcol])))
-            elif isinstance(tcol, (list, tuple)):
-                ex = examples[tcol[0]]
-                for tcol2 in tcol[1:]:
-                    ex = [e[tcol2] for e in ex]
-                texts.append(list(map(clean_text, ex)))
-            else:
-                raise NotImplementedError()
-
-        one_texts = [" ".join(one_example) for one_example in zip(*texts)]
-        final_texts = []
-
-        for text in one_texts:
-            if text is None or len(text) == 0:
-                continue
-            text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-            sents = sent_detector.tokenize(text)
-            cwc = 0
-            cur_seg = ""
-            for i, s in enumerate(sents):
-                wc = len(tokenizer.tokenize(s, add_special_tokens=True))
-                if cwc + wc <= total_tokens or cwc == 0 or i == len(sents) - 1:
-                    pass
-                else:
-                    final_texts.append(cur_seg)
-                    cwc = 0
-                    cur_seg = ""
-                cwc += wc
-                cur_seg = cur_seg + " " + s
-            # TODO: Last sent, big sentence
-            final_texts.append(cur_seg)
-        final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) for t in final_texts]
-        assert len(final_lengths) == len(final_texts)
-        return dict(text=final_texts, length=final_lengths)
-    return mapper
 
 
 def get_matching_mapper(text_cols, matching_query, matching_cols, mlm_query=tuple(), mlm_ans=tuple(),

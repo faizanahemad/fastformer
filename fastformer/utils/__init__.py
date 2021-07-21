@@ -1,4 +1,5 @@
 import argparse
+import functools
 from typing import Iterable
 
 import dill
@@ -17,6 +18,9 @@ import time
 from torch import nn
 from torch.nn import functional as F
 from timm.models.layers.weight_init import trunc_normal_
+import base64
+import hashlib
+from hashlib import sha3_256, md5, sha256
 
 import pandas as pd
 import random
@@ -782,7 +786,7 @@ def init_weights(module, std=None):
             pass
         elif hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
             fan_out, fan_in = module.weight.shape[:2]
-            std = np.sqrt(1.0 / float(fan_in + fan_out))
+            std = np.sqrt(1.0 / (float(fan_in + fan_out)/2.0))
         elif hasattr(module, "weight"):
             std = np.sqrt(1.0 / module.weight.shape[-1])
         if hasattr(module, "weight"):
@@ -874,6 +878,104 @@ def layer_normalizer_fn(embeddings, layer_normalizer, training, train_layer_norm
 
 def sync_layer_normalizers():
     pass
+
+
+def clean_text(text):
+    if isinstance(text, (list, tuple)):
+        text = " ".join(text)
+    text = str(text)
+    text = text.lower()
+    EMPTY = ' '
+
+    def replace_link(match):
+        return EMPTY if re.match('[a-z]+://', match.group(1)) else match.group(1)
+
+    text = re.sub('<a[^>]*>(.*)</a>', replace_link, text)
+    text = re.sub('<.*?>', EMPTY, text)
+    text.replace("\\'", "'")
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    text = re.sub('<pre><code>.*?</code></pre>', EMPTY, text)
+    text = re.sub('<code>.*?</code>', EMPTY, text)
+    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+    text = re.sub('[ ]+', ' ', text)
+
+    return text
+
+
+def get_text_mapper(text_cols, total_tokens, tokenizer=None, sent_detector=None, keep_above=None):
+    from typing import Dict, List
+    import base64
+    import hashlib
+    from hashlib import sha3_256, md5
+    import re
+    if sent_detector is None:
+        import nltk
+        sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+    if tokenizer is None:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+
+    def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
+        # TODO: remove duplicates after merging for main dataset of MLM
+        # TODO: add an id column after making MLM set
+        texts = []
+
+        for tcol in text_cols:
+            if isinstance(tcol, str):
+                texts.append(list(map(clean_text, examples[tcol])))
+            elif isinstance(tcol, (list, tuple)):
+                ex = examples[tcol[0]]
+                for tcol2 in tcol[1:]:
+                    ex = [e[tcol2] for e in ex]
+                texts.append(list(map(clean_text, ex)))
+            else:
+                raise NotImplementedError()
+
+        one_texts = [" ".join(one_example) for one_example in zip(*texts)]
+        final_texts = []
+        final_hashes = []
+        document_hash = []
+
+        for text in one_texts:
+            if text is None or len(text) == 0:
+                continue
+            text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+            sents = sent_detector.tokenize(text)
+            cwc = 0
+            cur_seg = ""
+            hashes = []
+            dh = base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()[:16]
+            for i, s in enumerate(sents):
+                hash = base64.b64encode(hashlib.sha256(s.encode("utf-8")).digest()).decode()[:16]
+                wc = len(tokenizer.tokenize(s, add_special_tokens=True))
+                if cwc + wc < total_tokens or cwc == 0 or i == len(sents) - 1:
+                    pass
+                else:
+                    final_texts.append(cur_seg)
+                    final_hashes.append(hashes[:3])
+                    document_hash.append(dh)
+                    cwc = 0
+                    cur_seg = ""
+                    hashes = []
+                cwc += wc
+                cur_seg = cur_seg + " " + s
+                hashes.append(hash)
+            # TODO: Last sent, big sentence
+            final_texts.append(cur_seg.strip())
+            final_hashes.append(hashes[:3])
+            document_hash.append(dh)
+        final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) for t in final_texts]
+        assert len(final_lengths) == len(final_texts)
+        results = dict(text=final_texts, length=final_lengths, hashes=final_hashes, hash=document_hash)
+        # dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
+        if isinstance(keep_above, int):
+            dl = results
+            ld = [{key: value[index] for key, value in dl.items()} for index in range(max(map(len, dl.values())))]
+            ld = [d for d in ld if d["length"] >= keep_above]
+            dl2 = {key:[item[key] for item in ld] for key in ld[0].keys()}
+            results = dl2
+        return results
+    return mapper
 
 
 

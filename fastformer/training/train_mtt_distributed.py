@@ -528,9 +528,9 @@ def train(local_rank, args):
     while steps_done < total_steps:
         random.seed(step)
         len_proba = random.random()
-        if len_proba < 0.75:
+        if len_proba < 0.5:
             batch = dataloader128()
-        elif len_proba < 0.85:
+        elif len_proba < 0.6:
             batch = dataloader256()
         else:
             batch = dataloader()
