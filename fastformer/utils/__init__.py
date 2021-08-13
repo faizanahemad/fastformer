@@ -8,6 +8,7 @@ import torch
 import random
 import re
 import gc
+import os
 import datetime
 import time
 from datetime import datetime, timedelta
@@ -25,6 +26,7 @@ from hashlib import sha3_256, md5, sha256
 import pandas as pd
 import random
 import os
+import logging
 import argparse
 from tqdm.auto import tqdm
 import subprocess
@@ -47,6 +49,19 @@ def warn(*args, **kwargs):
     pass
 
 warnings.warn = warn
+
+
+logging.basicConfig(
+    format='[PID: %(process)d] [%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s',
+    level=os.environ.get("LOGLEVEL", "INFO"),
+    datefmt='%Y-%m-%d %H:%M:%S')
+
+
+def getLogger(name, level=None):
+    level = os.environ.get("LOGLEVEL", "INFO") if level is None else level
+    log = logging.getLogger(name)
+    log.setLevel(level)
+    return log
 
 
 
@@ -902,23 +917,75 @@ def clean_text(text):
     return text
 
 
-def get_text_mapper(text_cols, total_tokens, tokenizer=None, sent_detector=None, keep_above=None):
-    from typing import Dict, List
-    import base64
-    import hashlib
-    from hashlib import sha3_256, md5
-    import re
+def init_text_mapper_artifact(tokenizer, sent_detector,
+                              use_sbert, use_msmarco, use_albert, use_squeezebert, use_nq):
+    from sentence_transformers import SentenceTransformer
+    from transformers import AutoTokenizer, AutoModel
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
+    sbert = None
+    msmarco = None
+    albert = None
+    squeezebert = None
+    nq = None
+    albert_tokenizer = None
+    squeezebert_tokenizer = None
+
     if sent_detector is None:
         import nltk
         sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
     if tokenizer is None:
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+    if use_sbert:
+        sbert = SentenceTransformer("paraphrase-mpnet-base-v2").eval()
+    if use_msmarco:
+        msmarco = SentenceTransformer("msmarco-distilbert-base-v4").eval()
+    if use_albert:
+        albert = AutoModel.from_pretrained("albert-base-v2").eval()
+        albert_tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
+    if use_squeezebert:
+        squeezebert = AutoModel.from_pretrained("squeezebert/squeezebert-uncased").eval()
+        squeezebert_tokenizer = AutoTokenizer.from_pretrained("squeezebert/squeezebert-uncased")
+    if use_nq:
+        nq = SentenceTransformer('nq-distilbert-base-v1').eval()
+    return dict(tokenizer=tokenizer, sent_detector=sent_detector, sbert=sbert, msmarco=msmarco,
+                albert=albert, albert_tokenizer=albert_tokenizer,
+                squeezebert=squeezebert, squeezebert_tokenizer=squeezebert_tokenizer, nq=nq)
+
+
+def get_text_mapper(text_cols, total_tokens, keep_above=None,
+                    use_sbert=False, use_msmarco=False, use_albert=False, use_squeezebert=False, use_nq=False):
+    from sentence_transformers import SentenceTransformer
+    from transformers import AutoTokenizer, AutoModel
+    from typing import Dict, List
+    import base64
+    import hashlib
+    from hashlib import sha3_256, md5
+    import re
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
+    artifact_cache = dict()
 
     def mapper(examples: Dict[str, List], indices: List[int]=None) -> Dict[str, List]:
         # TODO: remove duplicates after merging for main dataset of MLM
         # TODO: add an id column after making MLM set
         texts = []
+        if "artifact" not in artifact_cache:
+            artifacts = init_text_mapper_artifact(None, None, use_sbert, use_msmarco, use_albert, use_squeezebert, use_nq)
+            artifact_cache["tokenizer"] = artifacts.pop("tokenizer", None)
+            artifact_cache["artifact"] = artifacts
+
+        artifact = artifact_cache["artifact"]
+        sbert = artifact["sbert"]
+        msmarco = artifact["msmarco"]
+        albert = artifact["albert"]
+        albert_tokenizer = artifact["albert_tokenizer"]
+        squeezebert = artifact["squeezebert"]
+        squeezebert_tokenizer = artifact["squeezebert_tokenizer"]
+        nq = artifact["nq"]
+        sent_detector = artifact["sent_detector"]
+        tokenizer = artifact_cache["tokenizer"]
 
         for tcol in text_cols:
             if isinstance(tcol, str):
@@ -933,49 +1000,147 @@ def get_text_mapper(text_cols, total_tokens, tokenizer=None, sent_detector=None,
 
         one_texts = [" ".join(one_example) for one_example in zip(*texts)]
         final_texts = []
-        final_hashes = []
+        # final_hashes = []
         document_hash = []
 
         for text in one_texts:
-            if text is None or len(text) == 0:
+            if text is None or len(text) == 0 or (keep_above is not None and len(text.split()) < keep_above):
                 continue
-            text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-            sents = sent_detector.tokenize(text)
+
             cwc = 0
             cur_seg = ""
-            hashes = []
-            dh = base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()[:16]
+            # hashes = []
+            dh = str(base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()[:32])
+            if len(text.split()) < int(0.8 * total_tokens):
+                final_texts.append(text)
+                document_hash.append(dh)
+                continue
+
+            sents = sent_detector.tokenize(text)
+
+            num_sents = len(sents)
+            last_sents = max(int(0.2 * num_sents), 1)
+            s1 = " ".join(sents[:-last_sents])
+
+            if num_sents > 2 and len(s1.split()) < int(0.8 * total_tokens):
+                final_texts.append(s1)
+                document_hash.append(dh)
+                final_texts.append(" ".join(sents[-last_sents:]))
+                document_hash.append(dh)
+                continue
+
+            last_sents = max(int(0.5 * num_sents), 2)
+            s1s = " ".join(sents[:-last_sents])
+            s2s = " ".join(sents[-last_sents:])
+            if num_sents > 2 and len(s1s.split()) < int(0.8 * total_tokens) and len(s2s.split()) < int(0.8 * total_tokens):
+                final_texts.extend([s1s, s2s])
+                document_hash.extend([dh, dh])
+                continue
+
+            last_sents = max(int(0.35 * num_sents), 1)
+            s1s = " ".join(sents[:last_sents])
+            s2s = " ".join(sents[last_sents:2*last_sents])
+            s3s = " ".join(sents[2*last_sents:])
+            if num_sents > 2 and len(s1s.split()) < int(0.8 * total_tokens) and len(s2s.split()) < int(0.8 * total_tokens) and len(s3s.split()) < int(0.8 * total_tokens):
+                final_texts.extend([s1s, s2s, s3s])
+                document_hash.extend([dh, dh, dh])
+                continue
+
             for i, s in enumerate(sents):
-                hash = base64.b64encode(hashlib.sha256(s.encode("utf-8")).digest()).decode()[:16]
+                # hash = base64.b64encode(hashlib.sha256(s.encode("utf-8")).digest()).decode()[:16]
                 wc = len(tokenizer.tokenize(s, add_special_tokens=True))
                 if cwc + wc < total_tokens or cwc == 0 or i == len(sents) - 1:
                     pass
                 else:
                     final_texts.append(cur_seg)
-                    final_hashes.append(hashes[:3])
+                    # final_hashes.append(hashes[:3])
                     document_hash.append(dh)
                     cwc = 0
                     cur_seg = ""
-                    hashes = []
+                    # hashes = []
                 cwc += wc
                 cur_seg = cur_seg + " " + s
-                hashes.append(hash)
+                # hashes.append(hash)
             # TODO: Last sent, big sentence
             final_texts.append(cur_seg.strip())
-            final_hashes.append(hashes[:3])
+            # final_hashes.append(hashes[:3])
             document_hash.append(dh)
-        final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) for t in final_texts]
+        # final_lengths = [len(tokenizer.tokenize(t, add_special_tokens=True)) for t in final_texts]
+        final_lengths = [int(1.15 * len(t.split())) for t in final_texts]
         assert len(final_lengths) == len(final_texts)
-        results = dict(text=final_texts, length=final_lengths, hashes=final_hashes, hash=document_hash)
-        # dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
+        assert len(final_texts) == len(document_hash)
+
+        results = dict(text=final_texts,
+                       length=final_lengths,
+                       # hashes=final_hashes,
+                       doc_hash=document_hash
+                       )
+        empty_results = dict(text=[],
+                             length=[],
+                             doc_hash=[]
+                             )
+        if albert is not None:
+            empty_results["albert"] = []
+        if squeezebert is not None:
+            empty_results["squeezebert"] = []
+        if sbert is not None:
+            empty_results["sbert"] = []
+        if msmarco is not None:
+            empty_results["msmarco"] = []
+        if nq is not None:
+            empty_results["nq"] = []
+
+            # dl = {key: [fns(item[key], sep_dict[key][0], sep_dict[key][1]) for item in ld] for key in ld[0].keys()}
         if isinstance(keep_above, int):
             dl = results
             ld = [{key: value[index] for key, value in dl.items()} for index in range(max(map(len, dl.values())))]
             ld = [d for d in ld if d["length"] >= keep_above]
+            if len(ld) == 0:
+                # _ = empty_results.pop("length", None)
+                return empty_results
             dl2 = {key:[item[key] for item in ld] for key in ld[0].keys()}
             results = dl2
+            # _ = results.pop("length", None)
+
+        with torch.no_grad():
+            if albert is not None:
+                results["albert"] = albert(**albert_tokenizer.batch_encode_plus(results["text"], add_special_tokens=True, return_tensors="pt", max_length=512, truncation=True, padding=True))["last_hidden_state"].squeeze()[:,
+                        0].tolist()
+            if squeezebert is not None:
+                results["squeezebert"] = squeezebert(**squeezebert_tokenizer.batch_encode_plus(results["text"], add_special_tokens=True, return_tensors="pt", max_length=512, truncation=True, padding=True))["last_hidden_state"].squeeze()[:, 0].tolist()
+            if sbert is not None:
+                results["sbert"] = sbert.encode(results["text"]).tolist()
+            if msmarco is not None:
+                results["msmarco"] = msmarco.encode(results["text"]).tolist()
+            if nq is not None:
+                results["nq"] = nq.encode(results["text"]).tolist()
+        for k, v in results.items():
+            try:
+                assert isinstance(v, (list, tuple))
+                assert len(v) == len(list(results.values())[0])
+            except AssertionError as ae:
+                print(k, len(v), list(results.keys())[0], len(list(results.values())[0]))
+                raise ae
         return results
     return mapper
+
+
+def get_filter_mapper(keep_above):
+    def mapper_filter_by_length(examples):
+        empty_results = dict(zip(examples.keys(), [[]] * len(examples.keys())))
+        dl = examples
+        dl["length"] = [len(t.split()) for t in dl["text"]]
+        ld = [{key: value[index] for key, value in dl.items()} for index in range(max(map(len, dl.values())))]
+        ld = [d for d in ld if d["length"] >= keep_above]
+        if len(ld) == 0:
+            # _ = empty_results.pop("length", None)
+            return empty_results
+        dl2 = {key: [item[key] for item in ld] for key in ld[0].keys()}
+        return dl2
+    return mapper_filter_by_length
+
+
+
 
 
 
