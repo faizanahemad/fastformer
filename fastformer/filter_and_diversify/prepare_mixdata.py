@@ -58,5 +58,125 @@ dsets_256.save_to_disk("/home/ahemf/processed/dsets_256")
 
 fmap = get_filter_mapper(448)
 dsets_448 = dsets_256.map(fmap, batched=True, batch_size=256,)
-dsets_448.save_to_disk("/home/ahemf/processed/dsets_448")
+dsets_448.save_to_disk("/home/ahemf/processed/dseipythts_448")
+
+from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModel
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import torch
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+device = torch.device("cuda")
+sbert = SentenceTransformer("paraphrase-mpnet-base-v2").eval().to(device)
+dset = Dataset.load_from_disk("/home/ahemf/processed_datasets/dsets_448")
+with torch.no_grad():
+    dset_sbert = dset.map(lambda x: dict(sbert=sbert.encode(x["text"])), batched=True, batch_size=128)
+dset_sbert.save_to_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
+
+# https://huggingface.co/transformers/perplexity.html
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+from torch.nn import CrossEntropyLoss as CELoss, functional as F
+from torch import nn
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import torch
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+device = torch.device("cuda")
+
+
+class CrossEntropyLoss(nn.Module):
+
+    def __init__(self, ignore_index: int = -100) -> None:
+        super(CrossEntropyLoss, self).__init__()
+        self.ignore_index = ignore_index
+
+    def forward(self, input, target):
+        loss = F.cross_entropy(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction="none")
+        return loss.mean(1)
+
+dset_sbert = Dataset.load_from_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
+model_id = 'gpt2'
+model = GPT2LMHeadModel.from_pretrained(model_id).to(device).eval()
+tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
+
+max_length = model.config.n_positions
+stride = 512
+tokenizer.pad_token = tokenizer.eos_token
+max_length = 128
+stride = 128
+
+
+def perplexity(x):
+    # Batch Size = 1 only because loss from GPT2LMHeadModel gives one cross entropy value for whole input
+    encoded = tokenizer.batch_encode_plus(x["text"], padding=False, return_tensors="pt")
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
+    lengths = attention_mask.sum(1)
+    input_ids[input_ids == tokenizer.eos_token_id] = -100
+
+    lls = []
+    for i in range(0, input_ids.size(1), stride):
+        begin_loc = max(i + stride - max_length, 0)
+        end_loc = min(i + stride, input_ids.size(1))
+        trg_len = end_loc - i  # may be different from stride on last loop
+        cur_input_ids = input_ids[:, begin_loc:end_loc].contiguous()
+        cur_attention_mask = attention_mask[:, begin_loc:end_loc].contiguous()
+        cur_input_ids = cur_input_ids.to(device)
+        cur_attention_mask = cur_attention_mask.to(device)
+        target_ids = cur_input_ids.clone()
+        target_ids[:, :-trg_len] = -100
+        target_ids[:, :2] = -100
+        with torch.no_grad():
+            outputs = model(cur_input_ids, attention_mask=cur_attention_mask, labels=target_ids)
+            log_likelihood = outputs[0] * trg_len  # B x 1
+        lls.append(log_likelihood)
+
+    lls = torch.stack(lls, 0)
+    ppl = torch.exp(lls.sum().cpu() / lengths)
+    return dict(perplexity=ppl.tolist())
+
+perplexity(dset_sbert[0:1])
+model.zero_grad(set_to_none=True)
+with torch.no_grad():
+    dset_sbert = dset_sbert.map(perplexity, batched=True, batch_size=1)
+
+
+
+
+
+
+
+
+from transformers import AutoTokenizer
+from collections import Counter
+from transformers import AutoTokenizer, AutoModel, RobertaTokenizerFast
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+dset = Dataset.load_from_disk("/home/ahemf/processed/dsets_448")
+# dsets_tokenized = dset.map(lambda x: dict(tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]), batched=True, batch_size=1024)
+
+
+def term_frequency_builder(tokens):
+    raw_counts = Counter(tokens)
+    distinct_tokens = list(raw_counts.keys())
+    mc = raw_counts.most_common()[0]
+    most_common_count = mc[1]
+    most_common_token = mc[0]
+    WK = 0.25
+    raw_counts = {str(k): v for k, v in raw_counts.items()}
+    tf = {k: WK + (1 - WK) * (v / most_common_count) for k, v in raw_counts.items()}
+    return dict(tf=tf, raw_counts=raw_counts, most_common_count=most_common_count, most_common_token=most_common_token, distinct_tokens=distinct_tokens)
+
+
+def batch_term_frequency_builder(x):
+    tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]
+    ld = [term_frequency_builder(tk) for tk in tokens]
+    dl = {key: [item[key] for item in ld] for key in ld[0].keys()}
+    dl["tokens"] = tokens
+    return dl
+
+dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=1024, num_proc=32)
+
+
 
