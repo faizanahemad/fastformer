@@ -229,7 +229,7 @@ with Pool(8) as p:
 
     def forkjoin(x):
         texts = x["text"]
-        csz = len(texts) // 8
+        csz = int(np.ceil(len(texts) / 8))
         chunks = [dict(text=texts[i: i+csz]) for i in range(0, len(texts), csz)]
         assert len(chunks) == 8
         perplexities = [ppl for r in p.starmap(mapper, list(zip(chunks, range(8)))) for ppl in r["perplexity"]]
@@ -244,10 +244,12 @@ from collections import Counter
 from transformers import AutoTokenizer, AutoModel, RobertaTokenizerFast
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 import os
+import numpy as np
+from multiprocess.pool import Pool
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
-tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
 dset = Dataset.load_from_disk("/home/ahemf/processed/dsets_448")
-cpu_count = os.cpu_count() // 2
+cpu_count = os.cpu_count()
+overall_counts = Counter()
 # dsets_tokenized = dset.map(lambda x: dict(tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]), batched=True, batch_size=1024)
 
 
@@ -256,19 +258,36 @@ def term_frequency_builder(tokens):
     # distinct_tokens = list(raw_counts.keys())
     mc = raw_counts.most_common()[0]
     most_common_count = mc[1]
-    most_common_token = mc[0]
+    # most_common_token = mc[0]
     # raw_counts = {str(k): v for k, v in raw_counts.items()}
     tf = {str(k): 0.25 + 0.75 * (v / most_common_count) for k, v in raw_counts.items()}
     return tf
 
 
-def batch_term_frequency_builder(x):
-    tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]
-    tf = [term_frequency_builder(tk) for tk in tokens]
-    return dict(tf=tf)
+tokenizer_module = []
 
+def create_tokenizer():
+    from transformers import RobertaTokenizerFast
+    return RobertaTokenizerFast.from_pretrained("roberta-base")
 
-dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=512, num_proc=4)
+with Pool(cpu_count) as p:
+
+    def mapping(x):
+        if len(tokenizer_module) == 0:
+            tokenizer_module.append(create_tokenizer())
+        tokens = tokenizer_module[0].batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]
+        tf = [term_frequency_builder(tk) for tk in tokens]
+        return tf
+
+    def batch_term_frequency_builder(x):
+        texts = x["text"]
+        csz = int(np.ceil(len(texts) / cpu_count))
+        chunks = [dict(text=texts[i: i + csz]) for i in range(0, len(texts), csz)]
+        tf = [t for r in p.map(mapping, chunks) for t in r]
+        overall_counts.update([k for t in tf for k in t.keys()])
+        return dict(tf=tf)
+
+    dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=2048)
 
 
 
