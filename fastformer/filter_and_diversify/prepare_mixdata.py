@@ -73,6 +73,7 @@ with torch.no_grad():
     dset_sbert = dset.map(lambda x: dict(sbert=sbert.encode(x["text"])), batched=True, batch_size=128)
 dset_sbert.save_to_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
 
+########################################################################################################
 # https://huggingface.co/transformers/perplexity.html
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 from torch.nn import CrossEntropyLoss, functional as F, DataParallel
@@ -112,7 +113,7 @@ tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
 tokenizer.pad_token = tokenizer.eos_token
 
 
-def perplexity(x):
+def perplexity(x, device):
     # Batch Size = 1 only because loss from GPT2LMHeadModel gives one cross entropy value for whole input
     encoded = tokenizer.batch_encode_plus(x["text"], padding=True, max_length=max_length, return_tensors="pt")
     input_ids = encoded["input_ids"][:, :1024].to(device)
@@ -146,15 +147,99 @@ def perplexity(x):
     lls = torch.cat(lls, 1).squeeze()
     ppl = torch.exp(lls.sum(1) / lengths)
     return dict(perplexity=ppl.tolist())
+
+
+def perplexity_without_device(x):
+    return perplexity(x, device)
+
 with torch.no_grad():
-    print(perplexity(dset_sbert[0:32]))
+    print(perplexity_without_device(dset_sbert[0:32]))
+
 
 model.zero_grad(set_to_none=True)
 with torch.no_grad():
-    dset_sbert = dset_sbert.map(perplexity, batched=True, batch_size=32)
+    dset_sbert = dset_sbert.map(perplexity_without_device, batched=True, batch_size=32)
+
+#####################################################################################################
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+from torch.nn import CrossEntropyLoss, functional as F, DataParallel
+from torch import nn
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import torch
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+device = torch.device("cuda:0")
 
 
+def perplexity(x, device):
+    # Batch Size = 1 only because loss from GPT2LMHeadModel gives one cross entropy value for whole input
+    encoded = tokenizer.batch_encode_plus(x["text"], padding=True, max_length=max_length, return_tensors="pt")
+    input_ids = encoded["input_ids"][:, :1024].to(device)
+    attention_mask = encoded["attention_mask"][:, :1024].to(device)
+    lengths = attention_mask.sum(1)
 
+    lls = []
+    for i in range(0, input_ids.size(1), stride):
+        begin_loc = max(i + stride - max_length, 0)
+        end_loc = min(i + stride, input_ids.size(1))
+        trg_len = end_loc - i  # may be different from stride on last loop
+        cur_input_ids = input_ids[:, begin_loc:end_loc].contiguous()
+        cur_attention_mask = attention_mask[:, begin_loc:end_loc].contiguous()
+        cur_input_ids = cur_input_ids
+        cur_attention_mask = cur_attention_mask
+        target_ids = cur_input_ids.clone()
+        target_ids[:, :-trg_len] = -100
+        target_ids[:, :2] = -100
+        target_ids[target_ids == tokenizer.eos_token_id] = -100
+        with torch.no_grad():
+            outputs = model(cur_input_ids, attention_mask=cur_attention_mask, labels=target_ids)
+            lm_logits = outputs["logits"].detach()
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = target_ids[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss(reduction="none")
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)).reshape(shift_logits.size(0), shift_logits.size(1)).mean(1).squeeze().unsqueeze(-1)
+            log_likelihood = loss * trg_len  # B x 1
+        lls.append(log_likelihood)
+
+    lls = torch.cat(lls, 1).squeeze()
+    ppl = torch.exp(lls.sum(1) / lengths)
+    return dict(perplexity=ppl.tolist())
+
+dset_sbert = Dataset.load_from_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
+model_id = "distilgpt2"  # 'gpt2'
+model = GPT2LMHeadModel.from_pretrained(model_id).eval()
+max_length = 512
+stride = max_length
+for p in model.parameters():
+    p.requires_grad = False
+
+tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
+tokenizer.pad_token = tokenizer.eos_token
+
+from multiprocess.pool import Pool
+device = []
+with Pool(8) as p:
+    def mapper(x, device_id):
+        import torch
+        if len(device) == 0:
+            device.append(torch.device("cuda:%s" % device_id))
+        model.to(device[0])
+        return perplexity(x, device[0])
+
+    def forkjoin(x):
+        texts = x["text"]
+        csz = len(texts) // 8
+        chunks = [dict(text=texts[i: i+csz]) for i in range(0, len(texts), csz)]
+        assert len(chunks) == 8
+        perplexities = [ppl for r in p.starmap(mapper, list(zip(chunks, range(8)))) for ppl in r["perplexity"]]
+        return dict(perplexity=perplexities)
+
+    with torch.no_grad():
+        dset_sbert = dset_sbert.map(forkjoin, batched=True, batch_size=128)
+
+
+#####################################################################################################################
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel, RobertaTokenizerFast
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
@@ -162,6 +247,7 @@ import os
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
 tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
 dset = Dataset.load_from_disk("/home/ahemf/processed/dsets_448")
+cpu_count = os.cpu_count() // 2
 # dsets_tokenized = dset.map(lambda x: dict(tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]), batched=True, batch_size=1024)
 
 
@@ -173,19 +259,16 @@ def term_frequency_builder(tokens):
     most_common_token = mc[0]
     # raw_counts = {str(k): v for k, v in raw_counts.items()}
     tf = {str(k): 0.25 + 0.75 * (v / most_common_count) for k, v in raw_counts.items()}
-    return dict(tf=tf,
-                # raw_counts=raw_counts, most_common_count=most_common_count, most_common_token=most_common_token,
-                # distinct_tokens=distinct_tokens
-                )
+    return tf
+
 
 def batch_term_frequency_builder(x):
     tokens=tokenizer.batch_encode_plus(x["text"], add_special_tokens=False, max_length=4096, padding=False)["input_ids"]
-    ld = [term_frequency_builder(tk) for tk in tokens]
-    dl = {key: [item[key] for item in ld] for key in ld[0].keys()}
-    # dl["tokens"] = tokens
-    return dl
+    tf = [term_frequency_builder(tk) for tk in tokens]
+    return dict(tf=tf)
 
-dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=1024, num_proc=16)
+
+dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=512, num_proc=4)
 
 
 
