@@ -340,6 +340,13 @@ with Pool(cpu_count) as p:
     dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=2048)
 
 overall_counts = {int(k): v for k, v in overall_counts.items()}
+# count_buckets = {k: (v // 100)+1 for k, v in overall_counts.items()}
+# count_buckets = {k:int(np.log2(v))+1 for k, v in overall_counts.items()}
+count_buckets = {k:int(np.cbrt(v))+1 for k, v in overall_counts.items()}
+
+from collections import defaultdict
+freq2token = defaultdict(list)
+
 n_docs = len(dsets_tokenized)
 idf = {k: np.log1p(n_docs) - np.log1p(v) + 1 for k, v in overall_counts.items()}
 import pickle
@@ -347,6 +354,9 @@ with open('overall_counts.pickle', 'wb') as handle:
     pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 with open('idf.pickle', 'wb') as handle:
     pickle.dump(idf, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+with open('count_buckets.pickle', 'wb') as handle:
+    pickle.dump(count_buckets, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 with open('overall_counts.pickle', 'rb') as handle:

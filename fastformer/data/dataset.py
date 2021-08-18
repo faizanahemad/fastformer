@@ -212,9 +212,12 @@ def word_level_noising(text, tokenizer, probability=0.15):
 class sample_random_token:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
-        probas = np.linspace(1, 0.01, len(tokenizer))
+        probas = np.ones(len(tokenizer))
         for i in tokenizer.all_special_ids:
             probas[i] = 0
+        for i, token in enumerate(tokenizer.convert_ids_to_tokens(list(range(len(tokenizer))))):
+            if len(token) <= 3:
+                probas[i] = 0
         probas = probas / np.sum(probas)
         self.probas = probas
         self.length = len(tokenizer)
