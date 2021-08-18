@@ -264,7 +264,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         cls_token_output = sequence_output[:, 0]
         label_sentence_order = label_sentence_order.float()
         sent_order_logits = self.sent_order_nn(cls_token_output).squeeze(-1)
-        sentence_order_loss = self.sentence_order_prediction_w * self.loss_bce(sent_order_logits, label_sentence_order)
+        sentence_order_loss = self.loss_bce(sent_order_logits, label_sentence_order)
 
         sentence_order_accuracy = None
         mask_proportion = None
