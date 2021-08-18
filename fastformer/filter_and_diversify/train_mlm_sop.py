@@ -33,7 +33,9 @@ from fastformer.config import *
 from fastformer.optimizers import Novograd, RangerLars
 from fastformer.data.dataset import datadict_iterator, MTTDataset, get_simple_collate_fn, get_next
 from fastformer.utils import *
-from fastformer.model import *
+from torch.nn import CrossEntropyLoss
+from transformers import PreTrainedModel
+from collections import defaultdict
 from transformers import optimization
 import pandas as pd
 from sklearn.metrics import accuracy_score
@@ -42,9 +44,6 @@ import wandb
 from pytz import timezone
 from datetime import datetime, timedelta
 from torch.utils.data.dataloader import DataLoader
-from collections import Counter
-from fastformer.model.mtt_model import MTTModel, MultiTaskHighwayCLSPretraining, get_mtt_backbone
-import torchvision.transforms as transforms
 import multiprocessing
 import signal
 from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
@@ -52,12 +51,6 @@ import nltk
 
 from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
-
-try:
-    from gpustat import print_gpustat
-except:
-    def print_gpustat(*args, **kwargs):
-        print("NO GPUSTAT")
 
 try:
     from torch.cuda.amp import GradScaler, autocast
