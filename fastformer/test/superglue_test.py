@@ -40,7 +40,6 @@ from fastformer.data import *
 from fastformer.config import *
 from fastformer.data.dataset import datadict_iterator, superglue_test, MTTDataset
 from fastformer.utils import *
-from fastformer.model import *
 from transformers import optimization
 import pandas as pd
 from sklearn.metrics import accuracy_score
@@ -172,11 +171,6 @@ def training_args():
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
-
-    parser.add_argument('--model_save_dir', required=False, type=str,
-                        help='Save Dir')
-    parser.add_argument('--model_save_name', required=False, type=str,
-                        help='Save Name')
 
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
