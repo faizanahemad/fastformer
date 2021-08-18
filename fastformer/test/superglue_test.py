@@ -1021,7 +1021,6 @@ def train(local_rank, args):
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] if args["cpu"] else (args["nr"] * args["gpus_per_node"] + local_rank)
-    nr = args["nr"]
     if args["cpu"]:
         assert local_rank == 0
         device = torch.device("cpu")
@@ -1051,6 +1050,16 @@ def train(local_rank, args):
                   args["hpo"], args["dataset_key"], args["finetune"])()
     return
 
+
+if __name__ == "__main__":
+    torch.backends.cudnn.benchmark = True
+    # torch.multiprocessing.set_sharing_strategy('file_system')
+    args = training_args()
+    if args["world_size"] == 1 or args["cpu"]:
+        train(0, args)
+    else:
+        mp.spawn(train, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        # start_processes(train, (args,), args["gpus_per_node"], True, False, start_method='spawn')
 
 
 
