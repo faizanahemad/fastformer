@@ -222,6 +222,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
+        self.backbone = backbone
         self.mlm_w = mlm_w
         self.sentence_order_w = sentence_order_w
 
