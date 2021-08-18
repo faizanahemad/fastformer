@@ -248,7 +248,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, label_mlm_input_ids: torch.Tensor, label_sentence_order: torch.Tensor, validation_iter=False):
-        outputs = self.roberta(
+        outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
             return_dict=False,
