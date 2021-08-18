@@ -225,6 +225,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         self.backbone = backbone
         self.mlm_w = mlm_w
         self.sentence_order_w = sentence_order_w
+        self.tokenizer = tokenizer
 
         if reinit:
             self.backbone.init_weights()
