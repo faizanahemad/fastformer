@@ -1047,7 +1047,7 @@ def train(local_rank, args):
     _, tokenizer = get_backbone(args["pretrained_model"])
     SuperGlueTest(None, model, device, tokenizer, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
-                  args["hpo"], args["dataset_key"], args["finetune"])()
+                  args["hpo"], args["dataset_key"])()
     return
 
 
