@@ -58,20 +58,66 @@ dsets_256.save_to_disk("/home/ahemf/processed/dsets_256")
 
 fmap = get_filter_mapper(448)
 dsets_448 = dsets_256.map(fmap, batched=True, batch_size=256,)
-dsets_448.save_to_disk("/home/ahemf/processed/dseipythts_448")
+dsets_448.save_to_disk("/home/ahemf/processed/dsets_448")
+
+########################################################################################################
 
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModel
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 import torch
 from torch.nn.parallel.replicate import replicate
+import os
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
 device = torch.device("cuda")
 sbert = SentenceTransformer("paraphrase-mpnet-base-v2").eval().to(device)
 dset = Dataset.load_from_disk("/home/ahemf/processed_datasets/dsets_448")
 with torch.no_grad():
     dset_sbert = dset.map(lambda x: dict(sbert=sbert.encode(x["text"])), batched=True, batch_size=128)
+
+device = torch.device("cuda")
+def normalize_sbert(x):
+    t = torch.tensor(x["sbert"]).to(device)
+    t = t / t.norm(2, -1, True)
+    return dict(sbert=t.tolist())
+
+dset_sbert = dset_sbert.map(normalize_sbert,  batched=True, batch_size=8192)
+
+
+cnt = [1]
+def add_id(x):
+    ids = list(range(cnt[0], cnt[0]+len(x["text"])))
+    cnt[0] += len(x["text"])
+    return dict(id=ids)
+
+dset_sbert = dset_sbert.map(add_id,  batched=True, batch_size=8192)
+
+dset_sbert = dset_sbert.add_column("identifier", list(range(1, len(dset_sbert)+1)))
+
+device = torch.device("cuda")
+
+
+def approx_distance(x):
+    t = torch.tensor(x["sbert"]).to(device)
+    sims = t.mm(t.t()) - 1000 * torch.eye(t.size(0), device=device)
+    values, _ = sims.topk(128)
+    if "sbert_top_128" in x:
+        p = torch.tensor(x["sbert_top_128"]).to(device)
+        values = torch.cat((values, p), 1)
+        values, _ = values.topk(128)
+    return dict(sbert_top_128=values.tolist())
+
+dset_sbert = dset_sbert.map(approx_distance,  batched=True, batch_size=8192 * 4)
+dset_sbert = dset_sbert.shuffle(341257, writer_batch_size=8192*4).map(approx_distance,  batched=True, batch_size=8192 * 4)
+dset_sbert = dset_sbert.shuffle(2213, writer_batch_size=8192*4).map(approx_distance,  batched=True, batch_size=8192 * 4)
+dset_sbert = dset_sbert.shuffle(17, writer_batch_size=8192*4).map(approx_distance,  batched=True, batch_size=8192 * 4)
+dset_sbert = dset_sbert.shuffle(9913, writer_batch_size=8192*4).map(approx_distance,  batched=True, batch_size=8192 * 4)
+dset_sbert = dset_sbert.sort("identifier")
+
+
 dset_sbert.save_to_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
+
+
 
 ########################################################################################################
 # https://huggingface.co/transformers/perplexity.html
@@ -160,6 +206,8 @@ model.zero_grad(set_to_none=True)
 with torch.no_grad():
     dset_sbert = dset_sbert.map(perplexity_without_device, batched=True, batch_size=32)
 
+dset_sbert.save_to_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
+
 #####################################################################################################
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 from torch.nn import CrossEntropyLoss, functional as F, DataParallel
@@ -167,6 +215,7 @@ from torch import nn
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 import torch
 import os
+import numpy as np
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
 device = torch.device("cuda:0")
 
@@ -238,6 +287,7 @@ with Pool(8) as p:
     with torch.no_grad():
         dset_sbert = dset_sbert.map(forkjoin, batched=True, batch_size=128)
 
+dset_sbert.save_to_disk("/home/ahemf/processed_datasets/dsets_448_sbert")
 
 #####################################################################################################################
 from collections import Counter
@@ -260,7 +310,7 @@ def term_frequency_builder(tokens):
     most_common_count = mc[1]
     # most_common_token = mc[0]
     # raw_counts = {str(k): v for k, v in raw_counts.items()}
-    tf = {str(k): 0.25 + 0.75 * (v / most_common_count) for k, v in raw_counts.items()}
+    tf = [[k, 0.25 + 0.75 * (v / most_common_count)] for k, v in raw_counts.items()]
     return tf
 
 
@@ -284,10 +334,70 @@ with Pool(cpu_count) as p:
         csz = int(np.ceil(len(texts) / cpu_count))
         chunks = [dict(text=texts[i: i + csz]) for i in range(0, len(texts), csz)]
         tf = [t for r in p.map(mapping, chunks) for t in r]
-        overall_counts.update([k for t in tf for k in t.keys()])
+        overall_counts.update([k for t in tf for k, _ in t])
         return dict(tf=tf)
 
     dsets_tokenized = dset.map(batch_term_frequency_builder, batched=True, batch_size=2048)
 
+overall_counts = {int(k): v for k, v in overall_counts.items()}
+n_docs = len(dsets_tokenized)
+idf = {k: np.log1p(n_docs) - np.log1p(v) + 1 for k, v in overall_counts.items()}
+import pickle
+with open('overall_counts.pickle', 'wb') as handle:
+    pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+with open('idf.pickle', 'wb') as handle:
+    pickle.dump(idf, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
+with open('overall_counts.pickle', 'rb') as handle:
+    oc = pickle.load(handle)
+with open('idf.pickle', 'rb') as handle:
+    idf = pickle.load(handle)
+
+
+def tfidf_one(tf):
+    tf = [[t, v*idf[t]] for t, v in tf]
+    v_only = sorted([v for t, v in tf], reverse=True)
+
+
+    average = np.mean(v_only)
+    top_16 = np.mean(v_only[:16])
+    top_128 = np.mean(v_only[:128])
+    truncated_average = np.mean(v_only[16:-16])
+    return top_16, top_128, average, truncated_average
+
+
+def tfidf_batch(x):
+    tf = x["tf"]
+    tfidf = [tfidf_one(t) for t in tf]
+    top_k_16, top_k_128, average, truncated_average = zip(*tfidf)
+    return dict(tfidf_top_k_16=list(top_k_16), tfidf_top_k_128=list(top_k_128), tfidf_average=list(average), tfidf_truncated_average=list(truncated_average))
+tfidf_batch(dsets_tokenized[0:2])
+
+dsets_tokenized = dsets_tokenized.map(tfidf_batch, batched=True, batch_size=256, num_proc=cpu_count)
+dsets_tokenized = dsets_tokenized.add_column("identifier", list(range(1, len(dsets_tokenized)+1)))
+dsets_tokenized.save_to_disk("/home/ahemf/processed/dsets_448_tfidf")
+
+#####################################################################################################################
+
+dset_sbert_data = dset_sbert.remove_columns(['dataset', 'identifier', 'length', 'text'])
+dset_sbert_tfidf = concatenate_datasets([dsets_tokenized, dset_sbert_data], axis=1)
+
+
+import torch
+def mean_sbert(x):
+    t = torch.tensor(x["sbert_top_128"])
+    t16 = t[:, :16].mean(1)
+    t128 = t.mean(1)
+    return dict(sbert_top_16_avg=t16.tolist(), sbert_top_128_avg=t128.tolist())
+
+
+dset_sbert_tfidf = dset_sbert_tfidf.map(mean_sbert,  batched=True, batch_size=4096)
+
+
+dset_sbert_tfidf.save_to_disk("/home/ahemf/processed/dsets_448_sbert_tfidf")
+sbert_tfidf = dset_sbert_tfidf.remove_columns(['sbert', 'sbert_top_128'])
+sbert_tfidf.save_to_disk("/home/ahemf/processed/sbert_tfidf")
+
+sum(sbert_tfidf["length"]) / 1_000_000_000 == 9.504
+sum(sbert_tfidf["length"]) == 9504256152

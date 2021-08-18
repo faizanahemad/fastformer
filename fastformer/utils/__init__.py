@@ -40,6 +40,7 @@ from PIL import Image
 from albumentations import augmentations as alb
 import imgaug.augmenters as iaa
 from torch.nn.parallel import DistributedDataParallel as DDP
+from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel
 import torchvision.transforms as transforms
 import warnings
 warnings.simplefilter("ignore")
@@ -837,19 +838,19 @@ def get_rolling_diagonal_weights(size=512, window=9):
     return diag_mat
 
 
-def remove_dropout(module: nn.Module):
+def change_dropout(module: nn.Module, dropout_rate=0.0):
     str_attrs = dir(module)
     attrs = [(attr, getattr(module, attr, None)) for attr in str_attrs if attr not in  ["base_model", "base_model_prefix"]]
     attrs = [(str_attr, attr) for (str_attr, attr) in attrs if isinstance(attr, (nn.Module, nn.ModuleList, nn.ModuleDict))]
     attrs = [x for (str_attr, attr) in attrs for x in (attr if isinstance(attr, nn.ModuleList) else (attr.values() if isinstance(attr, nn.ModuleDict) else [attr]))]
     for attr in attrs:
-        remove_dropout(attr)
+        change_dropout(attr)
     if hasattr(module, "dropout"):
-        module.dropout.p = 0.0
+        module.dropout.p = dropout_rate
     if hasattr(module, "hidden_dropout"):
-        module.hidden_dropout.p = 0.0
+        module.hidden_dropout.p = dropout_rate
     if hasattr(module, "attention_dropout"):
-        module.attention_dropout.p = 0.0
+        module.attention_dropout.p = dropout_rate
 
 
 def get_loggable_dict(d):
@@ -893,6 +894,35 @@ def layer_normalizer_fn(embeddings, layer_normalizer, training, train_layer_norm
 
 def sync_layer_normalizers():
     pass
+
+
+def get_backbone(model_name, reinit=False, dropout_prob=0.05):
+    # TODO: Later also add a QnA boolean / fixed number of options question
+    # TODO: Add extra CLS attr and tokens in embedding
+    from transformers import AutoModel, RobertaTokenizerFast, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
+
+    if "roberta" in model_name:
+        if "large" in model_name:
+            model_name = "roberta-large"
+        elif "base" in model_name or "small" in model_name:
+            model_name = "roberta-base"
+        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        config = RobertaConfig.from_pretrained(model_name)
+        if dropout_prob is not None:
+            config.hidden_dropout_prob = dropout_prob
+            config.attention_probs_dropout_prob = dropout_prob
+
+        # config.gradient_checkpointing = True
+        model = AutoModel.from_pretrained(model_name)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModel.from_pretrained(model_name)
+
+    if reinit:
+        model.init_weights()
+    if dropout_prob is not None:
+        change_dropout(model, dropout_prob)
+    return model, tokenizer
 
 
 def clean_text(text):

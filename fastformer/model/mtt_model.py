@@ -151,7 +151,7 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
             model.embeddings.word_embeddings.weight = nn.Parameter(torch.cat((model.embeddings.word_embeddings.weight, extras)))
             setattr(model, "cls_tokens", cls_tokens)
             model.embeddings.word_embeddings.weight.requires_grad = True
-    remove_dropout(model)
+    change_dropout(model)
     return model, tokenizer
 
 
