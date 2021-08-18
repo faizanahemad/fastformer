@@ -44,6 +44,7 @@ from transformers import optimization
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from tqdm.auto import tqdm
+from torch.nn import CrossEntropyLoss
 import wandb
 from pytz import timezone
 from datetime import datetime, timedelta
@@ -115,9 +116,6 @@ class ClassificationModel(nn.Module):
         init_weights(self.head)
 
     def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
-        funnel_inputs = dict(input_ids=input_ids,
-                             attention_mask=attention_mask)
-
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         hidden_states = self.backbone(**inputs)["hidden_states"]
         funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
@@ -281,7 +279,6 @@ class SuperGlueTest:
         dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
         if isinstance(model, (ClassificationModel)):
             model = model.train()
-            optimizer_config.eps = 1e-7
             model.config.eps = 1e-7
             tokenizer = model.tokenizer
         elif isinstance(model, str):
@@ -317,7 +314,6 @@ class SuperGlueTest:
                 tokenizer = AutoTokenizer.from_pretrained(model)
                 model = AutoModel.from_pretrained(model)
             model = model.train()
-            optimizer_config.eps = 1e-7
             for p in model.parameters():
                 p.requires_grad = self.finetune
             if not self.finetune:
