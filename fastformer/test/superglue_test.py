@@ -146,12 +146,10 @@ def training_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--nodes', default=1,
                         type=int, metavar='N')
-    parser.add_argument('-g', '--gpus_per_node', default=1, type=int,
+    parser.add_argument('-g', '--gpus_per_node', default=8, type=int,
                         help='number of gpus per node')
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')
-    parser.add_argument('--model_config', required=True, type=str,
-                        help='model config')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='lr')
     parser.add_argument('--epochs', default=10, type=int,
@@ -160,7 +158,7 @@ def training_args():
                         help='weight_decay')
 
     parser.add_argument('--hpo', required=False, type=str,
-                        help='hpo dict with lr, epochs, warmup steps')
+                        help='hpo dict with lr, epochs, batch_size, weight_decay, iter_size')
 
     parser.add_argument('--dataset_key', required=False, type=str,
                         help='dataset_key')
@@ -274,7 +272,6 @@ class SuperGlueTest:
         self.task_word_map["axb"] = self.task_word_map["rte"]
         self.task_word_map["wsc.fixed"] = self.task_word_map["boolq"]
         # self.epoch_per_dataset = {"boolq": 35, 'cb': 150, 'copa': 200, 'multirc': 19, 'record': 2, 'rte': 200, 'wic': 100, 'wsc.fixed': 200}
-        self.epochs = epochs
         # self.lr_per_dataset = {"boolq": lr, 'cb': lr, 'copa': lr, 'multirc': lr, 'record': lr, 'rte': lr, 'wic': lr, 'wsc.fixed': lr}
 
         self.num_to_word = dict(boolq={0: "false", 1: "true"}, cb={0: "entailment", 1: "contradiction", 2: "neutral"},
