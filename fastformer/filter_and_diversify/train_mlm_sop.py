@@ -260,7 +260,6 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
 
-
         cls_token_output = sequence_output[:, 0]
         label_sentence_order = label_sentence_order.float()
         sent_order_logits = self.sent_order_nn(cls_token_output).squeeze(-1)
@@ -275,7 +274,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
             mask_indices = (input_ids.int() != label_mlm_input_ids.int())
             mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
-            lm_accuracy = lm_predictions == label_mlm_input_ids
+            lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[mask_indices].mean().item()
             non_mlm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
 
