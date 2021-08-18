@@ -279,7 +279,7 @@ class SuperGlueTest:
         set_seeds(self.seed)
         batch_size = self.batch_size
         dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
-        if isinstance(model, (FastFormerModel, FastFormerPreTrainedModel, ClassificationModel, FastFormerForFusedELECTRAPretraining)):
+        if isinstance(model, (ClassificationModel)):
             model = model.train()
             optimizer_config.eps = 1e-7
             model.config.eps = 1e-7
