@@ -330,7 +330,7 @@ class SuperGlueTest:
     def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False):
         set_seeds(self.seed)
         train_backbone = self.finetune
-        num_workers = 4
+        num_workers = 2
         model = model_dict["model"]
         tokenizer = model_dict["tokenizer"]
         dataloader_params = model_dict["dataloader_params"]
