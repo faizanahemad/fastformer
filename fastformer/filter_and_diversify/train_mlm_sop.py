@@ -130,6 +130,9 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
     if probability == 0 or len(tokens) <= 2:
         return tokens
 
+    two_remove_proba = 0.15
+    three_remove_proba = 0.05
+    probability = probability / (1 + two_remove_proba + 2 * three_remove_proba)
     tokens = np.array(tokens.tolist())
     original_tokens = tokens.copy()
     special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
@@ -143,13 +146,21 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
     else:
         rand_tokens = np.array([random.sample(range(len(tokenizer)), 1)[0] for _ in range(np.sum(rand_replace))])
     tokens[rand_replace] = rand_tokens
-
+    tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
     if full_length > 64:
         for i, t in enumerate(tokens):
-            if t == tokenizer.mask_token_id and i > 1 and random.random() <= 0.125:
-                tokens[i - 1] = tokenizer.mask_token_id
-            if t == tokenizer.mask_token_id and i < len(tokens) - 1 and random.random() <= 0.125:
-                tokens[i + 1] = tokenizer.mask_token_id
+            if t == tokenizer.mask_token_id and i > 1 and i < len(tokens) - 1:
+                proba = random.random()
+                if proba < two_remove_proba:
+                    if random.random() < 0.5:
+                        tokens[i - 1] = tokenizer.mask_token_id
+                    else:
+                        tokens[i + 1] = tokenizer.mask_token_id
+                elif proba < two_remove_proba + three_remove_proba:
+                    tokens[i - 1] = tokenizer.mask_token_id
+                    tokens[i + 1] = tokenizer.mask_token_id
+                else:
+                    pass
 
 
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
