@@ -603,7 +603,7 @@ def train(local_rank, args):
 
         samples_processed += int(batch[key].size(0))
         samples_processed_this_log_iter += int(batch[key].size(0))
-        validation_iter = ((steps_done + 1) % log_every_steps == 0 and (step + 1) % iter_size == 0) or step == 0
+        validation_iter = ((step + 2) % log_every_steps == 0 and (step + 1) % iter_size != 0) or step == 0
         model_start = time.time()
         if no_sync and (step + 1) % iter_size != 0 and hasattr(model, "no_sync"):
             with model.no_sync():
@@ -631,7 +631,7 @@ def train(local_rank, args):
             # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
             output = {k: float(v) if v else v for k, v in output.items()}
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, steps_done=steps_done, samples_processed=samples_processed, samples_per_second=samples_per_second,
+            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, updates_done=steps_done, samples_processed=samples_processed, samples_per_second=samples_per_second,
                              batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),
                              steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                              epoch=epoch,
