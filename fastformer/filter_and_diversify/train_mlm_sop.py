@@ -1,6 +1,7 @@
 import copy
 import sys
 import traceback
+from typing import Optional, Iterator
 
 import numpy as np
 import torch
@@ -182,8 +183,10 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         self.token_sampler = sample_random_token(self.tokenizer)
 
     def __getitem__(self, item):
-        tokenizer = self.tokenizer
+        if isinstance(item, str):
+            return self.dataset[item]
         item = self.dataset[item]
+        tokenizer = self.tokenizer
 
         text = item["text"]
         text = clean_text(text)
@@ -346,8 +349,11 @@ def training_args():
     parser.add_argument('--sentence_order_w', type=float, required=False, default=1.0,
                         help='sentence_order weight')
 
+    parser.add_argument('--sampling_column', required=False, type=str,
+                        help='sampling_column')
+
     parser.add_argument('--mlm_w', type=float, required=False, default=1.0,
-                        help='generator_wmlm_w weight')
+                        help='mlm_w weight')
 
     parser.add_argument('--shuffle_dataset', action="store_true", default=False,
                         help='Shuffle Train')
@@ -390,7 +396,26 @@ def training_args():
     return vars(args)
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, world_size=1, num_workers=None, max_length=512):
+class DistributedWeightedSampler(DistributedSampler):
+    def __init__(self, weights, dataset: Dataset, num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None, shuffle: bool = True,
+                 seed: int = 0, drop_last: bool = False) -> None:
+        # https://discuss.pytorch.org/t/how-to-use-my-own-sampler-when-i-already-use-distributedsampler/62143/18
+        # https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/sampler.py
+        super().__init__(dataset, num_replicas, rank, shuffle, seed, drop_last)
+        self.weights = torch.as_tensor(weights)
+        self.replacement = True
+
+    def __iter__(self) -> Iterator:
+        indices = list(super().__iter__())
+        weights = self.weights[indices]
+        assert len(weights) == self.num_samples
+        subsample_balanced_indicies = torch.multinomial(weights, self.num_samples, self.replacement)
+        dataset_indices = torch.as_tensor(indices)[subsample_balanced_indicies]
+        return iter(dataset_indices.tolist())
+
+
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, sampling_column=None, world_size=1, num_workers=None, max_length=512):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
@@ -401,9 +426,33 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, world_siz
                         word_mask_proba=0.15)
 
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
-
     dataset = MaskedLanguageSentenceOrderModelDataset(**dataset_args)
-    train_loader = DataLoader(dataset, sampler=None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset),
+
+    weights = None
+    if sampling_column is not None:
+        if sampling_column == "perplexity":
+            ppl = np.log1p(dataset["perplexity"])
+            weights = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+        elif "tfidf" in sampling_column:
+            tfidf_top = np.array(dataset["tfidf_top_k_128"])
+            weights = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+        elif "tfidf_truncated" in sampling_column:
+            tfidf_top = np.array(dataset["tfidf_truncated_average"])
+            mean = tfidf_top[~np.isnan(tfidf_top)].mean()
+            tfidf_top[np.isnan(tfidf_top)] = mean
+            weights = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+        elif "sbert" in sampling_column:
+            sbert = 1 - np.array(dataset["sbert_top_128_avg"])
+            weights = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+        else:
+            raise ValueError("Sampling column = %s is not valid" % (sampling_column))
+
+    if weights is not None:
+        sampler = None if single_node else DistributedWeightedSampler(weights, dataset, shuffle=shuffle_dataset)
+    else:
+        sampler = None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset)
+
+    train_loader = DataLoader(dataset, sampler=sampler,
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
@@ -542,7 +591,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
 
-    dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size, tokenizer,
+    dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size, tokenizer, args["sampling_column"],
                                   world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
 
     iter_size = max(args["accumulation_steps"], 1)

@@ -411,3 +411,12 @@ sbert_tfidf.save_to_disk("/home/ahemf/processed/sbert_tfidf")
 
 sum(sbert_tfidf["length"]) / 1_000_000_000 == 9.504
 sum(sbert_tfidf["length"]) == 9504256152
+
+from scipy.stats import describe
+describe(sbert_tfidf["perplexity"])  # DescribeResult(nobs=8252138, minmax=(1.0, 2666.609619140625), mean=50.22365915303506, variance=378.6735535134215, skewness=5.66997263818954, kurtosis=204.6866296365421)
+describe(np.log1p(sbert_tfidf["perplexity"]))  # DescribeResult(nobs=8252138, minmax=(0.6931471805599453, 7.888938076667314), mean=3.8780924745662606, variance=0.11594320687589393, skewness=-0.2525622031627243, kurtosis=3.5463577790908074)
+describe(sbert_tfidf["sbert_top_128_avg"])  # DescribeResult(nobs=8252138, minmax=(0.23806016147136688, 0.9999999403953552), mean=0.48508123392669744, variance=0.00398569604138435, skewness=1.0084712141737993, kurtosis=3.5581830353889874)
+import pandas as pd
+pd.Series(sbert_tfidf["sbert_top_128_avg"]).describe()
+
+
