@@ -631,7 +631,7 @@ def train(local_rank, args):
             # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
             output = {k: float(v) if v else v for k, v in output.items()}
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
-            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, samples_processed=samples_processed, samples_per_second=samples_per_second,
+            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, steps_done=steps_done, samples_processed=samples_processed, samples_per_second=samples_per_second,
                              batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),
                              steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                              epoch=epoch,
