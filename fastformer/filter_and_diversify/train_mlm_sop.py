@@ -742,7 +742,7 @@ def train_inner_loop(ddp_model, batch, optimizer, scheduler, gradient_clipping, 
     else:
         output, loss_float = forward_backward(batch, validation_iter, ddp_model, iter_size)
 
-    # print([name for name, params in (ddp_model.student if isinstance(ddp_model, (PatchCLR, MultiTaskHighwayCLSPretraining)) else ddp_model).named_parameters() if params.grad is None])
+    print([name for name, params in ddp_model.named_parameters() if params.grad is None])
     if not no_sync:
 
         torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
