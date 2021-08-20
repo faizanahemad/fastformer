@@ -234,7 +234,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
-        self.config.gradient_checkpointing = False
+        self.config.gradient_checkpointing = True
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
         self.backbone = backbone
@@ -568,7 +568,7 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         # model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
-        model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
+        model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10, gradient_as_bucket_view=True)  # find_unused_parameters=True
 
     clean_memory()
     barrier()
