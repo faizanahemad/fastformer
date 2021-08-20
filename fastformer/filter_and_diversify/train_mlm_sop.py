@@ -234,7 +234,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
-        self.config.gradient_checkpointing = True
+        self.config.gradient_checkpointing = False
         self.backbone = backbone
         self.mlm_w = mlm_w
         self.sentence_order_w = sentence_order_w
@@ -296,7 +296,8 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
             sentence_order_accuracy = (sent_order_preds == label_sentence_order).type(sent_order_logits.dtype).mean().item()
 
         return dict(loss=self.mlm_w * masked_lm_loss + self.sentence_order_w * sentence_order_loss,
-                    mlm_loss=masked_lm_loss, sentence_order_loss=sentence_order_loss, mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy,
+                    mlm_loss=masked_lm_loss.item(), sentence_order_loss=sentence_order_loss.item(),
+                    mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy,
                     sentence_order_accuracy=sentence_order_accuracy, mask_proportion=mask_proportion)
 
 
@@ -565,7 +566,7 @@ def train(local_rank, args):
     if args["world_size"] > 1:
         # model = FSDP(model, **fsdp_params)  # find_unused_parameters=True
 
-        model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=True, bucket_cap_mb=10)  # find_unused_parameters=True
+        model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False, bucket_cap_mb=10)  # find_unused_parameters=True
 
     clean_memory()
     barrier()
