@@ -47,6 +47,7 @@ import multiprocessing
 import signal
 from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
 import nltk
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
@@ -575,12 +576,14 @@ def train(local_rank, args):
     optc = optimizer_config.to_dict()
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     if args["optimizer"] == "adamw":
-        optimizer = torch.optim.AdamW(trainable_params, lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"],
-                                      betas=(optc["beta_1"], optc["beta_2"]))
+        optimizer_class = torch.optim.AdamW
+        optimizer = dict(lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"]))
     elif args["optimizer"] == "sgd":
-        optimizer = torch.optim.SGD(trainable_params, lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
+        optimizer_class = torch.optim.SGD
+        optimizer = dict(lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     else:
         raise ValueError
+    optimizer = ZeroRedundancyOptimizer(trainable_params, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in trainable_model.named_parameters() if v.requires_grad}))
     del trainable_params
     optimizer.zero_grad(set_to_none=True)
