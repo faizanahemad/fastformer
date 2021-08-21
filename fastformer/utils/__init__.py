@@ -1262,17 +1262,17 @@ class CoOccurenceModel(PreTrainedModel):
     def forward(self, input_ids, attention_mask, *args, **kwargs):
         b, s = input_ids.shape[:2]
         folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype).transpose(1, 2)
-        labels = folded_inputs[:, :, self.window].contiguous()
-        assert torch.all(labels == input_ids).item()
+        # labels = folded_inputs[:, :, self.window].contiguous()
+        # assert torch.all(labels == input_ids).item()
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
         embeddings = self.ln1(self.word_embeddings(folded_inputs))
         embeddings = embeddings.permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
-        masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+        masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        accuracy = (lm_predictions == labels)[attention_mask].float().mean().item()
+        accuracy = (lm_predictions == input_ids)[attention_mask].float().mean().item()
         _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
         return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
                     word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=top_k_alternatives)
