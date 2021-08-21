@@ -931,6 +931,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             config = DebertaV2Config()
             config.hidden_size = 1024
             config.intermediate_size = 4096
+            config.num_attention_heads = 16
             model = DebertaV2Model(config)
             tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-xlarge-v2")
 
