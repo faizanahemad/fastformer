@@ -520,7 +520,7 @@ def train(local_rank, args):
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
 
     if isinstance(backbone, CoOccurenceModel):
-        model = backbone
+        model = backbone.to(device)
         trainable_model = model
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
