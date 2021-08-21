@@ -168,7 +168,7 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
 
 
 class MaskedLanguageSentenceOrderModelDataset(Dataset):
-    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15):
+    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         try:
             self.tokenizer = copy.deepcopy(tokenizer)
@@ -180,6 +180,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         self.vocab = list(tokenizer.get_vocab())
         self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
+        self.mlm_sop_enabled = mlm_sop_enabled
 
     def __getitem__(self, item):
         if isinstance(item, str):
@@ -198,27 +199,30 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 text = " ".join(text.split()[:self.allowed_raw_length])
             length = len(text.strip().split())
 
-        seg_sep_token = f" {tokenizer.sep_token} "
-        num_segments = 2
-        segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
-        num_segments = sum(segments != tokenizer.pad_token)
+        if self.mlm_sop_enabled:
+            seg_sep_token = f" {tokenizer.sep_token} "
+            num_segments = 2
+            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+            num_segments = sum(segments != tokenizer.pad_token)
 
-        label_sentence_order = 0
-        if num_segments > 1:
-            if random.random() < 0.5:
-                label_sentence_order = 0
-            else:
-                label_sentence_order = 1
-                segments[0], segments[1] = segments[1], segments[0]
+            label_sentence_order = 0
+            if num_segments > 1:
+                if random.random() < 0.5:
+                    label_sentence_order = 0
+                else:
+                    label_sentence_order = 1
+                    segments[0], segments[1] = segments[1], segments[0]
 
-        results = dict(label_sentence_order=label_sentence_order)
-        text = seg_sep_token.join(segments)  # Training Labels for MLM
-        tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-        input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-        results["label_mlm_input_ids"] = input_ids.squeeze()
-
-        input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
-        results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
+            results = dict(label_sentence_order=label_sentence_order)
+            text = seg_sep_token.join(segments)  # Training Labels for MLM
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
+            results["label_mlm_input_ids"] = input_ids.squeeze()
+            input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
+            results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
+        else:
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+            results = dict(input_ids=tokenizer_outputs["input_ids"], attention_mask=tokenizer_outputs["attention_mask"])
 
         return results
 
@@ -418,15 +422,16 @@ class DistributedWeightedSampler(DistributedSampler):
         return iter(dataset_indices.tolist())
 
 
-def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, sampling_column=None, world_size=1, num_workers=None, max_length=512):
+def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_enabled, sampling_column=None, world_size=1, num_workers=None, max_length=512):
     single_node = world_size == 1
     from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
     import os
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
     dataset = Dataset.load_from_disk(location)
-    dataset_args = dict(tokenizer=tokenizer, dataset=dataset,
+    dataset_args = dict(tokenizer=tokenizer, dataset=dataset, mlm_sop_enabled=mlm_sop_enabled,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length),
                         word_mask_proba=0.15)
+    print("[Train]: Time = %s, Initializing Dataloader with dataset args = %s" % (dataset_args, get_time_string()))
 
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     dataset = MaskedLanguageSentenceOrderModelDataset(**dataset_args)
@@ -522,9 +527,11 @@ def train(local_rank, args):
     if isinstance(backbone, CoOccurenceModel):
         model = backbone.to(device)
         trainable_model = model
+        mlm_sop_enabled = False
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
         trainable_model = model.backbone
+        mlm_sop_enabled = True
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
 
@@ -603,7 +610,7 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
 
-    dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size, tokenizer, args["sampling_column"],
+    dataloader = build_dataloader(args["dataset"], args["shuffle_dataset"], batch_size, tokenizer, mlm_sop_enabled, args["sampling_column"],
                                   world_size=args["world_size"], num_workers=args["num_workers"], max_length=512)
 
     iter_size = max(args["accumulation_steps"], 1)
