@@ -694,7 +694,7 @@ def train(local_rank, args):
         if validation_iter:
             steps_remaining = total_steps - steps_done
             # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
-            output = {k: float(v) if v else v for k, v in output.items()}
+            output = {k: float(v) for k, v in output.items() if try_float(v)}
             samples_per_second = samples_processed_this_log_iter / np.sum(full_times)
             wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, updates_done=steps_done, samples_processed=samples_processed, samples_per_second=samples_per_second,
                              batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),

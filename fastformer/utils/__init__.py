@@ -910,7 +910,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             model_name = "roberta-large"
         elif "base" in model_name or "small" in model_name:
             model_name = "roberta-base"
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         config = RobertaConfig.from_pretrained(model_name)
         if dropout_prob is not None:
             config.hidden_dropout_prob = dropout_prob
@@ -934,6 +934,17 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             config.num_attention_heads = 16
             model = DebertaV2Model(config)
             tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-xlarge-v2")
+
+    elif "co-oc" in model_name:
+        if "roberta" in model_name:
+            if "large" in model_name:
+                model_name = "roberta-large"
+            elif "base" in model_name or "small" in model_name:
+                model_name = "roberta-base"
+            tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
+            model = CoOccurenceModel(3, model_name, tokenizer)
+        else:
+            raise ValueError("Co-Oc model only supports roberta-base and roberta-large")
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -1192,17 +1203,33 @@ def get_filter_mapper(keep_above):
 
 
 class CoOccurenceModel(PreTrainedModel):
-    def __init__(self, left_window, right_window, config: RobertaConfig, tokenizer: RobertaTokenizerFast):
-        super().__init__()
+    def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
+        super().__init__(PretrainedConfig())
+        model = AutoModel.from_pretrained(model_name)
+        config = model.config
         self.config = config
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-        self.left_window = left_window
-        self.right_window = right_window
+        self.window = window
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
-        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.word_embeddings = model.embeddings.word_embeddings
+        self.kernel_size = (2 * window + 1)
+        self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1,1))
+        assert config.hidden_size % 8 == 0
+        conv1 = nn.Conv2d(config.hidden_size, config.hidden_size, (1, window), groups=8)
+        conv2 = nn.Conv2d(config.hidden_size, config.hidden_size, (1, window+1), groups=8)
+        self.conv = nn.Sequential(conv1, nn.GELU(), conv2)
+        self.ffn = nn.Sequential(nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps),
+                                 nn.Linear(config.hidden_size, config.hidden_size * 2),
+                                 nn.GELU(),
+                                 nn.Linear(config.hidden_size * 2, config.hidden_size),
+                                 nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps))
+        init_weights(conv1, 0.01)
+        init_weights(conv2, 0.01)
+        self.ln1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
         self.init_weights()
         self.tie_weights()
 
@@ -1234,8 +1261,31 @@ class CoOccurenceModel(PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.word_embeddings = new_embeddings
 
-    def forward(self, input_ids, attention_mask):
-        return dict(loss=0.0, accuracy=0.0, word_ce=[0.0])
+    def forward(self, input_ids, attention_mask, *args, **kwargs):
+        b, s = input_ids.shape[:2]
+        folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype)
+        labels = folded_inputs[:, :, self.window].contiguous()
+        assert torch.all(labels == input_ids).item()
+        folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
+        embeddings = self.ln1(self.word_embeddings(folded_inputs))
+        embeddings = embeddings.permute(0, 3, 1, 2)
+        embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
+        embeddings = self.ffn(embeddings)
+        prediction_scores = self.lm_head(embeddings)  # B, S, vocab
+        masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+        lm_predictions = prediction_scores.detach().argmax(dim=-1)
+        accuracy = (lm_predictions == labels)[attention_mask].float().mean().item()
+        _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
+        return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
+                    word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=top_k_alternatives)
+
+
+def try_float(v):
+    try:
+        v = float(v)
+        return True
+    except:
+        return False
 
 
 
