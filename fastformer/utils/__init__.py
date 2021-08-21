@@ -17,7 +17,7 @@ import torchvision
 from pytz import timezone
 import time
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional as F, CrossEntropyLoss
 from timm.models.layers.weight_init import trunc_normal_
 import base64
 import hashlib
@@ -40,7 +40,8 @@ from PIL import Image
 from albumentations import augmentations as alb
 import imgaug.augmenters as iaa
 from torch.nn.parallel import DistributedDataParallel as DDP
-from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel
+from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, \
+    PretrainedConfig, PreTrainedModel, DebertaV2Config, DebertaV2Model, DebertaV2Tokenizer
 import torchvision.transforms as transforms
 import warnings
 warnings.simplefilter("ignore")
@@ -839,6 +840,9 @@ def get_rolling_diagonal_weights(size=512, window=9):
 
 
 def change_dropout(module: nn.Module, dropout_rate=0.0):
+    if hasattr(module, "config"):
+        module.config.hidden_dropout_prob = dropout_rate
+        module.config.attention_probs_dropout_prob = dropout_rate
     str_attrs = dir(module)
     attrs = [(attr, getattr(module, attr, None)) for attr in str_attrs if attr not in  ["base_model", "base_model_prefix"]]
     attrs = [(str_attr, attr) for (str_attr, attr) in attrs if isinstance(attr, (nn.Module, nn.ModuleList, nn.ModuleDict))]
@@ -914,6 +918,22 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
 
         # config.gradient_checkpointing = True
         model = AutoModel.from_pretrained(model_name)
+    elif "deberta" in model_name:
+        if "xlarge" in model_name:
+            model_name = "microsoft/deberta-xlarge-v2"
+            model = DebertaV2Model.from_pretrained(model_name)
+            tokenizer = DebertaV2Tokenizer.from_pretrained(model_name)
+        elif "xxlarge" in model_name:
+            model_name = "microsoft/deberta-xxlarge-v2"
+            tokenizer = DebertaV2Tokenizer.from_pretrained(model_name)
+            model = DebertaV2Model.from_pretrained(model_name)
+        elif "large" in model_name:
+            config = DebertaV2Config()
+            config.hidden_size = 1024
+            config.intermediate_size = 4096
+            model = DebertaV2Model(config)
+            tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-xlarge-v2")
+
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModel.from_pretrained(model_name)
@@ -1168,6 +1188,54 @@ def get_filter_mapper(keep_above):
         dl2 = {key: [item[key] for item in ld] for key in ld[0].keys()}
         return dl2
     return mapper_filter_by_length
+
+
+class CoOccurenceModel(PreTrainedModel):
+    def __init__(self, left_window, right_window, config: RobertaConfig, tokenizer: RobertaTokenizerFast):
+        super().__init__()
+        self.config = config
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        self.mask_token_id = tokenizer.mask_token_id
+        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+        self.left_window = left_window
+        self.right_window = right_window
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.init_weights()
+        self.tie_weights()
+
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, nn.Linear):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def get_input_embeddings(self):
+        return self.word_embeddings
+
+    def set_input_embeddings(self, new_embeddings):
+        self.word_embeddings = new_embeddings
+
+    def forward(self, input_ids, attention_mask):
+        return dict(loss=0.0, accuracy=0.0, word_ce=[0.0])
+
 
 
 
