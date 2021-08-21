@@ -1228,7 +1228,7 @@ class CoOccurenceModel(PreTrainedModel):
                                  nn.LayerNorm(256, eps=config.layer_norm_eps))
         init_weights(conv1, 0.01)
         init_weights(conv2, 0.01)
-        self.ln1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.ln1 = nn.LayerNorm(256, eps=config.layer_norm_eps)
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
         self.init_weights()
         self.tie_weights()
