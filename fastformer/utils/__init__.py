@@ -905,7 +905,17 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
     # TODO: Add extra CLS attr and tokens in embedding
     from transformers import AutoModel, RobertaTokenizerFast, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
 
-    if "roberta" in model_name:
+    if "co-oc" in model_name:
+        if "roberta" in model_name:
+            if "large" in model_name:
+                model_name = "roberta-large"
+            elif "base" in model_name or "small" in model_name:
+                model_name = "roberta-base"
+            tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
+            model = CoOccurenceModel(3, model_name, tokenizer)
+        else:
+            raise ValueError("Co-Oc model only supports roberta-base and roberta-large")
+    elif "roberta" in model_name:
         if "large" in model_name:
             model_name = "roberta-large"
         elif "base" in model_name or "small" in model_name:
@@ -934,17 +944,6 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             config.num_attention_heads = 16
             model = DebertaV2Model(config)
             tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-xlarge-v2")
-
-    elif "co-oc" in model_name:
-        if "roberta" in model_name:
-            if "large" in model_name:
-                model_name = "roberta-large"
-            elif "base" in model_name or "small" in model_name:
-                model_name = "roberta-base"
-            tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
-            model = CoOccurenceModel(3, model_name, tokenizer)
-        else:
-            raise ValueError("Co-Oc model only supports roberta-base and roberta-large")
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)

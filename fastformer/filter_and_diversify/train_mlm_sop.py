@@ -519,8 +519,12 @@ def train(local_rank, args):
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
 
-    model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
-    trainable_model = model.backbone
+    if isinstance(backbone, CoOccurenceModel):
+        model = backbone
+        trainable_model = model
+    else:
+        model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
+        trainable_model = model.backbone
     if local_rank == 0 and rank == 0:
         print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
 
@@ -537,6 +541,7 @@ def train(local_rank, args):
                     load_type = "not_strict"
                 except:
                     state_dict = {k: v for k, v in state_dict.items() if k.startswith("backbone.")}
+                    assert len(state_dict) > 0
                     trainable_model.load_state_dict(state_dict, strict=False)
                     load_type = "not_strict_no_ffn"
             except:
@@ -548,6 +553,7 @@ def train(local_rank, args):
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
                         state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
+                        assert len(state_dict) > 0
                         trainable_model.load_state_dict(state_dict, strict=True)
                         load_type = "strict-from-ddp-no-ffn"
                 except:
@@ -558,6 +564,7 @@ def train(local_rank, args):
                     except:
                         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
                         state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
+                        assert len(state_dict) > 0
                         trainable_model.load_state_dict(state_dict, strict=False)
                         load_type = "not_strict-from-ddp-no-ffn"
 
@@ -657,7 +664,8 @@ def train(local_rank, args):
 
         batch_times.append(gen_batch_time)
         if (steps_done + 1) % save_every_steps == 0 or (args["total_steps"] is not None and (steps_done + 1) >= args["total_steps"]):
-            state_dict = (getattr(model, "module", model).backbone).state_dict()
+
+            state_dict = getattr(getattr(model, "module", model), "backbone", getattr(model, "module", model)).state_dict()
             if local_rank == 0:
                 torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
             del state_dict
@@ -720,7 +728,7 @@ def train(local_rank, args):
         del bs_size
         start_time = time.time()
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    state_dict = (getattr(model, "module", model).backbone).state_dict()
+    state_dict = getattr(getattr(model, "module", model), "backbone", getattr(model, "module", model)).state_dict()
     if local_rank == 0:
         torch.save(state_dict, os.path.join(model_save_dir, model_save_name))
     del model
