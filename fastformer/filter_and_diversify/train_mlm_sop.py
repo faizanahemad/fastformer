@@ -216,13 +216,13 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             results = dict(label_sentence_order=label_sentence_order)
             text = seg_sep_token.join(segments)  # Training Labels for MLM
             tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-            input_ids, attention_mask = tokenizer_outputs["input_ids"], tokenizer_outputs["attention_mask"]
-            results["label_mlm_input_ids"] = input_ids.squeeze()
+            input_ids, attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
+            results["label_mlm_input_ids"] = input_ids
             input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
             results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
         else:
             tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-            results = dict(input_ids=tokenizer_outputs["input_ids"], attention_mask=tokenizer_outputs["attention_mask"])
+            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze())
 
         return results
 
