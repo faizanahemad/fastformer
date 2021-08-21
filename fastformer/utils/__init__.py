@@ -1262,7 +1262,7 @@ class CoOccurenceModel(PreTrainedModel):
 
     def forward(self, input_ids, attention_mask, *args, **kwargs):
         b, s = input_ids.shape[:2]
-        folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype)
+        folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype).transpose(1, 2)
         labels = folded_inputs[:, :, self.window].contiguous()
         assert torch.all(labels == input_ids).item()
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
