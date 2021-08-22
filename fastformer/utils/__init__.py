@@ -904,15 +904,17 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
     from transformers import AutoModel, RobertaTokenizerFast, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
-
+    import re
     if "co-oc" in model_name:
+        temp1 = re.findall(r'\d+', model_name)  # find number of digits through regular expression
+        window = 3 if len(temp1) == 0 else int(temp1[0])
         if "roberta" in model_name:
             if "large" in model_name:
                 model_name = "roberta-large"
             elif "base" in model_name or "small" in model_name:
                 model_name = "roberta-base"
             tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
-            model = CoOccurenceModel(3, model_name, tokenizer)
+            model = CoOccurenceModel(window, model_name, tokenizer)
         else:
             raise ValueError("Co-Oc model only supports roberta-base and roberta-large")
     elif "roberta" in model_name:
