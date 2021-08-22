@@ -1219,15 +1219,32 @@ class CoOccurenceModel(PreTrainedModel):
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
-        conv1 = nn.Conv2d(256, 256, (1, window), groups=8)
-        conv2 = nn.Conv2d(256, config.hidden_size // 2, (1, window+1), groups=8)
-        self.conv = nn.Sequential(conv1, nn.GELU(), conv2)
-        self.ffn = nn.Sequential(nn.Linear(config.hidden_size // 2, config.hidden_size),
-                                 nn.GELU(),
-                                 nn.Linear(config.hidden_size, 256),
-                                 nn.LayerNorm(256, eps=config.layer_norm_eps))
-        init_weights(conv1, 0.01)
-        init_weights(conv2, 0.01)
+        if window <= 3:
+            conv1 = nn.Conv2d(256, 256, (1, window), groups=8)
+            conv2 = nn.Conv2d(256, config.hidden_size // 2, (1, window+1), groups=8)
+            self.conv = nn.Sequential(conv1, nn.GELU(), conv2)
+            self.ffn = nn.Sequential(nn.Linear(config.hidden_size // 2, config.hidden_size),
+                                     nn.GELU(),
+                                     nn.Linear(config.hidden_size, 256),
+                                     nn.LayerNorm(256, eps=config.layer_norm_eps))
+            init_weights(conv1, 0.01)
+            init_weights(conv2, 0.01)
+        else:
+            conv1 = nn.Conv2d(256, 512, (1, 3), groups=8)
+            conv2 = nn.Conv2d(512, 512, (1, window), groups=8)
+            conv3 = nn.Conv2d(512, 512, (1, 3), groups=8)
+            conv4 = nn.Conv2d(512, config.hidden_size, (1, window-3), groups=8)
+            init_weights(conv1, 0.01)
+            init_weights(conv2, 0.01)
+            init_weights(conv3, 0.01)
+            init_weights(conv4, 0.01)
+            self.conv = nn.Sequential(conv1, nn.GELU(), conv2, nn.GELU(), conv3, nn.GELU(), conv4, nn.GELU())
+            self.ffn = nn.Sequential(nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps),
+                                     nn.Linear(config.hidden_size, config.hidden_size),
+                                     nn.GELU(),
+                                     nn.Linear(config.hidden_size, 256),
+                                     nn.LayerNorm(256, eps=config.layer_norm_eps))
+
         self.ln1 = nn.LayerNorm(256, eps=config.layer_norm_eps)
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
         self.init_weights()
