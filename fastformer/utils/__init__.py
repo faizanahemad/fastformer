@@ -1385,7 +1385,7 @@ class MixerCoOccurenceModel(PreTrainedModel):
 
         #
 
-        self.conv = MLPMixer(sequence_size=2*window, channels=channels, dim=config.hidden_size, depth=3)
+        self.conv = MLPMixer(sequence_size=2*window, channels=channels, dim=config.hidden_size, depth=2)
         self.ffn = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size),
                                  nn.GELU(),
                                  nn.Linear(config.hidden_size, channels),
