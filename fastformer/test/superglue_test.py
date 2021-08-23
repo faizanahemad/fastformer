@@ -216,8 +216,9 @@ class rproc:
 
 
 class wsc_proc:
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, version=1):
         self.tokenizer = tokenizer
+        self.version = version
 
     def __call__(self, x):
         tokenizer = self.tokenizer
@@ -225,8 +226,20 @@ class wsc_proc:
         words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + [
             "[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
         modified_text = " ".join(words)
-        text = x["text"] + f" {tokenizer.sep_token} " + modified_text + f" {tokenizer.sep_token} " + words[x["span1_index"]] + f" {tokenizer.sep_token} " + \
-               words[x["span2_index"]]
+        clues =  words[x["span1_index"]] + " [%s] " % (words[x["span1_index"]]) + f" {tokenizer.sep_token} " + \
+               words[x["span2_index"]] + " [%s]" % (words[x["span2_index"]])
+        if self.version == 1:
+            text = x["text"] + f" {tokenizer.sep_token} " + modified_text + f" {tokenizer.sep_token} " + clues
+        elif self.version == 2:
+            text = clues + f" {tokenizer.sep_token} " + modified_text + f" {tokenizer.sep_token} " + x["text"]
+        elif self.version == 3:
+            text = modified_text + f" {tokenizer.sep_token} " + clues + f" {tokenizer.sep_token} " + x["text"]
+        elif self.version == 4:
+            text = x["text"] + f" {tokenizer.sep_token} " + clues + f" {tokenizer.sep_token} " + modified_text
+        elif self.version == 5:
+            text = modified_text + f" {tokenizer.sep_token} " + x["text"] + f" {tokenizer.sep_token} " + clues
+        elif self.version == 6:
+            text = clues + f" {tokenizer.sep_token} " + x["text"] + f" {tokenizer.sep_token} " + modified_text
         return dict(text=text)
 
 
@@ -363,6 +376,7 @@ class SuperGlueTest:
                                     tokenizer.pad_token_id)
 
         train = None
+        train_idx = None
         if "train" in dataset:
             train = TextDataset(tokenizer,
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
@@ -375,14 +389,23 @@ class SuperGlueTest:
             print("epochs = ", int(self.epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(self.epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
+            if "idx" in dataset["train"][0]:
+                train_idx = [dataset["train"][i]["idx"] for i in range(len(dataset["train"]))]
+            else:
+                train_idx = list(range(len(dataset["train"])))
 
         validation = None
+        validation_idx = None
         if "validation" in dataset:
             validation = TextDataset(tokenizer,
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                     dataset["validation"])
             validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers,
                                     shuffle=False, **dataloader_params)
+            if "idx" in dataset["validation"][0]:
+                validation_idx = [dataset["validation"][i]["idx"] for i in range(len(dataset["validation"]))]
+            else:
+                validation_idx = list(range(len(dataset["validation"])))
 
         test = None
         test_idx = None
@@ -399,7 +422,8 @@ class SuperGlueTest:
 
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train, tokenizer=tokenizer,
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
-                    dataset_key=dataset_key, rank=rank, train_backbone=train_backbone)
+                    dataset_key=dataset_key, rank=rank, train_backbone=train_backbone,
+                    validation_idx=validation_idx, train_idx=train_idx)
 
     def train_classifier(self, model, device, classifier_data, predict_only=False):
         all_val_loss = []
@@ -547,6 +571,8 @@ class SuperGlueTest:
                 # torch.distributed.all_gather(tensor_list, cur_val_loss)
                 # cur_val_loss = torch.stack(tensor_list).mean().item()
                 all_val_loss.append(cur_val_loss)
+                labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
+                predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
                 val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                 # val_acc = torch.tensor(val_acc).to(device)
                 # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
@@ -859,9 +885,10 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def wsc(self, model, wsc, device, dataset_key, rank):
+        from datasets import concatenate_datasets
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        wsc = wsc.map(wsc_proc(tokenizer), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"])
+        wsc = concatenate_datasets([wsc.map(wsc_proc(tokenizer, i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)])
         classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -871,13 +898,15 @@ class SuperGlueTest:
                               val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
                               val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
-        final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        results = pd.DataFrame(list(zip(test_idx, classifier_results["predictions"])), columns=["id", "predictions"]).groupby("id").mean().reset_index().values
+        final_predictions = [dict(idx=idx, label=self.num_to_word["boolq"][int(pred > 0.5)]) for idx, pred in results]
         return final_predictions, dict(dataset="wsc.fixed", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
                                        epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def __call__(self, generate_test_predictions=True):
+        from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
         tokenizer = self.tokenizer
         model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
         pred_datas = []
@@ -886,7 +915,9 @@ class SuperGlueTest:
         # for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
         #     glue[gl] = load_dataset("glue", gl)
 
-        super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
+        super_glue = dict()
+        for gl in ['boolq', 'cb', 'copa', 'multirc', 'record', 'rte', 'wic', 'wsc.fixed', 'axb', 'axg']:  # 'wsc',
+            super_glue[gl] = load_dataset("super_glue", gl)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic', ]  # 'axb', 'axg'
         if self.hpo is not None:
             assert self.dataset_key is not None
