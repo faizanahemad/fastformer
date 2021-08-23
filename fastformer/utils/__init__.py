@@ -1385,7 +1385,7 @@ class MixerCoOccurenceModel(PreTrainedModel):
 
         #
 
-        self.conv = MLPMixer(sequence_size=2*window, channels=channels, dim=config.hidden_size, depth=2)
+        self.conv = MLPMixer(sequence_size=2*window, channels=channels, dim=config.hidden_size, depth=3)
         self.ffn = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size),
                                  nn.GELU(),
                                  nn.Linear(config.hidden_size, channels),
@@ -1437,9 +1437,9 @@ class MixerCoOccurenceModel(PreTrainedModel):
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1)
         accuracy = (lm_predictions == input_ids)[attention_mask].float().mean().item()
-        _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
+        # _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
         return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
-                    word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=top_k_alternatives)
+                    word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=None)
 
 
 
