@@ -1365,7 +1365,7 @@ class MixerCoOccurenceModel(PreTrainedModel):
     def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
         super().__init__(PretrainedConfig())
         from sklearn.decomposition import PCA
-        model = AutoModel.from_pretrained(model_name).detach()
+        model = AutoModel.from_pretrained(model_name)
         config = model.config
         self.config = config
         self.tokenizer = tokenizer
