@@ -885,10 +885,11 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def wsc(self, model, wsc, device, dataset_key, rank):
-        from datasets import concatenate_datasets
+        from datasets import concatenate_datasets, DatasetDict
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        wsc = concatenate_datasets([wsc.map(wsc_proc(tokenizer, i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)])
+        dsets = [wsc.map(wsc_proc(tokenizer, i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
+        wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
