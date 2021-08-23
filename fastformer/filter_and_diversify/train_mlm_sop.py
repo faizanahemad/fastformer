@@ -524,7 +524,7 @@ def train(local_rank, args):
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
 
-    if isinstance(backbone, CoOccurenceModel):
+    if isinstance(backbone, (CoOccurenceModel, MixerCoOccurenceModel)):
         model = backbone.to(device)
         trainable_model = model
         mlm_sop_enabled = False
