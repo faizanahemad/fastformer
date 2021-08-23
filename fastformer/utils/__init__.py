@@ -1377,7 +1377,7 @@ class MixerCoOccurenceModel(PreTrainedModel):
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
-        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit(model.embeddings.word_embeddings.weight.detach().numpy())))
+        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.embeddings.word_embeddings.weight.detach().numpy())))
         del model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
