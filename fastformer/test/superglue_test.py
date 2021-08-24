@@ -389,7 +389,7 @@ class SuperGlueTest:
             # except:
             #     print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
         clean_memory()
-        optimizer = torch.optim.AdamW(list(filter(lambda p: p.requires_grad, ddp_model.parameters())), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
+        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
 
