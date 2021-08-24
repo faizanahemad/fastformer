@@ -100,8 +100,6 @@ class TextDataset(Dataset):
 class ClassificationModel(nn.Module):
     def __init__(self, num_classes, model):
         super().__init__()
-
-
         self.backbone = model
         if num_classes == 1:
             self.ce = nn.BCEWithLogitsLoss()
@@ -113,15 +111,15 @@ class ClassificationModel(nn.Module):
         self.num_classes = num_classes
         init_weights(self.head)
 
-    def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
+    def get_representations(self, input_ids, attention_mask, token_type_ids=None):
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         hidden_states = self.backbone(**inputs)["hidden_states"]
         funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
-    def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):
+    def forward(self, input_ids, attention_mask, label=None, token_type_ids=None, **kwargs):
         with torch.set_grad_enabled(self.training):
-            funnel_outputs = self.get_representations(input_ids, attention_mask, char_ids, char_offsets, label, token_type_ids)
+            funnel_outputs = self.get_representations(input_ids, attention_mask, label, token_type_ids)
         logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
@@ -216,18 +214,45 @@ class rproc:
 
 
 class wsc_proc:
-    def __init__(self, tokenizer, version=1):
+    def __init__(self, tokenizer, dataset, version=1):
         self.tokenizer = tokenizer
         self.version = version
+        if "wsc" in dataset:
+            self.span1_text = "span1_text"
+            self.span2_text = "span2_text"
+            self.span1_index = "span1_index"
+            self.span2_index = "span2_index"
+            self.index_type = "word"
+        elif "dpr" in dataset:
+            self.span1_text = "noun"
+            self.span2_text = "Pronoun"
+            self.span1_index = "offset"
+            self.span2_index = "Pronoun-offset"
+            self.index_type = "char"
 
     def __call__(self, x):
         tokenizer = self.tokenizer
+        text = x["text"]
         words = x["text"].split()
-        words = words[:x["span1_index"]] + ["[%s]" % (words[x["span1_index"]])] + words[(x["span1_index"] + 1):x["span2_index"]] + [
-            "[%s]" % (words[x["span2_index"]])] + words[x["span2_index"]:]
-        modified_text = " ".join(words)
-        clues =  words[x["span1_index"]] + " [%s] " % (words[x["span1_index"]]) + f" {tokenizer.sep_token} " + \
-               words[x["span2_index"]] + " [%s]" % (words[x["span2_index"]])
+        span1_text = x[self.span1_text]
+        span2_text = x[self.span2_text]
+        span1_index = x[self.span1_index]
+        span2_index = x[self.span2_index]
+        if span1_index > span2_index:
+            span1_index, span2_index = span2_index, span1_index
+            span1_text, span2_text = span2_text, span1_text
+
+        if self.index_type == "word":
+            words = words[:span1_index] + ["[%s]" % (span1_text)] + words[(span1_index + len(span1_text.split())):span2_index] + [
+                "[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
+            modified_text = " ".join(words)
+        elif self.index_type == "char":
+            modified_text = text[:span1_index] + ["[%s]" % (span1_text)] + text[(span1_index + len(span1_text)):span2_index] + [
+                "[%s]" % (span2_text)] + text[span2_index + len(span2_text):]
+        else:
+            raise ValueError("Index type = %s not supported" % self.index_type)
+        clues = span1_text + (" [%s] " % span1_text) + f" {tokenizer.sep_token} " + \
+               span2_text + (" [%s]" % span2_text)
         if self.version == 1:
             text = x["text"] + f" {tokenizer.sep_token} " + modified_text + f" {tokenizer.sep_token} " + clues
         elif self.version == 2:
@@ -288,7 +313,7 @@ class SuperGlueTest:
         set_seeds(self.seed)
         batch_size = self.batch_size
         dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
-        if isinstance(model, (ClassificationModel)):
+        if isinstance(model, ClassificationModel):
             model = model.train()
             model.config.eps = 1e-7
             tokenizer = model.tokenizer
@@ -296,10 +321,6 @@ class SuperGlueTest:
             if "deberta" in model.lower() or "large" in model.lower():
                 batch_size = batch_size // 2
                 self.iter_size *= 2
-            if "conv" in model.lower():
-                dataloader_params = dict()
-            if "fast-conv" in model.lower():
-                dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
             if self.finetune:
                 batch_size = batch_size // 2
                 self.iter_size *= 2
@@ -362,11 +383,11 @@ class SuperGlueTest:
             model = classifier
             ddp_model = DDP(model, device_ids=None if self.device == torch.device("cpu") else [self.device], find_unused_parameters=True,
                             bucket_cap_mb=10)  # find_unused_parameters=True
-            try:
-                from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
-                ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
-            except:
-                print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
+            # try:
+            #     from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
+            #     ddp_model.register_comm_hook(state=None, hook=fp16_compress_hook)
+            # except:
+            #     print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
             optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
                                           betas=(optc["beta_1"], optc["beta_2"]))
@@ -425,7 +446,7 @@ class SuperGlueTest:
                     dataset_key=dataset_key, rank=rank, train_backbone=train_backbone,
                     validation_idx=validation_idx, train_idx=train_idx)
 
-    def train_classifier(self, model, device, classifier_data, predict_only=False):
+    def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None):
         all_val_loss = []
         all_val_acc = []
         all_train_acc = []
@@ -438,7 +459,7 @@ class SuperGlueTest:
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
         train_backbone = classifier_data["train_backbone"]
-        max_allowed_epochs = int(self.epochs)
+        max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
 
         broken = False
         stored_state = None
@@ -887,10 +908,27 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def wsc(self, model, wsc, device, dataset_key, rank):
-        from datasets import concatenate_datasets, DatasetDict
+        from datasets import concatenate_datasets, DatasetDict, load_dataset
+        dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
+        dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
+        dprB = dpr.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
+        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in [dprA, dprB]]) for split in ["train", "validation", "test"]})
+        dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
+        dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
+        dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
+        dpr = dpr.map(lambda x: dict(label=int(x["label"])))
+
+
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        dsets = [wsc.map(wsc_proc(tokenizer, i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
+
+        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
+        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, dataset_key, rank)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+        model_dict["model"] = classifier_data["model"]
+
+        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
