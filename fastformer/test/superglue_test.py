@@ -968,6 +968,15 @@ class SuperGlueTest:
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
         dpr = dpr.map(lambda x: dict(label=int(x["label"])))
 
+        for split in ["train", "validation", "test"]:
+            labels = np.array(dpr[split]['label'])
+            dpr[split] = dpr[split].remove_columns(['label'])
+            dpr[split] = dpr[split].add_column("label", labels)
+
+            idx = np.array(wsc[split]['idx'])
+            dpr[split] = dpr[split].remove_columns(['idx'])
+            dpr[split] = dpr[split].add_column("idx", idx)
+
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])))]) for split in ["train", "validation", "test"]})
