@@ -919,14 +919,14 @@ class SuperGlueTest:
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
-        del dpr["test"]
         dpr = dpr.map(lambda x: dict(label=int(x["label"])))
 
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
-        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets if "test" in d]) for split in ["train", "validation", "test"]})
+        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
@@ -943,11 +943,11 @@ class SuperGlueTest:
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
-        del dpr["test"]
         dpr = dpr.map(lambda x: dict(label=int(x["label"])))
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
-        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets if "test" in d]) for split in ["train", "validation", "test"]})
+        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
