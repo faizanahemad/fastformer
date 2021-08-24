@@ -438,7 +438,13 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
 
     weights = None
     if sampling_column is not None:
-        if sampling_column == "perplexity":
+        if "sbert" in sampling_column and "perplexity" in sampling_column:
+            ppl = np.log1p(dataset["perplexity"])
+            ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+            sbert = 1 - np.array(dataset["sbert_top_128_avg"])
+            sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+            weights = ppl + sbert
+        elif sampling_column == "perplexity":
             ppl = np.log1p(dataset["perplexity"])
             weights = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
         elif "tfidf" in sampling_column:
