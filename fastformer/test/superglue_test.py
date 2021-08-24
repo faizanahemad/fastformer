@@ -430,7 +430,7 @@ class SuperGlueTest:
 
         test = None
         test_idx = None
-        if rank == 0:
+        if rank == 0 and "test" in dataset and dataset["test"] is not None:
             test = TextDataset(tokenizer,
                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                               dataset["test"])
@@ -606,7 +606,7 @@ class SuperGlueTest:
 
             torch.distributed.barrier()
         predictions = []
-        if hasattr(model, "no_sync") and rank == 0 and self.hpo is None:
+        if hasattr(model, "no_sync") and rank == 0 and self.hpo is None and "test" in classifier_data and classifier_data["test"] is not None:
             model = model.eval()
             inner_model = model.module
             if stored_state is not None:
@@ -621,7 +621,7 @@ class SuperGlueTest:
                 test_preds = output["predictions"].cpu().tolist()
                 test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
                 predictions.extend(test_preds)
-        elif rank == 0 and self.hpo is None:
+        elif rank == 0 and self.hpo is None and "test" in classifier_data and classifier_data["test"] is not None:
             val_acc = 0.0
             model = model.eval()
             inner_model = model
@@ -913,6 +913,9 @@ class SuperGlueTest:
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
         dprB = dpr.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in [dprA, dprB]]) for split in ["train", "validation", "test"]})
+        dpr["train"] = concatenate_datasets([dpr["train"], dpr["validation"]])
+        dpr["validation"] = dpr["test"]
+
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
