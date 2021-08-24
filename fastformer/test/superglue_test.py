@@ -914,11 +914,12 @@ class SuperGlueTest:
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
         dprB = dpr.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in [dprA, dprB]]) for split in ["train", "validation", "test"]})
-        # dpr["train"] = concatenate_datasets([dpr["train"], dpr["validation"]])
+        dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
         # dpr["validation"] = dpr["test"]
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
+        del dpr["test"]
         dpr = dpr.map(lambda x: dict(label=int(x["label"])))
 
         model_dict = self.build_model(model)
@@ -937,9 +938,12 @@ class SuperGlueTest:
         gap = DatasetDict({split: concatenate_datasets([d[split] for d in [gapA, gapB]]) for split in ["train", "validation", "test"]})
 
         dpr=gap
+
+        dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
+        del dpr["test"]
         dpr = dpr.map(lambda x: dict(label=int(x["label"])))
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
