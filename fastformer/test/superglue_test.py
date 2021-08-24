@@ -909,6 +909,8 @@ class SuperGlueTest:
 
     def wsc(self, model, wsc, device, dataset_key, rank):
         # TODO: test gap before DPR, gap after DPR, gap with DPR
+        # TODO: Test wsc with both
+        # TODO: test using test-set of both
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
@@ -918,7 +920,7 @@ class SuperGlueTest:
         for split in ["train", "validation", "test"]:
             labels = np.array(wsc[split]['label'])
             wsc[split] = wsc[split].remove_columns(['label'])
-            wsc[split].add_column("label", labels)
+            wsc[split] = wsc[split].add_column("label", labels)
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
