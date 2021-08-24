@@ -977,7 +977,7 @@ class SuperGlueTest:
             dpr[split] = dpr[split].remove_columns(['idx'])
             dpr[split] = dpr[split].add_column("idx", idx)
 
-        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
+        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset', 'URL', 'ID']) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(dpr["train"].features, "\n", wsc["train"].features)
