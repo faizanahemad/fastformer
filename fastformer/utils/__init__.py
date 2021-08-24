@@ -1516,7 +1516,7 @@ class SMixerCoOccurenceModel(PreTrainedModel):
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
         embeddings = self.ln1(self.word_embeddings(folded_inputs))   # B, S, 2*W, C
         embeddings = embeddings.view(b*s, 2*self.window, embeddings.size(-1))
-        embeddings = self.conv(embeddings).mean(1).view(b, s, self.config.hidden_size)
+        embeddings = self.conv(embeddings).mean(1).view(b, s, self.channels)
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
