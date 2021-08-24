@@ -920,7 +920,7 @@ class SuperGlueTest:
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
         dprB = dpr.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in [dprA, dprB]]) for split in ["train", "validation", "test"]})
-        dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
+        # dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
         # dpr["validation"] = dpr["test"]
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
@@ -930,6 +930,13 @@ class SuperGlueTest:
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        print(dpr["train"].features, "\n", wsc["train"].features)
+        print("#" * 80)
+        print(dpr["validation"].features, "\n", wsc["validation"].features)
+        print("#" * 80)
+        print(dpr["test"].features, "\n", wsc["test"].features)
+        print("#" * 80)
+
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])))]) for split in ["train", "validation", "test"]})
         del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank)
@@ -944,7 +951,7 @@ class SuperGlueTest:
 
         dpr=gap
 
-        dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
+        # dpr["train"] = concatenate_datasets([dpr["train"], dpr["test"]])
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
