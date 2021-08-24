@@ -119,7 +119,7 @@ class ClassificationModel(nn.Module):
 
     def forward(self, input_ids, attention_mask, label=None, token_type_ids=None, **kwargs):
         with torch.set_grad_enabled(self.training):
-            funnel_outputs = self.get_representations(input_ids, attention_mask, label, token_type_ids)
+            funnel_outputs = self.get_representations(input_ids, attention_mask, token_type_ids)
         logits = self.head(funnel_outputs)
         loss = 0.0
         if label is not None and label.min() >= 0:
