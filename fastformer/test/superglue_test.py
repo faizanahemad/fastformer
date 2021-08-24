@@ -973,7 +973,7 @@ class SuperGlueTest:
             dpr[split] = dpr[split].remove_columns(['label'])
             dpr[split] = dpr[split].add_column("label", labels)
 
-            idx = np.array(wsc[split]['idx'])
+            idx = np.array(dpr[split]['idx'])
             dpr[split] = dpr[split].remove_columns(['idx'])
             dpr[split] = dpr[split].add_column("idx", idx)
 
