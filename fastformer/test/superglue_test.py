@@ -922,6 +922,10 @@ class SuperGlueTest:
             wsc[split] = wsc[split].remove_columns(['label'])
             wsc[split] = wsc[split].add_column("label", labels)
 
+            idx = np.array(wsc[split]['idx'])
+            wsc[split] = wsc[split].remove_columns(['idx'])
+            wsc[split] = wsc[split].add_column("idx", idx)
+
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
         dprB = dpr.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
