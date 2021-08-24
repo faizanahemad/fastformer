@@ -571,8 +571,9 @@ class SuperGlueTest:
                 # torch.distributed.all_gather(tensor_list, cur_val_loss)
                 # cur_val_loss = torch.stack(tensor_list).mean().item()
                 all_val_loss.append(cur_val_loss)
-                labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
-                predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
+                if isinstance(classifier_data["validation_idx"][0], int):
+                    labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
+                    predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
                 val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
                 # val_acc = torch.tensor(val_acc).to(device)
                 # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
@@ -798,6 +799,7 @@ class SuperGlueTest:
         return final_predictions, rte_res, final_predictions_axb, final_predictions_axg
 
     def multirc(self, model, multirc, device, dataset_key, rank):
+        # TODO: can we include label=1 examples of multirc from train-set only into MLM data itself?
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         multirc = multirc.map(lambda x: dict(text=x["paragraph"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer"]),
