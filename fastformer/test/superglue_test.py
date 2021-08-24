@@ -247,8 +247,8 @@ class wsc_proc:
                 "[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
             modified_text = " ".join(words)
         elif self.index_type == "char":
-            modified_text = text[:span1_index] + ["[%s]" % (span1_text)] + text[(span1_index + len(span1_text)):span2_index] + [
-                "[%s]" % (span2_text)] + text[span2_index + len(span2_text):]
+            modified_text = text[:span1_index] + "[%s]" % (span1_text) + text[(span1_index + len(span1_text)):span2_index] + \
+                "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
         else:
             raise ValueError("Index type = %s not supported" % self.index_type)
         clues = span1_text + (" [%s] " % span1_text) + f" {tokenizer.sep_token} " + \
