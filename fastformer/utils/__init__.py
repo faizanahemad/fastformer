@@ -922,7 +922,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
             if model_type == "smixer":
                 model = SMixerCoOccurenceModel(window, model_name, tokenizer)
-            if model_type == "mixer":
+            elif model_type == "mixer":
                 model = MixerCoOccurenceModel(window, model_name, tokenizer)
             else:
                 model = CoOccurenceModel(window, model_name, tokenizer)

@@ -924,7 +924,7 @@ class SuperGlueTest:
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
-        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, dataset_key, rank)
+        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
 
