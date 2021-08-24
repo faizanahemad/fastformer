@@ -914,6 +914,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        wsc = wsc.map(lambda x: dict(label=int(x["label"])))
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
