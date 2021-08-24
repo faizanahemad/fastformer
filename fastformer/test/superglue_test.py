@@ -932,6 +932,21 @@ class SuperGlueTest:
 
         #
         gap = load_dataset("gap")
+        gapA = gap.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref',"label").rename_column('A-offset', "offset")
+        gapB = gap.remove_columns(['A', 'A-offset', 'A-coref']).rename_column("Text", "text").rename_column("B", "noun").rename_column('B-coref', "label").rename_column('B-offset', "offset")
+        gap = DatasetDict({split: concatenate_datasets([d[split] for d in [gapA, gapB]]) for split in ["train", "validation", "test"]})
+
+        dpr=gap
+        dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
+        dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
+        dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
+        dpr = dpr.map(lambda x: dict(label=int(x["label"])))
+
+        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
+        dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
 
         #
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
