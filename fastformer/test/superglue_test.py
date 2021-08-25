@@ -962,6 +962,8 @@ class SuperGlueTest:
         # TODO: test using test-set of both [No]
         # TODO: MLM tuning of model before classification training on only true labels of train set.
         # TODO: Use val + train for 2 epochs in end before test predictions?
+
+        # TODO: Pretrain with large MLM set.
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
@@ -992,6 +994,10 @@ class SuperGlueTest:
             idx = np.array(wsc[split]['idx'])
             wsc[split] = wsc[split].remove_columns(['idx'])
             wsc[split] = wsc[split].add_column("idx", idx)
+
+            process_version = np.array(wsc[split]['process_version'])
+            wsc[split] = wsc[split].remove_columns(['process_version'])
+            wsc[split] = wsc[split].add_column("process_version", process_version)
 
         if enable_wsc:
             classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=3)
