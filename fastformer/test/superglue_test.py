@@ -969,7 +969,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = list(range(1, 15))
-        enable_wsc = False
+        enable_wsc = True
         enable_dpr = True
         enable_gap = True
 
