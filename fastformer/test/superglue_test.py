@@ -1016,7 +1016,7 @@ class SuperGlueTest:
             print(dpr["test"].features, "\n", wsc["test"].features)
             print("#" * 80)
 
-        dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])))]) for split in ["train", "validation", "test"]})
+        dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])), load_from_cache_file=caching)]) for split in ["train", "validation", "test"]})
         del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank, max_epochs=5)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
@@ -1060,7 +1060,7 @@ class SuperGlueTest:
             print(dpr["test"].features, "\n", wsc["test"].features)
             print("#" * 80)
         
-        dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])))]) for split in ["train", "validation", "test"]})
+        dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])), load_from_cache_file=caching)]) for split in ["train", "validation", "test"]})
         del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
