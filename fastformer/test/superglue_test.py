@@ -964,14 +964,24 @@ class SuperGlueTest:
         # TODO: Use val + train for 2 epochs in end before test predictions?
 
         # TODO: Pretrain with large MLM set.
-        from datasets import concatenate_datasets, DatasetDict, load_dataset
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+        from collections import defaultdict
+        model_name = model
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = list(range(1, 15))
+        enable_wiki_dpr = True
         enable_wsc = True
         enable_dpr = True
         enable_gap = True
+        if enable_wiki_dpr:
+            wiki_dpr = build_wiki_dpr(tokenizer)
+            classifier_data = self.prepare_classifier(model_dict, wiki_dpr, device, 1, "wiki_dpr", rank, max_epochs=1)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            model_dict["model"] = classifier_data["model"]
+
+
 
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                          load_from_cache_file=caching) for i in versions]
@@ -1271,6 +1281,38 @@ def train(local_rank, args):
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
                   args["hpo"], args["dataset_key"])()
     return
+
+
+def build_wiki_dpr(tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    from collections import defaultdict
+    if os.path.exists("MaskedWiki_sample.txt"):
+        with open("MaskedWiki_sample.txt") as f:
+            lines = f.readlines()
+
+        examples = defaultdict(list)
+        for i in range(0, len(lines), 5):
+            cur_ex = lines[i:i + 5]
+
+            cur_ex = list(map(lambda x: x.replace("\n", ""), cur_ex))
+            options = cur_ex[2].split(",")
+            correct_option = cur_ex[3]
+            text = cur_ex[0].replace("[MASK]", tokenizer.mask_token)
+            for opt in options:
+                ctext = text + f" {tokenizer.sep_token} " + opt
+                label = int(opt == correct_option)
+                examples["text"].append(ctext)
+                examples["label"].append(label)
+
+                ctext2 = text.replace(tokenizer.mask_token, opt)
+                examples["text"].append(ctext2)
+                examples["label"].append(label)
+        wiki_dpr = Dataset.from_dict(examples).train_test_split(test_size=0.1)
+        split2 = wiki_dpr["test"].train_test_split(test_size=0.5)
+        wiki_dpr["validation"] = split2["train"]
+        wiki_dpr["test"] = split2["test"]
+
+
 
 
 if __name__ == "__main__":
