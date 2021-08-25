@@ -451,8 +451,6 @@ class SuperGlueTest:
         validation = None
         validation_idx = None
         validation_version = None
-        print(dataset, dataset["validation"].column_names)
-        assert "process_version" in dataset["validation"].column_names
         if "validation" in dataset:
             validation = TextDataset(tokenizer,
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
@@ -964,9 +962,10 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
+        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 15)]
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
-        print(wsc)
+        if rank == 0:
+            print(wsc["validation"])
         wsc = wsc.map(lambda x: dict(label=int(x["label"])))
         for split in ["train", "validation", "test"]:
             labels = np.array(wsc[split]['label'])
