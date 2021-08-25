@@ -265,7 +265,12 @@ class wsc_proc:
             text = modified_text + f" {tokenizer.sep_token} " + x["text"] + f" {tokenizer.sep_token} " + clues
         elif self.version == 6:
             text = clues + f" {tokenizer.sep_token} " + x["text"] + f" {tokenizer.sep_token} " + modified_text
-        return dict(text=text)
+        elif self.version == 7:
+            text = clues + f" {tokenizer.sep_token} " + modified_text
+        elif self.version == 8:
+            text = modified_text + f" {tokenizer.sep_token} " + clues
+
+        return dict(text=text, version=self.version)
 
 
 class SuperGlueTest:
@@ -399,6 +404,7 @@ class SuperGlueTest:
 
         train = None
         train_idx = None
+        train_version = None
         if "train" in dataset:
             train = TextDataset(tokenizer,
                                dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
@@ -412,12 +418,17 @@ class SuperGlueTest:
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
             if "idx" in dataset["train"][0]:
-                train_idx = [dataset["train"][i]["idx"] for i in range(len(dataset["train"]))]
+                train_idx = dataset["train"]["idx"]
             else:
                 train_idx = list(range(len(dataset["train"])))
 
+            if "version" in dataset["train"].column_names:
+                train_version = dataset["train"]["version"]
+
+
         validation = None
         validation_idx = None
+        validation_version = None
         if "validation" in dataset:
             validation = TextDataset(tokenizer,
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
@@ -425,9 +436,13 @@ class SuperGlueTest:
             validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers,
                                     shuffle=False, **dataloader_params)
             if "idx" in dataset["validation"][0]:
-                validation_idx = [dataset["validation"][i]["idx"] for i in range(len(dataset["validation"]))]
+                validation_idx = dataset["validation"]["idx"]
             else:
                 validation_idx = list(range(len(dataset["validation"])))
+
+            if "version" in dataset["validation"].column_names:
+                validation_version = dataset["validation"]["version"]
+
 
         test = None
         test_idx = None
@@ -445,7 +460,7 @@ class SuperGlueTest:
         return dict(model=ddp_model, optimizer=optimizer, scheduler=scheduler, train=train, tokenizer=tokenizer,
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
                     dataset_key=dataset_key, rank=rank, train_backbone=train_backbone,
-                    validation_idx=validation_idx, train_idx=train_idx)
+                    validation_idx=validation_idx, train_idx=train_idx, validation_version=validation_version)
 
     def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None):
         all_val_loss = []
@@ -594,6 +609,13 @@ class SuperGlueTest:
                 # cur_val_loss = torch.stack(tensor_list).mean().item()
                 all_val_loss.append(cur_val_loss)
                 if isinstance(classifier_data["validation_idx"][0], int):
+                    if classifier_data["validation_version"] is not None:
+                        vals = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels, np.array(predictions) > 0.5, classifier_data["validation_version"])), columns=["idx", "label", "prediction", "version"])
+                        vals["label"] = vals["label"].astype(int)
+                        vals["prediction"] = vals["prediction"].astype(int)
+                        vals["correct"] = vals["label"] == vals["predictions"]
+                        version_wise_correct = vals.groupby("version")[["correct"]].mean()
+                        print("For %s: version_wise_correct = \n%s" % (dataset_key, version_wise_correct))
                     labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
                     predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
                 val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
