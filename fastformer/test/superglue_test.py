@@ -965,14 +965,16 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 13)]
+        caching = False
+        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
+                         load_from_cache_file=caching) for i in range(1, 13)]
         if rank == 0:
             print(dsets[0]["train"].features, "\n", dsets[1]["train"].features)
             print(dsets[0]["validation"].features, "\n", dsets[1]["validation"].features)
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(wsc["validation"])
-        wsc = wsc.map(lambda x: dict(label=int(x["label"])))
+        wsc = wsc.map(lambda x: dict(label=int(x["label"])), load_from_cache_file=caching)
         for split in ["train", "validation", "test"]:
             labels = np.array(wsc[split]['label'])
             wsc[split] = wsc[split].remove_columns(['label'])
@@ -995,10 +997,11 @@ class SuperGlueTest:
         dpr["train"] = dpr["train"].add_column("idx", list(range(len(dpr["train"]))))
         dpr["validation"] = dpr["validation"].add_column("idx", list(range(len(dpr["validation"]))))
         dpr["test"] = dpr["test"].add_column("idx", list(range(len(dpr["test"]))))
-        dpr = dpr.map(lambda x: dict(label=int(x["label"])))
+        dpr = dpr.map(lambda x: dict(label=int(x["label"])), load_from_cache_file=caching)
 
 
-        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset']) for i in range(1, 7)]
+        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset'],
+                         load_from_cache_file=caching) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(dpr["train"].features, "\n", wsc["train"].features)
@@ -1041,7 +1044,8 @@ class SuperGlueTest:
             dpr[split] = dpr[split].remove_columns(['idx'])
             dpr[split] = dpr[split].add_column("idx", idx)
 
-        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset', 'URL', 'ID']) for i in range(1, 7)]
+        dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset', 'URL', 'ID'],
+                         load_from_cache_file=caching) for i in range(1, 7)]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(dpr["train"].features, "\n", wsc["train"].features)
