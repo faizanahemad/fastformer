@@ -967,15 +967,19 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = list(range(1, 15))
+        enable_wsc = False
+        enable_dpr = True
+        enable_gap = True
+
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                          load_from_cache_file=caching) for i in versions]
-        if rank == 0:
-            for i in range(len(dsets)):
-                print(dsets[i]["train"].features)
-            for i in range(len(dsets)):
-                print(dsets[i]["validation"].features)
-            for i in range(len(dsets)):
-                print(dsets[i]["test"].features)
+        # if rank == 0:
+        #     for i in range(len(dsets)):
+        #         print(dsets[i]["train"].features)
+        #     for i in range(len(dsets)):
+        #         print(dsets[i]["validation"].features)
+        #     for i in range(len(dsets)):
+        #         print(dsets[i]["test"].features)
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(wsc["validation"])
@@ -989,9 +993,10 @@ class SuperGlueTest:
             wsc[split] = wsc[split].remove_columns(['idx'])
             wsc[split] = wsc[split].add_column("idx", idx)
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=3)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
-        model_dict["model"] = classifier_data["model"]
+        if enable_wsc:
+            classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=3)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+            model_dict["model"] = classifier_data["model"]
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
@@ -1018,13 +1023,14 @@ class SuperGlueTest:
 
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])), load_from_cache_file=caching)]) for split in ["train", "validation", "test"]})
         del dpr["test"]
-        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank, max_epochs=5)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
-        model_dict["model"] = classifier_data["model"]
+        if enable_gap:
+            classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank, max_epochs=5)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            model_dict["model"] = classifier_data["model"]
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
-        model_dict["model"] = classifier_data["model"]
+            classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            model_dict["model"] = classifier_data["model"]
 
         #
         gap = load_dataset("gap")
@@ -1062,13 +1068,14 @@ class SuperGlueTest:
         
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])), load_from_cache_file=caching)]) for split in ["train", "validation", "test"]})
         del dpr["test"]
-        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank, max_epochs=2)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
-        model_dict["model"] = classifier_data["model"]
+        if enable_dpr:
+            classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+            model_dict["model"] = classifier_data["model"]
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
-        model_dict["model"] = classifier_data["model"]
+            classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            model_dict["model"] = classifier_data["model"]
 
         #
         # dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
