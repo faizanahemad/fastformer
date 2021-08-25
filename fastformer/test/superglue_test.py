@@ -247,8 +247,11 @@ class wsc_proc:
                 "[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
             modified_text = " ".join(words)
             modified_text_2 = words[:span2_index] + ["[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
+            modified_text_2 = " ".join(modified_text_2)
             modified_text_3 = words[:span2_index] + [tokenizer.mask_token] + words[span2_index + len(span2_text.split()):]
+            modified_text_3 = " ".join(modified_text_3)
             modified_text_4 = words[:span2_index] + [span1_text] + words[span2_index + len(span2_text.split()):]
+            modified_text_4 = " ".join(modified_text_4)
         elif self.index_type == "char":
             modified_text = text[:span1_index] + "[%s]" % (span1_text) + text[(span1_index + len(span1_text)):span2_index] + \
                 "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
