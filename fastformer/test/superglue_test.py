@@ -966,6 +966,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        print(wsc)
         wsc = wsc.map(lambda x: dict(label=int(x["label"])))
         for split in ["train", "validation", "test"]:
             labels = np.array(wsc[split]['label'])
