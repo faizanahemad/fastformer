@@ -639,7 +639,7 @@ class SuperGlueTest:
                         vals = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels, np.array(predictions) > 0.5, classifier_data["validation_version"])), columns=["idx", "label", "prediction", "version"])
                         vals["label"] = vals["label"].astype(int)
                         vals["prediction"] = vals["prediction"].astype(int)
-                        vals["correct"] = vals["label"] == vals["predictions"]
+                        vals["correct"] = vals["label"] == vals["prediction"]
                         version_wise_correct = vals.groupby("version")[["correct"]].mean()
                         print("For %s: version_wise_correct = \n%s" % (dataset_key, version_wise_correct))
                     labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
