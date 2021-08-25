@@ -969,8 +969,12 @@ class SuperGlueTest:
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                          load_from_cache_file=caching) for i in range(1, 13)]
         if rank == 0:
-            print(dsets[0]["train"].features, "\n", dsets[1]["train"].features)
-            print(dsets[0]["validation"].features, "\n", dsets[1]["validation"].features)
+            for i in range(len(dsets)):
+                print(dsets[i]["train"].features)
+            for i in range(len(dsets)):
+                print(dsets[i]["validation"].features)
+            for i in range(len(dsets)):
+                print(dsets[i]["test"].features)
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(wsc["validation"])
