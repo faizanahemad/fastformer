@@ -909,8 +909,9 @@ class SuperGlueTest:
 
     def wsc(self, model, wsc, device, dataset_key, rank):
         # TODO: test gap before DPR, gap after DPR, gap with DPR
-        # TODO: Test wsc with both
-        # TODO: test using test-set of both
+        # TODO: Test wsc with both [Yes]
+        # TODO: test using test-set of both [No]
+        # TODO: MLM tuning of model before classification training on only true labels of train set.
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
@@ -925,6 +926,10 @@ class SuperGlueTest:
             idx = np.array(wsc[split]['idx'])
             wsc[split] = wsc[split].remove_columns(['idx'])
             wsc[split] = wsc[split].add_column("idx", idx)
+
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+        model_dict["model"] = classifier_data["model"]
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
         dprA = dpr.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref', "label").rename_column('A-offset', "offset")
