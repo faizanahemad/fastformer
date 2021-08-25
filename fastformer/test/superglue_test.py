@@ -451,6 +451,7 @@ class SuperGlueTest:
         validation = None
         validation_idx = None
         validation_version = None
+        print(dataset, dataset["validation"].column_names)
         assert "process_version" in dataset["validation"].column_names
         if "validation" in dataset:
             validation = TextDataset(tokenizer,
