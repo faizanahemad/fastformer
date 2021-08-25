@@ -965,7 +965,10 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 15)]
+        dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 2)]
+        if rank == 0:
+            print(dsets[0]["train"].features, "\n", dsets[1]["train"].features)
+            print(dsets[0]["validation"].features, "\n", dsets[1]["validation"].features)
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(wsc["validation"])
