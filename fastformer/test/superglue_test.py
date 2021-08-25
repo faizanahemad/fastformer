@@ -292,7 +292,7 @@ class wsc_proc:
         elif self.version == 16:
             pass
 
-        return dict(text=text, version=self.version)
+        return dict(text=text, process_version=self.version)
 
 
 class SuperGlueTest:
@@ -444,14 +444,14 @@ class SuperGlueTest:
             else:
                 train_idx = list(range(len(dataset["train"])))
 
-            if "version" in dataset["train"].column_names:
-                train_version = dataset["train"]["version"]
+            if "process_version" in dataset["train"].column_names:
+                train_version = dataset["train"]["process_version"]
 
 
         validation = None
         validation_idx = None
         validation_version = None
-        assert "version" in dataset["validation"].column_names
+        assert "process_version" in dataset["validation"].column_names
         if "validation" in dataset:
             validation = TextDataset(tokenizer,
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
@@ -463,8 +463,8 @@ class SuperGlueTest:
             else:
                 validation_idx = list(range(len(dataset["validation"])))
 
-            if "version" in dataset["validation"].column_names:
-                validation_version = dataset["validation"]["version"]
+            if "process_version" in dataset["validation"].column_names:
+                validation_version = dataset["validation"]["process_version"]
 
 
         test = None
