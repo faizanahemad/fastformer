@@ -359,7 +359,7 @@ class SuperGlueTest:
             raise ValueError
         return dict(model=model, tokenizer=tokenizer, dataloader_params=dataloader_params, batch_size=batch_size)
 
-    def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False):
+    def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False, max_epochs=None):
         set_seeds(self.seed)
         train_backbone = self.finetune
         num_workers = 2
@@ -367,6 +367,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         dataloader_params = model_dict["dataloader_params"]
         batch_size = model_dict["batch_size"]
+        max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
@@ -407,8 +408,8 @@ class SuperGlueTest:
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
-            print("epochs = ", int(self.epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(self.epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
+            print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
             if "idx" in dataset["train"][0]:
                 train_idx = [dataset["train"][i]["idx"] for i in range(len(dataset["train"]))]
@@ -912,6 +913,7 @@ class SuperGlueTest:
         # TODO: Test wsc with both [Yes]
         # TODO: test using test-set of both [No]
         # TODO: MLM tuning of model before classification training on only true labels of train set.
+        # TODO: Use val + train for 2 epochs in end before test predictions?
         from datasets import concatenate_datasets, DatasetDict, load_dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
@@ -927,8 +929,8 @@ class SuperGlueTest:
             wsc[split] = wsc[split].remove_columns(['idx'])
             wsc[split] = wsc[split].add_column("idx", idx)
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=2)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
@@ -955,12 +957,12 @@ class SuperGlueTest:
 
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])))]) for split in ["train", "validation", "test"]})
         del dpr["test"]
-        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank)
+        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank, max_epochs=5)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
         model_dict["model"] = classifier_data["model"]
 
         #
@@ -998,12 +1000,12 @@ class SuperGlueTest:
         
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])))]) for split in ["train", "validation", "test"]})
         del dpr["test"]
-        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank)
+        classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
         model_dict["model"] = classifier_data["model"]
 
         #
