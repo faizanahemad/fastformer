@@ -1311,6 +1311,8 @@ def build_wiki_dpr(tokenizer):
         split2 = wiki_dpr["test"].train_test_split(test_size=0.5)
         wiki_dpr["validation"] = split2["train"]
         wiki_dpr["test"] = split2["test"]
+        return wiki_dpr
+    raise ValueError
 
 
 
