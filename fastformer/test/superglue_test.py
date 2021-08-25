@@ -959,6 +959,10 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
 
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
+
         #
         gap = load_dataset("gap")
         gapA = gap.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref',"label").rename_column('A-offset', "offset")
@@ -995,6 +999,10 @@ class SuperGlueTest:
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"] + len(dpr[split])))]) for split in ["train", "validation", "test"]})
         del dpr["test"]
         classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
+
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
 
