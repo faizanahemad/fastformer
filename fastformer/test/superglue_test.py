@@ -246,9 +246,15 @@ class wsc_proc:
             words = words[:span1_index] + ["[%s]" % (span1_text)] + words[(span1_index + len(span1_text.split())):span2_index] + [
                 "[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
             modified_text = " ".join(words)
+            modified_text_2 = words[:span2_index] + ["[%s]" % (span2_text)] + words[span2_index + len(span2_text.split()):]
+            modified_text_3 = words[:span2_index] + [tokenizer.mask_token] + words[span2_index + len(span2_text.split()):]
+            modified_text_4 = words[:span2_index] + [span1_text] + words[span2_index + len(span2_text.split()):]
         elif self.index_type == "char":
             modified_text = text[:span1_index] + "[%s]" % (span1_text) + text[(span1_index + len(span1_text)):span2_index] + \
                 "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
+            modified_text_2 = text[:span2_index] + "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
+            modified_text_3 = text[:span2_index] + [tokenizer.mask_token] + text[span2_index + len(span2_text):]
+            modified_text_4 = text[:span2_index] + [span1_text] + text[span2_index + len(span2_text):]
         else:
             raise ValueError("Index type = %s not supported" % self.index_type)
         clues = span1_text + (" [%s] " % span1_text) + f" {tokenizer.sep_token} " + \
@@ -269,6 +275,22 @@ class wsc_proc:
             text = clues + f" {tokenizer.sep_token} " + modified_text
         elif self.version == 8:
             text = modified_text + f" {tokenizer.sep_token} " + clues
+        elif self.version == 9:
+            text = modified_text_2 + f" {tokenizer.sep_token} " + clues
+        elif self.version == 10:
+            text = clues + f" {tokenizer.sep_token} " + modified_text_2
+        elif self.version == 11:
+            text = modified_text + f" {tokenizer.sep_token} " + span1_text
+        elif self.version == 12:
+            text = modified_text_2 + f" {tokenizer.sep_token} " + span1_text
+        elif self.version == 13:
+            text = modified_text_3 + f" {tokenizer.sep_token} " + span1_text
+        elif self.version == 14:
+            text = modified_text_4
+        elif self.version == 15:
+            pass
+        elif self.version == 16:
+            pass
 
         return dict(text=text, version=self.version)
 
