@@ -488,7 +488,6 @@ class SuperGlueTest:
                     validation_idx=validation_idx, train_idx=train_idx, validation_version=validation_version)
 
     def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None):
-        assert classifier_data["validation_version"] is not None
         all_val_loss = []
         all_val_acc = []
         all_train_acc = []
