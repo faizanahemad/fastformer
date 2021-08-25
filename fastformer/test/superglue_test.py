@@ -256,8 +256,8 @@ class wsc_proc:
             modified_text = text[:span1_index] + "[%s]" % (span1_text) + text[(span1_index + len(span1_text)):span2_index] + \
                 "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
             modified_text_2 = text[:span2_index] + "[%s]" % (span2_text) + text[span2_index + len(span2_text):]
-            modified_text_3 = text[:span2_index] + [tokenizer.mask_token] + text[span2_index + len(span2_text):]
-            modified_text_4 = text[:span2_index] + [span1_text] + text[span2_index + len(span2_text):]
+            modified_text_3 = text[:span2_index] + tokenizer.mask_token + text[span2_index + len(span2_text):]
+            modified_text_4 = text[:span2_index] + span1_text + text[span2_index + len(span2_text):]
         else:
             raise ValueError("Index type = %s not supported" % self.index_type)
         clues = span1_text + (" [%s] " % span1_text) + f" {tokenizer.sep_token} " + \
@@ -966,8 +966,9 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         caching = False
+        versions = list(range(1, 15))
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
-                         load_from_cache_file=caching) for i in range(1, 13)]
+                         load_from_cache_file=caching) for i in versions]
         if rank == 0:
             for i in range(len(dsets)):
                 print(dsets[i]["train"].features)
@@ -988,8 +989,8 @@ class SuperGlueTest:
             wsc[split] = wsc[split].remove_columns(['idx'])
             wsc[split] = wsc[split].add_column("idx", idx)
 
-        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=2)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=3)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
 
         dpr = load_dataset('csv', data_files={'train': "dpr/winograd_train.csv", "validation": "dpr/winograd_dev.csv", 'test': "dpr/winograd_test.csv"})
@@ -1005,7 +1006,7 @@ class SuperGlueTest:
 
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset'],
-                         load_from_cache_file=caching) for i in range(1, 7)]
+                         load_from_cache_file=caching) for i in versions]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(dpr["train"].features, "\n", wsc["train"].features)
@@ -1049,7 +1050,7 @@ class SuperGlueTest:
             dpr[split] = dpr[split].add_column("idx", idx)
 
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset', 'URL', 'ID'],
-                         load_from_cache_file=caching) for i in range(1, 7)]
+                         load_from_cache_file=caching) for i in versions]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(dpr["train"].features, "\n", wsc["train"].features)
