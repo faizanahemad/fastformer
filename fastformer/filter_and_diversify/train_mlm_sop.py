@@ -368,6 +368,11 @@ def training_args():
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
+    parser.add_argument('--hard_tasks', action="store_true", default=False,
+                        help='hard_tasks Position aware MLM and Multi-Segment Order Prediction + Coherence prediction')
+    parser.add_argument('--hard_task_lm_name', required=True, type=str,
+                        help='hard_task_lm_name')
+
     parser.add_argument('--detect_anomaly', action="store_true", default=False,
                         help='AutoGrad Anomaly detection')
 
