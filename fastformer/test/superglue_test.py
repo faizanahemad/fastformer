@@ -1310,7 +1310,7 @@ def build_wiki_dpr(tokenizer):
         split2 = wiki_dpr["test"].train_test_split(test_size=0.5)
         wiki_dpr["validation"] = split2["train"]
         wiki_dpr["test"] = split2["test"]
-        wiki_dpr = wiki_dpr.filter(lambda x: len(x["text"].split()) > 48)
+        wiki_dpr = wiki_dpr.filter(lambda x: len(x["text"].split()) > 40)
         return wiki_dpr
     raise ValueError
 
