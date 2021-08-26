@@ -969,8 +969,8 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         caching = False
-        versions = list(range(1, 15))
-        enable_wiki_dpr = True
+        versions = list(range(1, 13))
+        enable_wiki_dpr = False
         enable_wsc = True
         enable_dpr = True
         enable_gap = True
