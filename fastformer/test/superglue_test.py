@@ -980,8 +980,6 @@ class SuperGlueTest:
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
             model_dict["model"] = classifier_data["model"]
 
-
-
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                          load_from_cache_file=caching) for i in versions]
         # if rank == 0:
