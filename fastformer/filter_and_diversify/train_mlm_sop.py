@@ -27,10 +27,7 @@ from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
 from transformers.models.roberta.modeling_roberta import RobertaLMHead
 
-from fastformer.data import *
 from fastformer.config import *
-from fastformer.optimizers import Novograd, RangerLars
-from fastformer.data.dataset import datadict_iterator, MTTDataset, get_simple_collate_fn, get_next
 from fastformer.utils import *
 from torch.nn import CrossEntropyLoss
 from transformers import PreTrainedModel
@@ -57,8 +54,35 @@ try:
 except:
     pass
 
-optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-4, 0.9, 0.98,
-                                   8, 8, 0.1)
+@dataclass
+class OptimizerConfig:
+    lr: float
+    eps: float
+    weight_decay: float
+    beta_1: float
+    beta_2: float
+    gradient_clipping: float
+
+optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-4, 0.9, 0.98, 1.0)
+
+class get_next:
+    def __init__(self, dataloader):
+        self.dataloader = dataloader
+        self.iter = iter(dataloader)
+        self.epoch = 0
+
+    def __call__(self):
+        try:
+            return next(self.iter)
+        except StopIteration as st:
+            self.epoch += 1
+            dataloader = self.dataloader
+            if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
+                dataloader.sampler.set_epoch(self.epoch)
+            else:
+                print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), self.epoch))
+            self.iter = iter(dataloader)
+            return next(self.iter)
 
 
 def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, required_length_max):
@@ -194,7 +218,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
 
         if length > self.allowed_raw_length:
             try:
-                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.8), self.tokenizer_args["max_length"])
+                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.6), self.tokenizer_args["max_length"])
             except:
                 text = " ".join(text.split()[:self.allowed_raw_length])
             length = len(text.strip().split())
@@ -306,6 +330,69 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
                     mlm_loss=masked_lm_loss.item(), sentence_order_loss=sentence_order_loss.item(),
                     mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy,
                     sentence_order_accuracy=sentence_order_accuracy, mask_proportion=mask_proportion)
+
+
+class CoherenceDataset(Dataset):
+    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True):
+        self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
+        try:
+            self.tokenizer = copy.deepcopy(tokenizer)
+        except:
+            self.tokenizer = tokenizer
+        self.tokenizer_args = tokenizer_args
+        self.dataset = dataset
+        self.word_mask_proba = word_mask_proba
+        self.vocab = list(tokenizer.get_vocab())
+        self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
+        self.token_sampler = sample_random_token(self.tokenizer)
+        self.mlm_sop_enabled = mlm_sop_enabled
+
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return self.dataset[item]
+        item = self.dataset[item]
+        tokenizer = self.tokenizer
+
+        text = item["text"]
+        text = clean_text(text)
+        length = len(text.strip().split())
+
+        if length > self.allowed_raw_length:
+            try:
+                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.6), self.tokenizer_args["max_length"])
+            except:
+                text = " ".join(text.split()[:self.allowed_raw_length])
+            length = len(text.strip().split())
+
+        # Only decoherence 50%, Decoherence + Difficult MSOP
+        if self.mlm_sop_enabled:
+            seg_sep_token = f" {tokenizer.sep_token} "
+            num_segments = 2
+            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+            num_segments = sum(segments != tokenizer.pad_token)
+
+            label_sentence_order = 0
+            if num_segments > 1:
+                if random.random() < 0.5:
+                    label_sentence_order = 0
+                else:
+                    label_sentence_order = 1
+                    segments[0], segments[1] = segments[1], segments[0]
+
+            results = dict(label_sentence_order=label_sentence_order)
+            text = seg_sep_token.join(segments)  # Training Labels for MLM
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+            input_ids, attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
+            results["label_mlm_input_ids"] = input_ids
+            results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
+        else:
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze())
+
+        return results
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 def training_args():
@@ -443,7 +530,15 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
 
     weights = None
     if sampling_column is not None:
-        if "sbert" in sampling_column and "perplexity" in sampling_column:
+        if "sbert" in sampling_column and "perplexity" in sampling_column and "tfidf" in sampling_column:
+            ppl = np.log1p(dataset["perplexity"])
+            ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+            sbert = 1 - np.array(dataset["sbert_top_128_avg"])
+            sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+            tfidf_top = np.array(dataset["tfidf_top_k_128"])
+            tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            weights = ppl + sbert + tfidf_top
+        elif "sbert" in sampling_column and "perplexity" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
             ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
             sbert = 1 - np.array(dataset["sbert_top_128_avg"])

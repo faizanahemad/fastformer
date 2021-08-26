@@ -970,7 +970,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = [2, 3, 4, 5, 6, 7, 8, 10]
-        enable_wiki_dpr = False
+        enable_wiki_dpr = True
         enable_wsc = True
         enable_dpr = True
         enable_gap = True
@@ -1285,6 +1285,9 @@ def train(local_rank, args):
 def build_wiki_dpr(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     from collections import defaultdict
+    if os.path.exists("wiki_dpr"):
+        wiki_dpr = DatasetDict.load_from_disk("wiki_dpr")
+        return wiki_dpr
     if os.path.exists("MaskedWiki_sample.txt"):
         with open("MaskedWiki_sample.txt") as f:
             lines = f.readlines()
@@ -1311,6 +1314,7 @@ def build_wiki_dpr(tokenizer):
         wiki_dpr["validation"] = split2["train"]
         wiki_dpr["test"] = split2["test"]
         wiki_dpr = wiki_dpr.filter(lambda x: len(x["text"].split()) > 40)
+        wiki_dpr.save_to_disk("wiki_dpr")
         return wiki_dpr
     raise ValueError
 
