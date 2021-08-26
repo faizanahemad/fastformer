@@ -1217,6 +1217,7 @@ def get_filter_mapper(keep_above):
 class CoOccurenceModel(PreTrainedModel):
     def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
         super().__init__(PretrainedConfig())
+        from sklearn.decomposition import PCA
         model = AutoModel.from_pretrained(model_name)
         config = model.config
         self.config = config
@@ -1225,21 +1226,23 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        self.lm_head = nn.Linear(256, config.vocab_size)
-        self.word_embeddings = nn.Embedding(config.vocab_size, 256)
-        self.word_embeddings.weight = nn.Parameter(model.embeddings.word_embeddings.weight[:, :256].clone())
+        channels = 256
+        self.channels = channels
+        self.lm_head = nn.Linear(channels, config.vocab_size)
+        self.word_embeddings = nn.Embedding(config.vocab_size, channels)
+        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.embeddings.word_embeddings.weight.detach().numpy())))
         del model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
         #
-        project = nn.Linear(256, config.hidden_size)
-        conv1 = nn.Conv2d(config.hidden_size, config.hidden_size * 2, (1, 2 * window), groups=16)
+        project = nn.Linear(channels, channels * 2)
+        conv1 = nn.Conv2d(channels * 2, config.hidden_size * 2, (1, 2 * window), groups=16)
         self.conv = nn.Sequential(conv1, nn.GELU())
         self.ffn = nn.Sequential(nn.Linear(config.hidden_size * 2, config.hidden_size),
                                  nn.GELU(),
-                                 nn.Linear(config.hidden_size, 256),
-                                 nn.LayerNorm(256, eps=config.layer_norm_eps))
+                                 nn.Linear(config.hidden_size, channels),
+                                 nn.LayerNorm(channels, eps=config.layer_norm_eps))
         init_weights(conv1, 0.01)
         init_weights(project, 0.01)
         # if window <= 3:
@@ -1265,7 +1268,7 @@ class CoOccurenceModel(PreTrainedModel):
         #                              nn.Linear(config.hidden_size, 256),
         #                              nn.LayerNorm(256, eps=config.layer_norm_eps))
 
-        self.ln1 = nn.Sequential(project, nn.GELU(), nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps))
+        self.ln1 = nn.Sequential(project, nn.GELU(), nn.LayerNorm(channels * 2, eps=config.layer_norm_eps))
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
         self.init_weights()
         self.tie_weights()
