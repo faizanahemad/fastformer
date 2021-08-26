@@ -1233,9 +1233,10 @@ class CoOccurenceModel(PreTrainedModel):
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
         #
-        conv1 = nn.Conv2d(256, config.hidden_size, (1, 2 * window), groups=8)
-        self.conv = nn.Sequential(conv1, nn.GELU())
-        self.ffn = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size),
+        project = nn.Linear(256, config.hidden_size)
+        conv1 = nn.Conv2d(config.hidden_size, config.hidden_size * 2, (1, 2 * window), groups=16)
+        self.conv = nn.Sequential(project, nn.GELU(), conv1, nn.GELU())
+        self.ffn = nn.Sequential(nn.Linear(config.hidden_size * 2, config.hidden_size),
                                  nn.GELU(),
                                  nn.Linear(config.hidden_size, 256),
                                  nn.LayerNorm(256, eps=config.layer_norm_eps))
