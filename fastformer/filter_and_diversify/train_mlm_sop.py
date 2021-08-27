@@ -400,7 +400,7 @@ class RTDMLMModel(PreTrainedModel):
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
         rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)
-        rtd_loss = self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1).float())
+        rtd_loss = 10.0 * self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1).float())
 
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
