@@ -1319,7 +1319,7 @@ class CoOccurenceModel(PreTrainedModel):
         _, top_k_alternatives = prediction_scores.detach().topk(16, -1)  #  B, S, 16
         word_ce = torch.log(1 + masked_lm_loss.detach().view(b, s))
 
-        return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
+        return dict(loss=masked_lm_loss.mean(), accuracy=accuracy, word_accuracy=word_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
 
