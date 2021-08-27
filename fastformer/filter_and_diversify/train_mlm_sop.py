@@ -721,7 +721,10 @@ def train(local_rank, args):
         optimizer = dict(lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     else:
         raise ValueError
-    optimizer = ZeroRedundancyOptimizer(trainable_params, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
+    if args["world_size"] > 1:
+        optimizer = ZeroRedundancyOptimizer(trainable_params, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
+    else:
+        optimizer = optimizer_class(**optimizer)
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in trainable_model.named_parameters() if v.requires_grad}))
     del trainable_params
     optimizer.zero_grad(set_to_none=True)
