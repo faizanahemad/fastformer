@@ -657,12 +657,12 @@ def train(local_rank, args):
     set_seeds(args["seed"])
     batch_size = 8
 
-    optimizer_config.lr = args["lr"]
-    optimizer_config.weight_decay = args["weight_decay"]
-    optimizer_config.gradient_clipping = args["gradient_clipping"]
-    optimizer_config.beta_1 = args["beta_1"]
-    optimizer_config.beta_2 = args["beta_2"]
-    optimizer_config.eps = 1e-7
+    optimizer_config["lr"] = args["lr"]
+    optimizer_config["weight_decay"] = args["weight_decay"]
+    optimizer_config["gradient_clipping"] = args["gradient_clipping"]
+    optimizer_config["beta_1"] = args["beta_1"]
+    optimizer_config["beta_2"] = args["beta_2"]
+    optimizer_config["eps"] = 1e-7
     eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
