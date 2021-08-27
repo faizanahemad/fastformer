@@ -970,12 +970,13 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = [2, 3, 4, 5, 6, 7, 8, 10]
-        enable_wiki_dpr = True
+        enable_wiki_dpr = False
         enable_wsc = True
         enable_dpr = True
-        enable_gap = True
         if enable_wiki_dpr:
             wiki_dpr = build_wiki_dpr(tokenizer)
+            del wiki_dpr["test"]
+            del wiki_dpr["validation"]
             classifier_data = self.prepare_classifier(model_dict, wiki_dpr, device, 1, "wiki_dpr", rank, max_epochs=1)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
             model_dict["model"] = classifier_data["model"]
