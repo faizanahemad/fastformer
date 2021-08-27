@@ -729,7 +729,7 @@ def train(local_rank, args):
         optimizer = dict(lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     else:
         raise ValueError
-    if args["world_size"] > 1:
+    if args["world_size"] > 1 and False:
         optimizer = ZeroRedundancyOptimizer(trainable_params, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
     else:
         optimizer = optimizer_class(trainable_params, **optimizer)
