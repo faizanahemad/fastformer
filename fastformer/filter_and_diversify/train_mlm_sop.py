@@ -444,10 +444,10 @@ class RTDMLMModel(PreTrainedModel):
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
 
         return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
-                    mlm_loss=masked_lm_loss.item(), accuracy_masking_model=accuracy_masking_model, only_rtd_lm_accuracy=only_rtd_lm_accuracy,
+                    mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
                     only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
-                    only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
+                    accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
                     mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
 
 
