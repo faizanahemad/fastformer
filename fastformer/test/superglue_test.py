@@ -970,7 +970,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = [2, 3, 4, 5, 6, 7, 8, 10]
-        enable_wiki_dpr = False
+        enable_wiki_dpr = True
         enable_wsc = True
         enable_dpr = True
         if enable_wiki_dpr:

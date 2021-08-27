@@ -445,69 +445,6 @@ class RTDMLMModel(PreTrainedModel):
                     mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
 
 
-class CoherenceDataset(Dataset):
-    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True):
-        self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
-        try:
-            self.tokenizer = copy.deepcopy(tokenizer)
-        except:
-            self.tokenizer = tokenizer
-        self.tokenizer_args = tokenizer_args
-        self.dataset = dataset
-        self.word_mask_proba = word_mask_proba
-        self.vocab = list(tokenizer.get_vocab())
-        self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
-        self.token_sampler = sample_random_token(self.tokenizer)
-
-
-    def __getitem__(self, item):
-        if isinstance(item, str):
-            return self.dataset[item]
-        item = self.dataset[item]
-        tokenizer = self.tokenizer
-
-        text = item["text"]
-        text = clean_text(text)
-        length = len(text.strip().split())
-
-        if length > self.allowed_raw_length:
-            try:
-                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.6), self.tokenizer_args["max_length"])
-            except:
-                text = " ".join(text.split()[:self.allowed_raw_length])
-            length = len(text.strip().split())
-
-        # Only decoherence 50%, Decoherence + Difficult MSOP
-        sep_token = f" {tokenizer.sep_token} "
-        bos_token = f" {tokenizer.bos_token} "
-        num_segments = random.randint(1, 4)
-        segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
-        num_segments = sum(segments != tokenizer.pad_token)
-        seg_idxs = []
-        if num_segments > 1:
-            if random.random() < 0.25:
-                label_coherence = 0
-            else:
-                seg_idxs = random.sample(range(num_segments), num_segments)
-                segments = segments[seg_idxs]
-                label_coherence = int(any([e > seg_idxs[i + 1] for i, e in enumerate(seg_idxs[:-1])]))
-                segments = [bos_token + seg + sep_token for seg in segments]
-        else:
-            label_coherence = 0
-
-
-        text = " ".join(segments).strip()
-        tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-        input_ids, attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
-        segment_mask = (input_ids == tokenizer.bos_token_id).type(torch.int)
-        segment_mask[0] = 0
-        results = dict(label_coherence=label_coherence, segment_labels=seg_idxs, input_ids=input_ids, attention_mask=attention_mask, segment_mask=segment_mask)
-        return results
-
-    def __len__(self):
-        return len(self.dataset)
-
-
 def training_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--nodes', default=1,
@@ -568,10 +505,10 @@ def training_args():
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
-    parser.add_argument('--hard_tasks', action="store_true", default=False,
-                        help='hard_tasks Position aware MLM and Multi-Segment Order Prediction + Coherence prediction')
-    parser.add_argument('--hard_task_lm_name', required=True, type=str,
-                        help='hard_task_lm_name')
+    parser.add_argument('--hard_mlm', action="store_true", default=False,
+                        help='hard_mlm Position aware MLM and Multi-Segment Order Prediction + Coherence prediction')
+    parser.add_argument('--hard_mlm_model', required=False, type=str,
+                        help='hard_mlm_model storage location')
 
     parser.add_argument('--detect_anomaly', action="store_true", default=False,
                         help='AutoGrad Anomaly detection')
@@ -747,6 +684,13 @@ def train(local_rank, args):
         model = backbone.to(device)
         trainable_model = model
         mlm_sop_enabled = False
+    elif args["hard_mlm"]:
+        masking_model, _ = get_backbone("co-oc-7-roberta-base", False, dropout_prob=0.0)
+        state_dict = torch.load(args["hard_mlm_model"], map_location='cpu')
+        masking_model.load_state_dict(state_dict, strict=True)
+        masking_model = masking_model.eval()
+        model = RTDMLMModel(backbone, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
+        mlm_sop_enabled = False
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
         trainable_model = model.backbone
@@ -756,45 +700,8 @@ def train(local_rank, args):
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
-
-        try:
-            trainable_model.load_state_dict(state_dict, strict=True)
-            load_type = "strict"
-        except:
-            try:
-                try:
-                    trainable_model.load_state_dict(state_dict, strict=False)
-                    load_type = "not_strict"
-                except:
-                    state_dict = {k: v for k, v in state_dict.items() if k.startswith("backbone.")}
-                    assert len(state_dict) > 0
-                    trainable_model.load_state_dict(state_dict, strict=False)
-                    load_type = "not_strict_no_ffn"
-            except:
-                try:
-                    try:
-                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        trainable_model.load_state_dict(state_dict, strict=True)
-                        load_type = "strict-from-ddp"
-                    except:
-                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
-                        assert len(state_dict) > 0
-                        trainable_model.load_state_dict(state_dict, strict=True)
-                        load_type = "strict-from-ddp-no-ffn"
-                except:
-                    try:
-                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        trainable_model.load_state_dict(state_dict, strict=False)
-                        load_type = "not_strict-from-ddp"
-                    except:
-                        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("backbone.")}
-                        assert len(state_dict) > 0
-                        trainable_model.load_state_dict(state_dict, strict=False)
-                        load_type = "not_strict-from-ddp-no-ffn"
-
-        print("[Train]: Time = %s, Loaded Pretrained model with Load type = %s, Torch Version = %s" % (get_time_string(), load_type, torch.__version__))
+        trainable_model.load_state_dict(state_dict, strict=True)
+        print("[Train]: Time = %s, Loaded Pretrained model, Torch Version = %s" % (get_time_string(), torch.__version__))
         del state_dict
     model = model.train()
 
@@ -942,6 +849,7 @@ def train(local_rank, args):
                       (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
+                print("[Train]: Time = %s, wandb_log = %s" % (get_time_string(), wandb_log))
                 # print("Step = %s, Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s, validation_iter = %s, %s" % (step, steps_done, log_every_steps, total_steps, steps_remaining, validation_iter, (step + 1) % log_every_steps == 0))
             batch_times = []
             full_times = []
