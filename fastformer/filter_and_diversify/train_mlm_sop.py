@@ -366,16 +366,17 @@ class RTDMLMModel(PreTrainedModel):
         indices = torch.multinomial(word_ce, int(0.15 * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
         word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
-
+        word_mask = [torch.arange(word_mask.size(0), device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
+        rtd_mask = [torch.arange(rtd_mask.size(0), device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = top_k[:, :, torch.randperm(top_k.size()[2])]
         top_k = top_k[:, :, 0]
-        print(input_ids.size(), ss, word_mask.size(), word_mask.max())
-        print(word_mask)
+        # print(input_ids.size(), ss, word_mask.size(), word_mask.max())
+        # print(word_mask)
         try:
-            input_ids[word_mask] = self.tokenizer.mask_token_id
-            input_ids[rtd_mask] = top_k[rtd_mask]
-            mask_accuracy = word_wise_accuracy[word_mask].float().mean().item()
-            rtd_accuracy = word_wise_accuracy[rtd_mask].float().mean().item()
+            input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
+            input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
+            mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
+            rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
         except Exception as e:
 
             # print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
