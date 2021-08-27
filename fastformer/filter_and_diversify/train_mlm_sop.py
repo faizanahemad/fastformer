@@ -383,7 +383,6 @@ class RTDMLMModel(PreTrainedModel):
             raise ValueError
         accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
-
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy
 
     def get_output_embeddings(self):
@@ -408,7 +407,7 @@ class RTDMLMModel(PreTrainedModel):
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
         rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)
-        rtd_loss = self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1))
+        rtd_loss = self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1).int())
 
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
