@@ -374,8 +374,9 @@ class RTDMLMModel(PreTrainedModel):
         try:
             mask_accuracy = word_wise_accuracy[word_mask].float().mean().item()
             rtd_accuracy = word_wise_accuracy[rtd_mask].float().mean().item()
-        except:
-            print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
+        except Exception as e:
+            print(ss, word_mask.size(), word_mask.max())
+            # print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
             raise ValueError
         accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
