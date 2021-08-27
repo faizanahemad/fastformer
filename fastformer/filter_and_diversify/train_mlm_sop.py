@@ -353,7 +353,7 @@ class RTDMLMModel(PreTrainedModel):
     def do_masking(self, input_ids, attention_mask):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
-        ss = attention_mask.sum(1).mean().item()
+        ss = attention_mask.sum(1).float().mean().item()
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask)
         word_ce = mlm_rtd_hints["word_ce"]
@@ -370,8 +370,8 @@ class RTDMLMModel(PreTrainedModel):
         top_k = top_k[:, :, 0]
         input_ids[word_mask] = self.tokenizer.mask_token_id
         input_ids[rtd_mask] = top_k[rtd_mask]
-        mask_accuracy = word_wise_accuracy[word_mask].mean().item()
-        rtd_accuracy = word_wise_accuracy[rtd_mask].mean().item()
+        mask_accuracy = word_wise_accuracy[word_mask].float().mean().item()
+        rtd_accuracy = word_wise_accuracy[rtd_mask].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
 
@@ -417,8 +417,9 @@ class RTDMLMModel(PreTrainedModel):
             input_ids = input_ids.view(-1).int()
             mask_indices = (input_ids != label_mlm_input_ids.int())
             only_mask_indices = (input_ids == self.tokenizer.mask_token_id)
-            only_rtd_accuracy = (rtd_scores > 0.0)[rtd_labels].mean().item()
-            rtd_accuracy = ((rtd_scores > 0.0).type(rtd_labels.dtype) == rtd_labels)[attention_mask].mean().item()
+            rtd_binary = rtd_scores > 0.0
+            only_rtd_accuracy = rtd_binary[rtd_labels].float().mean().item()
+            rtd_accuracy = (rtd_binary.type(rtd_labels.dtype) == rtd_labels)[attention_mask].float().mean().item()
             mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
             only_mask_proportion = (only_mask_indices.sum() / attention_mask.sum()).item()
             only_rtd_proportion = (rtd_labels.sum() / attention_mask.sum()).item()
