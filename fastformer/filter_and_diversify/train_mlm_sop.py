@@ -54,16 +54,7 @@ try:
 except:
     pass
 
-@dataclass
-class OptimizerConfig:
-    lr: float
-    eps: float
-    weight_decay: float
-    beta_1: float
-    beta_2: float
-    gradient_clipping: float
-
-optimizer_config = OptimizerConfig(5e-5, 1e-4, 1e-4, 0.9, 0.98, 1.0)
+optimizer_config = dict(lr=5e-5, eps=1e-4, weight_decay=1e-4, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
 
 class get_next:
     def __init__(self, dataloader):
@@ -713,7 +704,7 @@ def train(local_rank, args):
 
     clean_memory()
     barrier()
-    optc = optimizer_config.to_dict()
+    optc = copy.deepcopy(optimizer_config)
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     if args["optimizer"] == "adamw":
         optimizer_class = torch.optim.AdamW
