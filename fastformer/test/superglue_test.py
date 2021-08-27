@@ -1075,6 +1075,7 @@ class SuperGlueTest:
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=6)
             model_dict["model"] = classifier_data["model"]
 
+            self.seed = self.seed + 17
             classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
             model_dict["model"] = classifier_data["model"]
@@ -1082,6 +1083,7 @@ class SuperGlueTest:
         #
         # dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"]) for i in range(1, 7)]
         # wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        self.seed = self.seed + 343
         classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
