@@ -350,7 +350,7 @@ class RTDMLMModel(PreTrainedModel):
         self.lm_head = RobertaLMHead(backbone.config)
         self.tie_weights()
 
-    def do_masking(self, input_ids, attention_mask):
+    def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
@@ -370,6 +370,7 @@ class RTDMLMModel(PreTrainedModel):
         top_k = top_k[:, :, 0]
         input_ids[word_mask] = self.tokenizer.mask_token_id
         input_ids[rtd_mask] = top_k[rtd_mask]
+        print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
         mask_accuracy = word_wise_accuracy[word_mask].float().mean().item()
         rtd_accuracy = word_wise_accuracy[rtd_mask].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
