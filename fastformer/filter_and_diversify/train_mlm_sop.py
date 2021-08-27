@@ -317,7 +317,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
             sent_order_preds = (torch.sigmoid(sent_order_logits.detach()) > 0.5).type(sent_order_logits.dtype)
             sentence_order_accuracy = (sent_order_preds == label_sentence_order).type(sent_order_logits.dtype).mean().item()
 
-        return dict(loss=self.mlm_w * masked_lm_loss + self.sentence_order_w * sentence_order_loss,
+        return dict(loss=(self.mlm_w * masked_lm_loss) + (self.sentence_order_w * sentence_order_loss),
                     mlm_loss=masked_lm_loss.item(), sentence_order_loss=sentence_order_loss.item(),
                     mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy,
                     sentence_order_accuracy=sentence_order_accuracy, mask_proportion=mask_proportion)
