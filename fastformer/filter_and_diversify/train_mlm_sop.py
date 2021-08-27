@@ -366,11 +366,11 @@ class RTDMLMModel(PreTrainedModel):
         indices = torch.multinomial(word_ce, int(0.15 * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
         word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
+        print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
         top_k = top_k[:, :, torch.randperm(top_k.size()[2])]
         top_k = top_k[:, :, 0]
         input_ids[word_mask] = self.tokenizer.mask_token_id
         input_ids[rtd_mask] = top_k[rtd_mask]
-        print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
         mask_accuracy = word_wise_accuracy[word_mask].float().mean().item()
         rtd_accuracy = word_wise_accuracy[rtd_mask].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
