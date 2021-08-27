@@ -370,17 +370,10 @@ class RTDMLMModel(PreTrainedModel):
         rtd_mask = [torch.arange(rtd_mask.size(0), device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = top_k[:, :, torch.randperm(top_k.size()[2])]
         top_k = top_k[:, :, 0]
-        # print(input_ids.size(), ss, word_mask.size(), word_mask.max())
-        # print(word_mask)
-        try:
-            input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-            input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
-            mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
-            rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
-        except Exception as e:
-
-            # print(word_wise_accuracy.size(), ss, word_mask.size(), word_mask.max())
-            raise ValueError
+        input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
+        input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
+        mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
+        rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy
@@ -398,7 +391,7 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model = self.do_masking(input_ids, attention_mask)
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model = self.do_masking(input_ids, attention_mask, validation_iter)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -426,7 +419,7 @@ class RTDMLMModel(PreTrainedModel):
             mask_indices = (input_ids != label_mlm_input_ids.int())
             only_mask_indices = (input_ids == self.tokenizer.mask_token_id)
             rtd_binary = rtd_scores > 0.0
-            only_rtd_accuracy = rtd_binary[rtd_labels].float().mean().item()
+            only_rtd_accuracy = rtd_binary[rtd_labels.bool()].float().mean().item()
             rtd_accuracy = (rtd_binary.type(rtd_labels.dtype) == rtd_labels)[attention_mask].float().mean().item()
             mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
             only_mask_proportion = (only_mask_indices.sum() / attention_mask.sum()).item()
