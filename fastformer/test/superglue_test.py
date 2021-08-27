@@ -970,7 +970,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         caching = False
         versions = [2, 3, 4, 5, 6, 7, 8, 10]
-        enable_wiki_dpr = False
+        enable_wiki_dpr = True
         enable_wsc = True
         enable_dpr = True
         enable_gap = True
@@ -1026,9 +1026,25 @@ class SuperGlueTest:
         dsets = [dpr.map(wsc_proc(tokenizer, "dpr", i), remove_columns=['Pronoun', 'Pronoun-offset', 'noun', 'offset'],
                          load_from_cache_file=caching) for i in versions]
         dpr = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        if rank == 0:
+            print(dpr["train"].features, "\n", wsc["train"].features)
+            print("#" * 80)
+            print(dpr["validation"].features, "\n", wsc["validation"].features)
+            print("#" * 80)
+            print(dpr["test"].features, "\n", wsc["test"].features)
+            print("#" * 80)
 
         dpr = DatasetDict({split: concatenate_datasets([dpr[split], wsc[split].map(lambda x: dict(idx=x["idx"]+len(dpr[split])), load_from_cache_file=caching)]) for split in ["train", "validation", "test"]})
-        dpr1 = dpr
+        del dpr["test"]
+        if enable_gap:
+            classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "dpr", rank, max_epochs=5)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            model_dict["model"] = classifier_data["model"]
+
+            classifier_data = self.prepare_classifier(model_dict, wsc, device, 1, dataset_key, rank, max_epochs=1)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            model_dict["model"] = classifier_data["model"]
+
         #
         gap = load_dataset("gap")
         gapA = gap.remove_columns(['B', 'B-offset', 'B-coref']).rename_column("Text", "text").rename_column("A", "noun").rename_column('A-coref',"label").rename_column('A-offset', "offset")
@@ -1068,7 +1084,6 @@ class SuperGlueTest:
             {split: concatenate_datasets([dpr[split], dpr1[split]]) for split
              in ["train", "validation", "test"]})
         del dpr["test"]
-
         if enable_dpr:
             classifier_data = self.prepare_classifier(model_dict, dpr, device, 1, "gap", rank, max_epochs=6)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=6)
