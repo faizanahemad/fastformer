@@ -360,22 +360,25 @@ class RTDMLMModel(PreTrainedModel):
         top_k = mlm_rtd_hints["top_k_alternatives"]
         word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
         word_ce[torch.logical_not(attention_mask.bool())] = 0.0
-        word_ce[word_ce == self.tokenizer.pad_token_id] = 0.0
+        # word_ce[word_ce == self.tokenizer.pad_token_id] = 0.0
         word_ce[word_ce == self.tokenizer.bos_token_id] = 0.0
         word_ce[word_ce == self.tokenizer.eos_token_id] = 0.0
         indices = torch.multinomial(word_ce, int(0.15 * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
         word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
-        word_mask = [torch.arange(word_mask.size(0), device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
-        rtd_mask = [torch.arange(rtd_mask.size(0), device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
-        top_k = top_k[:, :, torch.randperm(top_k.size()[2])]
-        top_k = top_k[:, :, 0]
+        word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
+        rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
+        top_k = top_k[:, :, torch.randint(0, top_k.size(2), (1,))].squeeze(-1)
+        # top_k = top_k[:, :, 0]
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
         input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
-        mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
-        rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
+        mask_accuracy = None
+        rtd_accuracy = None
+        if validation_iter:
+            mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
+            rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
-        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
+        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy
 
     def get_output_embeddings(self):
@@ -399,8 +402,9 @@ class RTDMLMModel(PreTrainedModel):
         )
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
-        rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)
-        rtd_loss = 10.0 * self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1).float())
+        rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)[attention_mask].reshape(-1)
+        rtd_labels = rtd_labels[attention_mask].reshape(-1)
+        rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
 
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
@@ -408,32 +412,41 @@ class RTDMLMModel(PreTrainedModel):
 
         mask_proportion = None
         mlm_accuracy = None
-        non_mlm_accuracy = None
+        copy_token_lm_accuracy = None
         rtd_accuracy = None
         only_rtd_accuracy = None
-        only_mask_accuracy = None
+        only_mask_lm_accuracy = None
         only_mask_proportion = None
         only_rtd_proportion = None
+        non_rtd_accuracy = None
+        only_rtd_lm_accuracy = None
         if validation_iter:
+            rtd_labels = rtd_labels.bool()
+            not_rtd_labels = torch.logical_not(rtd_labels)
+            not_rtd_labels_mean = not_rtd_labels.float().mean().item()  # majority class prediction
             input_ids = input_ids.view(-1).int()
             mask_indices = (input_ids != label_mlm_input_ids.int())
             only_mask_indices = (input_ids == self.tokenizer.mask_token_id)
             rtd_binary = rtd_scores > 0.0
-            only_rtd_accuracy = rtd_binary[rtd_labels.bool()].float().mean().item()
-            rtd_accuracy = (rtd_binary.type(rtd_labels.dtype) == rtd_labels)[attention_mask].float().mean().item()
+            only_rtd_accuracy = rtd_binary[rtd_labels].float().mean().item()
+            rtd_accuracy = ((rtd_binary == rtd_labels).float().mean().item() - not_rtd_labels_mean) / (1 - not_rtd_labels_mean)
+            rtd_accuracy = max(0, rtd_accuracy)
+            non_rtd_accuracy = torch.logical_not(rtd_binary)[not_rtd_labels].float().mean().item()
             mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
             only_mask_proportion = (only_mask_indices.sum() / attention_mask.sum()).item()
             only_rtd_proportion = (rtd_labels.sum() / attention_mask.sum()).item()
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[mask_indices].mean().item()
-            only_mask_accuracy = lm_accuracy[only_mask_indices].mean().item()
-            non_mlm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
+
+            only_rtd_lm_accuracy = lm_accuracy[rtd_labels.view(-1)].mean().item()
+            only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
+            copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
 
         return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
-                    mlm_loss=masked_lm_loss.item(), accuracy_masking_model=accuracy_masking_model,
-                    only_mask_accuracy=only_mask_accuracy, only_rtd_accuracy=only_rtd_accuracy,
-                    mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy, rtd_accuracy=rtd_accuracy,
+                    mlm_loss=masked_lm_loss.item(), accuracy_masking_model=accuracy_masking_model, only_rtd_lm_accuracy=only_rtd_lm_accuracy,
+                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy,
+                    mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
                     mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
 
