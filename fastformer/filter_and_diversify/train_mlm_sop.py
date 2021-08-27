@@ -456,15 +456,15 @@ def training_args():
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
 
-    parser.add_argument('--lr', default=optimizer_config.lr, type=float,
+    parser.add_argument('--lr', default=optimizer_config["lr"], type=float,
                         help='lr')
-    parser.add_argument('--weight_decay', default=optimizer_config.weight_decay, type=float,
+    parser.add_argument('--weight_decay', default=optimizer_config["weight_decay"], type=float,
                         help='weight_decay')
-    parser.add_argument('--gradient_clipping', default=optimizer_config.gradient_clipping, type=float,
+    parser.add_argument('--gradient_clipping', default=optimizer_config["gradient_clipping"], type=float,
                         help='gradient_clipping')
-    parser.add_argument('--beta_1', default=optimizer_config.beta_1, type=float,
+    parser.add_argument('--beta_1', default=optimizer_config["beta_1"], type=float,
                         help='beta_1')
-    parser.add_argument('--beta_2', default=optimizer_config.beta_2, type=float,
+    parser.add_argument('--beta_2', default=optimizer_config["beta_2"], type=float,
                         help='beta_2')
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
