@@ -1314,10 +1314,13 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        accuracy = (lm_predictions == input_ids)[attention_mask].float().mean().item()
-        _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
+        word_accuracy = (lm_predictions == input_ids)
+        accuracy = word_accuracy[attention_mask].float().mean().item()
+        _, top_k_alternatives = prediction_scores.detach().topk(16, -1)  #  B, S, 16
+        word_ce = torch.log(1 + masked_lm_loss.detach().view(b, s))
+
         return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
-                    word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=top_k_alternatives)
+                    word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
 
 def try_float(v):

@@ -332,6 +332,119 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
                     sentence_order_accuracy=sentence_order_accuracy, mask_proportion=mask_proportion)
 
 
+class RTDMLMModel(PreTrainedModel):
+    def __init__(self, backbone: PreTrainedModel, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, reinit=False):
+        super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
+        self.pad_token_id = tokenizer.pad_token_id
+        self.mask_token_id = tokenizer.mask_token_id
+        hidden_size = backbone.config.hidden_size
+        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+        self.loss_bce = nn.BCEWithLogitsLoss()
+        self.config = backbone.config
+        self.config.gradient_checkpointing = True
+        if hasattr(backbone, "pooler"):
+            backbone.pooler = None
+        self.masking_model = masking_model
+        for p in self.masking_model.parameters():
+            p.requires_grad = False
+        self.backbone = backbone
+        self.mlm_w = mlm_w
+        self.tokenizer = tokenizer
+        self.rtd_nn = nn.Linear(hidden_size, 1)
+        init_weights(self.rtd_nn, 0.01)
+
+        if reinit:
+            self.backbone.init_weights()
+
+        self.lm_head = RobertaLMHead(backbone.config)
+        self.tie_weights()
+
+    def do_masking(self, input_ids, attention_mask):
+        label_mlm_input_ids = input_ids.clone()
+        b, s = input_ids.shape[:2]
+        ss = attention_mask.sum(1).mean().item()
+        with torch.no_grad():
+            mlm_rtd_hints = self.masking_model(input_ids, attention_mask)
+        word_ce = mlm_rtd_hints["word_ce"]
+        top_k = mlm_rtd_hints["top_k_alternatives"]
+        word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
+        word_ce[torch.logical_not(attention_mask.bool())] = 0.0
+        word_ce[word_ce == self.tokenizer.pad_token_id] = 0.0
+        word_ce[word_ce == self.tokenizer.bos_token_id] = 0.0
+        word_ce[word_ce == self.tokenizer.eos_token_id] = 0.0
+        indices = torch.multinomial(word_ce, int(0.15 * ss), False)
+        indices = indices[:, torch.randperm(indices.size()[1])]
+        word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
+        top_k = top_k[:, :, torch.randperm(top_k.size()[2])]
+        top_k = top_k[:, :, 0]
+        input_ids[word_mask] = self.tokenizer.mask_token_id
+        input_ids[rtd_mask] = top_k[rtd_mask]
+        mask_accuracy = word_wise_accuracy[word_mask].mean().item()
+        rtd_accuracy = word_wise_accuracy[rtd_mask].mean().item()
+        accuracy = mlm_rtd_hints["accuracy"]
+        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).int()
+
+        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy
+
+    def get_output_embeddings(self):
+        return self.lm_head.decoder
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head.decoder = new_embeddings
+
+    def get_input_embeddings(self):
+        return self.backbone.embeddings.word_embeddings
+
+    def set_input_embeddings(self, new_embeddings):
+        self.backbone.embeddings.word_embeddings = new_embeddings
+
+    def forward(self, input_ids, attention_mask, validation_iter=False):
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model = self.do_masking(input_ids, attention_mask)
+        outputs = self.backbone(
+            input_ids,
+            attention_mask=attention_mask,
+            return_dict=False,
+        )
+        sequence_output = outputs[0]
+        prediction_scores = self.lm_head(sequence_output)
+        rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)
+        rtd_loss = self.loss_bce(rtd_scores[attention_mask].reshape(-1), rtd_labels[attention_mask].reshape(-1))
+
+        prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
+        label_mlm_input_ids = label_mlm_input_ids.view(-1)
+        masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
+
+        mask_proportion = None
+        mlm_accuracy = None
+        non_mlm_accuracy = None
+        rtd_accuracy = None
+        only_rtd_accuracy = None
+        only_mask_accuracy = None
+        only_mask_proportion = None
+        only_rtd_proportion = None
+        if validation_iter:
+            input_ids = input_ids.view(-1).int()
+            mask_indices = (input_ids != label_mlm_input_ids.int())
+            only_mask_indices = (input_ids == self.tokenizer.mask_token_id)
+            only_rtd_accuracy = (rtd_scores > 0.0)[rtd_labels].mean().item()
+            rtd_accuracy = ((rtd_scores > 0.0).type(rtd_labels.dtype) == rtd_labels)[attention_mask].mean().item()
+            mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
+            only_mask_proportion = (only_mask_indices.sum() / attention_mask.sum()).item()
+            only_rtd_proportion = (rtd_labels.sum() / attention_mask.sum()).item()
+            lm_predictions = prediction_scores.detach().argmax(dim=-1)
+            lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
+            mlm_accuracy = lm_accuracy[mask_indices].mean().item()
+            only_mask_accuracy = lm_accuracy[only_mask_indices].mean().item()
+            non_mlm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
+
+        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
+                    mlm_loss=masked_lm_loss.item(), accuracy_masking_model=accuracy_masking_model,
+                    only_mask_accuracy=only_mask_accuracy, only_rtd_accuracy=only_rtd_accuracy,
+                    mlm_accuracy=mlm_accuracy, non_mlm_accuracy=non_mlm_accuracy, rtd_accuracy=rtd_accuracy,
+                    only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
+                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
+
+
 class CoherenceDataset(Dataset):
     def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
@@ -345,7 +458,7 @@ class CoherenceDataset(Dataset):
         self.vocab = list(tokenizer.get_vocab())
         self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
-        self.mlm_sop_enabled = mlm_sop_enabled
+
 
     def __getitem__(self, item):
         if isinstance(item, str):
@@ -365,30 +478,30 @@ class CoherenceDataset(Dataset):
             length = len(text.strip().split())
 
         # Only decoherence 50%, Decoherence + Difficult MSOP
-        if self.mlm_sop_enabled:
-            seg_sep_token = f" {tokenizer.sep_token} "
-            num_segments = 2
-            segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
-            num_segments = sum(segments != tokenizer.pad_token)
-
-            label_sentence_order = 0
-            if num_segments > 1:
-                if random.random() < 0.5:
-                    label_sentence_order = 0
-                else:
-                    label_sentence_order = 1
-                    segments[0], segments[1] = segments[1], segments[0]
-
-            results = dict(label_sentence_order=label_sentence_order)
-            text = seg_sep_token.join(segments)  # Training Labels for MLM
-            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-            input_ids, attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
-            results["label_mlm_input_ids"] = input_ids
-            results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
+        sep_token = f" {tokenizer.sep_token} "
+        bos_token = f" {tokenizer.bos_token} "
+        num_segments = random.randint(1, 4)
+        segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+        num_segments = sum(segments != tokenizer.pad_token)
+        seg_idxs = []
+        if num_segments > 1:
+            if random.random() < 0.25:
+                label_coherence = 0
+            else:
+                seg_idxs = random.sample(range(num_segments), num_segments)
+                segments = segments[seg_idxs]
+                label_coherence = int(any([e > seg_idxs[i + 1] for i, e in enumerate(seg_idxs[:-1])]))
+                segments = [bos_token + seg + sep_token for seg in segments]
         else:
-            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze())
+            label_coherence = 0
 
+
+        text = " ".join(segments).strip()
+        tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+        input_ids, attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
+        segment_mask = (input_ids == tokenizer.bos_token_id).type(torch.int)
+        segment_mask[0] = 0
+        results = dict(label_coherence=label_coherence, segment_labels=seg_idxs, input_ids=input_ids, attention_mask=attention_mask, segment_mask=segment_mask)
         return results
 
     def __len__(self):
