@@ -974,9 +974,17 @@ class SuperGlueTest:
         enable_wsc = True
         enable_dpr = True
         if enable_wiki_dpr:
+            dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
+                             load_from_cache_file=caching) for i in [13, 14]]
+            wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+            for split in ["train", "validation", "test"]:
+                wsc[split] = wsc[split].remove_columns(['process_version'])
+            del wsc["test"]
+            del wsc["validation"]
             wiki_dpr = build_wiki_dpr(tokenizer)
             del wiki_dpr["test"]
             del wiki_dpr["validation"]
+            wiki_dpr["train"] = concatenate_datasets([wsc["train"], wiki_dpr["train"], wsc["train"]])
             classifier_data = self.prepare_classifier(model_dict, wiki_dpr, device, 1, "wiki_dpr", rank, max_epochs=1)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
             model_dict["model"] = classifier_data["model"]
