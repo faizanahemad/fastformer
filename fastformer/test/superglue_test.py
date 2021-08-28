@@ -831,7 +831,8 @@ class SuperGlueTest:
 
         # mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
         # mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
-        # pd.concat([mnli["train"].to_pandas(), mnli_cb["train"].to_pandas()])
+        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas(), mnli_cb["train"].to_pandas()]))
+        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas(), mnli_cb["validation"].to_pandas()]))
         copa = load_dataset("super_glue", "copa")
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
@@ -860,16 +861,14 @@ class SuperGlueTest:
             print("RTE", rte)
             print("MNLI", mnli)
         if enable_rte and enable_copa and enable_mnli:
-            copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
+            copa_rte = {split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]}
             for split in ["train", "validation", "test"]:
-                text = list(copa_rte[split]["text"])
-                copa_rte[split] = copa_rte[split].remove_columns(['idx', 'text'])
-                copa_rte[split] = copa_rte[split].add_column("text", text)
+                copa_rte[split] = copa_rte[split].remove_columns(['idx'])
             del copa_rte["test"]
             mnli_copa_rte = dict()
             for split in ["train", "validation"]:
-                d1p = copa_rte[split].to_pandas()
-                d2p = mnli[split].to_pandas()
+                d1p = copa_rte[split].to_pandas()[["label", "text"]]
+                d2p = mnli[split].to_pandas()[["label", "text"]]
                 mnli_copa_rte[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
             mnli_copa_rte = DatasetDict(mnli_copa_rte)
 
