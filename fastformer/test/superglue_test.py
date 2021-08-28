@@ -777,20 +777,20 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def cb(self, model, cb, device, dataset_key, rank):
-        # MNLI / RTE / COPA / MultiRC
+        # MNLI || Scitail / RTE / COPA / MultiRC
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
 
         mnli = load_dataset("multi_nli")
         mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
-        mnli_labels = np.array(mnli["train"]["label"])
-        mnli_validation_labels = np.array(mnli["validation"]["label"])
+        mnli_labels = np.array(mnli["train"]["label"]).astype(int)
+        mnli_validation_labels = np.array(mnli["validation"]["label"]).astype(int)
         mnli_labels[mnli_labels==1], mnli_labels[mnli_labels==2] = 2, 1
         mnli_validation_labels[mnli_validation_labels == 1], mnli_validation_labels[mnli_validation_labels == 2] = 2, 1
         mnli["train"] = mnli["train"].remove_columns(['label']).add_column("label", mnli_labels)
         mnli["validation"] = mnli["validation"].remove_columns(['label']).add_column("label", mnli_validation_labels)
         mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-
+        mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
         cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
                     remove_columns=["hypothesis", "premise"])
@@ -811,6 +811,8 @@ class SuperGlueTest:
 
         dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        for split in ["train", "validation", "test"]:
+            cb[split] = cb[split].remove_columns(['label']).add_column("label", np.array(cb[split]["label"]).astype(int))
         mnli = DatasetDict(
             {split: concatenate_datasets([mnli[split], cb[split].remove_columns(["idx"])]) for split
              in ["train", "validation"]})
