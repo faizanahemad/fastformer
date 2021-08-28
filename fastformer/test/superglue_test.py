@@ -866,7 +866,14 @@ class SuperGlueTest:
                 copa_rte[split] = copa_rte[split].remove_columns(['text'])
                 copa_rte[split] = copa_rte[split].add_column("text", text)
             del copa_rte["test"]
-            mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
+            mnli_copa_rte = dict()
+            for split in ["train", "validation"]:
+                d1p = copa_rte[split].to_pandas()
+                d2p = mnli[split].to_pandas()
+                mnli_copa_rte[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
+            mnli_copa_rte = DatasetDict(mnli_copa_rte)
+
+            # mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
             classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=3)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
             model_dict["model"] = classifier_data["model"]
