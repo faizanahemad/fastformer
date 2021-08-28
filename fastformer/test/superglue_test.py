@@ -873,12 +873,12 @@ class SuperGlueTest:
 
         if enable_rte and enable_copa:
             copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
-            classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=5)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=7)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=7)
             model_dict["model"] = classifier_data["model"]
         elif enable_rte:
-            classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=5)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=7)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=7)
             model_dict["model"] = classifier_data["model"]
             
         elif enable_copa:
