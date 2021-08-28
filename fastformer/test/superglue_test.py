@@ -816,11 +816,10 @@ class SuperGlueTest:
             labels = np.array(mnli_cb[split]["label"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['label'])
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
-            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
-
             text = mnli_cb[split]["text"]
             mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
             mnli_cb[split] = mnli_cb[split].add_column("text", text)
+            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
 
         if rank == 0:
             for split in ["train", "validation",]:
