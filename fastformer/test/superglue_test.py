@@ -834,22 +834,16 @@ class SuperGlueTest:
         copa = load_dataset("super_glue", "copa")
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
-                           label=int(not x["label"] == 0),
-                           choice=0),
+                           label=int(not x["label"] == 0)),
             remove_columns=["premise", 'question', "choice1", "choice2"])
         copa_c2 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
-                           label=int(not x["label"] == 1),
-                           choice=1),
+                           label=int(not x["label"] == 1)),
             remove_columns=["premise", 'question', "choice1", "choice2"])
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         rte = load_dataset("super_glue", "rte")
         rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        if enable_mnli:
-            classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=2)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
-            model_dict["model"] = classifier_data["model"]
 
         for split in ["train", "validation", "test"]:
             rte_labels = np.array(rte[split]["label"])
@@ -864,6 +858,19 @@ class SuperGlueTest:
             print("COPA", copa)
             print("RTE", rte)
             print("MNLI", mnli)
+        if enable_rte and enable_copa and enable_mnli:
+            copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
+            for split in ["train", "validation", "test"]:
+                copa_rte[split] = copa_rte[split].remove_columns(['idx'])
+            del copa_rte["test"]
+            classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=3)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+            model_dict["model"] = classifier_data["model"]
+            mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
+            classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte, device, 3, "mnli_copa_rte", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+            model_dict["model"] = classifier_data["model"]
+
         if enable_rte and enable_copa:
             copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
             classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=5)
@@ -877,6 +884,10 @@ class SuperGlueTest:
         elif enable_copa:
             classifier_data = self.prepare_classifier(model_dict, copa, device, 3, "copa", rank, max_epochs=5)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            model_dict["model"] = classifier_data["model"]
+        elif enable_mnli:
+            classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
             model_dict["model"] = classifier_data["model"]
             
 
