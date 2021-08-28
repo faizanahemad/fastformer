@@ -832,9 +832,9 @@ class SuperGlueTest:
                     remove_columns=["hypothesis", "premise"])
         cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
         cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]) + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?",
+        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
                      remove_columns=["hypothesis", "premise"])
-        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]) + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?",
+        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
                      remove_columns=["hypothesis", "premise"])
 
         for split in ["train", "validation", "test"]:
