@@ -818,7 +818,7 @@ class SuperGlueTest:
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
             text = list(mnli_cb[split]["text"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
-            print(len(text), len(mnli_cb[split]))
+            print("split", len(text), len(mnli_cb[split]))
             mnli_cb[split] = mnli_cb[split].add_column("text", text)
             mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
 
@@ -827,9 +827,8 @@ class SuperGlueTest:
                 print(mnli[split].features, "\n==\n", mnli_cb[split].features)
                 print("="*40, "\n")
 
-        mnli = DatasetDict(
-            {split: concatenate_datasets([mnli[split], mnli_cb[split]]) for split
-             in ["train", "validation"]})
+        mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
+        mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
         classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
         model_dict["model"] = classifier_data["model"]
