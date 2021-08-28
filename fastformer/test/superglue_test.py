@@ -780,7 +780,7 @@ class SuperGlueTest:
         # MNLI || Scitail / RTE / COPA / MultiRC
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        enable_mnli = False
+        enable_mnli = True
         enable_rte = True
         enable_copa = True
         mnli = load_dataset("multi_nli")
@@ -863,16 +863,16 @@ class SuperGlueTest:
             for split in ["train", "validation", "test"]:
                 copa_rte[split] = copa_rte[split].remove_columns(['idx'])
             del copa_rte["test"]
+            mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
             classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=3)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
             model_dict["model"] = classifier_data["model"]
-            mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
             classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte, device, 3, "mnli_copa_rte", rank, max_epochs=2)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
             model_dict["model"] = classifier_data["model"]
-
-        if enable_rte and enable_copa:
+        elif enable_rte and enable_copa:
             copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
+            del copa_rte["test"]
             classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=7)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=7)
             model_dict["model"] = classifier_data["model"]
