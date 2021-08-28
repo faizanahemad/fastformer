@@ -838,12 +838,12 @@ class SuperGlueTest:
                      remove_columns=["hypothesis", "premise"])
 
         for split in ["train", "validation", "test"]:
-            cb1[split]["process_version"] = [1] * len(cb1[split])
-            cb2[split]["process_version"] = [2] * len(cb2[split])
-            cb3[split]["process_version"] = [3] * len(cb3[split])
-            cb4[split]["process_version"] = [4] * len(cb4[split])
-            cb5[split]["process_version"] = [5] * len(cb5[split])
-            cb6[split]["process_version"] = [6] * len(cb6[split])
+            cb1[split] = cb1[split].add_column("process_version", [1] * len(cb1[split]))
+            cb2[split] = cb2[split].add_column("process_version", [2] * len(cb2[split]))
+            cb3[split] = cb3[split].add_column("process_version", [3] * len(cb3[split]))
+            cb4[split] = cb4[split].add_column("process_version", [4] * len(cb4[split]))
+            cb5[split] = cb5[split].add_column("process_version", [5] * len(cb5[split]))
+            cb6[split] = cb6[split].add_column("process_version", [6] * len(cb6[split]))
 
         dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
