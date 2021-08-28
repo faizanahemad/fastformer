@@ -781,7 +781,7 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         enable_mnli = False
-        enable_rte = False
+        enable_rte = True
         enable_copa = True
         mnli = load_dataset("multi_nli")
         mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
@@ -847,16 +847,34 @@ class SuperGlueTest:
         rte = load_dataset("super_glue", "rte")
         rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         if enable_mnli:
-            classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
             model_dict["model"] = classifier_data["model"]
 
-        if enable_rte:
+        for split in ["train", "validation", "test"]:
+            rte_labels = np.array(rte[split]["label"])
+            rte[split] = rte[split].remove_columns(['label'])
+            rte[split] = rte[split].add_column("label", rte_labels)
+
+            copa_labels = np.array(copa[split]["label"])
+            copa[split] = copa[split].remove_columns(['label'])
+            copa[split] = copa[split].add_column("label", copa_labels)
+
+        if rank == 0:
+            print("COPA", copa)
+            print("RTE", rte)
+            print("MNLI", mnli)
+        if enable_rte and enable_copa:
+            copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
+            classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=5)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            model_dict["model"] = classifier_data["model"]
+        elif enable_rte:
             classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=5)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
             model_dict["model"] = classifier_data["model"]
             
-        if enable_copa:
+        elif enable_copa:
             classifier_data = self.prepare_classifier(model_dict, copa, device, 3, "copa", rank, max_epochs=5)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
             model_dict["model"] = classifier_data["model"]
