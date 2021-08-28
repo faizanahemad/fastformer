@@ -816,8 +816,9 @@ class SuperGlueTest:
             labels = np.array(mnli_cb[split]["label"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['label'])
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
-            text = mnli_cb[split]["text"]
+            text = list(mnli_cb[split]["text"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
+            print(len(text), len(mnli_cb[split]))
             mnli_cb[split] = mnli_cb[split].add_column("text", text)
             mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
 
