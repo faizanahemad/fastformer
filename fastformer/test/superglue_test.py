@@ -817,6 +817,11 @@ class SuperGlueTest:
             mnli_cb[split] = mnli_cb[split].remove_columns(['label'])
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
             mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
+
+            text = mnli_cb[split]["text"]
+            mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
+            mnli_cb[split] = mnli_cb[split].add_column("text", text)
+
         if rank == 0:
             for split in ["train", "validation",]:
                 print(mnli[split].features, "\n==\n", mnli_cb[split].features)
