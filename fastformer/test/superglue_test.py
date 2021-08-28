@@ -862,6 +862,9 @@ class SuperGlueTest:
             copa_rte = DatasetDict({split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]})
             for split in ["train", "validation", "test"]:
                 copa_rte[split] = copa_rte[split].remove_columns(['idx'])
+                text = list(copa_rte[split]["text"])
+                copa_rte[split] = copa_rte[split].remove_columns(['text'])
+                copa_rte[split] = copa_rte[split].add_column("text", text)
             del copa_rte["test"]
             mnli_copa_rte = DatasetDict({split: concatenate_datasets([copa_rte[split], mnli[split]]) for split in ["train", "validation"]})
             classifier_data = self.prepare_classifier(model_dict, copa_rte, device, 3, "copa_rte", rank, max_epochs=3)
