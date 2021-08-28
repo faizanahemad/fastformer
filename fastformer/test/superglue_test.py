@@ -127,11 +127,12 @@ class ClassificationModel(nn.Module):
 
         logits = logits.detach()
         if self.num_classes > 1:
-            predictions = logits.argmax(-1)
-            predictions = predictions.squeeze(-1) if predictions.ndim > 1 or self.num_classes == 1 else predictions
+            # predictions = logits.argmax(-1)
+            predictions = torch.softmax(logits, dim=-1)
+            predictions = predictions.squeeze(-1) if predictions.ndim > 1 else predictions
         else:
             predictions = torch.sigmoid(logits)
-            predictions = predictions.squeeze(-1) if predictions.ndim > 1 or self.num_classes == 1 else predictions
+            predictions = predictions.squeeze(-1) if predictions.ndim > 1 else predictions
         return dict(predictions=predictions, loss=loss)
 
 
@@ -635,15 +636,24 @@ class SuperGlueTest:
                 all_val_loss.append(cur_val_loss)
                 if isinstance(classifier_data["validation_idx"][0], int):
                     if classifier_data["validation_version"] is not None:
-                        vals = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels, np.array(predictions) > 0.5, classifier_data["validation_version"])), columns=["idx", "label", "prediction", "version"])
+                        individual_preds = np.array(predictions)
+                        vals = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels,
+                                                     individual_preds > 0.5 if classifier_data["num_classes"] == 1 else np.argmax(individual_preds, -1),
+                                                     classifier_data["validation_version"])), columns=["idx", "label", "prediction", "version"])
                         vals["label"] = vals["label"].astype(int)
                         vals["prediction"] = vals["prediction"].astype(int)
                         vals["correct"] = vals["label"] == vals["prediction"]
                         version_wise_correct = vals.groupby("version")[["correct"]].mean()
                         print("For %s: version_wise_correct = \n%s" % (dataset_key, version_wise_correct))
                     labels = pd.DataFrame(list(zip(classifier_data["validation_idx"], labels)), columns=["idx", "label"]).groupby("idx").head(1)["label"].values
-                    predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
-                val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
+                    if classifier_data["num_classes"] == 1:
+                        predictions = pd.DataFrame(list(zip(classifier_data["validation_idx"], predictions)), columns=["idx", "predictions"]).groupby("idx")["predictions"].mean().values
+                    else:
+                        p = pd.DataFrame(predictions)
+                        p["idx"] = classifier_data["validation_idx"]
+                        predictions = p.groupby("idx").mean().values
+                predictions = np.array(predictions)
+                val_acc = accuracy_score(labels, (predictions > 0.5) if classifier_data["num_classes"] == 1 else np.argmax(predictions, -1))
                 # val_acc = torch.tensor(val_acc).to(device)
                 # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
                 # torch.distributed.all_gather(tensor_list, val_acc)
@@ -814,9 +824,29 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def cb(self, model, cb, device, dataset_key, rank):
+        # MNLI / RTE / COPA / MultiRC
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        cb = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
+                    remove_columns=["hypothesis", "premise"])
+        cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
+        cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]) + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?",
+                     remove_columns=["hypothesis", "premise"])
+        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]) + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?",
+                     remove_columns=["hypothesis", "premise"])
+
+        for split in ["train", "validation", "test"]:
+            cb1[split]["process_version"] = [1] * len(cb1[split])
+            cb2[split]["process_version"] = [2] * len(cb2[split])
+            cb3[split]["process_version"] = [3] * len(cb3[split])
+            cb4[split]["process_version"] = [4] * len(cb4[split])
+            cb5[split]["process_version"] = [5] * len(cb5[split])
+            cb6[split]["process_version"] = [6] * len(cb6[split])
+
+        dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
+        cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         classifier_data = self.prepare_classifier(model_dict, cb, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -826,7 +856,14 @@ class SuperGlueTest:
                               val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
                               val_loss=classifier_results["val_loss"])
         test_idx = classifier_data["test_idx"]
-        final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+
+        p = pd.DataFrame(classifier_results["predictions"])
+        p["idx"] = test_idx
+        p = p.groupby("idx").mean().reset_index().values
+        predictions = np.argmax(p[:, 1:], -1)
+        test_idx = p["idx"].values
+
+        final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, predictions)]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
                                        epochs=classifier_results["epochs"],
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
