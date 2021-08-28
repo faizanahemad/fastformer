@@ -781,7 +781,8 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         enable_mnli = False
-        enable_rte = True
+        enable_rte = False
+        enable_copa = True
         mnli = load_dataset("multi_nli")
         mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
         mnli_labels = np.array(mnli["train"]["label"]).astype(int)
@@ -830,6 +831,19 @@ class SuperGlueTest:
 
         # mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
         # mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
+        copa = load_dataset("super_glue", "copa")
+        copa_c1 = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
+                           label=int(not x["label"] == 0),
+                           choice=0),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_c2 = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
+                           label=int(not x["label"] == 1),
+                           choice=1),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
+
         rte = load_dataset("super_glue", "rte")
         rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         if enable_mnli:
@@ -838,9 +852,15 @@ class SuperGlueTest:
             model_dict["model"] = classifier_data["model"]
 
         if enable_rte:
-            classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=3)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+            classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=5)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
             model_dict["model"] = classifier_data["model"]
+            
+        if enable_copa:
+            classifier_data = self.prepare_classifier(model_dict, copa, device, 3, "copa", rank, max_epochs=5)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+            model_dict["model"] = classifier_data["model"]
+            
 
         classifier_data = self.prepare_classifier(model_dict, cb, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
