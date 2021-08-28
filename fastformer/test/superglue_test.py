@@ -814,7 +814,7 @@ class SuperGlueTest:
         p["idx"] = test_idx
         p = p.groupby("idx").mean().reset_index().values
         predictions = np.argmax(p[:, 1:], -1)
-        test_idx = p["idx"].values
+        test_idx = p[:, 0]
 
         final_predictions = [dict(idx=idx, label=self.num_to_word["cb"][pred]) for idx, pred in zip(test_idx, predictions)]
         return final_predictions, dict(dataset="cb", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"],
