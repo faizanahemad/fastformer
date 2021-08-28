@@ -853,7 +853,7 @@ def train(local_rank, args):
                              epoch=epoch,
                              **{k: v for k, v in output.items() if v is not None})
 
-            if local_rank == 0 or args["world_size"] <= 8:
+            if local_rank <= (16 // args["world_size"]) or args["world_size"] <= 8:
                 wandb.log(wandb_log)
             if local_rank == 0:
                 print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
