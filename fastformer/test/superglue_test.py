@@ -811,17 +811,19 @@ class SuperGlueTest:
 
         dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        mnli_cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         for split in ["train", "validation", "test"]:
-            labels = np.array(cb[split]["label"])
-            cb[split] = cb[split].remove_columns(['label'])
-            cb[split] = cb[split].add_column("label", labels)
+            labels = np.array(mnli_cb[split]["label"])
+            mnli_cb[split] = mnli_cb[split].remove_columns(['label'])
+            mnli_cb[split] = mnli_cb[split].add_column("label", labels)
+            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
         if rank == 0:
             for split in ["train", "validation",]:
-                print(mnli[split].features, "\n==\n", cb[split].features)
+                print(mnli[split].features, "\n==\n", mnli_cb[split].features)
                 print("="*40, "\n")
 
         mnli = DatasetDict(
-            {split: concatenate_datasets([mnli[split], cb[split].remove_columns(['idx', 'process_version'])]) for split
+            {split: concatenate_datasets([mnli[split], mnli_cb[split]]) for split
              in ["train", "validation"]})
         classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
