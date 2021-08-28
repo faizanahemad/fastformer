@@ -778,6 +778,8 @@ class SuperGlueTest:
 
     def cb(self, model, cb, device, dataset_key, rank):
         # MNLI || Scitail / RTE / COPA / MultiRC
+        from datasets import Dataset
+        import pandas as pd
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         enable_mnli = True
@@ -831,8 +833,10 @@ class SuperGlueTest:
 
         # mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
         # mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
-        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas(), mnli_cb["train"].to_pandas()]))
-        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas(), mnli_cb["validation"].to_pandas()]))
+        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas()[["label", "text"]], 
+                                                       mnli_cb["train"].to_pandas()[["label", "text"]]]))
+        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas()[["label", "text"]], 
+                                                            mnli_cb["validation"].to_pandas()[["label", "text"]]]))
         copa = load_dataset("super_glue", "copa")
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
