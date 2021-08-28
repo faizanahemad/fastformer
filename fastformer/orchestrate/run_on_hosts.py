@@ -33,6 +33,8 @@ def get_args():
                         help="Flag to do something")
     parser.add_argument("--lm", default=False, action="store_true",
                         help="Flag to do something")
+    parser.add_argument("--mlm", default=False, action="store_true",
+                        help="Flag to do something")
     parser.add_argument("--vision", default=False, action="store_true",
                         help="Flag to do something")
     parser.add_argument("--ggl", default=False, action="store_true",
@@ -135,6 +137,7 @@ if __name__ == "__main__":
     #
 
     cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/training"
+    mlm_cmd_dir = "source ~/.zshrc && cd /home/ahemf/mygit/fastformer/fastformer/filter_and_diversify"
     main_cmd = """python train_lm_distributed.py -n %s -g 8 --nr %s --model_config tg_config"""
     main_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name fastformer.pth"
 
@@ -214,18 +217,26 @@ if __name__ == "__main__":
     # lm_cmd += " --pretrained_model /home/ahemf/model_save_dir/mtt.pth"
     lm_cmd += " > output.log 2>&1 & disown"
 
+    mlm_cmd = "python train_mlm_sop.py --model_config roberta-large -n %s --nr %s"
+    mlm_cmd += " --total_steps 100000 --batch_size 4 --lr 0.0001 --weight_decay 0.001 --gradient_clipping 3.0 --accumulation_steps 4"
+    mlm_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name roberta-large-hard.pth --wandb_name hard-mlm"
+    mlm_cmd += " --master_addr 0.0.0.0 --master_port 9999 --dataset /home/ahemf/processed_datasets/sbert_tfidf --log_every_steps 10 --num_workers 8 --mlm_w 10.0"
+    mlm_cmd += " --hard_mlm --hard_mlm_model /home/ahemf/model_save_dir/cooc_7_roberta.pth"
+
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
     # cmd1 = "kill -2 $(ps aux | grep multiprocessing | grep -v grep | awk \'{print $2}\')"
     cmd0 = "pkill -9 -f 'train_'"
     cmd1 = "pkill -9 -f 'multiprocessing'"
-    cmd_kill_nvidia = "nvidia-smi | grep 'python' | awk '{ print $3 }' | xargs -n1 kill -9"
+    cmd_kill_nvidia = "nvidia-smi | grep 'python' | awk \'{ print $3 }\' | xargs -n1 kill -9"
     cmd2 = "rm ~/torch_distributed_init/file-9999"
     cmd3 = cmd_dir + " && git fetch --all && git reset --hard origin/master && git pull"
     clear_log = cmd_dir + " && rm output.log"
     if args["kill"]:
+        clear_log = mlm_cmd_dir + " && rm output.log"
         run_command_v2(hosts, cmd1)
         run_command_v2(hosts, cmd0)
+        run_command_v2(hosts, cmd_kill_nvidia)
         # run_command_v2(h1, cmd2)
         run_command_v2(hosts, clear_log)
         time.sleep(10)
@@ -261,6 +272,22 @@ if __name__ == "__main__":
 
     if args["lm"]:
         cmd4 = cmd_dir + " && " + lm_cmd
+        if "tcp" in main_cmd:
+            ip_address_cmd = "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
+            addr = one_run(hosts[0], ip_address_cmd)["stdout"]
+            print(addr)
+            ipaddr = addr.strip().split()[1]
+            part0, part1 = cmd4.split("--master_addr")
+            part1 = part1.strip().split()[1:]
+            part1[1] = "9999"
+            part1 = ["--master_addr" + " " + ipaddr] + part1
+            part1 = " ".join(part1)
+            cmd4 = part0 + " " + part1
+
+        run_command_v2(hosts, cmd4, list(zip([len(hosts)] * len(hosts), list(map(str, list(range(len(hosts))))))), args["ds"])
+
+    if args["mlm"]:
+        cmd4 = mlm_cmd_dir + " && " + mlm_cmd
         if "tcp" in main_cmd:
             ip_address_cmd = "/usr/sbin/ifconfig eth0 | grep inet | cut -d: -f2"
             addr = one_run(hosts[0], ip_address_cmd)["stdout"]
