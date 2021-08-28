@@ -789,7 +789,7 @@ class SuperGlueTest:
         mnli_validation_labels[mnli_validation_labels == 1], mnli_validation_labels[mnli_validation_labels == 2] = 2, 1
         mnli["train"] = mnli["train"].remove_columns(['label']).add_column("label", mnli_labels)
         mnli["validation"] = mnli["validation"].remove_columns(['label']).add_column("label", mnli_validation_labels)
-        mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise", 'promptID', 'pairID', 'premise_binary_parse', 'premise_parse', 'hypothesis_binary_parse', 'hypothesis_parse', 'genre', ])
         mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
         cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
         cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
