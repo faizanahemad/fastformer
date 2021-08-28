@@ -815,14 +815,13 @@ class SuperGlueTest:
             labels = np.array(cb[split]["label"])
             cb[split] = cb[split].remove_columns(['label'])
             cb[split] = cb[split].add_column("label", labels)
-            cb[split] = cb[split].remove_columns(['idx', 'process_version'])
         if rank == 0:
             for split in ["train", "validation",]:
                 print(mnli[split].features, "\n==\n", cb[split].features)
                 print("="*40, "\n")
 
         mnli = DatasetDict(
-            {split: concatenate_datasets([mnli[split], cb[split].remove_columns(["idx"])]) for split
+            {split: concatenate_datasets([mnli[split], cb[split].remove_columns(['idx', 'process_version'])]) for split
              in ["train", "validation"]})
         classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
