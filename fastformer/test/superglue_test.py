@@ -813,6 +813,11 @@ class SuperGlueTest:
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         for split in ["train", "validation", "test"]:
             cb[split] = cb[split].remove_columns(['label']).add_column("label", np.array(cb[split]["label"]).astype(int))
+        if rank == 0:
+            for split in ["train", "validation",]:
+                print(mnli[split].features, "\n==\n", cb[split].features)
+                print("="*40, "\n")
+
         mnli = DatasetDict(
             {split: concatenate_datasets([mnli[split], cb[split].remove_columns(["idx"])]) for split
              in ["train", "validation"]})
