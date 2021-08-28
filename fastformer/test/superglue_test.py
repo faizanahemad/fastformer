@@ -780,7 +780,8 @@ class SuperGlueTest:
         # MNLI || Scitail / RTE / COPA / MultiRC
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-
+        enable_mnli = False
+        enable_rte = True
         mnli = load_dataset("multi_nli")
         mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
         mnli_labels = np.array(mnli["train"]["label"]).astype(int)
@@ -818,7 +819,6 @@ class SuperGlueTest:
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
             text = list(mnli_cb[split]["text"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
-            print("split", len(text), len(mnli_cb[split]))
             mnli_cb[split] = mnli_cb[split].add_column("text", text)
             mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
 
@@ -830,9 +830,17 @@ class SuperGlueTest:
 
         # mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
         # mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
-        classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
-        model_dict["model"] = classifier_data["model"]
+        rte = load_dataset("super_glue", "rte")
+        rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        if enable_mnli:
+            classifier_data = self.prepare_classifier(model_dict, mnli, device, 3, "mnli", rank, max_epochs=1)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+            model_dict["model"] = classifier_data["model"]
+
+        if enable_rte:
+            classifier_data = self.prepare_classifier(model_dict, rte, device, 3, "rte", rank, max_epochs=3)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+            model_dict["model"] = classifier_data["model"]
 
         classifier_data = self.prepare_classifier(model_dict, cb, device, 3, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
