@@ -608,7 +608,7 @@ class SuperGlueTest:
                 stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
                 model.module.load_state_dict(stored_state, strict=True)
 
-            if rank == 0:
+            if rank == 0 and "validation" in classifier_data and classifier_data["validation"] is not None:
                 inner_model = model.module
                 if stored_state is not None:
                     stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
