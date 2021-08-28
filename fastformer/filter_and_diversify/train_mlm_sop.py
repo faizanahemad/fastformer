@@ -770,7 +770,7 @@ def train(local_rank, args):
 
     gradient_clipping = optc["gradient_clipping"]
 
-    group = "%s-%s-%s-%sN-%s" % (args["wandb_name"], ds_name, args["model_config"], args["nodes"], time_string)
+    group = "%s-%s-%sN-%s" % (args["wandb_name"], args["model_config"], args["nodes"], time_string)
     wandb_init_args = dict(project="fnd", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank), group=group, id=f"{group}-worker-{nr}-{rank}-{local_rank}",
                            config={"args":args, "optimizer_config": optc},
                            settings=wandb.Settings(start_method="fork"))

@@ -222,6 +222,7 @@ if __name__ == "__main__":
     mlm_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name roberta-large-hard.pth --wandb_name hard-mlm"
     mlm_cmd += " --master_addr 0.0.0.0 --master_port 9999 --dataset /home/ahemf/processed_datasets/sbert_tfidf --log_every_steps 10 --num_workers 8 --mlm_w 10.0"
     mlm_cmd += " --hard_mlm --hard_mlm_model /home/ahemf/model_save_dir/cooc_7_roberta.pth"
+    mlm_cmd += " > output.log 2>&1 & disown"
 
     # > my.log 2>&1 &
     # cmd0 = "kill -2 $(ps aux | grep train_lm_distributed.py | grep -v grep | awk \'{print $2}\')"
