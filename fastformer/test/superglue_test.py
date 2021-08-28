@@ -824,6 +824,7 @@ class SuperGlueTest:
 
         if rank == 0:
             for split in ["train", "validation",]:
+                print(mnli[split], mnli_cb[split])
                 print(mnli[split].features, "\n==\n", mnli_cb[split].features)
                 print("="*40, "\n")
 
