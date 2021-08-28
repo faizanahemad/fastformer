@@ -1057,34 +1057,27 @@ class SuperGlueTest:
         if enable_wiki_dpr:
             dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                              load_from_cache_file=caching) for i in [13, 14]]
-            wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+            wsc_wiki = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
             for split in ["train", "validation", "test"]:
-                wsc[split] = wsc[split].remove_columns(['process_version'])
-                wsc[split] = wsc[split].remove_columns(['idx'])
-                labels = np.array(wsc[split]['label'])
-                wsc[split] = wsc[split].remove_columns(['label'])
-                wsc[split] = wsc[split].add_column("label", labels)
-            del wsc["test"]
-            del wsc["validation"]
+                wsc_wiki[split] = wsc_wiki[split].remove_columns(['process_version'])
+                wsc_wiki[split] = wsc_wiki[split].remove_columns(['idx'])
+                labels = np.array(wsc_wiki[split]['label'])
+                wsc_wiki[split] = wsc_wiki[split].remove_columns(['label'])
+                wsc_wiki[split] = wsc_wiki[split].add_column("label", labels)
+            del wsc_wiki["test"]
+            del wsc_wiki["validation"]
             wiki_dpr = build_wiki_dpr(tokenizer)
             del wiki_dpr["test"]
             del wiki_dpr["validation"]
             if rank == 0:
                 print(wiki_dpr["train"].features, "\n", wsc["train"].features)
-            wiki_dpr["train"] = concatenate_datasets([wsc["train"], wiki_dpr["train"], wsc["train"]])
+            wiki_dpr["train"] = concatenate_datasets([wsc_wiki["train"], wiki_dpr["train"], wsc_wiki["train"]])
             classifier_data = self.prepare_classifier(model_dict, wiki_dpr, device, 1, "wiki_dpr", rank, max_epochs=1)
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
             model_dict["model"] = classifier_data["model"]
 
         dsets = [wsc.map(wsc_proc(tokenizer, "wsc", i), remove_columns=["span1_index", "span2_index", "span1_text", "span2_text"],
                          load_from_cache_file=caching) for i in versions]
-        # if rank == 0:
-        #     for i in range(len(dsets)):
-        #         print(dsets[i]["train"].features)
-        #     for i in range(len(dsets)):
-        #         print(dsets[i]["validation"].features)
-        #     for i in range(len(dsets)):
-        #         print(dsets[i]["test"].features)
         wsc = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         if rank == 0:
             print(wsc["validation"])
