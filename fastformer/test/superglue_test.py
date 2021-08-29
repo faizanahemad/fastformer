@@ -986,13 +986,29 @@ class SuperGlueTest:
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         return cb
     
+    def get_scitail(self, tokenizer):
+        scitail = load_dataset("scitail", "tsv_format").map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]),
+                                                            remove_columns=["hypothesis", "premise"])
+        for split in ["train", "validation", "test"]:
+            labels = np.array([0 if lbl == "entails" else 1 for lbl in list(scitail[split]["label"])]).astype(int)
+            scitail[split] = scitail[split].remove_columns(['label'])
+            scitail[split] = scitail[split].add_column("label", labels)
+        return scitail
+    
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
+        scitail = load_dataset("scitail", "tsv_format").map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        for split in ["train", "validation", "test"]:
+            labels = np.array([0 if lbl == "entails" else 1 for lbl in list(scitail[split]["label"])]).astype(int)
+            scitail[split] = scitail[split].remove_columns(['label'])
+            scitail[split] = scitail[split].add_column("label", labels)
+        
         rte = self.get_rte(tokenizer)
         mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
-
+        scitail = self.get_scitail(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
         mnli_copa_rte_ext_cb = dict()
         for split in ["train", "validation"]:
             labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)

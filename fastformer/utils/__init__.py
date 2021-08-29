@@ -1535,6 +1535,18 @@ class SMixerCoOccurenceModel(PreTrainedModel):
                     word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=None)
 
 
+def merge_datasets_as_df(datasets: list, splits: list, columns: list):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    import pandas as pd
+    result = dict()
+    for split in splits:
+        dsets = [d[split].to_pandas()[columns] for d in datasets]
+        result[split] = Dataset.from_pandas(pd.concat(dsets))
+    result = DatasetDict(result)
+    return result
+
+
+
 
 
 
