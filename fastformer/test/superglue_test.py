@@ -891,7 +891,7 @@ class SuperGlueTest:
         cb = self.get_cb(tokenizer)
         copa = self.get_copa(tokenizer)
         rte = self.get_rte(tokenizer)
-        mnli_copa_rte_cb, copa_rte, mnli = self.get_mnli_copa_rte_cb(self, tokenizer)
+        mnli_copa_rte_cb, copa_rte, mnli = self.get_mnli_copa_rte_cb(tokenizer)
         if rank == 0:
             print("COPA", copa)
             print("RTE", rte)
@@ -989,6 +989,20 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         rte = self.get_rte_extended(tokenizer)
+        mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
+
+        mnli_copa_rte_ext_cb = dict()
+        for split in ["train", "validation"]:
+            labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+            d1p = mnli_copa_rte_cb[split].to_pandas()[["label", "text"]]
+            d2p = rte[split].to_pandas()[["label", "text"]]
+            mnli_copa_rte_ext_cb[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
+        mnli_copa_rte_ext_cb = DatasetDict(mnli_copa_rte_ext_cb)
+        classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, rte, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
