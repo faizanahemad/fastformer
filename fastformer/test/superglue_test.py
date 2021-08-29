@@ -994,7 +994,87 @@ class SuperGlueTest:
             scitail[split] = scitail[split].remove_columns(['label'])
             scitail[split] = scitail[split].add_column("label", labels)
         return scitail
-    
+
+
+    def get_swag(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+        swag = load_dataset("swag")  # .filter(lambda x: x["gold-source"]=="gold")
+        swag1 = swag.map(
+            lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending0"],
+                           label=int(not x["label"] == 0)),
+            remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3',])
+        swag2 = swag.map(
+            lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending1"],
+                           label=int(not x["label"] == 1)),
+            remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+        swag3 = swag.map(
+            lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending2"],
+                           label=int(not x["label"] == 2)),
+            remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+        swag4 = swag.map(
+            lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending3"],
+                           label=int(not x["label"] == 3)),
+            remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+        hellaswag = DatasetDict({k: concatenate_datasets([v, swag2[k], swag3[k], swag4[k]]) for k, v in swag1.items()})
+        for split in ["train", "validation", "test"]:
+            labels = np.array(hellaswag[split]["label"]).astype(int)
+            hellaswag[split] = hellaswag[split].remove_columns(['label'])
+            hellaswag[split] = hellaswag[split].add_column("label", labels)
+        return hellaswag
+
+
+    def get_hellaswag(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+        hellaswag = load_dataset("hellaswag")
+        hellaswag_c1 = hellaswag.map(
+            lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][0],
+                           label=int(not x["label"] == 0)),
+            remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type',])
+        hellaswag_c2 = hellaswag.map(
+            lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][1],
+                           label=int(not x["label"] == 1)),
+            remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type',])
+        hellaswag_c3 = hellaswag.map(
+            lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][2],
+                           label=int(not x["label"] == 2)),
+            remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type',])
+        hellaswag_c4 = hellaswag.map(
+            lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][3],
+                           label=int(not x["label"] == 3)),
+            remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type',])
+        hellaswag = DatasetDict({k: concatenate_datasets([v, hellaswag_c2[k], hellaswag_c3[k], hellaswag_c4[k]]) for k, v in hellaswag_c1.items()})
+        for split in ["train", "validation", "test"]:
+            labels = np.array(hellaswag[split]["label"]).astype(int)
+            hellaswag[split] = hellaswag[split].remove_columns(['label'])
+            hellaswag[split] = hellaswag[split].add_column("label", labels)
+        return hellaswag
+
+    def get_cosmos_qa(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+        qa = load_dataset("cosmos_qa")
+        qa1 = qa.map(
+            lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer0"],
+                           label=int(not x["label"] == 0)),
+            remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3',])
+        qa2 = qa.map(
+            lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer1"],
+                           label=int(not x["label"] == 1)),
+            remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+        qa3 = qa.map(
+            lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer2"],
+                           label=int(not x["label"] == 2)),
+            remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+        qa4 = qa.map(
+            lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer3"],
+                           label=int(not x["label"] == 3)),
+            remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+        qa = DatasetDict({k: concatenate_datasets([v, qa2[k], qa3[k], qa4[k]]) for k, v in qa1.items()})
+        for split in ["train", "validation", "test"]:
+            labels = np.array(qa[split]["label"]).astype(int)
+            qa[split] = qa[split].remove_columns(['label'])
+            qa[split] = qa[split].add_column("label", labels)
+        return qa
+
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
@@ -1007,7 +1087,10 @@ class SuperGlueTest:
         
         mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
         scitail = self.get_scitail(tokenizer)
-        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
+        cosmos_qa = self.get_cosmos_qa(tokenizer)
+        hellaswag = self.get_hellaswag(tokenizer)
+        swag = self.get_swag(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag], ["train", "validation"], ["label", "text"])
         rte = self.get_rte_extended(tokenizer)
         mnli_copa_rte_cb = merge_datasets_as_df([rte, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
         for split in ["train", "validation"]:
