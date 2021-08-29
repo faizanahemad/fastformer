@@ -844,6 +844,39 @@ class SuperGlueTest:
         dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
         return cb
+    
+    def get_mnli_copa_rte_cb(self, tokenizer):
+        mnli = self.get_mnli(tokenizer)
+        cb = self.get_cb(tokenizer)
+        mnli_cb = dict()
+        for split in ["train", "validation", "test"]:
+            labels = np.array(cb[split]["label"])
+            mnli_cb[split] = cb[split].remove_columns(['label'])
+            mnli_cb[split] = mnli_cb[split].add_column("label", labels)
+            text = list(mnli_cb[split]["text"])
+            mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
+            mnli_cb[split] = mnli_cb[split].add_column("text", text)
+            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
+        mnli_cb = DatasetDict(mnli_cb)
+
+        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas()[["label", "text"]],
+                                                       mnli_cb["train"].to_pandas()[["label", "text"]]]))
+        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas()[["label", "text"]],
+                                                            mnli_cb["validation"].to_pandas()[["label", "text"]]]))
+        copa = self.get_copa(tokenizer)
+        rte = self.get_rte(tokenizer)
+
+        copa_rte = {split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]}
+        for split in ["train", "validation", "test"]:
+            copa_rte[split] = copa_rte[split].remove_columns(['idx'])
+        del copa_rte["test"]
+        mnli_copa_rte_cb = dict()
+        for split in ["train", "validation"]:
+            d1p = copa_rte[split].to_pandas()[["label", "text"]]
+            d2p = mnli[split].to_pandas()[["label", "text"]]
+            mnli_copa_rte_cb[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
+        mnli_copa_rte_cb = DatasetDict(mnli_copa_rte_cb)
+        return mnli_copa_rte_cb, copa_rte, mnli
 
     def cb(self, model, cb, device, dataset_key, rank):
         # MNLI || Scitail / RTE / COPA / MultiRC
@@ -856,33 +889,9 @@ class SuperGlueTest:
         enable_copa = True
         mnli = self.get_mnli(tokenizer)
         cb = self.get_cb(tokenizer)
-
-        mnli_cb = dict()
-        for split in ["train", "validation", "test"]:
-            labels = np.array(cb[split]["label"])
-            mnli_cb[split] = cb[split].remove_columns(['label'])
-            mnli_cb[split] = mnli_cb[split].add_column("label", labels)
-            text = list(mnli_cb[split]["text"])
-            mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
-            mnli_cb[split] = mnli_cb[split].add_column("text", text)
-            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
-        mnli_cb = DatasetDict(mnli_cb)
-
-        if rank == 0:
-            for split in ["train", "validation"]:
-                print(mnli[split], mnli_cb[split])
-                print(mnli[split].features, "\n==\n", mnli_cb[split].features)
-                print("="*40, "\n")
-
-        # mnli["train"] = concatenate_datasets([mnli["train"], mnli_cb["train"]])
-        # mnli["validation"] = concatenate_datasets([mnli["validation"], mnli_cb["validation"]])
-        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas()[["label", "text"]], 
-                                                       mnli_cb["train"].to_pandas()[["label", "text"]]]))
-        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas()[["label", "text"]], 
-                                                            mnli_cb["validation"].to_pandas()[["label", "text"]]]))
         copa = self.get_copa(tokenizer)
         rte = self.get_rte(tokenizer)
-
+        mnli_copa_rte_cb, copa_rte, mnli = self.get_mnli_copa_rte_cb(self, tokenizer)
         if rank == 0:
             print("COPA", copa)
             print("RTE", rte)
@@ -949,10 +958,37 @@ class SuperGlueTest:
                                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
+    def get_rte_extended(self, tokenizer):
+        cb = load_dataset("super_glue", "rte")
+        cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
+                     remove_columns=["hypothesis", "premise"])
+        cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
+                     remove_columns=["hypothesis", "premise"])
+        cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
+        cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x[
+            "hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
+                     remove_columns=["hypothesis", "premise"])
+        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x[
+            "premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
+                     remove_columns=["hypothesis", "premise"])
+
+        for split in ["train", "validation", "test"]:
+            cb1[split] = cb1[split].add_column("process_version", [1] * len(cb1[split]))
+            cb2[split] = cb2[split].add_column("process_version", [2] * len(cb2[split]))
+            cb3[split] = cb3[split].add_column("process_version", [3] * len(cb3[split]))
+            cb4[split] = cb4[split].add_column("process_version", [4] * len(cb4[split]))
+            cb5[split] = cb5[split].add_column("process_version", [5] * len(cb5[split]))
+            cb6[split] = cb6[split].add_column("process_version", [6] * len(cb6[split]))
+
+        dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
+        cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        return cb
+    
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        rte = self.get_rte_extended(tokenizer)
         classifier_data = self.prepare_classifier(model_dict, rte, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -962,7 +998,8 @@ class SuperGlueTest:
                               val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
                               val_loss=classifier_results["val_loss"]), None, None
         test_idx = classifier_data["test_idx"]
-        final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in zip(test_idx, classifier_results["predictions"])]
+        results = pd.DataFrame(list(zip(test_idx, classifier_results["predictions"])), columns=["id", "predictions"]).groupby("id").mean().reset_index().values
+        final_predictions = [dict(idx=idx, label=self.num_to_word["rte"][int(pred > 0.5)]) for idx, pred in results]
 
         rte_res = dict(dataset="rte", train_acc=classifier_results["train_acc"], val_acc=classifier_results["val_acc"], epochs=classifier_results["epochs"],
                        val_loss_hist=classifier_results["all_val_loss"][-3:], broken=classifier_results["broken"],
