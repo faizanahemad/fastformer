@@ -369,7 +369,6 @@ class RTDMLMModel(PreTrainedModel):
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = top_k[:, :, torch.randint(0, top_k.size(2), (1,))].squeeze(-1)
-        # top_k = top_k[:, :, 0]
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
         input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
         mask_accuracy = None

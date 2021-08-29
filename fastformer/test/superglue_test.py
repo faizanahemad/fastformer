@@ -776,33 +776,61 @@ class SuperGlueTest:
                                        broken=classifier_results["broken"],
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
-    def cb(self, model, cb, device, dataset_key, rank):
-        # MNLI || Scitail / RTE / COPA / MultiRC
-        from datasets import Dataset
-        import pandas as pd
-        model_dict = self.build_model(model)
-        tokenizer = model_dict["tokenizer"]
-        enable_mnli = True
-        enable_rte = True
-        enable_copa = True
+    def get_mnli(self, tokenizer):
         mnli = load_dataset("multi_nli")
         mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
         mnli_labels = np.array(mnli["train"]["label"]).astype(int)
         mnli_validation_labels = np.array(mnli["validation"]["label"]).astype(int)
-        mnli_labels[mnli_labels==1], mnli_labels[mnli_labels==2] = 2, 1
+        mnli_labels[mnli_labels == 1], mnli_labels[mnli_labels == 2] = 2, 1
         mnli_validation_labels[mnli_validation_labels == 1], mnli_validation_labels[mnli_validation_labels == 2] = 2, 1
         mnli["train"] = mnli["train"].remove_columns(['label']).add_column("label", mnli_labels)
         mnli["validation"] = mnli["validation"].remove_columns(['label']).add_column("label", mnli_validation_labels)
-        mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise", 'promptID', 'pairID', 'premise_binary_parse', 'premise_parse', 'hypothesis_binary_parse', 'hypothesis_parse', 'genre', ])
+        mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]),
+                        remove_columns=["hypothesis", "premise", 'promptID', 'pairID', 'premise_binary_parse', 'premise_parse', 'hypothesis_binary_parse',
+                                        'hypothesis_parse', 'genre', ])
         mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
-        cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+        return mnli
+
+    def get_copa(self, tokenizer):
+        copa = load_dataset("super_glue", "copa")
+        copa_c1 = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
+                           label=int(not x["label"] == 0)),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_c2 = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
+                           label=int(not x["label"] == 1)),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
+        for split in ["train", "validation", "test"]:
+            copa_labels = np.array(copa[split]["label"])
+            copa[split] = copa[split].remove_columns(['label'])
+            copa[split] = copa[split].add_column("label", copa_labels)
+        return copa
+
+    def get_rte(self, tokenizer):
+        rte = load_dataset("super_glue", "rte")
+        rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+
+        for split in ["train", "validation", "test"]:
+            rte_labels = np.array(rte[split]["label"])
+            rte[split] = rte[split].remove_columns(['label'])
+            rte[split] = rte[split].add_column("label", rte_labels)
+        return rte
+
+    def get_cb(self, tokenizer):
+        cb = load_dataset("super_glue", "cb")
+        cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
+                     remove_columns=["hypothesis", "premise"])
         cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
-                    remove_columns=["hypothesis", "premise"])
+                     remove_columns=["hypothesis", "premise"])
         cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
         cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
+        cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x[
+            "hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
                      remove_columns=["hypothesis", "premise"])
-        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
+        cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x[
+            "premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
                      remove_columns=["hypothesis", "premise"])
 
         for split in ["train", "validation", "test"]:
@@ -815,15 +843,30 @@ class SuperGlueTest:
 
         dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
         cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
-        mnli_cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        return cb
+
+    def cb(self, model, cb, device, dataset_key, rank):
+        # MNLI || Scitail / RTE / COPA / MultiRC
+        from datasets import Dataset
+        import pandas as pd
+        model_dict = self.build_model(model)
+        tokenizer = model_dict["tokenizer"]
+        enable_mnli = True
+        enable_rte = True
+        enable_copa = True
+        mnli = self.get_mnli(tokenizer)
+        cb = self.get_cb(tokenizer)
+
+        mnli_cb = dict()
         for split in ["train", "validation", "test"]:
-            labels = np.array(mnli_cb[split]["label"])
-            mnli_cb[split] = mnli_cb[split].remove_columns(['label'])
+            labels = np.array(cb[split]["label"])
+            mnli_cb[split] = cb[split].remove_columns(['label'])
             mnli_cb[split] = mnli_cb[split].add_column("label", labels)
             text = list(mnli_cb[split]["text"])
             mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
             mnli_cb[split] = mnli_cb[split].add_column("text", text)
             mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
+        mnli_cb = DatasetDict(mnli_cb)
 
         if rank == 0:
             for split in ["train", "validation"]:
@@ -837,28 +880,8 @@ class SuperGlueTest:
                                                        mnli_cb["train"].to_pandas()[["label", "text"]]]))
         mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas()[["label", "text"]], 
                                                             mnli_cb["validation"].to_pandas()[["label", "text"]]]))
-        copa = load_dataset("super_glue", "copa")
-        copa_c1 = copa.map(
-            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
-                           label=int(not x["label"] == 0)),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_c2 = copa.map(
-            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
-                           label=int(not x["label"] == 1)),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
-
-        rte = load_dataset("super_glue", "rte")
-        rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-
-        for split in ["train", "validation", "test"]:
-            rte_labels = np.array(rte[split]["label"])
-            rte[split] = rte[split].remove_columns(['label'])
-            rte[split] = rte[split].add_column("label", rte_labels)
-
-            copa_labels = np.array(copa[split]["label"])
-            copa[split] = copa[split].remove_columns(['label'])
-            copa[split] = copa[split].add_column("label", copa_labels)
+        copa = self.get_copa(tokenizer)
+        rte = self.get_rte(tokenizer)
 
         if rank == 0:
             print("COPA", copa)

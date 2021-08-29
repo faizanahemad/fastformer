@@ -1316,7 +1316,7 @@ class CoOccurenceModel(PreTrainedModel):
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
         word_accuracy = (lm_predictions == input_ids).contiguous()
         accuracy = word_accuracy[attention_mask].float().mean().item()
-        _, top_k_alternatives = prediction_scores.detach().topk(16, -1)  #  B, S, 16
+        _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
         word_ce = torch.log(1 + masked_lm_loss.detach().view(b, s))
 
         return dict(loss=masked_lm_loss.mean(), accuracy=accuracy, word_accuracy=word_accuracy,
