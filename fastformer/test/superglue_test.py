@@ -1005,19 +1005,15 @@ class SuperGlueTest:
             scitail[split] = scitail[split].remove_columns(['label'])
             scitail[split] = scitail[split].add_column("label", labels)
         
-        rte = self.get_rte(tokenizer)
         mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
         scitail = self.get_scitail(tokenizer)
         mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
-        mnli_copa_rte_ext_cb = dict()
+        rte = self.get_rte_extended(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([rte, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
         for split in ["train", "validation"]:
             labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
-            d1p = mnli_copa_rte_cb[split].to_pandas()[["label", "text"]]
-            d2p = rte[split].to_pandas()[["label", "text"]]
-            mnli_copa_rte_ext_cb[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
-        mnli_copa_rte_ext_cb = DatasetDict(mnli_copa_rte_ext_cb)
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
