@@ -846,6 +846,7 @@ class SuperGlueTest:
         return cb
     
     def get_mnli_copa_rte_cb(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         mnli = self.get_mnli(tokenizer)
         cb = self.get_cb(tokenizer)
         mnli_cb = dict()
@@ -986,6 +987,7 @@ class SuperGlueTest:
         return cb
     
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         rte = self.get_rte_extended(tokenizer)
