@@ -990,7 +990,7 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        rte = self.get_rte_extended(tokenizer)
+        rte = self.get_rte(tokenizer)
         mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
 
         mnli_copa_rte_ext_cb = dict()
