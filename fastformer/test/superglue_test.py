@@ -1070,7 +1070,7 @@ class SuperGlueTest:
 
     def get_commonsense_qa(self, tokenizer):
         commonsense_qa = load_dataset("commonsense_qa")
-        commonsense_qa = commonsense_qa.map(lambda x: dict(label=ord(x["answerKey"]) - ord('A')), remove_columns=["answerKey"])
+        commonsense_qa = commonsense_qa.map(lambda x: dict(label=(ord(x["answerKey"]) - ord('A')) if len(x["answerKey"]) > 0 else 0), remove_columns=["answerKey"])
         ca1 = commonsense_qa.map(
             lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][0],
                            label=int(not x["label"] == 0)),
