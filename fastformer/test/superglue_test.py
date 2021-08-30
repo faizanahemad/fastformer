@@ -742,7 +742,8 @@ class SuperGlueTest:
         cosmos_qa = self.get_cosmos_qa(tokenizer)
         hellaswag = self.get_hellaswag(tokenizer)
         swag = self.get_swag(tokenizer)
-        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag], ["train", "validation"], ["label", "text"])
+        commonsense_qa = self.get_commonsense_qa(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
         for split in ["train", "validation"]:
             labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
             labels[labels==0], labels[labels==1] = 1, 0
@@ -773,11 +774,32 @@ class SuperGlueTest:
     def wic(self, model, wic, device, dataset_key, rank):
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
+        qa_srl = self.get_qa_srl(tokenizer)
+        qqp = self.get_qqp(tokenizer)
+        scitail = self.get_scitail(tokenizer)
+        cosmos_qa = self.get_cosmos_qa(tokenizer)
+        hellaswag = self.get_hellaswag(tokenizer)
+        swag = self.get_swag(tokenizer)
+        commonsense_qa = self.get_commonsense_qa(tokenizer)
+        mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"],
+                                                ["label", "text"])
+
+        for split in ["train", "validation"]:
+            labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
+            labels[labels == 0], labels[labels == 1] = 1, 0
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+
         wic_reversed = wic.map(lambda x: dict(text=x["sentence2"] + f" {tokenizer.sep_token} " + x["sentence1"] + f" {tokenizer.sep_token} " + x["word"]),
                                remove_columns=['sentence1', 'sentence2', "word"])
         wic = wic.map(lambda x: dict(text=x["sentence1"] + f" {tokenizer.sep_token} " + x["sentence2"] + f" {tokenizer.sep_token} " + x["word"]),
                       remove_columns=['sentence1', 'sentence2', "word"])
         wic["train"] = concatenate_datasets((wic["train"], wic_reversed["train"]))
+        mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, qa_srl, wic, qqp], ["train", "validation"], ["label", "text"])
+        classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, wic, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -824,6 +846,41 @@ class SuperGlueTest:
             copa[split] = copa[split].remove_columns(['label'])
             copa[split] = copa[split].add_column("label", copa_labels)
         return copa
+
+
+    def get_qa_srl(self, tokenizer):
+        qa_srl = load_dataset("qa_srl", script_version="master")
+        qa_srl_pos = qa_srl.map(lambda x: dict(text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q!="_"])) + f" {tokenizer.sep_token} " + x["answers"][0], label=1),
+                                remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+        list_of_answers = [b for a in list(qa_srl["train"]["answers"]) for b in a]
+        qa_srl_n1 = qa_srl.map(lambda x: dict(
+            text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " + random.sample(list_of_answers, 1)[0],
+            label=0),
+                                remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+        qa_srl_n2 = qa_srl.map(lambda x: dict(
+            text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " +
+                 random.sample(list_of_answers, 1)[0],
+            label=0),
+                               remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+        qa_srl_n3 = qa_srl.map(lambda x: dict(
+            text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " +
+                 random.sample(list_of_answers, 1)[0],
+            label=0),
+                               remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+        qa_srl = merge_datasets_as_df([qa_srl_pos, qa_srl_n1, qa_srl_n2, qa_srl_n3], ["train", "validation"], ["label", "text"])
+        return qa_srl
+
+    def get_qqp(self, tokenizer):
+        quora = load_dataset("quora")
+        quora["validation"] = Dataset.from_dict(quora["train"][0:10])
+        quora_1 = quora.map(lambda x: dict(text=x["questions"]["text"][0] + f" {tokenizer.sep_token} " + x["questions"]["text"][1], label=int(x["is_duplicate"])), remove_columns=['questions', 'is_duplicate'])
+        quora_2 = quora.map(
+            lambda x: dict(text=x["questions"]["text"][1] + f" {tokenizer.sep_token} " + x["questions"]["text"][0], label=int(x["is_duplicate"])),
+            remove_columns=['questions', 'is_duplicate'])
+        quora = merge_datasets_as_df([quora_1, quora_2], ["train", "validation"], ["label", "text"])
+        return quora
+
+
 
     def get_rte(self, tokenizer):
         rte = load_dataset("super_glue", "rte")
@@ -1105,7 +1162,8 @@ class SuperGlueTest:
         cosmos_qa = self.get_cosmos_qa(tokenizer)
         hellaswag = self.get_hellaswag(tokenizer)
         swag = self.get_swag(tokenizer)
-        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag], ["train", "validation"], ["label", "text"])
+        commonsense_qa = self.get_commonsense_qa(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
         rte = self.get_rte_extended(tokenizer)
         mnli_copa_rte_cb = merge_datasets_as_df([rte, mnli_copa_rte_cb], ["train", "validation"], ["label", "text"])
         for split in ["train", "validation"]:
