@@ -753,6 +753,7 @@ class SuperGlueTest:
         mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, boolq], ["train", "validation"], ["label", "text"])
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+        model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, boolq, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -865,34 +866,10 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         mnli = self.get_mnli(tokenizer)
         cb = self.get_cb(tokenizer)
-        mnli_cb = dict()
-        for split in ["train", "validation", "test"]:
-            labels = np.array(cb[split]["label"])
-            mnli_cb[split] = cb[split].remove_columns(['label'])
-            mnli_cb[split] = mnli_cb[split].add_column("label", labels)
-            text = list(mnli_cb[split]["text"])
-            mnli_cb[split] = mnli_cb[split].remove_columns(['text'])
-            mnli_cb[split] = mnli_cb[split].add_column("text", text)
-            mnli_cb[split] = mnli_cb[split].remove_columns(['idx', 'process_version'])
-        mnli_cb = DatasetDict(mnli_cb)
-
-        mnli["train"] = Dataset.from_pandas(pd.concat([mnli["train"].to_pandas()[["label", "text"]],
-                                                       mnli_cb["train"].to_pandas()[["label", "text"]]]))
-        mnli["validation"] = Dataset.from_pandas(pd.concat([mnli["validation"].to_pandas()[["label", "text"]],
-                                                            mnli_cb["validation"].to_pandas()[["label", "text"]]]))
         copa = self.get_copa(tokenizer)
         rte = self.get_rte(tokenizer)
-
-        copa_rte = {split: concatenate_datasets([copa[split], rte[split]]) for split in ["train", "validation", "test"]}
-        for split in ["train", "validation", "test"]:
-            copa_rte[split] = copa_rte[split].remove_columns(['idx'])
-        del copa_rte["test"]
-        mnli_copa_rte_cb = dict()
-        for split in ["train", "validation"]:
-            d1p = copa_rte[split].to_pandas()[["label", "text"]]
-            d2p = mnli[split].to_pandas()[["label", "text"]]
-            mnli_copa_rte_cb[split] = Dataset.from_pandas(pd.concat([d1p, d2p]))
-        mnli_copa_rte_cb = DatasetDict(mnli_copa_rte_cb)
+        mnli_copa_rte_cb = merge_datasets_as_df([mnli, cb, copa, rte], ["train", "validation"], ["label", "text"])
+        copa_rte = merge_datasets_as_df([copa, rte, cb], ["train", "validation"], ["label", "text"])
         return mnli_copa_rte_cb, copa_rte, mnli
 
     def cb(self, model, cb, device, dataset_key, rank):
@@ -1091,6 +1068,34 @@ class SuperGlueTest:
             qa[split] = qa[split].add_column("label", labels)
         return qa
 
+    def get_commonsense_qa(self, tokenizer):
+        commonsense_qa = load_dataset("commonsense_qa")
+        commonsense_qa = commonsense_qa.map(lambda x: dict(label=ord(x["answerKey"]) - ord('A')), remove_columns=["answerKey"])
+        ca1 = commonsense_qa.map(
+            lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][0],
+                           label=int(not x["label"] == 0)),
+            remove_columns=['question', 'choices'])
+        ca2 = commonsense_qa.map(
+            lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][1],
+                           label=int(not x["label"] == 1)),
+            remove_columns=['question', 'choices'])
+        ca3 = commonsense_qa.map(
+            lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][2],
+                           label=int(not x["label"] == 2)),
+            remove_columns=['question', 'choices'])
+        ca4 = commonsense_qa.map(
+            lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][3],
+                           label=int(not x["label"] == 3)),
+            remove_columns=['question', 'choices'])
+        ca5 = commonsense_qa.map(
+            lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][4],
+                           label=int(not x["label"] == 4)),
+            remove_columns=['question', 'choices'])
+
+        dsets = [ca1, ca2, ca3, ca4, ca5]
+        cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+        return cb
+
     def rte_axb_axg(self, model, rte, axb, axg, device, dataset_key, rank):
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
@@ -1183,6 +1188,23 @@ class SuperGlueTest:
             remove_columns=["premise", 'question', "choice1", "choice2"])
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
+        mnli_copa_rte_cb, copa_rte_cb, _ = self.get_mnli_copa_rte_cb(tokenizer)
+        scitail = self.get_scitail(tokenizer)
+        cosmos_qa = self.get_cosmos_qa(tokenizer)
+        hellaswag = self.get_hellaswag(tokenizer)
+        swag = self.get_swag(tokenizer)
+        commonsense_qa = self.get_commonsense_qa(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
+        for split in ["train", "validation"]:
+            labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
+            labels[labels == 0], labels[labels == 1] = 1, 0
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+
+        # mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, copa], ["train", "validation"], ["label", "text"])
+        classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=3)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+        model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
