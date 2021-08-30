@@ -849,6 +849,7 @@ class SuperGlueTest:
 
 
     def get_qa_srl(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         qa_srl = load_dataset("qa_srl", script_version="master")
         qa_srl_pos = qa_srl.map(lambda x: dict(text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q!="_"])) + f" {tokenizer.sep_token} " + x["answers"][0], label=1),
                                 remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
@@ -871,6 +872,7 @@ class SuperGlueTest:
         return qa_srl
 
     def get_qqp(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         quora = load_dataset("quora")
         quora["validation"] = Dataset.from_dict(quora["train"][0:10])
         quora_1 = quora.map(lambda x: dict(text=x["questions"]["text"][0] + f" {tokenizer.sep_token} " + x["questions"]["text"][1], label=int(x["is_duplicate"])), remove_columns=['questions', 'is_duplicate'])
@@ -883,6 +885,7 @@ class SuperGlueTest:
 
 
     def get_rte(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         rte = load_dataset("super_glue", "rte")
         rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
 
@@ -893,6 +896,7 @@ class SuperGlueTest:
         return rte
 
     def get_cb(self, tokenizer):
+        from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         cb = load_dataset("super_glue", "cb")
         cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
                      remove_columns=["hypothesis", "premise"])
