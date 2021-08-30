@@ -352,9 +352,6 @@ class SuperGlueTest:
             if "deberta" in model.lower() or "large" in model.lower():
                 batch_size = batch_size // 2
                 self.iter_size *= 2
-            if self.finetune:
-                batch_size = batch_size // 2
-                self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
             from transformers.models.deberta import DebertaModel
             if os.path.exists(model):
