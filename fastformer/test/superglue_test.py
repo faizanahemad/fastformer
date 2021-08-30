@@ -736,7 +736,23 @@ class SuperGlueTest:
     def boolq(self, model, boolq, device, dataset_key, rank):
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
+
+        mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
+        scitail = self.get_scitail(tokenizer)
+        cosmos_qa = self.get_cosmos_qa(tokenizer)
+        hellaswag = self.get_hellaswag(tokenizer)
+        swag = self.get_swag(tokenizer)
+        mnli_copa_rte_cb = merge_datasets_as_df([scitail, mnli_copa_rte_cb, hellaswag, cosmos_qa, swag], ["train", "validation"], ["label", "text"])
+        for split in ["train", "validation"]:
+            labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
+            labels[labels==0], labels[labels==1] = 1, 0
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
+            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+
         boolq = boolq.map(lambda x: dict(text=x["passage"] + f" {tokenizer.sep_token} " + x["question"]), remove_columns=['question', 'passage'])
+        mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, boolq], ["train", "validation"], ["label", "text"])
+        classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         classifier_data = self.prepare_classifier(model_dict, boolq, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
@@ -1079,12 +1095,6 @@ class SuperGlueTest:
         from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
-        scitail = load_dataset("scitail", "tsv_format").map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
-        for split in ["train", "validation", "test"]:
-            labels = np.array([0 if lbl == "entails" else 1 for lbl in list(scitail[split]["label"])]).astype(int)
-            scitail[split] = scitail[split].remove_columns(['label'])
-            scitail[split] = scitail[split].add_column("label", labels)
-        
         mnli_copa_rte_cb, _, _ = self.get_mnli_copa_rte_cb(tokenizer)
         scitail = self.get_scitail(tokenizer)
         cosmos_qa = self.get_cosmos_qa(tokenizer)
