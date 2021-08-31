@@ -1266,7 +1266,7 @@ class SuperGlueTest:
 
         del mnli_copa_rte_cb["validation"]
         swag_hellaswag = merge_datasets_as_df([hellaswag, swag, copa], ["train", "validation"], ["label", "text"])
-        classifier_data = self.prepare_classifier(model_dict, swag, device, 1, "swag_hellaswag", rank, max_epochs=2)
+        classifier_data = self.prepare_classifier(model_dict, swag_hellaswag, device, 1, "swag_hellaswag", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=3)
