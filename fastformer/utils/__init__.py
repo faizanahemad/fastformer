@@ -1220,6 +1220,8 @@ class CoOccurenceModel(PreTrainedModel):
         from sklearn.decomposition import PCA
         from transformers import AutoModelForMaskedLM
         model = AutoModelForMaskedLM.from_pretrained(model_name).eval()
+        for p in model.parameters():
+            p.requires_grad = False
         config = model.config
         self.config = config
         self.tokenizer = tokenizer
