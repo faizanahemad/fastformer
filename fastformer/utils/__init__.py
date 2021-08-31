@@ -1245,6 +1245,7 @@ class CoOccurenceModel(PreTrainedModel):
                                  nn.Linear(config.hidden_size, channels))
         init_weights(conv1, 0.01)
         init_weights(project, 0.01)
+        init_weights(self.ffn, 0.01)
         # if window <= 3:
         #     conv1 = nn.Conv2d(256, 256, (1, window), groups=8)
         #     conv2 = nn.Conv2d(256, config.hidden_size // 2, (1, window+1), groups=8)
@@ -1270,7 +1271,7 @@ class CoOccurenceModel(PreTrainedModel):
 
         self.ln1 = nn.Sequential(project, nn.GELU(), nn.LayerNorm(channels * 2, eps=config.layer_norm_eps))
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
-        self.init_weights()
+
         self.tie_weights()
 
     def _init_weights(self, module):
