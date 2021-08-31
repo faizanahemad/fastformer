@@ -1226,7 +1226,7 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        channels = 256
+        channels = 512
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
@@ -1237,12 +1237,11 @@ class CoOccurenceModel(PreTrainedModel):
         assert config.hidden_size % 8 == 0
         #
         project = nn.Linear(channels, channels * 2)
-        conv1 = nn.Conv2d(channels * 2, config.hidden_size * 2, (1, 2 * window), groups=16)
+        conv1 = nn.Conv2d(channels * 2, config.hidden_size * 4, (1, 2 * window), groups=16)
         self.conv = nn.Sequential(conv1, nn.GELU())
-        self.ffn = nn.Sequential(nn.Linear(config.hidden_size * 2, config.hidden_size),
+        self.ffn = nn.Sequential(nn.Linear(config.hidden_size * 4, config.hidden_size),
                                  nn.GELU(),
-                                 nn.Linear(config.hidden_size, channels),
-                                 nn.LayerNorm(channels, eps=config.layer_norm_eps))
+                                 nn.Linear(config.hidden_size, channels))
         init_weights(conv1, 0.01)
         init_weights(project, 0.01)
         # if window <= 3:
@@ -1310,7 +1309,7 @@ class CoOccurenceModel(PreTrainedModel):
         embeddings = self.ln1(self.word_embeddings(folded_inputs))
         embeddings = embeddings.permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
-        embeddings = self.ffn(embeddings)
+        embeddings = embeddings + self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)

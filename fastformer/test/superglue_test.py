@@ -749,6 +749,7 @@ class SuperGlueTest:
 
         boolq = boolq.map(lambda x: dict(text=x["passage"] + f" {tokenizer.sep_token} " + x["question"]), remove_columns=['question', 'passage'])
         mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, boolq], ["train", "validation"], ["label", "text"])
+        del mnli_copa_rte_cb["validation"]
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
@@ -794,6 +795,7 @@ class SuperGlueTest:
                       remove_columns=['sentence1', 'sentence2', "word"])
         wic["train"] = concatenate_datasets((wic["train"], wic_reversed["train"]))
         mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, qa_srl, wic, qqp], ["train", "validation"], ["label", "text"])
+        del mnli_copa_rte_cb["validation"]
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
@@ -1171,6 +1173,7 @@ class SuperGlueTest:
             labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+        del mnli_copa_rte_cb["validation"]
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=2)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
         model_dict["model"] = classifier_data["model"]
@@ -1260,7 +1263,8 @@ class SuperGlueTest:
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
             mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
 
-        # mnli_copa_rte_cb = merge_datasets_as_df([mnli_copa_rte_cb, copa], ["train", "validation"], ["label", "text"])
+
+        del mnli_copa_rte_cb["validation"]
         classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=3)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
