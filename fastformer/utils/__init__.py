@@ -1317,10 +1317,10 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         student_loss = 0.0
         if self.training and torch.is_grad_enabled():
-            token_locations = torch.logical_and(attention_mask.bool(),
-                                                input_ids != self.tokenizer.bos_token_id,
-                                                input_ids != self.tokenizer.eos_token_id,
-                                                torch.rand(input_ids.size(), device=input_ids.device) < 0.1)
+            token_locations = torch.logical_and(torch.logical_and(attention_mask.bool(),
+                                                input_ids != self.tokenizer.bos_token_id),
+                                                torch.logical_and(input_ids != self.tokenizer.eos_token_id,
+                                                torch.rand(input_ids.size(), device=input_ids.device) < 0.1))
             roberta_inputs = input_ids.clone()
             roberta_inputs[token_locations] = self.tokenizer.mask_token_id
             with torch.no_grad():
