@@ -818,7 +818,7 @@ def train(local_rank, args):
 
         samples_processed += int(batch[key].size(0))
         samples_processed_this_log_iter += int(batch[key].size(0))
-        validation_iter = ((step + 2) % log_every_steps == 0 and (step + 1) % iter_size != 0) or step == 0
+        validation_iter = (step + 1) % log_every_steps == 0 or step == 0
         model_start = time.time()
         if no_sync and (step + 1) % iter_size != 0 and hasattr(model, "no_sync"):
             with model.no_sync():
