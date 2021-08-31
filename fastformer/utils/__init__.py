@@ -1309,7 +1309,7 @@ class CoOccurenceModel(PreTrainedModel):
         embeddings = self.ln1(self.word_embeddings(folded_inputs))
         embeddings = embeddings.permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
-        embeddings = embeddings + self.ffn(embeddings)
+        embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
