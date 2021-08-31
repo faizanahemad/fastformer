@@ -1232,7 +1232,7 @@ class CoOccurenceModel(PreTrainedModel):
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
         self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
-        del model
+        self.model = model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
@@ -1312,6 +1312,7 @@ class CoOccurenceModel(PreTrainedModel):
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
+        student_loss = 0.0
         if self.training and torch.is_grad_enabled():
             token_locations = torch.logical_and(attention_mask.bool(),
                                                 input_ids != self.tokenizer.bos_token_id,
@@ -1319,6 +1320,10 @@ class CoOccurenceModel(PreTrainedModel):
                                                 torch.rand(input_ids.size(), device=input_ids.device) < 0.1)
             roberta_inputs = input_ids.clone()
             roberta_inputs[token_locations] = self.tokenizer.mask_token_id
+            with torch.no_grad():
+                roberta_logits = torch.softmax(self.roberta(roberta_inputs).logits[token_locations], -1)
+            roberta_matching = torch.softmax(prediction_scores[token_locations], -1)
+            student_loss = ((roberta_matching - roberta_logits) ** 2).sum(-1).mean()
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
@@ -1326,8 +1331,9 @@ class CoOccurenceModel(PreTrainedModel):
         accuracy = word_accuracy[attention_mask].float().mean().item()
         _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
         word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
+        masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss.mean(), accuracy=accuracy, word_accuracy=word_accuracy,
+        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss, student_loss=student_loss, accuracy=accuracy, word_accuracy=word_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
 
