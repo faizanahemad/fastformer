@@ -1218,7 +1218,8 @@ class CoOccurenceModel(PreTrainedModel):
     def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
         super().__init__(PretrainedConfig())
         from sklearn.decomposition import PCA
-        model = AutoModel.from_pretrained(model_name)
+        from transformers import AutoModelForMaskedLM
+        model = AutoModelForMaskedLM.from_pretrained(model_name).eval()
         config = model.config
         self.config = config
         self.tokenizer = tokenizer
@@ -1230,7 +1231,7 @@ class CoOccurenceModel(PreTrainedModel):
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
-        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.embeddings.word_embeddings.weight.detach().numpy())))
+        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
         del model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
@@ -1311,12 +1312,20 @@ class CoOccurenceModel(PreTrainedModel):
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
+        if self.training and torch.is_grad_enabled():
+            token_locations = torch.logical_and(attention_mask.bool(),
+                                                input_ids != self.tokenizer.bos_token_id,
+                                                input_ids != self.tokenizer.eos_token_id,
+                                                torch.rand(input_ids.size(), device=input_ids.device) < 0.1)
+            roberta_inputs = input_ids.clone()
+            roberta_inputs[token_locations] = self.tokenizer.mask_token_id
+
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
-        word_accuracy = (lm_predictions == input_ids).contiguous()
+        word_accuracy = (lm_predictions == input_ids)
         accuracy = word_accuracy[attention_mask].float().mean().item()
         _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
-        word_ce = torch.log(1 + masked_lm_loss.detach().view(b, s))
+        word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
 
         return dict(loss=masked_lm_loss.mean(), accuracy=accuracy, word_accuracy=word_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
