@@ -1324,7 +1324,7 @@ class CoOccurenceModel(PreTrainedModel):
             roberta_inputs = input_ids.clone()
             roberta_inputs[token_locations] = self.tokenizer.mask_token_id
             with torch.no_grad():
-                roberta_logits = torch.softmax(self.roberta(roberta_inputs).logits[token_locations], -1)
+                roberta_logits = torch.softmax(self.model(roberta_inputs).logits[token_locations], -1)
             roberta_matching = torch.softmax(prediction_scores[token_locations], -1)
             student_loss = ((roberta_matching - roberta_logits) ** 2).sum(-1).mean()
 
