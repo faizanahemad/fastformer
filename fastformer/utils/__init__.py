@@ -1318,7 +1318,7 @@ class CoOccurenceModel(PreTrainedModel):
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
         embeddings = self.word_embeddings(folded_inputs)
         mixer_embeddings = self.mixer(embeddings.view(b * s, 2 * self.window, embeddings.size(-1))).mean(1).view(b, s, self.channels)
-        embeddings = self.ln1(embeddings)
+        embeddings = self.ln1(mixer_embeddings)
         embeddings = embeddings.permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings) + mixer_embeddings
