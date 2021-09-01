@@ -19,3 +19,14 @@ dataset_448.save_to_disk("/home/ahemf/processed/c4_448")
 c4 = DatasetDict.load_from_disk("/home/ahemf/processed/c4_448")
 dsets = Dataset.load_from_disk("/home/ahemf/processed/dsets_448")
 
+c4['train'] = c4['train'].add_column('dataset', ['c4'] * len(c4['train']))
+c4['train'] = c4['train'].remove_columns(['url', 'timestamp'])
+c4['validation'] = c4['validation'].remove_columns(['url', 'timestamp'])
+c4['validation'] = c4['validation'].add_column('dataset', ['c4'] * len(c4['validation']))
+
+dataset_col = dsets['dataset']
+dsets = dsets.remove_columns(["dataset"])
+dsets = dsets.add_column("dataset", dataset_col)
+
+c4["train"] = concatenate_datasets([c4["train"], dsets])
+c4.save_to_disk("/home/ahemf/processed/c4_extended")
