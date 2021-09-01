@@ -1337,7 +1337,7 @@ class CoOccurenceModel(PreTrainedModel):
             word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss,
+        return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss,
                     accuracy=accuracy, word_accuracy=word_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
