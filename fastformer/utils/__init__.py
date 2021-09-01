@@ -1321,7 +1321,7 @@ class CoOccurenceModel(PreTrainedModel):
         wide_mixer_embeddings = mixer_embeddings.mean(1).view(b, s, self.channels)
         mixer_embeddings = mixer_embeddings.view(b, s, 2 * self.window, self.channels)
         embeddings = self.ln1(mixer_embeddings)
-        embeddings = embeddings.permute(0, 3, 1, 2) + mixer_embeddings.permute(0, 3, 1, 2)
+        embeddings = embeddings.permute(0, 3, 1, 2) + mixer_embeddings.repeat((1,1,1,2)).permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings) + wide_mixer_embeddings
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
