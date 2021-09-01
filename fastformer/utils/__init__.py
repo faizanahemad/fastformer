@@ -930,9 +930,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             elif "base" in model_name or "small" in model_name:
                 model_name = "roberta-base"
             tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
-            if model_type == "smixer":
-                model = SMixerCoOccurenceModel(window, model_name, tokenizer)
-            elif model_type == "mixer":
+            if model_type == "mixer":
                 model = MixerCoOccurenceModel(window, model_name, tokenizer)
             else:
                 model = CoOccurenceModel(window, model_name, tokenizer)
@@ -1239,22 +1237,20 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        channels = 512
+        channels = config.hidden_size
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
         self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
-        self.model = model
+        del  model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
         #
-        project = nn.Linear(channels, channels * 2)
-        conv1 = nn.Conv2d(channels * 2, config.hidden_size * 4, (1, 2 * window), groups=16)
+        conv1 = nn.Conv2d(config.hidden_size, config.hidden_size * 4, (1, 2 * window), groups=16)
         self.conv = nn.Sequential(conv1, nn.GELU())
-        self.ffn = nn.Sequential(nn.Linear(config.hidden_size * 4, config.hidden_size),
-                                 nn.GELU(),
-                                 nn.Linear(config.hidden_size, channels))
+        self.mixer = MLPMixer(sequence_size=2 * window, channels=channels, dim=config.hidden_size, depth=1)
+        self.ffn = nn.Linear(config.hidden_size * 4, config.hidden_size)
         init_weights(conv1, 0.01)
         init_weights(project, 0.01)
         init_weights(self.ffn, 0.01)
@@ -1281,7 +1277,8 @@ class CoOccurenceModel(PreTrainedModel):
         #                              nn.Linear(config.hidden_size, 256),
         #                              nn.LayerNorm(256, eps=config.layer_norm_eps))
 
-        self.ln1 = nn.Sequential(project, nn.GELU(), nn.LayerNorm(channels * 2, eps=config.layer_norm_eps))
+        self.ln1 = nn.Sequential(nn.Linear(config.hidden_size, config.hidden_size), nn.GELU(), nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps))
+        init_weights(self.ln1, 0.01)
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
 
         self.tie_weights()
@@ -1320,29 +1317,13 @@ class CoOccurenceModel(PreTrainedModel):
         # labels = folded_inputs[:, :, self.window].contiguous()
         # assert torch.all(labels == input_ids).item()
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
-        embeddings = self.ln1(self.word_embeddings(folded_inputs))
+        embeddings = self.word_embeddings(folded_inputs)
+        mixer_embeddings = self.mixer(embeddings.view(b * s, 2 * self.window, embeddings.size(-1))).mean(1).view(b, s, self.channels)
+        embeddings = self.ln1(embeddings)
         embeddings = embeddings.permute(0, 3, 1, 2)
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
-        embeddings = self.ffn(embeddings)
+        embeddings = self.ffn(embeddings) + mixer_embeddings
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
-        student_loss = 0.0
-        teacher_accuracy = 0.0
-        if self.training and torch.is_grad_enabled():
-            token_locations = torch.logical_and(torch.logical_and(attention_mask.bool(),
-                                                input_ids != self.tokenizer.bos_token_id),
-                                                torch.logical_and(input_ids != self.tokenizer.eos_token_id,
-                                                torch.rand(input_ids.size(), device=input_ids.device) < 0.1))
-            roberta_inputs = input_ids.clone()
-            roberta_inputs[token_locations] = self.tokenizer.mask_token_id
-            with torch.no_grad():
-                # roberta_logits = torch.softmax(self.model(roberta_inputs).logits[token_locations], -1)
-                roberta_logits = self.model(roberta_inputs).logits[token_locations]
-            # roberta_matching = torch.softmax(prediction_scores[token_locations], -1)
-            roberta_matching = prediction_scores[token_locations]
-            # student_loss = 10.0 * (torch.abs(roberta_matching - roberta_logits)).sum(-1).mean()
-            student_loss = 10 * ((roberta_matching - roberta_logits) ** 2).mean()
-            teacher_accuracy = (input_ids[token_locations] == roberta_logits.argmax(-1)).float().mean().item()
-            # print(token_locations.sum(-1), token_locations.sum(), input_ids.size(), roberta_matching.size(), roberta_logits.size())
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
@@ -1357,8 +1338,8 @@ class CoOccurenceModel(PreTrainedModel):
             word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss, student_loss=student_loss, 
-                    accuracy=accuracy, word_accuracy=word_accuracy, teacher_accuracy=teacher_accuracy,
+        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss,
+                    accuracy=accuracy, word_accuracy=word_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
 
@@ -1481,89 +1462,7 @@ class MixerCoOccurenceModel(PreTrainedModel):
         # assert torch.all(labels == input_ids).item()
         folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
         embeddings = self.ln1(self.word_embeddings(folded_inputs))   # B, S, 2*W, C
-        embeddings = embeddings.view(b*s, 2*self.window, embeddings.size(-1))
-        embeddings = self.conv(embeddings).mean(1).view(b, s, self.config.hidden_size)
-        embeddings = self.ffn(embeddings)
-        prediction_scores = self.lm_head(embeddings)  # B, S, vocab
-        masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
-        lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        accuracy = (lm_predictions == input_ids)[attention_mask].float().mean().item()
-        # _, top_k_alternatives = prediction_scores.detach().topk(16, -1)
-        return dict(loss=masked_lm_loss.mean(), accuracy=accuracy,
-                    word_ce=masked_lm_loss.detach().view(b, s), top_k_alternatives=None)
-
-
-class SMixerCoOccurenceModel(PreTrainedModel):
-    def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
-        super().__init__(PretrainedConfig())
-        from sklearn.decomposition import PCA
-        model = AutoModel.from_pretrained(model_name)
-        config = model.config
-        self.config = config
-        self.tokenizer = tokenizer
-        self.pad_token_id = tokenizer.pad_token_id
-        self.mask_token_id = tokenizer.mask_token_id
-        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
-        self.window = window
-        channels = 256
-        self.channels = channels
-        self.lm_head = nn.Linear(channels, config.vocab_size)
-        self.word_embeddings = nn.Embedding(config.vocab_size, channels)
-        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.embeddings.word_embeddings.weight.detach().numpy())))
-        del model
-        self.kernel_size = (2 * window + 1)
-        self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
-        assert config.hidden_size % 8 == 0
-
-        #
-
-        self.conv = MLPMixer(sequence_size=2*window, channels=channels, dim=channels, depth=3)
-        self.ffn = nn.Sequential(nn.Linear(channels, config.hidden_size),
-                                 nn.GELU(),
-                                 nn.Linear(config.hidden_size, channels),
-                                 nn.LayerNorm(channels, eps=config.layer_norm_eps))
-        self.ln1 = nn.LayerNorm(channels, eps=config.layer_norm_eps)
-        self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
-        self.init_weights()
-        self.tie_weights()
-
-    def _init_weights(self, module):
-        """Initialize the weights"""
-        if isinstance(module, nn.Linear):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def get_output_embeddings(self):
-        return self.lm_head
-
-    def set_output_embeddings(self, new_embeddings):
-        self.lm_head = new_embeddings
-
-    def get_input_embeddings(self):
-        return self.word_embeddings
-
-    def set_input_embeddings(self, new_embeddings):
-        self.word_embeddings = new_embeddings
-
-    def forward(self, input_ids, attention_mask, *args, **kwargs):
-        b, s = input_ids.shape[:2]
-        folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype).transpose(1, 2)
-        # labels = folded_inputs[:, :, self.window].contiguous()
-        # assert torch.all(labels == input_ids).item()
-        folded_inputs = torch.cat((folded_inputs[:, :, :self.window], folded_inputs[:, :, self.window+1:]), -1)
-        embeddings = self.ln1(self.word_embeddings(folded_inputs))   # B, S, 2*W, C
-        embeddings = embeddings.view(b*s, 2*self.window, embeddings.size(-1))
-        embeddings = self.conv(embeddings).mean(1).view(b, s, self.channels)
+        embeddings = self.conv(embeddings.view(b*s, 2*self.window, embeddings.size(-1))).mean(1).view(b, s, self.config.hidden_size)
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
