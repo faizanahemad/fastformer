@@ -1316,6 +1316,7 @@ class CoOccurenceModel(PreTrainedModel):
         embeddings = self.ffn(embeddings)
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
         student_loss = 0.0
+        teacher_accuracy = 0.0
         if self.training and torch.is_grad_enabled():
             token_locations = torch.logical_and(torch.logical_and(attention_mask.bool(),
                                                 input_ids != self.tokenizer.bos_token_id),
@@ -1330,6 +1331,7 @@ class CoOccurenceModel(PreTrainedModel):
             roberta_matching = prediction_scores[token_locations]
             # student_loss = 10.0 * (torch.abs(roberta_matching - roberta_logits)).sum(-1).mean()
             student_loss = 10 * ((roberta_matching - roberta_logits) ** 2).mean()
+            teacher_accuracy = (input_ids[token_locations] == roberta_logits.argmax(-1)).float().mean().item()
             # print(token_locations.sum(-1), token_locations.sum(), input_ids.size(), roberta_matching.size(), roberta_logits.size())
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
@@ -1345,7 +1347,8 @@ class CoOccurenceModel(PreTrainedModel):
             word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss, student_loss=student_loss, accuracy=accuracy, word_accuracy=word_accuracy,
+        return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss, student_loss=student_loss, 
+                    accuracy=accuracy, word_accuracy=word_accuracy, teacher_accuracy=teacher_accuracy,
                     word_ce=word_ce, top_k_alternatives=top_k_alternatives)
 
 

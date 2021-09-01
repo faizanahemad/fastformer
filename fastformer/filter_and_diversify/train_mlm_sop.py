@@ -471,7 +471,6 @@ class RTDMLMModel(PreTrainedModel):
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[mask_indices].mean().item()
             only_rtd_lm_accuracy = lm_accuracy[attention_mask.view(-1)]
-            print(rtd_labels.size(), only_rtd_lm_accuracy.size())
             only_rtd_lm_accuracy = only_rtd_lm_accuracy.reshape(-1)[rtd_labels].mean().item()
             only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
