@@ -691,10 +691,12 @@ def train(local_rank, args):
         trainable_model = model
         mlm_sop_enabled = False
     elif args["hard_mlm"]:
-        masking_model, _ = get_backbone("co-oc-7-roberta-base", False, dropout_prob=0.0)
+        masking_model, _ = get_backbone("co-oc-7-roberta-large", False, dropout_prob=0.0)
         state_dict = torch.load(args["hard_mlm_model"], map_location='cpu')
         masking_model.load_state_dict(state_dict, strict=True)
         masking_model = masking_model.eval()
+        masking_model.model = None
+        del masking_model.model
         model = RTDMLMModel(backbone, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
         mlm_sop_enabled = False
     else:

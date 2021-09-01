@@ -1324,10 +1324,13 @@ class CoOccurenceModel(PreTrainedModel):
             roberta_inputs = input_ids.clone()
             roberta_inputs[token_locations] = self.tokenizer.mask_token_id
             with torch.no_grad():
-                roberta_logits = torch.softmax(self.model(roberta_inputs).logits[token_locations], -1)
-            roberta_matching = torch.softmax(prediction_scores[token_locations], -1)
-            student_loss = 10.0 * (torch.abs(roberta_matching - roberta_logits)).sum(-1).mean()
-            print(token_locations.sum(-1), token_locations.sum(), input_ids.size(), roberta_matching.size(), roberta_logits.size())
+                # roberta_logits = torch.softmax(self.model(roberta_inputs).logits[token_locations], -1)
+                roberta_logits = self.model(roberta_inputs).logits[token_locations]
+            # roberta_matching = torch.softmax(prediction_scores[token_locations], -1)
+            roberta_matching = prediction_scores[token_locations]
+            # student_loss = 10.0 * (torch.abs(roberta_matching - roberta_logits)).sum(-1).mean()
+            student_loss = ((roberta_matching - roberta_logits) ** 2).mean()
+            # print(token_locations.sum(-1), token_locations.sum(), input_ids.size(), roberta_matching.size(), roberta_logits.size())
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
