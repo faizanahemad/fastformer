@@ -1237,7 +1237,7 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        channels = 512
+        channels = 384
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
