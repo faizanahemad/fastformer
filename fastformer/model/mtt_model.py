@@ -61,25 +61,6 @@ from fastformer.model.lib import *
 from fastformer.utils import *
 from fastformer.model import FastFormerPreTrainedModel
 
-def log(t, eps=1e-8):
-    return torch.log(t + eps)
-
-def gumbel_noise(t):
-    noise = torch.zeros_like(t).uniform_(0, 1)
-    return -log(-log(noise))
-
-def gumbel_sample(t, temperature=2.0):
-    return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
-
-
-def temperature_sampling(logits, temperature=2.0):
-    if temperature is None or temperature == 0.0:
-        return torch.argmax(logits)
-    probs = F.softmax(logits / temperature)
-    pred_ids = probs.view(-1, probs.size(-1)).clip(0.0, 1.0).multinomial(1, replacement=False)
-    if logits.ndim == 3:
-        pred_ids = pred_ids.view(*probs.shape[:2])
-    return pred_ids
 
 
 def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_alpha, reinit=False, train_layer_normalizers=True, enable_layer_normalizers_statistics=False, dropout_prob=0.05):

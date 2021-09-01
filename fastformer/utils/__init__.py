@@ -1334,10 +1334,15 @@ class CoOccurenceModel(PreTrainedModel):
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
+
         word_accuracy = (lm_predictions == input_ids)
         accuracy = word_accuracy[attention_mask].float().mean().item()
-        _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
-        word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
+
+        top_k_alternatives = None
+        word_ce = None
+        if not torch.is_grad_enabled():
+            _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
+            word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         masked_lm_loss = masked_lm_loss.mean()
 
         return dict(loss=masked_lm_loss + student_loss, masked_lm_loss=masked_lm_loss, student_loss=student_loss, accuracy=accuracy, word_accuracy=word_accuracy,
@@ -1565,6 +1570,26 @@ def merge_datasets_as_df(datasets: list, splits: list, columns: list):
         result[split] = Dataset.from_pandas(pd.concat(dsets))
     result = DatasetDict(result)
     return result
+
+def log(t, eps=1e-8):
+    return torch.log(t + eps)
+
+def gumbel_noise(t):
+    noise = torch.zeros_like(t).uniform_(0, 1)
+    return -log(-log(noise))
+
+def gumbel_sample(t, temperature=2.0):
+    return ((t / temperature) + gumbel_noise(t)).argmax(dim=-1)
+
+
+def temperature_sampling(logits, temperature=2.0):
+    if temperature is None or temperature == 0.0:
+        return torch.argmax(logits)
+    probs = F.softmax(logits / temperature)
+    pred_ids = probs.view(-1, probs.size(-1)).clip(0.0, 1.0).multinomial(1, replacement=False)
+    if logits.ndim == 3:
+        pred_ids = pred_ids.view(*probs.shape[:2])
+    return pred_ids
 
 
 
