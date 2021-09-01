@@ -812,6 +812,16 @@ def init_weights(module, std=None):
             nn.init.constant_(module.bias, 0.0)
 
 
+def momentum_param_copy(student, teacher, m):
+    named_student_params = dict(getattr(student, "module", student).named_parameters())
+    named_teacher_params = teacher.named_parameters()
+    with torch.no_grad():
+        for name_k, param_k in named_teacher_params:
+            if name_k in named_student_params:
+                param_k.data.mul_(m).add_((1 - m) * named_student_params[name_k].detach().data)
+
+
+
 def student_teacher_param_update(student, teacher, m, device=None):
     if device is not None:
         teacher = teacher.to(device)

@@ -339,6 +339,11 @@ class RTDMLMModel(PreTrainedModel):
         for p in self.masking_model.parameters():
             p.requires_grad = False
         self.backbone = backbone
+        self.momentum_backbone = copy.deepcopy(backbone)
+        self.momentum_backbone.load_state_dict(backbone.state_dict())
+        self.copy_momentum = 0.9
+        for p in self.momentum_backbone.parameters():
+            p.requires_grad = False
         self.mlm_w = mlm_w
         self.tokenizer = tokenizer
         self.rtd_nn = nn.Linear(hidden_size, 1)
@@ -349,6 +354,10 @@ class RTDMLMModel(PreTrainedModel):
 
         self.lm_head = RobertaLMHead(backbone.config)
         self.tie_weights()
+        self.momentum_lm_head = copy.deepcopy(self.lm_head)
+        self.momentum_lm_head.load_state_dict(self.lm_head.state_dict())
+        for p in self.momentum_lm_head.parameters():
+            p.requires_grad = False
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
@@ -375,13 +384,13 @@ class RTDMLMModel(PreTrainedModel):
         selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.5)
         mlm_input_ids[selected_mask_locations] = self.tokenizer.mask_token_id
         with torch.no_grad():
-            outputs = self.backbone(
+            outputs = self.momentum_backbone(
                 mlm_input_ids,
                 attention_mask=attention_mask,
                 return_dict=False,
             )
             sequence_output = outputs[0]
-            teacher_prediction_scores = self.lm_head(sequence_output)[selected_mask_locations]
+            teacher_prediction_scores = self.momentum_lm_head(sequence_output)[selected_mask_locations]
             lm_predictions = teacher_prediction_scores.detach().argmax(dim=-1)
             mlm_teacher_accuracy = (lm_predictions == label_mlm_input_ids[selected_mask_locations]).float().mean().item()
 
@@ -399,7 +408,7 @@ class RTDMLMModel(PreTrainedModel):
             prediction_scores = self.lm_head(sequence_output)[rtd_locations]
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
         rtd_replacement_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations]).float().mean().item()
-        sampled_replacements = temperature_sampling(prediction_scores).view(-1)
+        sampled_replacements = temperature_sampling(prediction_scores, 1.0).view(-1)
         input_ids[rtd_locations] = sampled_replacements
         rtd_post_replacement_accuracy = (sampled_replacements == label_mlm_input_ids[rtd_locations]).float().mean().item()
 
@@ -455,6 +464,8 @@ class RTDMLMModel(PreTrainedModel):
         only_rtd_lm_accuracy = None
         mlm_student_accuracy = None
         if validation_iter:
+            momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
+            momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
             rtd_labels = rtd_labels.bool()
             not_rtd_labels = torch.logical_not(rtd_labels)
             not_rtd_labels_mean = not_rtd_labels.float().mean().item()  # majority class prediction
