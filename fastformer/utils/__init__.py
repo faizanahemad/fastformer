@@ -1237,20 +1237,20 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        channels = config.hidden_size
+        channels = 512
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
         self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
-        del  model
+        del model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
         #
         conv1 = nn.Conv2d(config.hidden_size, config.hidden_size * 4, (1, 2 * window), groups=16)
         self.conv = nn.Sequential(conv1, nn.GELU())
-        self.mixer = MLPMixer(sequence_size=2 * window, channels=channels, dim=config.hidden_size, depth=1)
-        self.ffn = nn.Linear(config.hidden_size * 4, config.hidden_size)
+        self.mixer = MLPMixer(sequence_size=2 * window, channels=channels, dim=channels, depth=1)
+        self.ffn = nn.Linear(config.hidden_size * 4, channels)
         init_weights(conv1, 0.01)
         init_weights(self.ffn, 0.01)
         # if window <= 3:
