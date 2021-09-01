@@ -1252,7 +1252,6 @@ class CoOccurenceModel(PreTrainedModel):
         self.mixer = MLPMixer(sequence_size=2 * window, channels=channels, dim=config.hidden_size, depth=1)
         self.ffn = nn.Linear(config.hidden_size * 4, config.hidden_size)
         init_weights(conv1, 0.01)
-        init_weights(project, 0.01)
         init_weights(self.ffn, 0.01)
         # if window <= 3:
         #     conv1 = nn.Conv2d(256, 256, (1, window), groups=8)
