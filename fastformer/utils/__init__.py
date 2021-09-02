@@ -1237,7 +1237,7 @@ class CoOccurenceModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
         self.window = window
-        channels = 256
+        channels = config.hidden_size
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
@@ -1321,7 +1321,7 @@ class CoOccurenceModel(PreTrainedModel):
         wide_mixer_embeddings = mixer_embeddings.mean(1).view(b, s, self.channels)
         mixer_embeddings = mixer_embeddings.view(b, s, 2 * self.window, self.channels)
         embeddings = self.ln1(mixer_embeddings)
-        embeddings = embeddings.permute(0, 3, 1, 2) + mixer_embeddings.repeat((1,1,1,4)).permute(0, 3, 1, 2)
+        embeddings = embeddings.permute(0, 3, 1, 2) + mixer_embeddings.permute(0, 3, 1, 2)  # .repeat((1,1,1,4))
         embeddings = self.conv(embeddings).squeeze(-1).transpose(1, 2)
         embeddings = self.ffn(embeddings) + wide_mixer_embeddings
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
