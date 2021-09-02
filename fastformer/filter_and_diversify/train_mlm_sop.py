@@ -466,9 +466,9 @@ class RTDMLMModel(PreTrainedModel):
         non_rtd_accuracy = None
         only_rtd_lm_accuracy = None
         mlm_student_accuracy = None
+        momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
+        momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
         if validation_iter:
-            momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
-            momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
             rtd_labels = rtd_labels.bool()
             not_rtd_labels = torch.logical_not(rtd_labels)
             not_rtd_labels_mean = not_rtd_labels.float().mean().item()  # majority class prediction
