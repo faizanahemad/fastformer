@@ -853,12 +853,17 @@ def change_dropout(module: nn.Module, dropout_rate=0.0):
     if hasattr(module, "config"):
         module.config.hidden_dropout_prob = dropout_rate
         module.config.attention_probs_dropout_prob = dropout_rate
+    # print("dropout_rate = %s" % dropout_rate)
     str_attrs = dir(module)
     attrs = [(attr, getattr(module, attr, None)) for attr in str_attrs if attr not in  ["base_model", "base_model_prefix"]]
     attrs = [(str_attr, attr) for (str_attr, attr) in attrs if isinstance(attr, (nn.Module, nn.ModuleList, nn.ModuleDict))]
     attrs = [x for (str_attr, attr) in attrs for x in (attr if isinstance(attr, nn.ModuleList) else (attr.values() if isinstance(attr, nn.ModuleDict) else [attr]))]
+    # print([attr for attr in attrs if isinstance(attr, nn.Dropout) or hasattr(attr, "dropout")])
     for attr in attrs:
-        change_dropout(attr)
+        change_dropout(attr, dropout_rate)
+    if isinstance(module, nn.Dropout):
+        # print("Found dropout_rate = %s" % dropout_rate)
+        module.p = dropout_rate
     if hasattr(module, "dropout"):
         module.dropout.p = dropout_rate
     if hasattr(module, "hidden_dropout"):

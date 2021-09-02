@@ -107,7 +107,7 @@ class ClassificationModel(nn.Module):
             self.ce = CrossEntropyLoss(ignore_index=-100)
 
         self.num_features = (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
-        self.head = nn.Linear(self.num_features, num_classes)
+        self.head = nn.Sequential(nn.Dropout(0.1), nn.Linear(self.num_features, self.num_features // 4), nn.GELU(), nn.Linear(self.num_features // 4, num_classes))
         self.num_classes = num_classes
         init_weights(self.head)
 
@@ -373,6 +373,7 @@ class SuperGlueTest:
 
                 tokenizer = AutoTokenizer.from_pretrained(model)
                 model = AutoModel.from_pretrained(model)
+            change_dropout(model, 0.1)
             model = model.train()
             for p in model.parameters():
                 p.requires_grad = self.finetune

@@ -370,7 +370,7 @@ class RTDMLMModel(PreTrainedModel):
         word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask.bool()), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
-        indices = torch.multinomial(word_ce, int(0.2 * ss), False)
+        indices = torch.multinomial(word_ce, int((0.15 + random.random() * 0.05) * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
         word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
@@ -395,9 +395,9 @@ class RTDMLMModel(PreTrainedModel):
             mlm_teacher_accuracy = (lm_predictions == label_mlm_input_ids[selected_mask_locations]).float().mean().item()
 
         rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
-        extra_masks = torch.logical_or(rtd_locations, torch.logical_and(torch.rand(input_ids.size(), device=input_ids.device) < 0.1, torch.logical_not(non_mask_locations)))
-        rtd_input_ids = input_ids.clone()
-        rtd_input_ids[extra_masks] = self.tokenizer.mask_token_id
+        # extra_masks = torch.logical_or(rtd_locations, torch.logical_and(torch.rand(input_ids.size(), device=input_ids.device) < 0.1, torch.logical_not(non_mask_locations)))
+        rtd_input_ids = label_mlm_input_ids.clone()
+        rtd_input_ids[rtd_locations] = self.tokenizer.mask_token_id
         with torch.no_grad():
             outputs = self.backbone(
                 rtd_input_ids,
@@ -408,7 +408,7 @@ class RTDMLMModel(PreTrainedModel):
             prediction_scores = self.lm_head(sequence_output)[rtd_locations]
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
         rtd_replacement_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations]).float().mean().item()
-        sampled_replacements = temperature_sampling(prediction_scores, 1.0).view(-1)
+        sampled_replacements = temperature_sampling(prediction_scores, 2.0).view(-1)
         input_ids[rtd_locations] = sampled_replacements
         rtd_post_replacement_accuracy = (sampled_replacements == label_mlm_input_ids[rtd_locations]).float().mean().item()
 
