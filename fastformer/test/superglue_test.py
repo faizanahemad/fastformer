@@ -1250,31 +1250,32 @@ class SuperGlueTest:
             remove_columns=["premise", 'question', "choice1", "choice2"])
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
-        mnli_copa_rte_cb, copa_rte_cb, _ = self.get_mnli_copa_rte_cb(tokenizer)
-        scitail = self.get_scitail(tokenizer)
-        cosmos_qa = self.get_cosmos_qa(tokenizer)
-        hellaswag = self.get_hellaswag(tokenizer)
-        swag = self.get_swag(tokenizer)
-        commonsense_qa = self.get_commonsense_qa(tokenizer)
-        mnli_copa_rte_cb = merge_datasets_as_df([scitail, copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
-        for split in ["train", "validation"]:
-            labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
-            labels[labels == 0], labels[labels == 1] = 1, 0
-            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
-            mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
+        if False:
+            mnli_copa_rte_cb, copa_rte_cb, _ = self.get_mnli_copa_rte_cb(tokenizer)
+            scitail = self.get_scitail(tokenizer)
+            cosmos_qa = self.get_cosmos_qa(tokenizer)
+            hellaswag = self.get_hellaswag(tokenizer)
+            swag = self.get_swag(tokenizer)
+            commonsense_qa = self.get_commonsense_qa(tokenizer)
+            mnli_copa_rte_cb = merge_datasets_as_df([scitail, copa_rte_cb, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
+            for split in ["train", "validation"]:
+                labels = np.array(mnli_copa_rte_cb[split]["label"]).clip(0, 1).astype(int)
+                labels[labels == 0], labels[labels == 1] = 1, 0
+                mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].remove_columns(['label'])
+                mnli_copa_rte_cb[split] = mnli_copa_rte_cb[split].add_column("label", labels)
 
 
-        del mnli_copa_rte_cb["validation"]
-        swag_hellaswag = merge_datasets_as_df([hellaswag, swag, copa], ["train", "validation"], ["label", "text"])
-        classifier_data = self.prepare_classifier(model_dict, swag_hellaswag, device, 1, "swag_hellaswag", rank, max_epochs=2)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
-        model_dict["model"] = classifier_data["model"]
-        classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=3)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
-        model_dict["model"] = classifier_data["model"]
-        classifier_data = self.prepare_classifier(model_dict, swag, device, 1, "swag", rank, max_epochs=2)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
-        model_dict["model"] = classifier_data["model"]
+            del mnli_copa_rte_cb["validation"]
+            swag_hellaswag = merge_datasets_as_df([hellaswag, swag, copa], ["train", "validation"], ["label", "text"])
+            classifier_data = self.prepare_classifier(model_dict, swag_hellaswag, device, 1, "swag_hellaswag", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+            model_dict["model"] = classifier_data["model"]
+            classifier_data = self.prepare_classifier(model_dict, mnli_copa_rte_cb, device, 1, "mnli_copa_rte_cb", rank, max_epochs=3)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+            model_dict["model"] = classifier_data["model"]
+            classifier_data = self.prepare_classifier(model_dict, swag, device, 1, "swag", rank, max_epochs=2)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=2)
+            model_dict["model"] = classifier_data["model"]
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
         classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
         if rank != 0:
