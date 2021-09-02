@@ -381,7 +381,8 @@ class RTDMLMModel(PreTrainedModel):
 
         mask_locations = input_ids == self.tokenizer.mask_token_id
         mlm_input_ids = label_mlm_input_ids.clone()
-        selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.5)
+        selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.25)
+        teacher_mask_proportion = (selected_mask_locations.sum() / mask_locations.sum()).item()
         mlm_input_ids[selected_mask_locations] = self.tokenizer.mask_token_id
         with torch.no_grad():
             outputs = self.momentum_backbone(
@@ -420,7 +421,7 @@ class RTDMLMModel(PreTrainedModel):
             rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
         accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
-        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy
+        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy, teacher_mask_proportion
 
     def get_output_embeddings(self):
         return self.lm_head.decoder
@@ -435,7 +436,7 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy = self.do_masking(input_ids, attention_mask, validation_iter)
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy, teacher_mask_proportion = self.do_masking(input_ids, attention_mask, validation_iter)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -492,7 +493,7 @@ class RTDMLMModel(PreTrainedModel):
         return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + distillation_loss, rtd_loss=rtd_loss.item(), distillation_loss=distillation_loss.item(),
                     mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
                     mlm_teacher_accuracy=mlm_teacher_accuracy, mlm_student_accuracy=mlm_student_accuracy, rtd_replacement_accuracy=rtd_replacement_accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
-                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy,
+                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, teacher_mask_proportion=teacher_mask_proportion,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
                     mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
