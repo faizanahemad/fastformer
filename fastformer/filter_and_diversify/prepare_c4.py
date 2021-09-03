@@ -30,3 +30,5 @@ dsets = dsets.add_column("dataset", dataset_col)
 
 c4["train"] = concatenate_datasets([c4["train"], dsets])
 c4.save_to_disk("/home/ahemf/processed/c4_extended")
+
+

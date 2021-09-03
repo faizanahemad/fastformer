@@ -150,6 +150,8 @@ def training_args():
                         help='Epochs')
     parser.add_argument('--weight_decay', default=0.01, type=float,
                         help='weight_decay')
+    parser.add_argument('--dropout', default=0.1, type=float,
+                        help='dropout')
 
     parser.add_argument('--hpo', required=False, type=str,
                         help='hpo dict with lr, epochs, batch_size, weight_decay, iter_size')
@@ -302,7 +304,7 @@ class wsc_proc:
 class SuperGlueTest:
     def __init__(self, location, model, device, tokenizer, rank, world_size, epochs, lr,
                  seed, batch_size, accumulation_steps,
-                 weight_decay, hpo=None, dataset_key=None, finetune=True):
+                 weight_decay, dropout, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.device = device
@@ -316,6 +318,7 @@ class SuperGlueTest:
         self.lr = lr
         self.epochs = epochs
         self.weight_decay = weight_decay
+        self.dropout = dropout
 
         self.batch_size = batch_size
         self.iter_size = accumulation_steps
@@ -373,7 +376,7 @@ class SuperGlueTest:
 
                 tokenizer = AutoTokenizer.from_pretrained(model)
                 model = AutoModel.from_pretrained(model)
-            change_dropout(model, 0.1)
+            change_dropout(model, self.dropout)
             model = model.train()
             for p in model.parameters():
                 p.requires_grad = self.finetune
@@ -1239,6 +1242,9 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def copa(self, model, copa, device, dataset_key, rank):
+        # TODO: Is the option even plausible as a training task. NS are options from other examples.
+        # TODO: Multi-View Choice, Question, Premise || Question, Premise, Choice || Premise, Choice (No question)
+        # TODO: Given Premise and one option, select between {'cause', 'effect'} as correct question.
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
         copa_c1 = copa.map(
@@ -1642,7 +1648,7 @@ def train(local_rank, args):
     model = args["pretrained_model"]
     _, tokenizer = get_backbone(args["pretrained_model"])
     SuperGlueTest(None, model, device, tokenizer, rank, args["world_size"], args["epochs"], args["lr"],
-                  args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
+                  args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"], args["dropout"],
                   args["hpo"], args["dataset_key"])()
     return
 
