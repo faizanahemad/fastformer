@@ -183,7 +183,8 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
 
 
 class MaskedLanguageSentenceOrderModelDataset(Dataset):
-    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True):
+    def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True,
+                 msop_or_insertion_enabled=False,):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         try:
             self.tokenizer = copy.deepcopy(tokenizer)
@@ -333,6 +334,8 @@ class RTDMLMModel(PreTrainedModel):
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
         self.config.gradient_checkpointing = True
+        self.distillation_loss_w = 1.0
+        self.rtd_temperature = 1.0
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
         self.masking_model = masking_model.eval()
@@ -383,7 +386,7 @@ class RTDMLMModel(PreTrainedModel):
 
         mask_locations = input_ids == self.tokenizer.mask_token_id
         mlm_input_ids = label_mlm_input_ids.clone()
-        selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.25)
+        selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.5)
         teacher_mask_proportion = (selected_mask_locations.sum() / mask_locations.sum()).item()
         mlm_input_ids[selected_mask_locations] = self.tokenizer.mask_token_id
         with torch.no_grad():
@@ -392,8 +395,8 @@ class RTDMLMModel(PreTrainedModel):
                 attention_mask=attention_mask,
                 return_dict=False,
             )
-            sequence_output = outputs[0]
-            teacher_prediction_scores = self.momentum_lm_head(sequence_output)[selected_mask_locations]
+            sequence_output = outputs[0][selected_mask_locations]
+            teacher_prediction_scores = self.momentum_lm_head(sequence_output)
             lm_predictions = teacher_prediction_scores.detach().argmax(dim=-1)
             mlm_teacher_accuracy = (lm_predictions == label_mlm_input_ids[selected_mask_locations]).float().mean().item()
 
@@ -466,8 +469,9 @@ class RTDMLMModel(PreTrainedModel):
         non_rtd_accuracy = None
         only_rtd_lm_accuracy = None
         mlm_student_accuracy = None
-        momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
-        momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
+        if self.distillation_loss_w > 0:
+            momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
+            momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
         if validation_iter:
             rtd_labels = rtd_labels.bool()
             not_rtd_labels = torch.logical_not(rtd_labels)
@@ -492,7 +496,7 @@ class RTDMLMModel(PreTrainedModel):
             only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + distillation_loss, rtd_loss=rtd_loss.item(), distillation_loss=distillation_loss.item(),
+        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + self.distillation_loss_w * distillation_loss, rtd_loss=rtd_loss.item(), distillation_loss=distillation_loss.item(),
                     mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
                     mlm_teacher_accuracy=mlm_teacher_accuracy, mlm_student_accuracy=mlm_student_accuracy, rtd_replacement_accuracy=rtd_replacement_accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
                     only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, teacher_mask_proportion=teacher_mask_proportion,
@@ -848,6 +852,22 @@ def train(local_rank, args):
     while steps_done < total_steps:
         random.seed(step)
         batch = dataloader()
+
+        if hasattr(getattr(model, "module", model), "distillation_loss_w"):
+            getattr(model, "module", model).distillation_loss_w = np.interp(steps_done,
+                                                                            [0, 10, total_steps // 5, total_steps // 4],
+                                                                            [1.0, 0.0, 0.0, 1.0])
+            if steps_done == (total_steps // 5):
+                momentum_param_copy(getattr(model, "module", model).backbone,
+                                    getattr(model, "module", model).momentum_backbone, 0.0)
+                momentum_param_copy(getattr(model, "module", model).lm_head,
+                                    getattr(model, "module", model).momentum_lm_head, 0.0)
+
+        if hasattr(getattr(model, "module", model), "rtd_temperature"):
+            getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
+                                                                        [0, total_steps // 5, total_steps // 4, total_steps // 2],
+                                                                        [1.0, 1.0, 2.0, 4.0])
+
 
         epoch = dataloader.epoch
 
