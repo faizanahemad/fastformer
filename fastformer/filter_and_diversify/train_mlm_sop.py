@@ -184,13 +184,14 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
 
 class MaskedLanguageSentenceOrderModelDataset(Dataset):
     def __init__(self, tokenizer, tokenizer_args: dict, dataset: Dataset, word_mask_proba=0.15, mlm_sop_enabled=True,
-                 msop_or_insertion_enabled=False,):
+                 hard_lm_enabled=False,):
         self.sent_detector = nltk.data.load('tokenizers/punkt/english.pickle')
         try:
             self.tokenizer = copy.deepcopy(tokenizer)
         except:
             self.tokenizer = tokenizer
         self.tokenizer_args = tokenizer_args
+        self.hard_lm_enabled = hard_lm_enabled
         self.dataset = dataset
         self.word_mask_proba = word_mask_proba
         self.vocab = list(tokenizer.get_vocab())
@@ -215,8 +216,8 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 text = " ".join(text.split()[:self.allowed_raw_length])
             length = len(text.strip().split())
 
+        seg_sep_token = f" {tokenizer.sep_token} "
         if self.mlm_sop_enabled:
-            seg_sep_token = f" {tokenizer.sep_token} "
             num_segments = 2
             segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
             num_segments = sum(segments != tokenizer.pad_token)
@@ -236,6 +237,34 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             results["label_mlm_input_ids"] = input_ids
             input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
             results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
+        elif self.hard_lm_enabled:
+            task = random.randint(0, 5)
+            if task == 0:
+                # Do nothing
+                pass
+            elif task == 1:
+                # Do MSOP
+                pass
+            elif task == 2:
+                # Do place of insert
+                pass
+            elif task == 3:
+                # Place of wrong insert, start , end
+                pass
+            elif task == 4:
+                # Place of deletion from middle
+                pass
+            elif task == 5:
+                # Reversed order without SEP token, detect where reversal has happened
+                pass
+            elif task == 6:
+                # NSP / SOP plain
+                pass
+            elif task == 7:
+                # select the correct option for mask token somewhere, negative option is sampled from same document.
+                pass
+
+
         else:
             tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
             results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze())

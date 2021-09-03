@@ -114,7 +114,7 @@ class ClassificationModel(nn.Module):
     def get_representations(self, input_ids, attention_mask, token_type_ids=None):
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         hidden_states = self.backbone(**inputs)["hidden_states"]
-        funnel_outputs = hidden_states[-1][:, 0] + hidden_states[-2][:, 0] + hidden_states[-3][:, 0] + hidden_states[-4][:, 0]
+        funnel_outputs = hidden_states[-1][:, 0] # + hidden_states[-2][:, 0] + hidden_states[-3][:, 0] + hidden_states[-4][:, 0]
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, label=None, token_type_ids=None, **kwargs):
