@@ -218,7 +218,7 @@ if __name__ == "__main__":
     lm_cmd += " > output.log 2>&1 & disown"
 
     mlm_cmd = "python train_mlm_sop.py --model_config roberta-large -n %s --nr %s"
-    mlm_cmd += " --total_steps 100000 --batch_size 4 --lr 0.0001 --weight_decay 0.0001 --gradient_clipping 3.0 --accumulation_steps 1"
+    mlm_cmd += " --total_steps 100000 --batch_size 4 --lr 0.0001 --weight_decay 0.0001 --gradient_clipping 10.0 --accumulation_steps 4"
     mlm_cmd += " --model_save_dir /home/ahemf/model_save_dir --model_save_name roberta-large-hard.pth --wandb_name hard-mlm"
     mlm_cmd += " --master_addr 0.0.0.0 --master_port 9999 --dataset /home/ahemf/processed_datasets/sbert_tfidf --log_every_steps 10 --num_workers 8 --mlm_w 10.0"
     mlm_cmd += " --hard_mlm --hard_mlm_model /home/ahemf/model_save_dir/cooc_7_roberta.pth --sampling_column sbert-perplexity-tfidf"

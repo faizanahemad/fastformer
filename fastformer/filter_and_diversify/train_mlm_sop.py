@@ -84,7 +84,7 @@ def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, req
     valid_pairs = []
     valid_lengths = []
     sents_n_lengths = list(zip(sents, sent_lengths))
-    for wlen in range(len(sents_n_lengths), 0, -1):
+    for wlen in range(len(sents_n_lengths), 1, -1):
         for ws in windowed(sents_n_lengths, wlen, step=max(wlen - 2, 1)):
             current_sents, current_lengths = zip(*ws)
             tl = sum(current_lengths)
@@ -289,6 +289,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 task_labels = [start_position, min(end_position, self.tokenizer_args["max_length"]), -100, -100]
 
             elif task == 4:
+                # Detect deletion position
                 sents = self.sent_detector.tokenize(text)
                 sent_idx = random.randint(0, len(sents) - 2)
                 removed_sent = sents[sent_idx]
@@ -303,10 +304,42 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
 
             elif task == 5:
                 # Reversed order without SEP token, detect where reversal has happened
-                pass
+                num_segments = 2
+                segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+                num_segments = sum(segments != tokenizer.pad_token)
+                position = -100
+                if num_segments > 1:
+                    segments[0], segments[1] = segments[1], segments[0]
+                    position = tokenizer.encode(" ".join(segments[0]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                text = seg_sep_token.join(segments)
+                task_labels = [position, -100, -100, -100]
+
             elif task == 6:
-                # NSP / SOP plain
-                pass
+                num_segments = 2
+                segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+                num_segments = sum(segments != tokenizer.pad_token)
+                if num_segments > 1:
+                    if random.random() < 0.5:
+                        label = 0
+                    else:
+                        if random.random() < 0.5:
+                            label = 1
+                            segments[0], segments[1] = segments[1], segments[0]
+                        else:
+                            label = 2
+                            random_item = self.dataset[random.randint(0, len(self.dataset))]
+                            random_text = random_item["text"]
+                            random_text = clean_text(random_text)
+                            if random.random() < 0.5:
+                                segments[1] = " ".join(random_text.split()[:len(segments[1].split())])
+                            else:
+                                segments[0] = segments[1]
+                                segments[1] = " ".join(random_text.split()[:len(segments[1].split())])
+                else:
+                    label = 0
+                task_labels = [label, -100, -100, -100]
+                text = seg_sep_token.join(segments)
+
             elif task == 7:
                 # select the correct option for mask token somewhere, negative option is sampled from same document.
                 pass
