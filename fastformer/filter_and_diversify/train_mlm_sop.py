@@ -84,13 +84,15 @@ def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, req
     valid_pairs = []
     valid_lengths = []
     sents_n_lengths = list(zip(sents, sent_lengths))
-    for wlen in range(1, len(sents_n_lengths)):
-        for ws in windowed(sents_n_lengths, wlen):
+    for wlen in range(len(sents_n_lengths), 0, -1):
+        for ws in windowed(sents_n_lengths, wlen, step=max(wlen - 2, 1)):
             current_sents, current_lengths = zip(*ws)
             tl = sum(current_lengths)
             if tl >= required_length_min and tl < required_length_max - 2:
                 valid_pairs.append(" ".join(current_sents))
                 valid_lengths.append(tl)
+        if len(valid_pairs) > 2:
+            break
     if len(valid_pairs) > 0:
         text = random.choices(valid_pairs, np.array(valid_lengths)/sum(valid_lengths), k=1)[0]
     else:
