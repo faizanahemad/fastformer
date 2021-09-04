@@ -169,6 +169,12 @@ def training_args():
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
 
+    parser.add_argument('--scheduler_policy', required=False, type=str, default="olr",
+                        help='scheduler_policy')
+
+    parser.add_argument('--scheduler_warmup', required=False, type=float, default=0.1,
+                        help='scheduler_warmup')
+
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
@@ -304,7 +310,7 @@ class wsc_proc:
 class SuperGlueTest:
     def __init__(self, location, model, device, tokenizer, rank, world_size, epochs, lr,
                  seed, batch_size, accumulation_steps,
-                 weight_decay, dropout, hpo=None, dataset_key=None, finetune=True):
+                 weight_decay, dropout, scheduler_policy, scheduler_warmup, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
         self.device = device
@@ -314,6 +320,8 @@ class SuperGlueTest:
         self.finetune = finetune
         self.hpo = eval(hpo) if hpo is not None else None
         self.seed = seed
+        self.scheduler_warmup = scheduler_warmup
+        self.scheduler_policy = scheduler_policy
 
         self.lr = lr
         self.epochs = epochs
@@ -441,9 +449,14 @@ class SuperGlueTest:
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
-            print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
-                                                            three_phase=False, pct_start=0.1, anneal_strategy="linear")
+            total_steps = int(max_allowed_epochs) * steps_per_epoch
+            print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr, " total steps =", total_steps)
+            if self.scheduler_policy == "olr":
+                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e3,
+                                                                three_phase=False, pct_start=self.scheduler_warmup, anneal_strategy="linear")
+            else:
+                from transformers import get_constant_schedule_with_warmup
+                scheduler = get_constant_schedule_with_warmup(optimizer, self.scheduler_warmup * total_steps)
             if "idx" in dataset["train"][0]:
                 train_idx = dataset["train"]["idx"]
             else:
@@ -1648,7 +1661,8 @@ def train(local_rank, args):
     model = args["pretrained_model"]
     _, tokenizer = get_backbone(args["pretrained_model"])
     SuperGlueTest(None, model, device, tokenizer, rank, args["world_size"], args["epochs"], args["lr"],
-                  args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"], args["dropout"],
+                  args["seed"], args["batch_size"], args["accumulation_steps"],
+                  args["weight_decay"], args["dropout"], args["scheduler_policy"], args["scheduler_warmup"],
                   args["hpo"], args["dataset_key"])()
     return
 

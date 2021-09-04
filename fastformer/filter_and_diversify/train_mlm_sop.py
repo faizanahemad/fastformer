@@ -240,20 +240,65 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         elif self.hard_lm_enabled:
             task = random.randint(0, 5)
             if task == 0:
-                # Do nothing
-                pass
+                task_labels=[-100, -100, -100, -100]
             elif task == 1:
                 # Do MSOP
+                num_segments = random.randint(1, 4)
+                segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
+                num_segments = sum(segments != tokenizer.pad_token)
+                seg_idxs = random.sample(range(num_segments), num_segments)
+                task_labels = list(seg_idxs) + [-100] * (4 - num_segments)
+                text = seg_sep_token.join(segments)
                 pass
             elif task == 2:
                 # Do place of insert
-                pass
+                sents = self.sent_detector.tokenize(text)
+                sent_idx = random.randint(0, len(sents) - 2)
+                masked_sent = sents[sent_idx]
+                position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                if len(masked_sent.split()) > 16:
+                    sents = sents[:sent_idx] + sents[sent_idx + 1:]
+                else:
+                    masked_sent_2 = sents[sent_idx + 1]
+                    masked_sent = masked_sent + " " + masked_sent_2
+                    sents = sents[:sent_idx] + sents[sent_idx + 2:]
+                text = " ".join(sents) + seg_sep_token + masked_sent
+                task_labels = [position, -100, -100, -100]
             elif task == 3:
-                # Place of wrong insert, start , end
-                pass
+                random_item = self.dataset[random.randint(0, len(self.dataset))]
+                random_text = random_item["text"]
+                random_text = clean_text(random_text)
+                random_sents = self.sent_detector.tokenize(random_text)
+                random_sent_idx = random.randint(0, len(random_sents) - 2)
+                noise_sent = random_sents[random_sent_idx]
+                if len(noise_sent.split()) < 16:
+                    noise_sent = random_sents[random_sent_idx] + " " + random_sents[random_sent_idx + 1]
+
+                sents = self.sent_detector.tokenize(text)
+                sent_idx = random.randint(0, len(sents) - 2)
+                removed_sent = sents[sent_idx]
+                start_position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                end_position = tokenizer.encode(" ".join(sents[:sent_idx] + [noise_sent]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                if len(removed_sent.split()) > 16:
+                    sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 1:]
+                else:
+                    sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 2:]
+                text = " ".join(sents)
+                task_labels = [start_position, min(end_position, self.tokenizer_args["max_length"]), -100, -100]
+
             elif task == 4:
-                # Place of deletion from middle
-                pass
+                sents = self.sent_detector.tokenize(text)
+                sent_idx = random.randint(0, len(sents) - 2)
+                removed_sent = sents[sent_idx]
+                position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+
+                if len(removed_sent.split()) > 32:
+                    sents = sents[:sent_idx] + sents[sent_idx + 1:]
+                else:
+                    sents = sents[:sent_idx] + sents[sent_idx + 2:]
+                text = " ".join(sents)
+                task_labels = [position, -100, -100, -100]
+
             elif task == 5:
                 # Reversed order without SEP token, detect where reversal has happened
                 pass
@@ -263,6 +308,10 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             elif task == 7:
                 # select the correct option for mask token somewhere, negative option is sampled from same document.
                 pass
+            tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
+            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(),
+                           attention_mask=tokenizer_outputs["attention_mask"].squeeze(),
+                           task_labels=task_labels, task_id=task)
 
 
         else:
