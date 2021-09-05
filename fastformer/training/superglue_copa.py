@@ -1409,7 +1409,7 @@ def train(local_rank, args):
     else:
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
-    print("[Train]: Time = %s, Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
+    print("[Train]: Time = %s, ------------------ Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
     if args["init_method"] == "tcp":
         if args["nr"] == 0:
             args["master_addr"] = "0.0.0.0"
@@ -1419,7 +1419,7 @@ def train(local_rank, args):
     else:
         raise ValueError
 
-    print("[Train]: Time = %s, Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
+    print("[Train]: Time = %s, ---------- Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
     print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
     barrier = get_barrier(True)
