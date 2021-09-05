@@ -548,7 +548,7 @@ class SuperGlueTest:
         dataset_key, train_acc, val_acc, stored_state_val_acc, stored_state_val_loss))
         print("For %s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
-                    all_train_acc=all_train_acc, epochs=epochs, val_loss=val_loss)
+                    all_train_acc=all_train_acc, epochs=epochs, val_loss=val_loss, broken=False)
 
     def mnli(self, model, mnli, device, dataset_key, rank):
         mnli = load_dataset("multi_nli")
