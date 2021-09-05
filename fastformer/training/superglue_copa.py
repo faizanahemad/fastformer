@@ -296,8 +296,7 @@ class SuperGlueTest:
             if self.finetune:
                 batch_size = batch_size // 2
                 self.iter_size *= 2
-            from transformers import AutoTokenizer, AutoModel, AutoModelWithLMHead, AutoModelForMaskedLM, ElectraForPreTraining, CTRLConfig, CTRLPreTrainedModel
-            from transformers.models.deberta import DebertaModel
+            from transformers import AutoTokenizer, AutoModel
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
                 try:
@@ -429,11 +428,8 @@ class SuperGlueTest:
         epochs = -1
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
-        train_backbone = classifier_data["train_backbone"]
         max_allowed_epochs = int(self.epochs)
 
-        broken = False
-        stored_state = None
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
             scheduler = classifier_data["scheduler"]
@@ -479,70 +475,16 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
-                continue_training = torch.tensor(2).to(device)
-                per_epoch = 3 if max_allowed_epochs < 50 and not train_backbone else 5
                 model = model.eval()
-                if epochs % per_epoch == 0 and rank == 0 and self.hpo is None and False:
-                    inner_model = model.module
-                    labels, predictions, val_losses = [], [], []
-                    with model.no_sync():
-                        for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
-                            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                            label = batch.pop("label")
-                            labels.extend(label.cpu().tolist())
-                            with torch.no_grad():
-                                output = inner_model(**batch, label=label)
-                            val_loss = output["loss"].detach().cpu().item()
-                            val_preds = output["predictions"].cpu().tolist()
-                            val_preds = val_preds if isinstance(val_preds, (list, tuple)) else [val_preds]
-                            predictions.extend(val_preds)
-                            val_losses.append(val_loss)
-                    cur_val_loss = np.mean(val_losses)
-                    # cur_val_loss = torch.tensor(cur_val_loss).to(device)
-                    # tensor_list = [cur_val_loss.new_empty(cur_val_loss.size()) for _ in range(self.world_size)]
-                    # torch.distributed.all_gather(tensor_list, cur_val_loss)
-                    # cur_val_loss = torch.stack(tensor_list).mean().item()
-                    all_val_loss.append(cur_val_loss)
-                    val_acc = accuracy_score(labels, (np.array(predictions) > 0.5) if classifier_data["num_classes"] == 1 else predictions)
-                    # val_acc = torch.tensor(val_acc).to(device)
-                    # tensor_list = [val_acc.new_empty(val_acc.size()) for _ in range(self.world_size)]
-                    # torch.distributed.all_gather(tensor_list, val_acc)
-                    # val_acc = torch.stack(tensor_list).mean().item()
-                    all_val_acc.append(val_acc)
-
-                    if len(all_val_loss) >= 3 and all_val_loss[-1] > all_val_loss[-2] and all_val_loss[-2] > all_val_loss[-3] and epochs > max(
-                            max_allowed_epochs / 2, 3):
-                        continue_training = torch.tensor(0).to(device)
-                    elif (len(all_val_loss) >= 2 and all_val_loss[-1] <= all_val_loss[-2]) or stored_state is None:
-                        continue_training = torch.tensor(1).to(device)
-                        stored_state_val_acc = val_acc
-                        stored_state_val_loss = all_val_loss[-1]
 
                 epochs += 1
-                torch.distributed.barrier()
-                dist.broadcast(continue_training, 0)
-                if continue_training.item() == 0 and self.hpo is None and False:
-                    model.load_state_dict(stored_state)
-                    optimizer.zero_grad(set_to_none=True)
-                    broken = True
-                    break
-                elif continue_training.item() == 1 and self.hpo is None:
-                    stored_state = copy.deepcopy(model.state_dict().copy())
 
             torch.distributed.barrier()
             if rank == 0:
                 pbar.close()
 
-            if stored_state is not None:
-                model.load_state_dict(stored_state)
-                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                model.module.load_state_dict(stored_state, strict=True)
-
             if rank == 0:
                 inner_model = model.module
-                if stored_state is not None:
-                    stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                    inner_model.load_state_dict(stored_state, strict=True)
                 labels, predictions, val_losses = [], [], []
                 with model.no_sync():
                     for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
@@ -577,9 +519,6 @@ class SuperGlueTest:
         if hasattr(model, "no_sync") and rank == 0 and self.hpo is None:
             model = model.eval()
             inner_model = model.module
-            if stored_state is not None:
-                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                inner_model.load_state_dict(stored_state, strict=True)
             for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 _ = batch.pop("label", None)
@@ -590,12 +529,8 @@ class SuperGlueTest:
                 test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
                 predictions.extend(test_preds)
         elif rank == 0 and self.hpo is None:
-            val_acc = 0.0
             model = model.eval()
             inner_model = model
-            if stored_state is not None:
-                stored_state = {k.replace("module.", ""): v for k, v in stored_state.items()}
-                inner_model.load_state_dict(stored_state, strict=True)
             for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 _ = batch.pop("label", None)
@@ -613,7 +548,7 @@ class SuperGlueTest:
         dataset_key, train_acc, val_acc, stored_state_val_acc, stored_state_val_loss))
         print("For %s: all_val_loss = %s, all_val_accuracy = %s" % (dataset_key, all_val_loss, all_val_acc))
         return dict(val_acc=val_acc, train_acc=train_acc, predictions=predictions, all_val_loss=all_val_loss, all_val_acc=all_val_acc,
-                    all_train_acc=all_train_acc, epochs=epochs, broken=broken, val_loss=val_loss)
+                    all_train_acc=all_train_acc, epochs=epochs, val_loss=val_loss)
 
     def mnli(self, model, mnli, device, dataset_key, rank):
         mnli = load_dataset("multi_nli")
@@ -904,55 +839,6 @@ class SuperGlueTest:
 
         super_glue, _ = superglue_test(test_only=False, pet_dataset=False)
         keys = ['cb', 'copa', 'multirc', 'record', 'wsc.fixed', 'rte', 'boolq', 'wic', ]  # 'axb', 'axg'
-        if self.hpo is not None:
-            assert self.dataset_key is not None
-            dataset = super_glue[self.dataset_key]
-            hpo = self.hpo
-            hpo_keys = list(hpo.keys())
-            hpo_combinations = np.array(np.meshgrid(*hpo.values())).T.reshape(-1, len(hpo_keys))
-            dk = self.dataset_key
-            results = []
-            print("[SUPERGLUE]: HPO = %s, dataset_key = %s" % (hpo_combinations, self.dataset_key))
-            for idx, c in enumerate(hpo_combinations):
-                for k, v in zip(hpo_keys, c):
-                    setattr(self, k, v)
-                if dk == "boolq":
-                    _, pred_data = self.boolq(model, dataset, self.device, dk, self.rank)
-                elif dk == "cb":
-                    _, pred_data = self.cb(model, dataset, self.device, dk, self.rank)
-                elif dk == "copa":
-                    _, pred_data = self.copa(model, dataset, self.device, dk, self.rank)
-                elif dk == "multirc":
-                    _, pred_data = self.multirc(model, dataset, self.device, dk, self.rank)
-                elif dk == "record":
-                    _, pred_data = self.record(model, dataset, self.device, dk, self.rank)
-                elif dk == "wic":
-                    _, pred_data = self.wic(model, dataset, self.device, dk, self.rank)
-                elif dk == "wsc.fixed":
-                    _, pred_data = self.wsc(model, dataset, self.device, dk, self.rank)
-                elif dk == "rte":
-                    _, pred_data, _, _ = self.rte_axb_axg(model, dataset, super_glue["axb"], super_glue["axg"], self.device, dk, self.rank)
-                elif dk == "swag":
-                    _, pred_data = self.swag(model, None, self.device, dk, self.rank)
-                elif dk == "mnli":
-                    _, pred_data = self.mnli(model, None, self.device, dk, self.rank)
-                elif dk == "hellaswag":
-                    _, pred_data = self.hellaswag(model, None, self.device, dk, self.rank)
-                elif dk == "anli":
-                    _, pred_data = self.anli(model, dataset, self.device, dk, self.rank)
-                else:
-                    raise NotImplementedError
-                if self.rank == 0:
-                    res_dict = dict(zip(hpo_keys, c))
-                    res_dict["val_acc"] = pred_data["val_acc"]
-                    res_dict["train_acc"] = pred_data["train_acc"]
-                    res_dict["val_loss"] = pred_data["val_loss"]
-                    if "test_acc" in pred_data:
-                        res_dict["test_acc"] = pred_data["test_acc"]
-                    results.append(res_dict)
-            if self.rank == 0:
-                print(tabulate(results, headers="keys", tablefmt="grid"))
-            return None
 
         if self.dataset_key is not None:
             keys = [self.dataset_key]
