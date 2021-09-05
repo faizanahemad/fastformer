@@ -1457,7 +1457,7 @@ def train(local_rank, args):
 
     fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
     fsdp_wrapper(wrap_type=0, init=True)
-    print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
+    print("[Train]: Time = %s, ---- Build Model with fsdp params = %s ----" % (get_time_string(), fsdp_params))
 
     model = None
     print("[Train]: Time = %s, Before Superglue call, test only = %s" % (get_time_string(), args["test_only"]))
