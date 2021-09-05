@@ -115,39 +115,14 @@ def training_args():
                         help='Batch Size')
     parser.add_argument('--seed', required=False, type=int, default=3123,
                         help='seed')
-    parser.add_argument('--enable_layer_normalizers', action="store_true", default=False,
-                        help='enable_layer_normalizers')
 
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
-
-    parser.add_argument('--resume', required=False, type=str,
-                        help='Resume From')
-    parser.add_argument('--checkpoint', required=False, type=str,
-                        help='Checkpoint Location')
 
     parser.add_argument('--model_save_dir', required=False, type=str,
                         help='Save Dir')
     parser.add_argument('--model_save_name', required=False, type=str,
                         help='Save Name')
-
-    parser.add_argument('--validate_on_start', action="store_true", default=False,
-                        help='Validate before training')
-
-    parser.add_argument('--skip_steps', action="store_true", default=False,
-                        help='Skip already trained steps while continuing training')
-
-    parser.add_argument('--wandb_dryrun', action="store_true", default=False,
-                        help='WanDB Dryrun Only')
-
-    parser.add_argument('--validate_only', action="store_true", default=False,
-                        help='Validate Only')
-
-    parser.add_argument('--test_only', action="store_true", default=True,
-                        help='Test Only')
-
-    parser.add_argument('--shuffle_dataset', action="store_true", default=False,
-                        help='Shuffle Train')
 
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
@@ -164,15 +139,6 @@ def training_args():
     parser.add_argument('--backward_hook', action="store_true", default=False,
                         help='Backward Hook for gradients')
 
-    parser.add_argument('--train_dataset', required=False, type=str,
-                        help='Train Dataset')
-
-    parser.add_argument('--validation_dataset', required=False, type=str,
-                        help='Validation Dataset')
-
-    parser.add_argument('--test_dataset', required=False, type=str,
-                        help='Test Dataset')
-
     parser.add_argument('--init_method', required=False, type=str, default="tcp",
                         help='init_method')
 
@@ -188,22 +154,14 @@ def training_args():
     parser.add_argument('--dist_backend', type=str, required=False,
                         default='nccl',
                         help='Distributed Backend')
-    parser.add_argument('--log_every_steps', type=int, default=100, metavar='N',
-                        help='how many batches to wait before logging training status')
-    parser.add_argument('--validate_every_steps', type=int, default=1_000, metavar='N',
-                        help='how many batches to wait before logging training status')
-    parser.add_argument('--save_every_steps', type=int, default=1_000, metavar='N',
-                        help='how many batches to wait before logging training status')
-
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
     os.environ['MASTER_ADDR'] = args.master_addr
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    assert hasattr(args, "test_dataset") or not args["test_only"]
-    assert hasattr(args, "validation_dataset") or not args["validate_only"]
     return vars(args)
+
 
 class FastFormerForClassification(FastFormerPreTrainedModel):
     def __init__(self, config: FastFormerConfig, num_classes, model, tokenizer=None,
@@ -215,29 +173,18 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             raise ValueError
 
-        self.backbone: FastFormerModel = FastFormerModel(config, tokenizer) if model is None else model
-        # if num_classes == 1:
-        #     self.ce = BCELossFocal()
-        # else:
-        #     self.ce = AdMSoftmaxLoss(ignore_index=-100, m=additive_margin_softmax_w)
-        from fastformer.model import PreNormRobertaModel
-        dropout = 0.1
+        self.backbone = model
+        
         if num_classes == 1:
             self.ce = nn.BCEWithLogitsLoss()
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
-        if isinstance(self.backbone, PreNormRobertaModel):
-            num_features = self.backbone.embeddings.position_embeddings.weight.size(1)
-            num_features_small = self.backbone.small_config.hidden_size
-            self.num_features = (num_features + num_features_small) * 4
-            dropout = 0.15
-        else:
-            self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
+        
+        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
         self.head = nn.Linear(self.num_features, num_classes)
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
-        self.cls_tokens = model.cls_tokens if hasattr(model, "cls_tokens") else 1
         if reinit_backbone:
             self.init_weights()
 
@@ -251,24 +198,10 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
                              char_ids=char_ids, char_offsets=char_offsets,
                              run_decoder=False,
                              run_answering=False)
-        if isinstance(self.backbone, (FastFormerModel)):
-            funnel_outputs = self.backbone(**funnel_inputs)
-            funnel_outputs = funnel_outputs["encoder_outputs"][0][:, 0]
-        else:
-            from fastformer.model import PreNormRobertaModel
-            inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-            if isinstance(self.backbone, PreNormRobertaModel):
-                inputs["run_large_encoder"] = True
-                funnel_outputs = self.backbone(**inputs)["hidden_states"]
-                inputs["run_large_encoder"] = False
-                funnel_outputs_small = self.backbone(**inputs)["hidden_states"]
-                hidden_states = [torch.cat((h1, h2), -1) for h1, h2 in zip(funnel_outputs, funnel_outputs_small)]
-            else:
-                hidden_states = self.backbone(**inputs)["hidden_states"]
-            if self.cls_tokens > 1:
-                funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-1][:, 1], hidden_states[-2][:, 0], hidden_states[-2][:, 1]), -1)
-            else:
-                funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
+
+        inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
+        hidden_states = self.backbone(**inputs)["hidden_states"]
+        funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):
@@ -330,22 +263,18 @@ class wsc_proc:
 
 
 class SuperGlueTest:
-    def __init__(self, location, model, config, device, tokenizer, rank, world_size, size_dicts, epochs, lr,
+    def __init__(self, location, model, device, rank, world_size, epochs, lr,
                  seed, batch_size, accumulation_steps,
-                 weight_decay, cls_tokens=1, enable_layer_normalizers=False, hpo=None, dataset_key=None, finetune=True):
+                 weight_decay, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
-        self.config = config
+
         self.device = device
-        self.tokenizer = tokenizer
         self.rank = rank
         self.world_size = world_size
-        self.size_dicts = size_dicts
         self.finetune = finetune
-        self.cls_tokens = cls_tokens
         self.hpo = eval(hpo) if hpo is not None else None
         self.seed = seed
-        self.enable_layer_normalizers = enable_layer_normalizers
 
         self.lr = lr
         self.epochs = epochs
@@ -400,11 +329,11 @@ class SuperGlueTest:
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
                 try:
-                    main_model, tokenizer = get_mtt_backbone(model_name, self.cls_tokens, self.enable_layer_normalizers, None, reinit=False,
+                    main_model, tokenizer = get_mtt_backbone(model_name, 1, self.enable_layer_normalizers, None, reinit=False,
                                                              train_layer_normalizers=False, enable_layer_normalizers_statistics=self.enable_layer_normalizers,
                                                              dropout_prob=0.1)
                 except:
-                    main_model, tokenizer = get_mtt_backbone(model, self.cls_tokens, self.enable_layer_normalizers, None, reinit=False,
+                    main_model, tokenizer = get_mtt_backbone(model, 1, self.enable_layer_normalizers, None, reinit=False,
                                                              train_layer_normalizers=False, enable_layer_normalizers_statistics=self.enable_layer_normalizers,
                                                              dropout_prob=0.1)
                 main_model = main_model.to(self.device)
@@ -472,13 +401,12 @@ class SuperGlueTest:
                                           betas=(optc["beta_1"], optc["beta_2"]))
             optimizer.zero_grad(set_to_none=True)
 
-        collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0,
-                                    tokenizer.pad_token_id)
+        collate_fn = get_collate_fn(0, tokenizer.pad_token_id)
 
         train = None
         if "train" in dataset:
-            train = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
-                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+            train = MTTDataset(1, len(tokenizer), tokenizer,
+                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                dataset["train"])
             train.training = False
             train = DataLoader(train, sampler=None if self.world_size == 1 else DistributedSampler(train, shuffle=True), batch_size=batch_size,
@@ -492,8 +420,8 @@ class SuperGlueTest:
 
         validation = None
         if "validation" in dataset:
-            validation = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
-                                    dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+            validation = MTTDataset(1, len(tokenizer), tokenizer,
+                                    dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                     dataset["validation"])
             validation.training = False
             validation = DataLoader(validation, sampler=None, batch_size=batch_size, collate_fn=collate_fn, num_workers=num_workers,
@@ -502,8 +430,8 @@ class SuperGlueTest:
         test = None
         test_idx = None
         if rank == 0:
-            test = MTTDataset(self.cls_tokens, len(tokenizer), tokenizer,
-                              dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512 - (self.cls_tokens - 1)),
+            test = MTTDataset(1, len(tokenizer), tokenizer,
+                              dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                               dataset["test"])
             test.training = False
             if "idx" in dataset["test"][0]:
@@ -996,7 +924,6 @@ class SuperGlueTest:
     def __call__(self, generate_test_predictions=True):
         tokenizer = self.tokenizer
         model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
-        size_dicts = self.size_dicts
         pred_datas = []
         print("[SUPERGLUE]: call to superglue class")
 
@@ -1165,53 +1092,22 @@ def train_test(local_rank, args):
 
     print("[Train]: Time = %s, ---------- Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
-    print("[Train]: Time = %s, Initialized Dist Process for Rank = %s" % (get_time_string(), rank))
-    barrier = get_barrier(True)
-    rnd = torch.tensor(int(time.time())).to(device)
-    dist.broadcast(rnd, 0)
-    format = "%Y-%m-%d %H-%M %Z"
-    # + timedelta(hours=5, minutes=30)
-    time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
     set_seeds(args["seed"])
-    model_config.model_size = args["model_config"]
-    size_dicts = get_batch_size(args["model_config"], not args["no_autocast"])
-
-    mconf = model_config.to_dict()
-
-    config = config_dict[mconf.pop("model_size")]
-    if any(config.relative_attention):
-        size_dicts = {k: v - 4 for k, v in size_dicts.items()}
-    size_dicts = {1024: args["batch_size"]} if "batch_size" in args and isinstance(args["batch_size"], int) else size_dicts
-    tokenizer = get_tokenizer(mconf.pop("tokenizer_name"))
-    config.vocab_size = len(tokenizer) + 22
-    config.tokenizer_length = 1024
-    config.tokenizer_length = config.tokenizer_length - config.num_highway_cls_tokens
-    config.max_position_embeddings = config.max_position_embeddings + config.num_highway_cls_tokens
-
-    collate_fn = get_collate_fn(config.num_highway_cls_tokens, tokenizer.pad_token_id)
 
     if args["world_size"] != 128:
         optimizer_config.lr = optimizer_config.lr * (args["world_size"] / 128)
-    config.eps = 1e-4
     if args["no_autocast"]:
         optimizer_config.eps = 1e-7
-        config.layer_norm_eps = 1e-7
-        config.eps = 1e-7
         optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 
-    fsdp_params = configure_fsdp(not args["no_autocast"], True if not args["no_autocast"] else False, True)
-    fsdp_wrapper(wrap_type=0, init=True)
-    print("[Train]: Time = %s, ---- Build Model with fsdp params = %s ----" % (get_time_string(), fsdp_params))
-
-    model = None
     print("[Train]: Time = %s, Before Superglue call, test only = %s" % (get_time_string(), args["test_only"]))
-    if args["test_only"]:
-        model = args["pretrained_model"]
-        print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
-        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
-                      args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
-                      args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
-        return
+
+    model = args["pretrained_model"]
+    print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
+    SuperGlueTest(None, model, device, rank, args["world_size"], args["epochs"], args["lr"],
+                  args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
+                args["hpo"], args["dataset_key"], args["finetune"])()
+    return
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
 # Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
