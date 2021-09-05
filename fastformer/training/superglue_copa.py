@@ -1763,6 +1763,7 @@ def train(local_rank, args):
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     # torch.multiprocessing.set_sharing_strategy('file_system')
+    print("[TRAIN]: superglue copa train start")
     args = training_args()
     if args["world_size"] == 1 or args["cpu"]:
         train_catch_exception(0, args)
