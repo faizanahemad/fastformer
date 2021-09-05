@@ -337,7 +337,7 @@ class SuperGlueTest:
         print(model)
         return dict(model=model, tokenizer=tokenizer, dataloader_params=dataloader_params, batch_size=batch_size)
 
-    def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False):
+    def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False, max_epochs=None):
         set_seeds(self.seed)
         train_backbone = self.finetune
         num_workers = 4
@@ -345,6 +345,7 @@ class SuperGlueTest:
         tokenizer = model_dict["tokenizer"]
         dataloader_params = model_dict["dataloader_params"]
         batch_size = model_dict["batch_size"]
+        max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
 
         # rnd = torch.tensor(random.randint(0, 2**32 - 1)).to(device)
         # dist.broadcast(rnd, 0)
@@ -385,8 +386,8 @@ class SuperGlueTest:
 
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
-            print("epochs = ", int(self.epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(self.epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
+            print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
 
         validation = None
@@ -416,7 +417,7 @@ class SuperGlueTest:
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
                     dataset_key=dataset_key, rank=rank, train_backbone=train_backbone)
 
-    def train_classifier(self, model, device, classifier_data, predict_only=False):
+    def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None):
         all_val_loss = []
         all_val_acc = []
         all_train_acc = []
@@ -428,7 +429,7 @@ class SuperGlueTest:
         epochs = -1
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
-        max_allowed_epochs = int(self.epochs)
+        max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
 
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
