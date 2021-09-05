@@ -1335,20 +1335,6 @@ def build_dataloader(location, shuffle_dataset, sampling_fraction, config, colla
     return train_loader
 
 
-def train_catch_exception(local_rank, args):
-    from fastformer.training.train_lm_distributed import train
-    rank = args["nr"] * args["gpus_per_node"] + local_rank
-    nr = args["nr"]
-    try:
-        train(local_rank, args)
-    except Exception as e:
-        print(
-            "[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
-        # traceback.print_tb(e.__traceback__)
-        # traceback.print_exception(*sys.exc_info())
-        traceback.print_exc()
-        raise e
-
 
 def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scaler, gradient_clipping, iter_size=1, no_sync=False, zero_grad_check=False):
     # It seems to me like the first accumulated gradients might get clipped several times hence giving more weight to last accumulated gradients :
@@ -1758,6 +1744,20 @@ def train(local_rank, args):
 
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
+
+def train_catch_exception(local_rank, args):
+    from fastformer.training.train_lm_distributed import train
+    rank = args["nr"] * args["gpus_per_node"] + local_rank
+    nr = args["nr"]
+    try:
+        train(local_rank, args)
+    except Exception as e:
+        print(
+            "[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
+        # traceback.print_tb(e.__traceback__)
+        # traceback.print_exception(*sys.exc_info())
+        traceback.print_exc()
+        raise e
 
 
 if __name__ == "__main__":
