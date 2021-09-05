@@ -1067,7 +1067,6 @@ def train_test(local_rank, args):
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
     set_seeds(args["seed"])
 
-    print("[Train]: Time = %s, Before Superglue call, test only = %s" % (get_time_string(), args["test_only"]))
 
     model = args["pretrained_model"]
     print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
