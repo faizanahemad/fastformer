@@ -289,13 +289,13 @@ class SuperGlueTest:
             if "deberta" in model.lower() or "large" in model.lower():
                 batch_size = batch_size // 2
                 self.iter_size *= 2
-            if "conv" in model.lower():
-                dataloader_params = dict()
-            if "fast-conv" in model.lower():
-                dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
-            if self.finetune:
-                batch_size = batch_size // 2
-                self.iter_size *= 2
+            # if "conv" in model.lower():
+            #     dataloader_params = dict()
+            # if "fast-conv" in model.lower():
+            #     dataloader_params = dict(persistent_workers=True, prefetch_factor=2)
+            # if self.finetune:
+            #     batch_size = batch_size // 2
+            #     self.iter_size *= 2
             from transformers import AutoTokenizer, AutoModel
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
