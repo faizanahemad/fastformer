@@ -104,8 +104,6 @@ def training_args():
 
     parser.add_argument('--dataset_key', required=False, type=str,
                         help='dataset_key')
-    parser.add_argument('--cls_tokens', default=1, type=int,
-                        help='cls_tokens')
 
     parser.add_argument('--accumulation_steps', default=1, type=int,
                         help='Gradient Accumulation')
@@ -172,13 +170,6 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         init_weights(self.head)
 
     def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
-        # TODO: support extra cls_tokens
-        funnel_inputs = dict(input_ids=input_ids,
-                             attention_mask=attention_mask,
-                             token_type_ids=token_type_ids,
-                             char_ids=char_ids, char_offsets=char_offsets,
-                             run_decoder=False,
-                             run_answering=False)
 
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         hidden_states = self.backbone(**inputs)["hidden_states"]
