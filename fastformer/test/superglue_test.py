@@ -59,7 +59,7 @@ warnings.warn = warn
 
 import logging
 
-optimizer_config = dict(eps=1e-7, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
+optimizer_config = dict(eps=1e-7, beta_1=0.9, beta_2=0.98, gradient_clipping=0.1)
 
 for name in logging.Logger.manager.loggerDict.keys():
     logging.getLogger(name).setLevel(logging.CRITICAL)
