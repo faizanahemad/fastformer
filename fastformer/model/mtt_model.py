@@ -9,8 +9,6 @@ import traceback
 from sklearn.metrics import accuracy_score
 from torch.cuda.amp import GradScaler, autocast
 
-from fairscale.nn.misc import checkpoint_wrapper
-from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 
 import numpy as np
 import math
