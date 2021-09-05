@@ -1475,7 +1475,9 @@ def train(local_rank, args):
     elif args["pretrained_model"] is not None and args["test_only"]:
         model = args["pretrained_model"]
 
+    print("[Train]: Time = %s, Before Superglue call" % (get_time_string()))
     if args["test_only"]:
+        print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
         SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
                       args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
                       args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
