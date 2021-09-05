@@ -434,8 +434,7 @@ class SuperGlueTest:
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
 
-        collate_fn = get_collate_fn(model.config.num_highway_cls_tokens if hasattr(model, "config") and isinstance(model.config, FastFormerConfig) else 0,
-                                    tokenizer.pad_token_id)
+        collate_fn = get_collate_fn(0, tokenizer.pad_token_id)
 
         train = None
         train_idx = None
@@ -452,7 +451,7 @@ class SuperGlueTest:
             total_steps = int(max_allowed_epochs) * steps_per_epoch
             print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr, " total steps =", total_steps)
             if self.scheduler_policy == "olr":
-                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e3,
+                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
                                                                 three_phase=False, pct_start=self.scheduler_warmup, anneal_strategy="linear")
             else:
                 from transformers import get_constant_schedule_with_warmup
