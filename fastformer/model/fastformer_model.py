@@ -50,7 +50,7 @@ from transformers.modeling_outputs import (
     TokenClassifierOutput,
 )
 from transformers.modeling_utils import PreTrainedModel
-from transformers.utils import logging
+import logging
 
 from fastformer.data import *
 from fastformer.model.AdMSLoss import AdMSoftmaxLoss, BCELossFocal
