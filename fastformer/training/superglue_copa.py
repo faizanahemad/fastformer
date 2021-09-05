@@ -996,6 +996,7 @@ class SuperGlueTest:
         model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
         size_dicts = self.size_dicts
         pred_datas = []
+        print("[SUPERGLUE]: call to superglue class")
 
         # glue = dict()
         # for gl in ['cola', 'sst2', 'mrpc', 'qqp', 'stsb', 'mnli', 'mnli_mismatched', 'mnli_matched', 'qnli', 'rte', 'wnli', 'ax']:
@@ -1011,6 +1012,7 @@ class SuperGlueTest:
             hpo_combinations = np.array(np.meshgrid(*hpo.values())).T.reshape(-1, len(hpo_keys))
             dk = self.dataset_key
             results = []
+            print("[SUPERGLUE]: HPO = %s, dataset_key = %s" % (hpo_combinations, self.dataset_key))
             for idx, c in enumerate(hpo_combinations):
                 for k, v in zip(hpo_keys, c):
                     setattr(self, k, v)
