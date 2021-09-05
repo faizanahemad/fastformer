@@ -1368,7 +1368,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
                 inf_grad=len(inf_gradders))
 
 
-def train(local_rank, args):
+def train_test(local_rank, args):
     # torch.multiprocessing.set_sharing_strategy('file_system')
     # too many barriers / one node data parallel and multiple node DDP
     os.environ['MASTER_ADDR'] = args["master_addr"]
@@ -1750,7 +1750,7 @@ def train_catch_exception(local_rank, args):
     rank = args["nr"] * args["gpus_per_node"] + local_rank
     nr = args["nr"]
     try:
-        train(local_rank, args)
+        train_test(local_rank, args)
     except Exception as e:
         print(
             "[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
