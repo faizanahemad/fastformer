@@ -240,18 +240,21 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
             results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
         elif self.hard_lm_enabled:
-            task = random.randint(0, 5)
+            task = random.randint(0, 7)
+
             if task == 0:
-                task_labels=[-100, -100, -100, -100]
+                task_labels = [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100]
+                noise_type = 0
             elif task == 1:
                 # Do MSOP
                 num_segments = random.randint(1, 4)
                 segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
                 num_segments = sum(segments != tokenizer.pad_token)
                 seg_idxs = random.sample(range(num_segments), num_segments)
-                task_labels = list(seg_idxs) + [-100] * (4 - num_segments)
+                in_order = all([i < j for i, j in windowed(seg_idxs, 2, fillvalue=1e8)])
+                task_labels = list(seg_idxs) + [-100] * (11 - num_segments)
                 text = seg_sep_token.join(segments)
-                pass
+                noise_type = 0 if in_order else 1
             elif task == 2:
                 # Do place of insert
                 sents = self.sent_detector.tokenize(text)
@@ -265,8 +268,10 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                     masked_sent = masked_sent + " " + masked_sent_2
                     sents = sents[:sent_idx] + sents[sent_idx + 2:]
                 text = " ".join(sents) + seg_sep_token + masked_sent
-                task_labels = [position, -100, -100, -100]
+                noise_type = 1
+                task_labels = [-100, -100, -100, -100, position, -100, -100, -100, -100, -100, -100]
             elif task == 3:
+                # Detect place of random insert
                 random_item = self.dataset[random.randint(0, len(self.dataset))]
                 random_text = random_item["text"]
                 random_text = clean_text(random_text)
@@ -276,17 +281,25 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 if len(noise_sent.split()) < 16:
                     noise_sent = random_sents[random_sent_idx] + " " + random_sents[random_sent_idx + 1]
 
+                start_position = -100
+                end_position = -100
                 sents = self.sent_detector.tokenize(text)
-                sent_idx = random.randint(0, len(sents) - 2)
-                removed_sent = sents[sent_idx]
-                start_position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
-                end_position = tokenizer.encode(" ".join(sents[:sent_idx] + [noise_sent]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
-                if len(removed_sent.split()) > 16:
-                    sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 1:]
+                if len(sents) > 3:
+                    sent_idx = random.randint(1, len(sents) - 2)
+                    removed_sent = sents[sent_idx]
+                    start_position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                    end_position = tokenizer.encode(" ".join(sents[:sent_idx] + [noise_sent]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                    if len(removed_sent.split()) > 16:
+                        sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 1:]
+                    else:
+                        sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 2:]
+                    end_position = min(end_position, self.tokenizer_args["max_length"])
+
+                    noise_type = 2
                 else:
-                    sents = sents[:sent_idx] + [noise_sent] + sents[sent_idx + 2:]
+                    noise_type = 0
                 text = " ".join(sents)
-                task_labels = [start_position, min(end_position, self.tokenizer_args["max_length"]), -100, -100]
+                task_labels = [-100, -100, -100, -100, -100, start_position, end_position, -100, -100, -100, -100]
 
             elif task == 4:
                 # Detect deletion position
@@ -294,13 +307,17 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 sent_idx = random.randint(0, len(sents) - 2)
                 removed_sent = sents[sent_idx]
                 position = tokenizer.encode(" ".join(sents[:sent_idx]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
-
-                if len(removed_sent.split()) > 32:
-                    sents = sents[:sent_idx] + sents[sent_idx + 1:]
+                if len(sents) > 3:
+                    if len(removed_sent.split()) > 32:
+                        sents = sents[:sent_idx] + sents[sent_idx + 1:]
+                    else:
+                        sents = sents[:sent_idx] + sents[sent_idx + 2:]
+                    noise_type = 3
                 else:
-                    sents = sents[:sent_idx] + sents[sent_idx + 2:]
+                    position = -100
+                    noise_type = 0
                 text = " ".join(sents)
-                task_labels = [position, -100, -100, -100]
+                task_labels = [-100, -100, -100, -100, -100, -100, -100, position, -100, -100, -100]
 
             elif task == 5:
                 # Reversed order without SEP token, detect where reversal has happened
@@ -311,22 +328,36 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 if num_segments > 1:
                     segments[0], segments[1] = segments[1], segments[0]
                     position = tokenizer.encode(" ".join(segments[0]), return_offsets_mapping=False, **self.tokenizer_args)["attention_mask"].sum()
+                    noise_type = 1
+                else:
+                    noise_type = 0
                 text = seg_sep_token.join(segments)
-                task_labels = [position, -100, -100, -100]
+                task_labels = [-100, -100, -100, -100, -100, -100, -100, -100, position, -100, -100]
 
             elif task == 6:
                 num_segments = 2
                 segments = np.array(segment(text, num_segments, self.sent_detector, tokenizer.pad_token))
                 num_segments = sum(segments != tokenizer.pad_token)
                 if num_segments > 1:
-                    if random.random() < 0.5:
+                    if random.random() < 0.3:
+                        noise_type = 0
                         label = 0
                     else:
-                        if random.random() < 0.5:
+                        rn = random.random()
+                        if rn < 0.3:
                             label = 1
                             segments[0], segments[1] = segments[1], segments[0]
-                        else:
+                            noise_type = 1
+                        elif rn < 0.7:
                             label = 2
+                            segments[0], segments[1] = segments[1], segments[0]
+                            segments[0] = " ".join(self.sent_detector.tokenize(segments[0])[1:]) if random.random() < 0.25 else segments[0]
+                            segments[0] = " ".join(self.sent_detector.tokenize(segments[0])[:-1]) if random.random() < 0.25 else segments[0]
+                            segments[1] = " ".join(self.sent_detector.tokenize(segments[1])[1:]) if random.random() < 0.25 else segments[1]
+                            segments[1] = " ".join(self.sent_detector.tokenize(segments[1])[:-1]) if random.random() < 0.25 else segments[1]
+                            noise_type = 4  # Order change + Deletion
+                        else:
+                            label = 3
                             random_item = self.dataset[random.randint(0, len(self.dataset))]
                             random_text = random_item["text"]
                             random_text = clean_text(random_text)
@@ -335,18 +366,50 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                             else:
                                 segments[0] = segments[1]
                                 segments[1] = " ".join(random_text.split()[:len(segments[1].split())])
+                            noise_type = 2
                 else:
                     label = 0
-                task_labels = [label, -100, -100, -100]
+                    noise_type = 0
+                task_labels = [-100, -100, -100, -100, -100, -100, -100, -100, -100, label, -100]
                 text = seg_sep_token.join(segments)
 
             elif task == 7:
-                # select the correct option for mask token somewhere, negative option is sampled from same document.
-                pass
+                # Select correct option, 1st and last sent are negatives, need atleast 6 sents
+                sents = self.sent_detector.tokenize(text)
+                ns_possible = False
+                if len(sents) > 7:
+                    ns_possible = True
+                    if random.random() < 0.5:
+                        ns, sents = (sents[0], sents[1:]) if len(sents[0].split()) > 16 else (sents[0] + sents[1], sents[2:])
+                    else:
+                        ns, sents = (sents[-1], sents[:-1]) if len(sents[-1].split()) > 16 else (sents[-2] + sents[-1], sents[:-2])
+
+
+                sent_idx = random.randint(0, len(sents) - 2)
+                masked_sent = sents[sent_idx]
+                if len(masked_sent.split()) > 16:
+                    sents = sents[:sent_idx] + seg_sep_token + sents[sent_idx + 1:]
+                else:
+                    masked_sent_2 = sents[sent_idx + 1]
+                    masked_sent = masked_sent + " " + masked_sent_2
+                    sents = sents[:sent_idx] + seg_sep_token + sents[sent_idx + 2:]
+                if ns_possible and random.random() < 0.6:
+                    text = " ".join(sents) + seg_sep_token + ns
+                    label = 0
+                    noise_type = 2
+                else:
+                    text = " ".join(sents) + seg_sep_token + masked_sent
+                    label = 1
+                    noise_type = 1
+                task_labels = [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100, label]
+            else:
+                raise ValueError
+            task_labels.append(noise_type)
+
             tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
             results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(),
                            attention_mask=tokenizer_outputs["attention_mask"].squeeze(),
-                           task_labels=task_labels, task_id=task)
+                           task_labels=task_labels, noise_type=noise_type)
 
 
         else:
@@ -459,7 +522,7 @@ class RTDMLMModel(PreTrainedModel):
         self.momentum_backbone.load_state_dict(backbone.state_dict())
         _ = self.momentum_backbone.eval()
         change_dropout(self.momentum_backbone, 0.0)
-        self.copy_momentum = 0.9
+        self.copy_momentum = 0.99
         for p in self.momentum_backbone.parameters():
             p.requires_grad = False
         self.mlm_w = mlm_w
