@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 import traceback
 
-from fairscale.nn.misc import checkpoint_wrapper
-from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+try:
+    from fairscale.nn.misc import checkpoint_wrapper
+    from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+except:
+    pass
 
 
 import numpy as np
