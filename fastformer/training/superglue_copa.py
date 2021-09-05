@@ -903,7 +903,6 @@ class SuperGlueTest:
                                        model=getattr(classifier_data["model"], "module", classifier_data["model"]).backbone)
 
     def __call__(self, generate_test_predictions=True):
-        tokenizer = self.tokenizer
         model = self.model.to(self.device).eval() if not isinstance(self.model, str) else self.model
         pred_datas = []
         print("[SUPERGLUE]: call to superglue class")
