@@ -65,7 +65,6 @@ except:
 
 from fastformer.config import *
 
-logger = logging.get_logger(__name__)
 
 
 class Embeddings(nn.Module):
