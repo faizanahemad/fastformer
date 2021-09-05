@@ -1460,6 +1460,14 @@ def train(local_rank, args):
     print("[Train]: Time = %s, Build Model with fsdp params = %s" % (get_time_string(), fsdp_params))
 
     model = None
+    print("[Train]: Time = %s, Before Superglue call, test only = %s" % (get_time_string(), args["test_only"]))
+    if args["test_only"]:
+        model = args["pretrained_model"]
+        print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
+        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
+                      args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
+                      args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
+        return
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]) and not args["test_only"]:
         model = FastFormerForFusedELECTRAPretraining(config, tokenizer=tokenizer, **mconf).to(device)
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
@@ -1474,14 +1482,6 @@ def train(local_rank, args):
         del state_dict
     elif args["pretrained_model"] is not None and args["test_only"]:
         model = args["pretrained_model"]
-
-    print("[Train]: Time = %s, Before Superglue call" % (get_time_string()))
-    if args["test_only"]:
-        print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
-        SuperGlueTest(None, model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["epochs"], args["lr"],
-                      args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
-                      args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
-        return
 
     if args["validate_on_start"] or args["validate_only"]:
         _ = LargeValidator(args["validation_dataset"], model, config, device, tokenizer, rank, args["world_size"], size_dicts, args["no_autocast"])()
