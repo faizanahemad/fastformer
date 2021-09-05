@@ -334,7 +334,7 @@ class SuperGlueTest:
             print(type(model))
             raise ValueError
         print("batch_size = %s, iter size = %s" % (batch_size, self.iter_size))
-        print(model)
+        # print(model)
         return dict(model=model, tokenizer=tokenizer, dataloader_params=dataloader_params, batch_size=batch_size)
 
     def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False, max_epochs=None):
@@ -753,6 +753,29 @@ class SuperGlueTest:
     def copa(self, model, copa, device, dataset_key, rank):
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
+
+        copa_options = list(copa["train"]["choice1"]) + list(copa["train"]["choice2"]) + list(copa["validation"]["choice1"]) + list(
+            copa["validation"]["choice2"]) + list(copa["test"]["choice1"]) + list(copa["test"]["choice2"])
+        copa_aux1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"], label=1),
+                             remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_aux2 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"], label=1),
+                             remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_ns = None
+        for i in range(10):
+            random.seed(3413 + i)
+            copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
+                                remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
+            if copa_ns is None:
+                copa_ns = copa_ns1
+            else:
+                copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
+        copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
+        copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
+        del copa_ns["test"]
+        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=5)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+        model_dict["model"] = classifier_data["model"]
+
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0,
                            choice=0),
