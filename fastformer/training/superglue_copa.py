@@ -39,7 +39,6 @@ import random
 import os
 import argparse
 import time
-from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
 from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -1369,8 +1368,7 @@ def train_inner_loop(args, ddp_model, batch, labels, optimizer, scheduler, scale
             # print([name for name, params in ddp_model.named_parameters() if params.grad is None])
 
     if not no_sync:
-        ddp_model.clip_grad_norm_(gradient_clipping) if isinstance(ddp_model, FSDP) else torch.nn.utils.clip_grad_norm_(ddp_model.parameters(),
-                                                                                                                        gradient_clipping)
+        torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), gradient_clipping)
         optimizer.step()
         scheduler.step()
 
