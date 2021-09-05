@@ -92,8 +92,6 @@ def training_args():
                         help='number of gpus per node')
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')
-    parser.add_argument('--model_config', required=True, type=str,
-                        help='model config')
     parser.add_argument('--lr', default=optimizer_config.lr, type=float,
                         help='lr')
     parser.add_argument('--epochs', default=10, type=int,
@@ -119,28 +117,11 @@ def training_args():
     parser.add_argument('--pretrained_model', required=False, type=str,
                         help='Pretrained Model')
 
-    parser.add_argument('--model_save_dir', required=False, type=str,
-                        help='Save Dir')
-    parser.add_argument('--model_save_name', required=False, type=str,
-                        help='Save Name')
-
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
     parser.add_argument('--finetune', action="store_true", default=False,
                         help='finetune')
-
-    parser.add_argument('--no_autocast', action="store_true", default=False,
-                        help='Avoid Autocast')
-
-    parser.add_argument('--detect_anomaly', action="store_true", default=False,
-                        help='AutoGrad Anomaly detection')
-
-    parser.add_argument('--backward_hook', action="store_true", default=False,
-                        help='Backward Hook for gradients')
-
-    parser.add_argument('--init_method', required=False, type=str, default="tcp",
-                        help='init_method')
 
     parser.add_argument('--num_workers', required=False, type=int, default=0,
                         help='Dataloader workers')
@@ -1065,9 +1046,6 @@ def train_test(local_rank, args):
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     import warnings
     warnings.simplefilter("ignore")
-    if args["wandb_dryrun"]:
-        os.environ["WANDB_MODE"] = "dryrun"
-        os.environ["WANDB_SILENT"] = "true"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] if args["cpu"] else (args["nr"] * args["gpus_per_node"] + local_rank)
@@ -1081,24 +1059,13 @@ def train_test(local_rank, args):
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
     print("[Train]: Time = %s, ------------------ Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
-    if args["init_method"] == "tcp":
-        if args["nr"] == 0:
-            args["master_addr"] = "0.0.0.0"
-        init_method = "tcp://%s:%s" % (args["master_addr"], args["master_port"])
-    elif args["init_method"] == "file":
-        init_method = 'file://%s/%s' % (args["master_addr"], args["master_port"])
-    else:
-        raise ValueError
+    if args["nr"] == 0:
+        args["master_addr"] = "0.0.0.0"
+    init_method = "tcp://%s:%s" % (args["master_addr"], args["master_port"])
 
     print("[Train]: Time = %s, ---------- Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
     set_seeds(args["seed"])
-
-    if args["world_size"] != 128:
-        optimizer_config.lr = optimizer_config.lr * (args["world_size"] / 128)
-    if args["no_autocast"]:
-        optimizer_config.eps = 1e-7
-        optimizer_config.gradient_clipping = 4 * optimizer_config.gradient_clipping
 
     print("[Train]: Time = %s, Before Superglue call, test only = %s" % (get_time_string(), args["test_only"]))
 
