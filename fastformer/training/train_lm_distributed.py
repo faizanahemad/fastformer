@@ -38,8 +38,11 @@ import random
 import os
 import argparse
 import time
-from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
-from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+try:
+    from fairscale.nn.wrap import auto_wrap, enable_wrap, wrap
+    from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+except:
+    pass
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm, trange
