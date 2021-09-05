@@ -433,6 +433,8 @@ class SuperGlueTest:
         else:
             print(type(model))
             raise ValueError
+        print("batch_size = %s, iter size = %s" % (batch_size, self.iter_size))
+        print(model)
         return dict(model=model, tokenizer=tokenizer, dataloader_params=dataloader_params, batch_size=batch_size)
 
     def prepare_classifier(self, model_dict, dataset, device, num_classes, dataset_key, rank, reinit=False):
@@ -1211,21 +1213,8 @@ def train_test(local_rank, args):
                       args["cls_tokens"], args["enable_layer_normalizers"], args["hpo"], args["dataset_key"], args["finetune"])()
         return
 
-# I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling). Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
-
-def train_catch_exception(local_rank, args):
-    from fastformer.training.train_lm_distributed import train
-    rank = args["nr"] * args["gpus_per_node"] + local_rank
-    nr = args["nr"]
-    try:
-        train_test(local_rank, args)
-    except Exception as e:
-        print(
-            "[Exception-in-train]: Node Rank = %s, Local Rank = %s, Rank = %s, Exception = %s, Trace = %s" % (nr, local_rank, rank, e, traceback.format_exc()))
-        # traceback.print_tb(e.__traceback__)
-        # traceback.print_exception(*sys.exc_info())
-        traceback.print_exc()
-        raise e
+# I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
+# Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
 
 if __name__ == "__main__":
@@ -1234,8 +1223,8 @@ if __name__ == "__main__":
     print("[TRAIN]: superglue copa train start")
     args = training_args()
     if args["world_size"] == 1 or args["cpu"]:
-        train_catch_exception(0, args)
+        train_test(0, args)
     else:
         # start_processes(train_catch_exception, (args,), args["gpus_per_node"], True, False, start_method='spawn')
-        mp.spawn(train_catch_exception, nprocs=args["gpus_per_node"], args=(args,), join=True)
+        mp.spawn(train_test, nprocs=args["gpus_per_node"], args=(args,), join=True)
 
