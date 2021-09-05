@@ -71,8 +71,6 @@ from fastformer.model import FastFormerPreTrainedModel
 from itertools import repeat
 import collections.abc
 
-logger = logging.get_logger(__name__)
-
 
 def _ntuple(n):
     def parse(x):
