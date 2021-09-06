@@ -759,8 +759,9 @@ class SuperGlueTest:
         commonsense_qa = get_commonsense_qa(tokenizer)
         scitail = get_scitail(tokenizer)
         cosmos_qa = get_cosmos_qa(tokenizer)
+        copa_pretrain = get_copa(tokenizer)
 
-        merged_pretrain = merge_datasets_as_df([scitail, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
+        merged_pretrain = merge_datasets_as_df([scitail, hellaswag, cosmos_qa, swag, commonsense_qa, copa_pretrain], ["train", "validation"], ["label", "text"]).shuffle()
         classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=3)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
@@ -1168,22 +1169,23 @@ def get_mnli(tokenizer):
     mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
     return mnli
 
-def get_copa(tokenizer):
+def get_copa(tokenizer, reverse_labels=False):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     copa = load_dataset("super_glue", "copa")
     copa_c1 = copa.map(
         lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
-                       label=int(not x["label"] == 0)),
+                       label=int(x["label"] == 0)),
         remove_columns=["premise", 'question', "choice1", "choice2"])
     copa_c2 = copa.map(
         lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
-                       label=int(not x["label"] == 1)),
+                       label=int(x["label"] == 1)),
         remove_columns=["premise", 'question', "choice1", "choice2"])
     copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
     for split in ["train", "validation", "test"]:
-        copa_labels = np.array(copa[split]["label"])
+        labels = np.array(copa[split]["label"])
+        labels = (1 - labels) if reverse_labels else labels
         copa[split] = copa[split].remove_columns(['label'])
-        copa[split] = copa[split].add_column("label", copa_labels)
+        copa[split] = copa[split].add_column("label", labels)
     return copa
 
 def get_qa_srl(tokenizer):
@@ -1212,6 +1214,7 @@ def get_qa_srl(tokenizer):
     qa_srl = merge_datasets_as_df([qa_srl_pos, qa_srl_n1, qa_srl_n2, qa_srl_n3], ["train", "validation"], ["label", "text"])
     return qa_srl
 
+
 def get_qqp(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     quora = load_dataset("quora")
@@ -1225,6 +1228,7 @@ def get_qqp(tokenizer):
     quora = merge_datasets_as_df([quora_1, quora_2], ["train", "validation"], ["label", "text"])
     return quora
 
+
 def get_rte(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     rte = load_dataset("super_glue", "rte")
@@ -1235,6 +1239,7 @@ def get_rte(tokenizer):
         rte[split] = rte[split].remove_columns(['label'])
         rte[split] = rte[split].add_column("label", rte_labels)
     return rte
+
 
 def get_cb(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
@@ -1263,16 +1268,6 @@ def get_cb(tokenizer):
     dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
     cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
     return cb
-
-def get_mnli_copa_rte_cb(tokenizer):
-    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
-    mnli = get_mnli(tokenizer)
-    cb = get_cb(tokenizer)
-    copa = get_copa(tokenizer)
-    rte = get_rte(tokenizer)
-    mnli_copa_rte_cb = merge_datasets_as_df([mnli, cb, copa, rte], ["train", "validation"], ["label", "text"])
-    copa_rte = merge_datasets_as_df([copa, rte, cb], ["train", "validation"], ["label", "text"])
-    return mnli_copa_rte_cb, copa_rte, mnli
 
 
 if __name__ == "__main__":
