@@ -780,7 +780,6 @@ class SuperGlueTest:
         merged_pretrain = merge_datasets_as_df([hellaswag, swag, cosmos_qa, scitail, commonsense_qa, copa_ns], ["train", "validation"], ["label", "text"]).shuffle()
         merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
         merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_pretrain], ["train"], ["label", "text"]).shuffle()
-        del merged_pretrain["validation"]
         merged_pretrain["validation"] = copa_pretrain["validation"]
         classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
