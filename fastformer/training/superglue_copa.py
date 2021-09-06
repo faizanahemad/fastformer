@@ -754,6 +754,14 @@ class SuperGlueTest:
         model_dict = self.build_model(model)
         tokenizer = model_dict["tokenizer"]
 
+        hellaswag = get_hellaswag(tokenizer)
+        swag = get_swag(tokenizer)
+        commonsense_qa = get_commonsense_qa(tokenizer)
+        scitail = get_scitail(tokenizer)
+        cosmos_qa = get_cosmos_qa(tokenizer)
+
+        merged_pretrain = merge_datasets_as_df([scitail, hellaswag, cosmos_qa, swag, commonsense_qa], ["train", "validation"], ["label", "text"])
+
         copa_options = list(copa["train"]["choice1"]) + list(copa["train"]["choice2"]) + list(copa["validation"]["choice1"]) + list(
             copa["validation"]["choice2"]) + list(copa["test"]["choice1"]) + list(copa["test"]["choice2"])
         copa_aux1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"], label=1),
@@ -775,7 +783,7 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
 
-        init_weights(model_dict["model"].module.head, 0.01)
+        # init_weights(model_dict["model"].module.head, 0.01)
 
         copa_aux = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
                              remove_columns=["premise", 'question', "choice1", "choice2"])
@@ -783,7 +791,7 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
         model_dict["model"] = classifier_data["model"]
 
-        init_weights(model_dict["model"].module.head, 0.01)
+        # init_weights(model_dict["model"].module.head, 0.01)
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0,
                            choice=0),
@@ -957,7 +965,6 @@ def train_test(local_rank, args):
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
     torch.backends.cudnn.benchmark = True
     rank = args["nr"] if args["cpu"] else (args["nr"] * args["gpus_per_node"] + local_rank)
-    nr = args["nr"]
     if args["cpu"]:
         assert local_rank == 0
         device = torch.device("cpu")
@@ -966,18 +973,16 @@ def train_test(local_rank, args):
     else:
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
-    print("[Train]: Time = %s, ------------------ Prepare to init Dist Process for Rank = %s" % (get_time_string(), rank))
     if args["nr"] == 0:
         args["master_addr"] = "0.0.0.0"
     init_method = "tcp://%s:%s" % (args["master_addr"], args["master_port"])
 
-    print("[Train]: Time = %s, ---------- Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
+    print("[Train]: Time = %s, Initializing Dist Process with init-method = %s for Rank = %s" % (get_time_string(), init_method, rank))
     dist.init_process_group(args["dist_backend"], rank=rank, world_size=args["world_size"], init_method=init_method)
     set_seeds(args["seed"])
 
 
     model = args["pretrained_model"]
-    print("[Train]: Time = %s, Inside if call, Superglue call" % (get_time_string()))
     SuperGlueTest(None, model, device, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
                 args["hpo"], args["dataset_key"], args["finetune"])()
@@ -986,7 +991,8 @@ def train_test(local_rank, args):
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
 # Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
 
-def get_rte_extended(self, tokenizer):
+def get_rte_extended(tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     cb = load_dataset("super_glue", "rte")
     cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
                  remove_columns=["hypothesis", "premise"])
@@ -1013,125 +1019,138 @@ def get_rte_extended(self, tokenizer):
     cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
     return cb
 
-def get_scitail(self, tokenizer):
+
+def get_scitail(tokenizer, reverse_labels=False):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     scitail = load_dataset("scitail", "tsv_format").map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]),
                                                         remove_columns=["hypothesis", "premise"])
+    entail = 0 if reverse_labels else 1
     for split in ["train", "validation", "test"]:
-        labels = np.array([0 if lbl == "entails" else 1 for lbl in list(scitail[split]["label"])]).astype(int)
+        labels = np.array([entail if lbl == "entails" else (1 - entail) for lbl in list(scitail[split]["label"])]).astype(int)
         scitail[split] = scitail[split].remove_columns(['label'])
         scitail[split] = scitail[split].add_column("label", labels)
     return scitail
 
-def get_swag(self, tokenizer):
+def get_swag(tokenizer, reverse_labels=False):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     swag = load_dataset("swag")  # .filter(lambda x: x["gold-source"]=="gold")
     swag1 = swag.map(
         lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending0"],
-                       label=int(not x["label"] == 0)),
+                       label=int(x["label"] == 0)),
         remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
     swag2 = swag.map(
         lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending1"],
-                       label=int(not x["label"] == 1)),
+                       label=int(x["label"] == 1)),
         remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
     swag3 = swag.map(
         lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending2"],
-                       label=int(not x["label"] == 2)),
+                       label=int(x["label"] == 2)),
         remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
     swag4 = swag.map(
         lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending3"],
-                       label=int(not x["label"] == 3)),
+                       label=int(x["label"] == 3)),
         remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
     hellaswag = DatasetDict({k: concatenate_datasets([v, swag2[k], swag3[k], swag4[k]]) for k, v in swag1.items()})
     for split in ["train", "validation", "test"]:
         labels = np.array(hellaswag[split]["label"]).astype(int)
+        labels = (1 - labels) if reverse_labels else labels
         hellaswag[split] = hellaswag[split].remove_columns(['label'])
         hellaswag[split] = hellaswag[split].add_column("label", labels)
     return hellaswag
 
-def get_hellaswag(self, tokenizer):
+def get_hellaswag(tokenizer, reverse_labels=False):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     hellaswag = load_dataset("hellaswag")
     hellaswag_c1 = hellaswag.map(
         lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][0],
-                       label=int(not x["label"] == 0)),
+                       label=int(x["label"] == 0)),
         remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
     hellaswag_c2 = hellaswag.map(
         lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][1],
-                       label=int(not x["label"] == 1)),
+                       label=int(x["label"] == 1)),
         remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
     hellaswag_c3 = hellaswag.map(
         lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][2],
-                       label=int(not x["label"] == 2)),
+                       label=int(x["label"] == 2)),
         remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
     hellaswag_c4 = hellaswag.map(
         lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][3],
-                       label=int(not x["label"] == 3)),
+                       label=int(x["label"] == 3)),
         remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
     hellaswag = DatasetDict({k: concatenate_datasets([v, hellaswag_c2[k], hellaswag_c3[k], hellaswag_c4[k]]) for k, v in hellaswag_c1.items()})
     for split in ["train", "validation", "test"]:
         labels = np.array(hellaswag[split]["label"]).astype(int)
+        labels = (1 - labels) if reverse_labels else labels
         hellaswag[split] = hellaswag[split].remove_columns(['label'])
         hellaswag[split] = hellaswag[split].add_column("label", labels)
     return hellaswag
 
-def get_cosmos_qa(self, tokenizer):
+def get_cosmos_qa(tokenizer, reverse_labels=False):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     qa = load_dataset("cosmos_qa")
     qa1 = qa.map(
         lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer0"],
-                       label=int(not x["label"] == 0)),
+                       label=int(x["label"] == 0)),
         remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
     qa2 = qa.map(
         lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer1"],
-                       label=int(not x["label"] == 1)),
+                       label=int(x["label"] == 1)),
         remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
     qa3 = qa.map(
         lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer2"],
-                       label=int(not x["label"] == 2)),
+                       label=int(x["label"] == 2)),
         remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
     qa4 = qa.map(
         lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer3"],
-                       label=int(not x["label"] == 3)),
+                       label=int(x["label"] == 3)),
         remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
     qa = DatasetDict({k: concatenate_datasets([v, qa2[k], qa3[k], qa4[k]]) for k, v in qa1.items()})
     for split in ["train", "validation", "test"]:
         labels = np.array(qa[split]["label"]).astype(int)
+        labels = (1 - labels) if reverse_labels else labels
         qa[split] = qa[split].remove_columns(['label'])
         qa[split] = qa[split].add_column("label", labels)
     return qa
 
-def get_commonsense_qa(self, tokenizer):
+def get_commonsense_qa(tokenizer, reverse_labels=False):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     commonsense_qa = load_dataset("commonsense_qa")
     commonsense_qa = commonsense_qa.map(lambda x: dict(label=(ord(x["answerKey"]) - ord('A')) if len(x["answerKey"]) > 0 else 0),
                                         remove_columns=["answerKey"])
     ca1 = commonsense_qa.map(
         lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][0],
-                       label=int(not x["label"] == 0)),
+                       label=int(x["label"] == 0)),
         remove_columns=['question', 'choices'])
     ca2 = commonsense_qa.map(
         lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][1],
-                       label=int(not x["label"] == 1)),
+                       label=int(x["label"] == 1)),
         remove_columns=['question', 'choices'])
     ca3 = commonsense_qa.map(
         lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][2],
-                       label=int(not x["label"] == 2)),
+                       label=int(x["label"] == 2)),
         remove_columns=['question', 'choices'])
     ca4 = commonsense_qa.map(
         lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][3],
-                       label=int(not x["label"] == 3)),
+                       label=int(x["label"] == 3)),
         remove_columns=['question', 'choices'])
     ca5 = commonsense_qa.map(
         lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][4],
-                       label=int(not x["label"] == 4)),
+                       label=int(x["label"] == 4)),
         remove_columns=['question', 'choices'])
 
     dsets = [ca1, ca2, ca3, ca4, ca5]
     cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+    for split in cb.keys():
+        labels = np.array(cb[split]["label"]).astype(int)
+        labels = (1 - labels) if reverse_labels else labels
+        cb[split] = cb[split].remove_columns(['label'])
+        cb[split] = cb[split].add_column("label", labels)
     return cb
 
 ########
 
-def get_mnli(self, tokenizer):
+def get_mnli(tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     mnli = load_dataset("multi_nli")
     mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
     mnli_labels = np.array(mnli["train"]["label"]).astype(int)
@@ -1146,7 +1165,8 @@ def get_mnli(self, tokenizer):
     mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
     return mnli
 
-def get_copa(self, tokenizer):
+def get_copa(tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     copa = load_dataset("super_glue", "copa")
     copa_c1 = copa.map(
         lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
@@ -1163,7 +1183,7 @@ def get_copa(self, tokenizer):
         copa[split] = copa[split].add_column("label", copa_labels)
     return copa
 
-def get_qa_srl(self, tokenizer):
+def get_qa_srl(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     qa_srl = load_dataset("qa_srl", script_version="master")
     qa_srl_pos = qa_srl.map(lambda x: dict(
@@ -1189,7 +1209,7 @@ def get_qa_srl(self, tokenizer):
     qa_srl = merge_datasets_as_df([qa_srl_pos, qa_srl_n1, qa_srl_n2, qa_srl_n3], ["train", "validation"], ["label", "text"])
     return qa_srl
 
-def get_qqp(self, tokenizer):
+def get_qqp(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     quora = load_dataset("quora")
     quora["validation"] = Dataset.from_dict(quora["train"][0:10])
@@ -1202,7 +1222,7 @@ def get_qqp(self, tokenizer):
     quora = merge_datasets_as_df([quora_1, quora_2], ["train", "validation"], ["label", "text"])
     return quora
 
-def get_rte(self, tokenizer):
+def get_rte(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     rte = load_dataset("super_glue", "rte")
     rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
@@ -1213,7 +1233,7 @@ def get_rte(self, tokenizer):
         rte[split] = rte[split].add_column("label", rte_labels)
     return rte
 
-def get_cb(self, tokenizer):
+def get_cb(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
     cb = load_dataset("super_glue", "cb")
     cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
@@ -1241,12 +1261,12 @@ def get_cb(self, tokenizer):
     cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
     return cb
 
-def get_mnli_copa_rte_cb(self, tokenizer):
+def get_mnli_copa_rte_cb(tokenizer):
     from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
-    mnli = self.get_mnli(tokenizer)
-    cb = self.get_cb(tokenizer)
-    copa = self.get_copa(tokenizer)
-    rte = self.get_rte(tokenizer)
+    mnli = get_mnli(tokenizer)
+    cb = get_cb(tokenizer)
+    copa = get_copa(tokenizer)
+    rte = get_rte(tokenizer)
     mnli_copa_rte_cb = merge_datasets_as_df([mnli, cb, copa, rte], ["train", "validation"], ["label", "text"])
     copa_rte = merge_datasets_as_df([copa, rte, cb], ["train", "validation"], ["label", "text"])
     return mnli_copa_rte_cb, copa_rte, mnli
