@@ -758,10 +758,15 @@ class SuperGlueTest:
         # augment COPA with NS for main training
         # Augment positives by removing stopwords
         # Only Swag
+        # MV -> First option correct then 1 else 0
 
         copa_aux = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
             remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_aux_2 = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"] + f" {tokenizer.sep_token} " + x["choice1"], label=int(not x["label"])),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_aux = DatasetDict({split: concatenate_datasets([copa_aux[split], copa_aux_2[split]]) for split in copa_aux.keys()})
         del copa_aux["test"]
         classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
