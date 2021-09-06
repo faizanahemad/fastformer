@@ -753,7 +753,7 @@ class SuperGlueTest:
         cosmos_qa = get_cosmos_qa(tokenizer)
         copa_pretrain = get_copa(tokenizer)
 
-        merged_pretrain = merge_datasets_as_df([copa_pretrain, scitail, hellaswag, cosmos_qa, swag, commonsense_qa, copa_pretrain], ["train", "validation"], ["label", "text"]).shuffle()
+        merged_pretrain = merge_datasets_as_df([copa_pretrain, hellaswag, swag, copa_pretrain], ["train", "validation"], ["label", "text"]).shuffle()
         classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
         model_dict["model"] = classifier_data["model"]
