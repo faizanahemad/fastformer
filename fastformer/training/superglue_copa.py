@@ -753,13 +753,10 @@ class SuperGlueTest:
         cosmos_qa = get_cosmos_qa(tokenizer)
         copa_pretrain = get_copa(tokenizer)
 
-        merged_pretrain = merge_datasets_as_df([hellaswag, swag, cosmos_qa, scitail, commonsense_qa], ["train", "validation"], ["label", "text"]).shuffle()
-        merged_pretrain["train"] = concatenate_datasets([copa_pretrain["train"], merged_pretrain["train"], merged_pretrain["validation"], copa_pretrain["train"]])
-        del merged_pretrain["validation"]
-        merged_pretrain["validation"] = copa_pretrain["validation"]
-        classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
-        model_dict["model"] = classifier_data["model"]
+        # Reverse order of COPA pretrain
+        # Add mnli rte etc
+        # augment COPA with NS for main training
+        # Augment positives by removing stopwords
 
         copa_options = list(copa["train"]["choice1"]) + list(copa["train"]["choice2"]) + list(copa["validation"]["choice1"]) + list(
             copa["validation"]["choice2"]) + list(copa["test"]["choice1"]) + list(copa["test"]["choice2"])
@@ -779,6 +776,16 @@ class SuperGlueTest:
         copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
         copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
         del copa_ns["test"]
+
+        merged_pretrain = merge_datasets_as_df([hellaswag, swag, cosmos_qa, scitail, commonsense_qa, copa_ns], ["train", "validation"], ["label", "text"]).shuffle()
+        merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
+        merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_pretrain], ["train"], ["label", "text"]).shuffle()
+        del merged_pretrain["validation"]
+        merged_pretrain["validation"] = copa_pretrain["validation"]
+        classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+        model_dict["model"] = classifier_data["model"]
+
         classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
