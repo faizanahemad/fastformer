@@ -476,7 +476,6 @@ class SuperGlueTest:
                 train_predictions = (np.array(train_predictions) > 0.5) if classifier_data["num_classes"] == 1 else train_predictions
                 train_acc = accuracy_score(train_labels, train_predictions)
                 all_train_acc.append(train_acc)
-                model = model.eval()
 
                 epochs += 1
 
@@ -485,7 +484,8 @@ class SuperGlueTest:
                 pbar.close()
 
             if rank == 0:
-                inner_model = model.module
+                model = model.eval()
+                inner_model = model.module.eval()
                 labels, predictions, val_losses = [], [], []
                 with model.no_sync():
                     for step, batch in enumerate(tqdm(classifier_data["validation"], desc="%s validation" % dataset_key)):
