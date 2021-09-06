@@ -771,8 +771,8 @@ class SuperGlueTest:
                 copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
         copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
         copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
-        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=4)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=4)
+        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
 
         init_weights(model_dict["model"].module.head, 0.01)
@@ -985,6 +985,271 @@ def train_test(local_rank, args):
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
 # Seems to help with a variety of real world datasets where the bulk of the data is often very similar and easy to learn but certain subpopulations are much more challenging.
+
+def get_rte_extended(self, tokenizer):
+    cb = load_dataset("super_glue", "rte")
+    cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
+                 remove_columns=["hypothesis", "premise"])
+    cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
+                 remove_columns=["hypothesis", "premise"])
+    cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
+    cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+    cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x[
+        "hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
+                 remove_columns=["hypothesis", "premise"])
+    cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x[
+        "premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
+                 remove_columns=["hypothesis", "premise"])
+
+    for split in ["train", "validation", "test"]:
+        cb1[split] = cb1[split].add_column("process_version", [1] * len(cb1[split]))
+        cb2[split] = cb2[split].add_column("process_version", [2] * len(cb2[split]))
+        cb3[split] = cb3[split].add_column("process_version", [3] * len(cb3[split]))
+        cb4[split] = cb4[split].add_column("process_version", [4] * len(cb4[split]))
+        cb5[split] = cb5[split].add_column("process_version", [5] * len(cb5[split]))
+        cb6[split] = cb6[split].add_column("process_version", [6] * len(cb6[split]))
+
+    dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
+    cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+    return cb
+
+def get_scitail(self, tokenizer):
+    scitail = load_dataset("scitail", "tsv_format").map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]),
+                                                        remove_columns=["hypothesis", "premise"])
+    for split in ["train", "validation", "test"]:
+        labels = np.array([0 if lbl == "entails" else 1 for lbl in list(scitail[split]["label"])]).astype(int)
+        scitail[split] = scitail[split].remove_columns(['label'])
+        scitail[split] = scitail[split].add_column("label", labels)
+    return scitail
+
+def get_swag(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    swag = load_dataset("swag")  # .filter(lambda x: x["gold-source"]=="gold")
+    swag1 = swag.map(
+        lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending0"],
+                       label=int(not x["label"] == 0)),
+        remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+    swag2 = swag.map(
+        lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending1"],
+                       label=int(not x["label"] == 1)),
+        remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+    swag3 = swag.map(
+        lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending2"],
+                       label=int(not x["label"] == 2)),
+        remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+    swag4 = swag.map(
+        lambda x: dict(text=x["sent1"] + f" {tokenizer.sep_token} " + x["sent2"] + " " + x["ending3"],
+                       label=int(not x["label"] == 3)),
+        remove_columns=['video-id', 'fold-ind', 'startphrase', 'sent1', 'sent2', 'gold-source', 'ending0', 'ending1', 'ending2', 'ending3', ])
+    hellaswag = DatasetDict({k: concatenate_datasets([v, swag2[k], swag3[k], swag4[k]]) for k, v in swag1.items()})
+    for split in ["train", "validation", "test"]:
+        labels = np.array(hellaswag[split]["label"]).astype(int)
+        hellaswag[split] = hellaswag[split].remove_columns(['label'])
+        hellaswag[split] = hellaswag[split].add_column("label", labels)
+    return hellaswag
+
+def get_hellaswag(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    hellaswag = load_dataset("hellaswag")
+    hellaswag_c1 = hellaswag.map(
+        lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][0],
+                       label=int(not x["label"] == 0)),
+        remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
+    hellaswag_c2 = hellaswag.map(
+        lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][1],
+                       label=int(not x["label"] == 1)),
+        remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
+    hellaswag_c3 = hellaswag.map(
+        lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][2],
+                       label=int(not x["label"] == 2)),
+        remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
+    hellaswag_c4 = hellaswag.map(
+        lambda x: dict(text=x["ctx_a"] + f" {tokenizer.sep_token} " + x["ctx_b"] + " " + x["endings"][3],
+                       label=int(not x["label"] == 3)),
+        remove_columns=['ind', 'activity_label', 'ctx_a', 'ctx_b', 'ctx', 'endings', 'source_id', 'split', 'split_type', ])
+    hellaswag = DatasetDict({k: concatenate_datasets([v, hellaswag_c2[k], hellaswag_c3[k], hellaswag_c4[k]]) for k, v in hellaswag_c1.items()})
+    for split in ["train", "validation", "test"]:
+        labels = np.array(hellaswag[split]["label"]).astype(int)
+        hellaswag[split] = hellaswag[split].remove_columns(['label'])
+        hellaswag[split] = hellaswag[split].add_column("label", labels)
+    return hellaswag
+
+def get_cosmos_qa(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    qa = load_dataset("cosmos_qa")
+    qa1 = qa.map(
+        lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer0"],
+                       label=int(not x["label"] == 0)),
+        remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+    qa2 = qa.map(
+        lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer1"],
+                       label=int(not x["label"] == 1)),
+        remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+    qa3 = qa.map(
+        lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer2"],
+                       label=int(not x["label"] == 2)),
+        remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+    qa4 = qa.map(
+        lambda x: dict(text=x["context"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["answer3"],
+                       label=int(not x["label"] == 3)),
+        remove_columns=['id', 'context', 'question', 'answer0', 'answer1', 'answer2', 'answer3', ])
+    qa = DatasetDict({k: concatenate_datasets([v, qa2[k], qa3[k], qa4[k]]) for k, v in qa1.items()})
+    for split in ["train", "validation", "test"]:
+        labels = np.array(qa[split]["label"]).astype(int)
+        qa[split] = qa[split].remove_columns(['label'])
+        qa[split] = qa[split].add_column("label", labels)
+    return qa
+
+def get_commonsense_qa(self, tokenizer):
+    commonsense_qa = load_dataset("commonsense_qa")
+    commonsense_qa = commonsense_qa.map(lambda x: dict(label=(ord(x["answerKey"]) - ord('A')) if len(x["answerKey"]) > 0 else 0),
+                                        remove_columns=["answerKey"])
+    ca1 = commonsense_qa.map(
+        lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][0],
+                       label=int(not x["label"] == 0)),
+        remove_columns=['question', 'choices'])
+    ca2 = commonsense_qa.map(
+        lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][1],
+                       label=int(not x["label"] == 1)),
+        remove_columns=['question', 'choices'])
+    ca3 = commonsense_qa.map(
+        lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][2],
+                       label=int(not x["label"] == 2)),
+        remove_columns=['question', 'choices'])
+    ca4 = commonsense_qa.map(
+        lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][3],
+                       label=int(not x["label"] == 3)),
+        remove_columns=['question', 'choices'])
+    ca5 = commonsense_qa.map(
+        lambda x: dict(text=x["question"] + f" {tokenizer.sep_token} " + x["choices"]["text"][4],
+                       label=int(not x["label"] == 4)),
+        remove_columns=['question', 'choices'])
+
+    dsets = [ca1, ca2, ca3, ca4, ca5]
+    cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+    return cb
+
+########
+
+def get_mnli(self, tokenizer):
+    mnli = load_dataset("multi_nli")
+    mnli["validation"] = concatenate_datasets([mnli["validation_matched"], mnli["validation_mismatched"]])
+    mnli_labels = np.array(mnli["train"]["label"]).astype(int)
+    mnli_validation_labels = np.array(mnli["validation"]["label"]).astype(int)
+    mnli_labels[mnli_labels == 1], mnli_labels[mnli_labels == 2] = 2, 1
+    mnli_validation_labels[mnli_validation_labels == 1], mnli_validation_labels[mnli_validation_labels == 2] = 2, 1
+    mnli["train"] = mnli["train"].remove_columns(['label']).add_column("label", mnli_labels)
+    mnli["validation"] = mnli["validation"].remove_columns(['label']).add_column("label", mnli_validation_labels)
+    mnli = mnli.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]),
+                    remove_columns=["hypothesis", "premise", 'promptID', 'pairID', 'premise_binary_parse', 'premise_parse', 'hypothesis_binary_parse',
+                                    'hypothesis_parse', 'genre', ])
+    mnli = mnli.filter(lambda x: len(x["text"].split()) > 32)
+    return mnli
+
+def get_copa(self, tokenizer):
+    copa = load_dataset("super_glue", "copa")
+    copa_c1 = copa.map(
+        lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"],
+                       label=int(not x["label"] == 0)),
+        remove_columns=["premise", 'question', "choice1", "choice2"])
+    copa_c2 = copa.map(
+        lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"],
+                       label=int(not x["label"] == 1)),
+        remove_columns=["premise", 'question', "choice1", "choice2"])
+    copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
+    for split in ["train", "validation", "test"]:
+        copa_labels = np.array(copa[split]["label"])
+        copa[split] = copa[split].remove_columns(['label'])
+        copa[split] = copa[split].add_column("label", copa_labels)
+    return copa
+
+def get_qa_srl(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    qa_srl = load_dataset("qa_srl", script_version="master")
+    qa_srl_pos = qa_srl.map(lambda x: dict(
+        text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " + x["answers"][0],
+        label=1),
+                            remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+    list_of_answers = [b for a in list(qa_srl["train"]["answers"]) for b in a]
+    qa_srl_n1 = qa_srl.map(lambda x: dict(
+        text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " +
+             random.sample(list_of_answers, 1)[0],
+        label=0),
+                           remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+    qa_srl_n2 = qa_srl.map(lambda x: dict(
+        text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " +
+             random.sample(list_of_answers, 1)[0],
+        label=0),
+                           remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+    qa_srl_n3 = qa_srl.map(lambda x: dict(
+        text=x["sentence"] + f" {tokenizer.sep_token} " + (" ".join([q for q in x["question"] if q != "_"])) + f" {tokenizer.sep_token} " +
+             random.sample(list_of_answers, 1)[0],
+        label=0),
+                           remove_columns=['sentence', 'sent_id', 'predicate_idx', 'predicate', 'question', 'answers'])
+    qa_srl = merge_datasets_as_df([qa_srl_pos, qa_srl_n1, qa_srl_n2, qa_srl_n3], ["train", "validation"], ["label", "text"])
+    return qa_srl
+
+def get_qqp(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    quora = load_dataset("quora")
+    quora["validation"] = Dataset.from_dict(quora["train"][0:10])
+    quora_1 = quora.map(
+        lambda x: dict(text=x["questions"]["text"][0] + f" {tokenizer.sep_token} " + x["questions"]["text"][1], label=int(x["is_duplicate"])),
+        remove_columns=['questions', 'is_duplicate'])
+    quora_2 = quora.map(
+        lambda x: dict(text=x["questions"]["text"][1] + f" {tokenizer.sep_token} " + x["questions"]["text"][0], label=int(x["is_duplicate"])),
+        remove_columns=['questions', 'is_duplicate'])
+    quora = merge_datasets_as_df([quora_1, quora_2], ["train", "validation"], ["label", "text"])
+    return quora
+
+def get_rte(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    rte = load_dataset("super_glue", "rte")
+    rte = rte.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+
+    for split in ["train", "validation", "test"]:
+        rte_labels = np.array(rte[split]["label"])
+        rte[split] = rte[split].remove_columns(['label'])
+        rte[split] = rte[split].add_column("label", rte_labels)
+    return rte
+
+def get_cb(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    cb = load_dataset("super_glue", "cb")
+    cb1 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x["hypothesis"]),
+                 remove_columns=["hypothesis", "premise"])
+    cb2 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x["premise"]),
+                 remove_columns=["hypothesis", "premise"])
+    cb3 = cb.map(lambda x: dict(text=x["hypothesis"] + f" {tokenizer.sep_token} " + x["premise"]), remove_columns=["hypothesis", "premise"])
+    cb4 = cb.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["hypothesis"]), remove_columns=["hypothesis", "premise"])
+    cb5 = cb.map(lambda x: dict(text="premise: " + x["premise"] + f" {tokenizer.sep_token} " + "hypothesis: " + x[
+        "hypothesis"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis entail or contradict with each other?"),
+                 remove_columns=["hypothesis", "premise"])
+    cb6 = cb.map(lambda x: dict(text="hypothesis: " + x["hypothesis"] + f" {tokenizer.sep_token} " + "premise: " + x[
+        "premise"] + f" {tokenizer.sep_token} " + "Do the premise and hypothesis agree?"),
+                 remove_columns=["hypothesis", "premise"])
+
+    for split in ["train", "validation", "test"]:
+        cb1[split] = cb1[split].add_column("process_version", [1] * len(cb1[split]))
+        cb2[split] = cb2[split].add_column("process_version", [2] * len(cb2[split]))
+        cb3[split] = cb3[split].add_column("process_version", [3] * len(cb3[split]))
+        cb4[split] = cb4[split].add_column("process_version", [4] * len(cb4[split]))
+        cb5[split] = cb5[split].add_column("process_version", [5] * len(cb5[split]))
+        cb6[split] = cb6[split].add_column("process_version", [6] * len(cb6[split]))
+
+    dsets = [cb1, cb2, cb3, cb4, cb5, cb6]
+    cb = DatasetDict({split: concatenate_datasets([d[split] for d in dsets]) for split in ["train", "validation", "test"]})
+    return cb
+
+def get_mnli_copa_rte_cb(self, tokenizer):
+    from datasets import concatenate_datasets, DatasetDict, load_dataset, Dataset
+    mnli = self.get_mnli(tokenizer)
+    cb = self.get_cb(tokenizer)
+    copa = self.get_copa(tokenizer)
+    rte = self.get_rte(tokenizer)
+    mnli_copa_rte_cb = merge_datasets_as_df([mnli, cb, copa, rte], ["train", "validation"], ["label", "text"])
+    copa_rte = merge_datasets_as_df([copa, rte, cb], ["train", "validation"], ["label", "text"])
+    return mnli_copa_rte_cb, copa_rte, mnli
 
 
 if __name__ == "__main__":
