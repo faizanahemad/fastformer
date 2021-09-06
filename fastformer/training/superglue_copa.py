@@ -771,11 +771,18 @@ class SuperGlueTest:
                 copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
         copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
         copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
-        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=5)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
+        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=4)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=4)
         model_dict["model"] = classifier_data["model"]
 
         init_weights(model_dict["model"].module.head, 0.01)
+
+        copa_aux = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
+                             remove_columns=["premise", 'question', "choice1", "choice2"])
+        classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
+        model_dict["model"] = classifier_data["model"]
+
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0,
                            choice=0),
