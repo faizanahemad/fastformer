@@ -391,7 +391,7 @@ class SuperGlueTest:
                                                             three_phase=False, pct_start=0.1, anneal_strategy="linear")
 
         validation = None
-        if "validation" in dataset:
+        if "validation" in dataset and dataset["validation"] is not None:
             validation = MTTDataset(1, len(tokenizer), tokenizer,
                                     dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                                     dataset["validation"])
@@ -401,7 +401,7 @@ class SuperGlueTest:
 
         test = None
         test_idx = None
-        if rank == 0:
+        if rank == 0 and "test" in dataset and dataset["test"] is not None:
             test = MTTDataset(1, len(tokenizer), tokenizer,
                               dict(padding="max_length", truncation=True, return_tensors="pt", max_length=512),
                               dataset["test"])
@@ -517,26 +517,18 @@ class SuperGlueTest:
 
             torch.distributed.barrier()
         predictions = []
-        if hasattr(model, "no_sync") and rank == 0 and self.hpo is None:
+        if rank == 0 and self.hpo is None and "test" in classifier_data and classifier_data["test"] is not None:
             model = model.eval()
-            inner_model = model.module
+            inner_model = getattr(model, "module", model)
             for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
                 batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
                 _ = batch.pop("label", None)
                 with torch.no_grad():
-                    with model.no_sync():
+                    if hasattr(model, "no_sync"):
+                        with model.no_sync():
+                            output = inner_model(**batch, label=None)
+                    else:
                         output = inner_model(**batch, label=None)
-                test_preds = output["predictions"].cpu().tolist()
-                test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
-                predictions.extend(test_preds)
-        elif rank == 0 and self.hpo is None:
-            model = model.eval()
-            inner_model = model
-            for step, batch in enumerate(tqdm(classifier_data["test"], desc="%s test" % dataset_key)):
-                batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
-                _ = batch.pop("label", None)
-                with torch.no_grad():
-                    output = inner_model(**batch, label=None)
                 test_preds = output["predictions"].cpu().tolist()
                 test_preds = test_preds if isinstance(test_preds, (list, tuple)) else [test_preds]
                 predictions.extend(test_preds)
@@ -783,6 +775,7 @@ class SuperGlueTest:
                 copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
         copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
         copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
+        del copa_ns["test"]
         classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
         model_dict["model"] = classifier_data["model"]
@@ -791,6 +784,7 @@ class SuperGlueTest:
 
         copa_aux = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
                              remove_columns=["premise", 'question', "choice1", "choice2"])
+        del copa_aux["test"]
         classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
         model_dict["model"] = classifier_data["model"]
