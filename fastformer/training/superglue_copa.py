@@ -775,7 +775,7 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
 
-        init_weights(model_dict["model"].module.head)
+        init_weights(model_dict["model"].module.head, 0.01)
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0,
                            choice=0),
