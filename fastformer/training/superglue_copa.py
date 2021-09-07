@@ -911,8 +911,8 @@ class SuperGlueTest:
                 label=0),
             remove_columns=["premise", 'question', "choice1", "choice2"])
 
-
-        merged_pretrain = merge_datasets_as_df([hellaswag, swag, cosmos_qa, scitail, commonsense_qa, copa_ns], ["train", "validation"], ["label", "text"]).shuffle()
+        # cosmos_qa, scitail, commonsense_qa, hellaswag,
+        merged_pretrain = merge_datasets_as_df([swag, copa_ns], ["train", "validation"], ["label", "text"]).shuffle()
         merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
         merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_pretrain, copa_correct_question, copa_incorrect_question], ["train"], ["label", "text"]).shuffle()
         merged_pretrain["validation"] = copa_pretrain["validation"]
