@@ -943,7 +943,7 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=8)
         model_dict["model"] = classifier_data["model"]
 
-        init_weights(model_dict["model"].module.head, 0.01)
+        # init_weights(model_dict["model"].module.head, 0.01)
 
 
         # init_weights(model_dict["model"].module.head, 0.01)
