@@ -929,7 +929,7 @@ class SuperGlueTest:
         copa_questions["train"] = concatenate_datasets([copa_questions["train"], copa_questions["validation"], copa_questions["test"]])
 
         # cosmos_qa, scitail, commonsense_qa, hellaswag,
-        merged_pretrain = merge_datasets_as_df([swag, copa_ns, scitail], ["train", "validation"], ["label", "text"]).shuffle()
+        merged_pretrain = merge_datasets_as_df([swag, copa_ns, cosmos_qa], ["train", "validation"], ["label", "text"]).shuffle()
         # merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
         merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_questions, copa_aux], ["train"], ["label", "text"]).shuffle()
         merged_pretrain["validation"] = copa_pretrain["validation"]
