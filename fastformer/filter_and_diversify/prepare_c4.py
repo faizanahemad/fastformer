@@ -32,3 +32,4 @@ c4["train"] = concatenate_datasets([c4["train"], dsets])
 c4.save_to_disk("/home/ahemf/processed/c4_extended")
 
 
+# TODO: need to use CTRL/DEBERTA tokenizer or just split() for tokens with lemmer/stemmer for tokenization
