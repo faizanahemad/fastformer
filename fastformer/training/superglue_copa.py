@@ -938,8 +938,9 @@ class SuperGlueTest:
         model_dict["model"] = classifier_data["model"]
 
         copa_ns = merge_datasets_as_df([copa_ns, copa_pretrain, copa_questions, copa_aux], ["train"], ["label", "text"]).shuffle()
-        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+        copa_ns["validation"] = copa_pretrain["validation"]
+        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=8)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=8)
         model_dict["model"] = classifier_data["model"]
 
         init_weights(model_dict["model"].module.head, 0.01)
