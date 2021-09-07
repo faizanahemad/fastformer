@@ -234,6 +234,117 @@ class wsc_proc:
         return dict(text=text)
 
 
+class copa_proc:
+    def __init__(self, tokenizer, all_choices):
+        self.tokenizer = tokenizer
+        self.all_choices = all_choices
+
+    def __call__(self, x):
+        texts, labels, versions = [], [], []
+        assert x["premise"]
+        x = dict(premise=x["premise"][0], label=x["label"][0], choice1=x["choice1"][0], choice2=x["choice2"][0])
+        for _ in range(3):
+            texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + random.sample(self.all_choices, 1)[0])
+            labels.append(0)
+            versions.append(1)
+
+            texts.append("option: " + random.sample(self.all_choices, 1)[0] + f" {self.tokenizer.sep_token} " + "premise: "+x["premise"])
+            labels.append(0)
+            versions.append(2)
+
+            texts.append(x["premise"].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + random.sample(self.all_choices, 1)[0])
+            labels.append(0)
+            versions.append(3)
+
+            texts.append("option: " + random.sample(self.all_choices, 1)[0].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + "premise: " + x["premise"])
+            labels.append(0)
+            versions.append(4)
+
+            texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + random.sample(self.all_choices, 1)[0].lower().replace("the", ""))
+            labels.append(0)
+            versions.append(3)
+
+            texts.append("option: " + random.sample(self.all_choices, 1)[0] + f" {self.tokenizer.sep_token} " + "premise: " + x["premise"].lower().replace("the", ""))
+            labels.append(0)
+            versions.append(4)
+
+            texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + random.sample(self.all_choices, 1)[0] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])])
+            labels.append(0)
+            versions.append(5)
+
+            texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + random.sample(self.all_choices, 1)[0] + f" {self.tokenizer.sep_token} " +
+                         [x["choice1"], x["choice2"]][int(x["label"])])
+            labels.append(0)
+            versions.append(5)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])] + f" {self.tokenizer.sep_token} " +
+                     [x["choice1"], x["choice2"]][int(x["label"])])
+        labels.append(0)
+        versions.append(5)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(x["label"])] + f" {self.tokenizer.sep_token} " +
+                     random.sample(self.all_choices, 1)[0])
+        labels.append(1)
+        versions.append(5)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(x["label"])] + f" {self.tokenizer.sep_token} " +
+                     [x["choice1"], x["choice2"]][int(not x["label"])])
+        labels.append(1)
+        versions.append(5)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(x["label"])])
+        labels.append(1)
+        versions.append(1)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])])
+        labels.append(0)
+        versions.append(1)
+
+        texts.append(x["premise"].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(x["label"])])
+        labels.append(1)
+        versions.append(3)
+
+        texts.append(x["premise"].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])])
+        labels.append(0)
+        versions.append(3)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(x["label"])].lower().replace("the", ""))
+        labels.append(1)
+        versions.append(3)
+
+        texts.append(x["premise"] + f" {self.tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])].lower().replace("the", ""))
+        labels.append(0)
+        versions.append(3)
+
+        texts.append("option: " + [x["choice1"], x["choice2"]][int(x["label"])].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + "premise: " + x["premise"])
+        labels.append(1)
+        versions.append(4)
+
+        texts.append("option: " + [x["choice1"], x["choice2"]][int(not x["label"])].lower().replace("the", "") + f" {self.tokenizer.sep_token} " + "premise: " + x[
+            "premise"])
+        labels.append(0)
+        versions.append(4)
+
+        texts.append("option: " + [x["choice1"], x["choice2"]][int(x["label"])] + f" {self.tokenizer.sep_token} " + "premise: " + x[
+            "premise"].lower().replace("the", ""))
+        labels.append(1)
+        versions.append(4)
+
+        texts.append("option: " + [x["choice1"], x["choice2"]][int(not x["label"])] + f" {self.tokenizer.sep_token} " + "premise: " + x[
+            "premise"].lower().replace("the", ""))
+        labels.append(0)
+        versions.append(4)
+
+
+
+
+
+
+# augment COPA with NS for main training
+# Augment positives by removing stopwords
+# Is first option correct, but we still provide second option to ensure model has both options seen at same run.
+
+
 class SuperGlueTest:
     def __init__(self, location, model, device, rank, world_size, epochs, lr,
                  seed, batch_size, accumulation_steps,
@@ -758,7 +869,7 @@ class SuperGlueTest:
         # augment COPA with NS for main training
         # Augment positives by removing stopwords
         # Only Swag
-        # MV -> First option correct then 1 else 0
+        # Is first option correct, but we still provide second option to ensure model has both options seen at same run.
 
         copa_aux = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
@@ -791,17 +902,27 @@ class SuperGlueTest:
         copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
         del copa_ns["test"]
 
+        copa_correct_question = copa.map(
+            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]], label=1),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+        copa_incorrect_question = copa.map(
+            lambda x: dict(
+                text=x["premise"] + f" {tokenizer.sep_token} " + list({'cause', 'effect'} - {x["question"]})[0] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]],
+                label=0),
+            remove_columns=["premise", 'question', "choice1", "choice2"])
+
+
         merged_pretrain = merge_datasets_as_df([hellaswag, swag, cosmos_qa, scitail, commonsense_qa, copa_ns], ["train", "validation"], ["label", "text"]).shuffle()
         merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
-        merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_pretrain], ["train"], ["label", "text"]).shuffle()
+        merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_pretrain, copa_correct_question, copa_incorrect_question], ["train"], ["label", "text"]).shuffle()
         merged_pretrain["validation"] = copa_pretrain["validation"]
         classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
         model_dict["model"] = classifier_data["model"]
 
-        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
-        model_dict["model"] = classifier_data["model"]
+        # classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
+        # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=3)
+        # model_dict["model"] = classifier_data["model"]
 
         # init_weights(model_dict["model"].module.head, 0.01)
 
