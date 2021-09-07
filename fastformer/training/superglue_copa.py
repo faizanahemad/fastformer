@@ -916,8 +916,8 @@ class SuperGlueTest:
         # merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
         merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_correct_question, copa_incorrect_question], ["train"], ["label", "text"]).shuffle()
         merged_pretrain["validation"] = copa_pretrain["validation"]
-        classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=1)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=1)
+        classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=5)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=5)
         model_dict["model"] = classifier_data["model"]
 
         # classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=3)
