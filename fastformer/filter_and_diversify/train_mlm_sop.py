@@ -511,7 +511,6 @@ class RTDMLMModel(PreTrainedModel):
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
         self.config.gradient_checkpointing = True
-        # self.distillation_loss_w = 1.0
         self.rtd_temperature = 1.0
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
@@ -519,13 +518,6 @@ class RTDMLMModel(PreTrainedModel):
         for p in self.masking_model.parameters():
             p.requires_grad = False
         self.backbone = backbone
-        # self.momentum_backbone = copy.deepcopy(backbone)
-        # self.momentum_backbone.load_state_dict(backbone.state_dict())
-        # _ = self.momentum_backbone.eval()
-        # change_dropout(self.momentum_backbone, 0.0)
-        # self.copy_momentum = 0.99
-        # for p in self.momentum_backbone.parameters():
-        #     p.requires_grad = False
         self.mlm_w = mlm_w
         self.tokenizer = tokenizer
         self.rtd_nn = nn.Linear(hidden_size, 1)
@@ -536,74 +528,6 @@ class RTDMLMModel(PreTrainedModel):
 
         self.lm_head = RobertaLMHead(backbone.config)
         self.tie_weights()
-        # self.momentum_lm_head = copy.deepcopy(self.lm_head)
-        # self.momentum_lm_head.load_state_dict(self.lm_head.state_dict())
-        # for p in self.momentum_lm_head.parameters():
-        #     p.requires_grad = False
-
-    def do_masking_unused(self, input_ids, attention_mask, validation_iter=False):
-        label_mlm_input_ids = input_ids.clone()
-        b, s = input_ids.shape[:2]
-        ss = attention_mask.sum(1).float().mean().item()
-        with torch.no_grad():
-            mlm_rtd_hints = self.masking_model(input_ids, attention_mask)
-        word_ce = mlm_rtd_hints["word_ce"]
-        top_k = mlm_rtd_hints["top_k_alternatives"]
-        word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
-        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask.bool()), input_ids == self.tokenizer.bos_token_id))
-        word_ce[non_mask_locations] = 0.0
-        indices = torch.multinomial(word_ce, int((0.15 + random.random() * 0.05) * ss), False)
-        indices = indices[:, torch.randperm(indices.size()[1])]
-        word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
-        word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
-        rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
-        top_k = top_k[:, :, torch.randint(0, top_k.size(2), (1,))].squeeze(-1)
-        input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
-
-        mask_locations = input_ids == self.tokenizer.mask_token_id
-        mlm_input_ids = label_mlm_input_ids.clone()
-        selected_mask_locations = torch.logical_and(mask_locations, torch.rand(input_ids.size(), device=input_ids.device) < 0.5)
-        teacher_mask_proportion = (selected_mask_locations.sum() / mask_locations.sum()).item()
-        mlm_input_ids[selected_mask_locations] = self.tokenizer.mask_token_id
-        with torch.no_grad():
-            outputs = self.momentum_backbone(
-                mlm_input_ids,
-                attention_mask=attention_mask,
-                return_dict=False,
-            )
-            sequence_output = outputs[0][selected_mask_locations]
-            teacher_prediction_scores = self.momentum_lm_head(sequence_output)
-            lm_predictions = teacher_prediction_scores.detach().argmax(dim=-1)
-            mlm_teacher_accuracy = (lm_predictions == label_mlm_input_ids[selected_mask_locations]).float().mean().item()
-
-        rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
-        # extra_masks = torch.logical_or(rtd_locations, torch.logical_and(torch.rand(input_ids.size(), device=input_ids.device) < 0.1, torch.logical_not(non_mask_locations)))
-        rtd_input_ids = label_mlm_input_ids.clone()
-        rtd_input_ids[rtd_locations] = self.tokenizer.mask_token_id
-        with torch.no_grad():
-            outputs = self.backbone(
-                rtd_input_ids,
-                attention_mask=attention_mask,
-                return_dict=False,
-            )
-            sequence_output = outputs[0]
-            prediction_scores = self.lm_head(sequence_output)[rtd_locations]
-            lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        rtd_replacement_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations]).float().mean().item()
-        sampled_replacements = temperature_sampling(prediction_scores, 2.0).view(-1)
-        input_ids[rtd_locations] = sampled_replacements
-        rtd_post_replacement_accuracy = (sampled_replacements == label_mlm_input_ids[rtd_locations]).float().mean().item()
-
-
-        mask_accuracy = None
-        rtd_accuracy = None
-        if validation_iter:
-            mask_accuracy = word_wise_accuracy[word_mask[0], word_mask[1]].float().mean().item()
-            rtd_accuracy = word_wise_accuracy[rtd_mask[0], rtd_mask[1]].float().mean().item()
-        accuracy = mlm_rtd_hints["accuracy"]
-        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
-        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy, teacher_mask_proportion
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
