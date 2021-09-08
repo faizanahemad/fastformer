@@ -562,7 +562,7 @@ class RTDMLMModel(PreTrainedModel):
             rtd_post_replacement_accuracy = (rtd_words[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
-        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_locations, rtd_post_replacement_accuracy
+        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_post_replacement_accuracy
 
 
     def get_output_embeddings(self):
@@ -578,7 +578,7 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, rtd_locations, rtd_post_replacement_accuracy = self.do_masking(input_ids, attention_mask, validation_iter)
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, rtd_post_replacement_accuracy = self.do_masking(input_ids, attention_mask, validation_iter)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
