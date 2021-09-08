@@ -534,7 +534,7 @@ class RTDMLMModel(PreTrainedModel):
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
         with torch.no_grad():
-            mlm_rtd_hints = self.masking_model(input_ids, attention_mask)
+            mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         word_ce = mlm_rtd_hints["word_ce"]
         word_logits = mlm_rtd_hints["prediction_scores"]
         rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
