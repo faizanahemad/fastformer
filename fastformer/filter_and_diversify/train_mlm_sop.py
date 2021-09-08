@@ -997,7 +997,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [2.0, 1.0, 0.75, 0.5])
+                                                                        [1.0, 0.75, 0.5, 0.25])
 
 
         epoch = dataloader.epoch
