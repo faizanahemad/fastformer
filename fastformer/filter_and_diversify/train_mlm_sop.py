@@ -240,6 +240,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             input_ids = token_id_masking(results["label_mlm_input_ids"], self.tokenizer, self.word_mask_proba, sampler=self.token_sampler)
             results.update(dict(input_ids=input_ids, attention_mask=attention_mask, ))
         elif self.hard_lm_enabled:
+            # TODO: if hard tasks are given reduce mask rate
             task = random.randint(0, 7)
 
             if task == 0:
@@ -510,7 +511,7 @@ class RTDMLMModel(PreTrainedModel):
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
         self.config.gradient_checkpointing = True
-        self.distillation_loss_w = 1.0
+        # self.distillation_loss_w = 1.0
         self.rtd_temperature = 1.0
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
@@ -518,13 +519,13 @@ class RTDMLMModel(PreTrainedModel):
         for p in self.masking_model.parameters():
             p.requires_grad = False
         self.backbone = backbone
-        self.momentum_backbone = copy.deepcopy(backbone)
-        self.momentum_backbone.load_state_dict(backbone.state_dict())
-        _ = self.momentum_backbone.eval()
-        change_dropout(self.momentum_backbone, 0.0)
-        self.copy_momentum = 0.99
-        for p in self.momentum_backbone.parameters():
-            p.requires_grad = False
+        # self.momentum_backbone = copy.deepcopy(backbone)
+        # self.momentum_backbone.load_state_dict(backbone.state_dict())
+        # _ = self.momentum_backbone.eval()
+        # change_dropout(self.momentum_backbone, 0.0)
+        # self.copy_momentum = 0.99
+        # for p in self.momentum_backbone.parameters():
+        #     p.requires_grad = False
         self.mlm_w = mlm_w
         self.tokenizer = tokenizer
         self.rtd_nn = nn.Linear(hidden_size, 1)
@@ -535,12 +536,12 @@ class RTDMLMModel(PreTrainedModel):
 
         self.lm_head = RobertaLMHead(backbone.config)
         self.tie_weights()
-        self.momentum_lm_head = copy.deepcopy(self.lm_head)
-        self.momentum_lm_head.load_state_dict(self.lm_head.state_dict())
-        for p in self.momentum_lm_head.parameters():
-            p.requires_grad = False
+        # self.momentum_lm_head = copy.deepcopy(self.lm_head)
+        # self.momentum_lm_head.load_state_dict(self.lm_head.state_dict())
+        # for p in self.momentum_lm_head.parameters():
+        #     p.requires_grad = False
 
-    def do_masking(self, input_ids, attention_mask, validation_iter=False):
+    def do_masking_unused(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
@@ -604,6 +605,42 @@ class RTDMLMModel(PreTrainedModel):
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy, teacher_mask_proportion
 
+    def do_masking(self, input_ids, attention_mask, validation_iter=False):
+        label_mlm_input_ids = input_ids.clone()
+        b, s = input_ids.shape[:2]
+        ss = attention_mask.sum(1).float().mean().item()
+        with torch.no_grad():
+            mlm_rtd_hints = self.masking_model(input_ids, attention_mask)
+        word_ce = mlm_rtd_hints["word_ce"]
+        word_logits = mlm_rtd_hints["prediction_scores"]
+        rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
+
+        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask.bool()), input_ids == self.tokenizer.bos_token_id))
+        word_ce[non_mask_locations] = 0.0
+        indices = torch.multinomial(word_ce, int((0.15 + random.random() * 0.05) * ss), False)
+        indices = indices[:, torch.randperm(indices.size()[1])]
+        word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
+        word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
+        rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
+        input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
+        input_ids[rtd_mask[0], rtd_mask[1]] = rtd_words[rtd_mask[0], rtd_mask[1]]
+
+        mask_accuracy = None
+        rtd_accuracy = None
+        rtd_post_replacement_accuracy = None
+        accuracy = None
+        if validation_iter:
+            word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
+            mask_locations = input_ids == self.tokenizer.mask_token_id
+            rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
+            mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
+            rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
+            rtd_post_replacement_accuracy = (rtd_words[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
+            accuracy = mlm_rtd_hints["accuracy"]
+        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
+        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_locations, rtd_post_replacement_accuracy, teacher_mask_proportion
+
+
     def get_output_embeddings(self):
         return self.lm_head.decoder
 
@@ -617,7 +654,7 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, selected_mask_locations, rtd_locations, teacher_prediction_scores, mlm_teacher_accuracy, rtd_replacement_accuracy, rtd_post_replacement_accuracy, teacher_mask_proportion = self.do_masking(input_ids, attention_mask, validation_iter)
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, rtd_locations, rtd_post_replacement_accuracy, teacher_mask_proportion = self.do_masking(input_ids, attention_mask, validation_iter)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -626,7 +663,6 @@ class RTDMLMModel(PreTrainedModel):
         attention_mask = attention_mask.bool()
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
-        distillation_loss = ((prediction_scores[selected_mask_locations] - teacher_prediction_scores) ** 2).mean()
         rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)[attention_mask].view(-1)
         rtd_labels = rtd_labels[attention_mask].view(-1)
         rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
@@ -644,10 +680,6 @@ class RTDMLMModel(PreTrainedModel):
         only_rtd_proportion = None
         non_rtd_accuracy = None
         only_rtd_lm_accuracy = None
-        mlm_student_accuracy = None
-        if self.distillation_loss_w > 0:
-            momentum_param_copy(self.backbone, self.momentum_backbone, self.copy_momentum)
-            momentum_param_copy(self.lm_head, self.momentum_lm_head, self.copy_momentum)
         if validation_iter:
             rtd_labels = rtd_labels.bool()
             not_rtd_labels = torch.logical_not(rtd_labels)
@@ -666,15 +698,14 @@ class RTDMLMModel(PreTrainedModel):
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[mask_indices].mean().item()
-            mlm_student_accuracy = lm_accuracy[selected_mask_locations.view(-1)].mean().item()
             only_rtd_lm_accuracy = lm_accuracy[attention_mask.view(-1)]
             only_rtd_lm_accuracy = only_rtd_lm_accuracy.reshape(-1)[rtd_labels].mean().item()
             only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + self.distillation_loss_w * distillation_loss, rtd_loss=rtd_loss.item(), distillation_loss=distillation_loss.item(),
+        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
                     mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
-                    mlm_teacher_accuracy=mlm_teacher_accuracy, mlm_student_accuracy=mlm_student_accuracy, rtd_replacement_accuracy=rtd_replacement_accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
+                    rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
                     only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, teacher_mask_proportion=teacher_mask_proportion,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
@@ -1042,7 +1073,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [1.0, 1.0, 1.25, 1.5])
+                                                                        [2.0, 1.0, 0.75, 0.5])
 
 
         epoch = dataloader.epoch

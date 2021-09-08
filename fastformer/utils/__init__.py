@@ -1334,19 +1334,17 @@ class CoOccurenceModel(PreTrainedModel):
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
 
-        word_accuracy = (lm_predictions == input_ids)
-        accuracy = word_accuracy[attention_mask].float().mean().item()
-
-        top_k_alternatives = None
-        word_ce = None
-        if not torch.is_grad_enabled():
-            _, top_k_alternatives = prediction_scores.detach().topk(8, -1)  #  B, S, 16
-            word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
+        word_accuracy = None
+        accuracy = None
+        if "validation_iter" in kwargs and kwargs["validation_iter"]:
+            word_accuracy = (lm_predictions == input_ids)
+            accuracy = word_accuracy[attention_mask].float().mean().item()
+        word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         masked_lm_loss = masked_lm_loss.mean()
 
         return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss,
                     accuracy=accuracy, word_accuracy=word_accuracy,
-                    word_ce=word_ce, top_k_alternatives=top_k_alternatives)
+                    word_ce=word_ce, prediction_scores=prediction_scores.detach())
 
 
 def try_float(v):
