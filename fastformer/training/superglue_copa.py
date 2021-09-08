@@ -958,15 +958,6 @@ class SuperGlueTest:
         _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
         model_dict["model"] = classifier_data["model"]
 
-        copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
-        copa_aux["validation"] = copa_pretrain["validation"]
-        max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
-        classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
-        model_dict["model"] = classifier_data["model"]
-
-        # init_weights(model_dict["model"].module.head, 0.01)
-
         copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
         copa_ns["validation"] = copa_pretrain["validation"]
         max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
@@ -975,6 +966,15 @@ class SuperGlueTest:
         model_dict["model"] = classifier_data["model"]
 
         init_weights(model_dict["model"].module.head, 0.01)
+
+        copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
+        copa_aux["validation"] = copa_pretrain["validation"]
+        max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
+        classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
+        model_dict["model"] = classifier_data["model"]
+
+        # init_weights(model_dict["model"].module.head, 0.01)
 
 
         # init_weights(model_dict["model"].module.head, 0.01)
