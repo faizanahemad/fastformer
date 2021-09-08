@@ -88,7 +88,7 @@ def training_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--nodes', default=1,
                         type=int, metavar='N')
-    parser.add_argument('-g', '--gpus_per_node', default=1, type=int,
+    parser.add_argument('-g', '--gpus_per_node', default=8, type=int,
                         help='number of gpus per node')
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')
@@ -96,6 +96,16 @@ def training_args():
                         help='lr')
     parser.add_argument('--epochs', default=10, type=int,
                         help='Epochs')
+
+    parser.add_argument('--dropout', default=0.1, type=float,
+                        help='dropout')
+
+    parser.add_argument('--scheduler_policy', required=False, type=str, default="olr",
+                        help='scheduler_policy')
+
+    parser.add_argument('--scheduler_warmup', required=False, type=float, default=0.1,
+                        help='scheduler_warmup')
+
     parser.add_argument('--weight_decay', default=0.1, type=float,
                         help='weight_decay')
 
@@ -118,9 +128,6 @@ def training_args():
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
 
-    parser.add_argument('--finetune', action="store_true", default=False,
-                        help='finetune')
-
     parser.add_argument('--num_workers', required=False, type=int, default=0,
                         help='Dataloader workers')
 
@@ -130,9 +137,6 @@ def training_args():
     parser.add_argument('--master_port', type=str, required='MASTER_PORT' not in os.environ,
                         default=None if 'MASTER_PORT' not in os.environ else os.environ['MASTER_PORT'],
                         help='Master PORT')
-    parser.add_argument('--dist_backend', type=str, required=False,
-                        default='nccl',
-                        help='Distributed Backend')
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
     os.environ['MASTER_ADDR'] = args.master_addr
@@ -868,12 +872,12 @@ class SuperGlueTest:
         # Copa pretrain again
         # Remove the
 
-        # Reverse order of COPA pretrain
         # Add mnli rte etc
         # augment COPA with NS for main training
         # Augment positives by removing stopwords
-        # Only Swag
         # Is first option correct, but we still provide second option to ensure model has both options seen at same run.
+        # Dropout
+        # Bigger head
 
         copa_aux = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
@@ -1136,6 +1140,7 @@ def train_test(local_rank, args):
     else:
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
+        args["dist_backend"] = "nccl"
     if args["nr"] == 0:
         args["master_addr"] = "0.0.0.0"
     init_method = "tcp://%s:%s" % (args["master_addr"], args["master_port"])
@@ -1148,7 +1153,7 @@ def train_test(local_rank, args):
     model = args["pretrained_model"]
     SuperGlueTest(None, model, device, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
-                args["hpo"], args["dataset_key"], args["finetune"])()
+                args["hpo"], args["dataset_key"], True)()
     return
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
