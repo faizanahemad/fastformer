@@ -352,7 +352,7 @@ class copa_proc:
 class SuperGlueTest:
     def __init__(self, location, model, device, rank, world_size, epochs, lr,
                  seed, batch_size, accumulation_steps,
-                 weight_decay, hpo=None, dataset_key=None, finetune=True):
+                 weight_decay, dropout, scheduler_policy, scheduler_warmup, hpo=None, dataset_key=None, finetune=True):
         self.location = location
         self.model = model
 
@@ -362,6 +362,9 @@ class SuperGlueTest:
         self.finetune = finetune
         self.hpo = eval(hpo) if hpo is not None else None
         self.seed = seed
+        self.scheduler_warmup = scheduler_warmup
+        self.scheduler_policy = scheduler_policy
+        self.dropout = dropout
 
         self.lr = lr
         self.epochs = epochs
@@ -435,6 +438,7 @@ class SuperGlueTest:
 
                 tokenizer = AutoTokenizer.from_pretrained(model)
                 model = AutoModel.from_pretrained(model)
+            change_dropout(model, self.dropout)
             model = model.train()
             optimizer_config.eps = 1e-7
             for p in model.parameters():
@@ -502,8 +506,14 @@ class SuperGlueTest:
             iter_size = self.iter_size
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
             print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
-                                                            three_phase=False, pct_start=0.1, anneal_strategy="linear")
+            if self.scheduler_policy == "olr":
+                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
+                                                                three_phase=False, pct_start=self.scheduler_warmup, anneal_strategy="linear")
+            else:
+                total_steps = int(max_allowed_epochs) * steps_per_epoch
+                from transformers import get_constant_schedule_with_warmup
+                scheduler = get_constant_schedule_with_warmup(optimizer, self.scheduler_warmup * total_steps)
+
 
         validation = None
         if "validation" in dataset and dataset["validation"] is not None:
@@ -1153,6 +1163,7 @@ def train_test(local_rank, args):
     model = args["pretrained_model"]
     SuperGlueTest(None, model, device, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
+                  args["dropout"], args["scheduler_policy"], args["scheduler_warmup"],
                 args["hpo"], args["dataset_key"], True)()
     return
 
