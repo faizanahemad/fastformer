@@ -1334,7 +1334,7 @@ class CoOccurenceModel(PreTrainedModel):
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
-        under_confidence_scores = 2 - F.softmax(prediction_scores, dim=-1).max(-1).values
+        under_confidence_scores = 1 - F.softmax(prediction_scores, dim=-1).max(-1).values
         word_ce = torch.sqrt(masked_lm_loss.detach().view(b, s) + 1.0)
 
         word_accuracy = None
@@ -1366,7 +1366,7 @@ class CoOccurenceModel(PreTrainedModel):
                 wc = word_ce[i][attention_mask[i]].view(-1)
                 sp_corr.append(spearman_correlation(uc, wc).item())
                 corrs.append(corr(uc, wc).item())
-            print("\n", sp_corr, "\n", corrs)
+            print("\n", sp_corr, "\n", corrs, "\n", uc[:b], "\n", wc[:b])
             # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
             # corrcoef_under_confidence_ce = corrcoef(under_confidence_scores, word_ce).mean().item()
             spearman_under_confidence_ce = torch.mean(torch.tensor(sp_corr))
