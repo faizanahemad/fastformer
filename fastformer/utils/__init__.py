@@ -1366,7 +1366,7 @@ class CoOccurenceModel(PreTrainedModel):
                 wc = word_ce[i][attention_mask[i]].view(-1)
                 sp_corr.append(spearman_correlation(uc, wc).item())
                 corrs.append(corr(uc, wc).item())
-            print("under_confidence_scores", under_confidence_scores.size(), under_confidence_scores[-1][:b], uc[:b])
+            print("under_confidence_scores", "\n", under_confidence_scores.size(), "\n", under_confidence_scores[-1][:b], "\n", uc[:b])
             # print("word_ce", word_ce.size(), word_ce[-1][:b], wc[:b])
             # print("\n", sp_corr, "\n", corrs, "\n", )
             # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
