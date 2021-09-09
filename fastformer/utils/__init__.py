@@ -1360,18 +1360,16 @@ class CoOccurenceModel(PreTrainedModel):
             under_confidence_scores_mean = under_confidence_scores.mean().item()
             under_confidence_scores_std = under_confidence_scores.std().item()
             sp_corr = []
-            corr = []
+            corrs = []
             for i in range(b):
                 uc = under_confidence_scores[i][attention_mask[i]].view(-1)
                 wc = word_ce[i][attention_mask[i]].view(-1)
                 sp_corr.append(spearman_correlation(uc, wc).item())
-                uc, wc = uc.view(1, -1), wc.view(1, -1)
-                cur_corr = corrcoef(uc, wc)
-                corr.append(cur_corr.mean().item())
+                corrs.append(corr(uc, wc).item())
             # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
             # corrcoef_under_confidence_ce = corrcoef(under_confidence_scores, word_ce).mean().item()
             spearman_under_confidence_ce = torch.mean(torch.tensor(sp_corr))
-            corrcoef_under_confidence_ce = torch.mean(torch.tensor(corr))
+            corrcoef_under_confidence_ce = torch.mean(torch.tensor(corrs))
 
             correct_underconfident = under_confidence_scores[word_accuracy][attention_mask].float().mean().item()
             incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
@@ -1430,6 +1428,8 @@ def corrcoef(x, y):
     x = torch.stack((x, y), 1)
     # calculate covariance matrix of rows
     c = cov(x)
+    print(x.size(), c.size())
+    print(c)
     # normalize covariance matrix
     d = torch.diagonal(c, dim1=1, dim2=2)
     stddev = torch.pow(d, 0.5)
@@ -1438,7 +1438,12 @@ def corrcoef(x, y):
     c = c.div(torch.transpose(stddev, 1, 2))
     return c[:, 1, 0]
 
+def corr(x, y):
+    vx = x - torch.mean(x)
+    vy = y - torch.mean(y)
 
+    cost = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)))
+    return cost
 
 class PreNormResidual(nn.Module):
     def __init__(self, dim, fn):
