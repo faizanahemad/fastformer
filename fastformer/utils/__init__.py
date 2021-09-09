@@ -1438,11 +1438,16 @@ def corrcoef(x, y):
     c = c.div(torch.transpose(stddev, 1, 2))
     return c[:, 1, 0]
 
+
 def corr(x, y):
     vx = x - torch.mean(x)
     vy = y - torch.mean(y)
-
-    cost = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)))
+    numerator = torch.sum(vx * vy)
+    vx2 = torch.sum(vx ** 2)
+    vy2 = torch.sum(vy ** 2)
+    root_vx2 = torch.sqrt(vx2) + 1e-5
+    root_vy2 = torch.sqrt(vy2) + 1e-5
+    cost =  numerator / (root_vx2 * root_vy2)
     return cost
 
 class PreNormResidual(nn.Module):
