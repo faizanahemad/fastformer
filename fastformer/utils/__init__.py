@@ -1344,6 +1344,8 @@ class CoOccurenceModel(PreTrainedModel):
         word_ce = masked_lm_loss.detach().view(b, s) + 1.0
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
         word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 4
+        word_ce = torch.exp(word_ce)
+        under_confidence_scores = torch.exp(under_confidence_scores)
 
         word_accuracy = None
         accuracy = None
