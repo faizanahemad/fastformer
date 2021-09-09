@@ -1362,8 +1362,8 @@ class CoOccurenceModel(PreTrainedModel):
             sp_corr = []
             corrs = []
             for i in range(b):
-                uc = under_confidence_scores[i][attention_mask[i]].view(-1)
-                wc = word_ce[i][attention_mask[i]].view(-1)
+                uc = under_confidence_scores[i][:attention_mask[i].sum()].view(-1)
+                wc = word_ce[i][:attention_mask[i].sum()].view(-1)
                 sp_corr.append(spearman_correlation(uc, wc).item())
                 corrs.append(corr(uc, wc).item())
             print("under_confidence_scores", "\n", under_confidence_scores.size(), "\n", under_confidence_scores[-1][:b], "\n", uc[:b])
