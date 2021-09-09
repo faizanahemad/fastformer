@@ -1,6 +1,6 @@
-mkdir /home/ahemf/processed_datasets
-mkdir /home/ahemf/model_save_dir
-mkdir /home/ahemf/torch_distributed_init
+mkdir -p /home/ahemf/processed_datasets
+mkdir -p /home/ahemf/model_save_dir
+mkdir -p /home/ahemf/torch_distributed_init
 cat > ~/.zshrc << "EOF"
 
 export ZSH=/home/$USER/.oh-my-zsh
@@ -21,6 +21,8 @@ bindkey "^[[B" history-substring-search-down
 
 export AUTO_TITLE_SCREENS="NO"
 alias grep='nocorrect grep --color=auto'
+alias nvkill="nvidia-smi | grep 'python' | awk '{ print $3 }' | xargs -n1 kill -9"
+alias mpkill="kill $(ps aux | grep multiprocessing | grep -v grep | awk '{print $2}')"
 setopt HIST_VERIFY
 export PATH="$PATH":~/bin
 export PATH="$PATH:/usr/local/cuda-11.2/bin"
@@ -65,6 +67,6 @@ set incsearch
 set hlsearch
 EOF
 
-wget https://repo.anaconda.com/archive/Anaconda3-2020.11-Linux-x86_64.sh > /dev/null
-sh Anaconda3-2020.11-Linux-x86_64.sh -b
+wget https://repo.anaconda.com/archive/Anaconda3-2021.05-Linux-x86_64.sh > /dev/null
+sh Anaconda3-2021.05-Linux-x86_64.sh -b
 . ~/.zshrc

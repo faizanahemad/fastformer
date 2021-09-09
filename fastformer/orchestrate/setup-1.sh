@@ -1,4 +1,4 @@
-sudo mkdir /home/ahemf
+sudo mkdir -p /home/ahemf
 sudo chown -R ahemf /home/ahemf
 
 sudo yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
@@ -23,9 +23,9 @@ sudo yum -y install amazon-midway-init
 sudo yum -y remove nvidia-dkms nvidia
 
 cd /home/ahemf
-wget https://developer.download.nvidia.com/compute/cuda/11.2.2/local_installers/cuda_11.2.2_460.32.03_linux.run > /dev/null
-chmod +x cuda_11.2.2_460.32.03_linux.run
-sudo sudo sh cuda_11.2.2_460.32.03_linux.run --silent --driver --toolkit
+wget https://developer.download.nvidia.com/compute/cuda/11.4.0/local_installers/cuda_11.4.0_470.42.01_linux.run > /dev/null
+chmod +x cuda_11.4.0_470.42.01_linux.run
+sudo sudo sh cuda_11.4.0_470.42.01_linux.run --silent --driver --toolkit
 
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 

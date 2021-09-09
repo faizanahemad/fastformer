@@ -1,9 +1,17 @@
 source ~/.zshrc
-# pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio===0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
-# pip install torch torchvision torchaudio
-pip install torch==1.8.0+cu111 torchvision==0.9.0+cu111 torchaudio==0.8.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null
-pip install tqdm wandb torchnlp torchtext dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer attrdict > /dev/null
-pip install -U joblib scikit-learn > /dev/null
+pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null
+pip install --use-deprecated=legacy-resolver -U tqdm wandb> /dev/null
+pip install --use-deprecated=legacy-resolver -U sacrebleu sacremoses sentencepiece  > /dev/null
+pip install --use-deprecated=legacy-resolver -U dataclasses dataclasses-json  > /dev/null
+pip install --use-deprecated=legacy-resolver -U dill nltk more-itertools  > /dev/null
+pip install --use-deprecated=legacy-resolver -U gpustat nlpaug pyarrow  > /dev/null
+pip install --use-deprecated=legacy-resolver -U snakeviz torch-optimizer attrdict  > /dev/null
+pip install --use-deprecated=legacy-resolver -U pytorch-fast-transformers pytorch-ranger  > /dev/null
+pip install --use-deprecated=legacy-resolver -U transformers datasets tokenizers  > /dev/null
+pip install --use-deprecated=legacy-resolver -U joblib scikit-learn > /dev/null
+
+# https://github.com/pypa/pip/issues/9187
+# --use-feature=fast-deps --use-deprecated=legacy-resolver
 
 python -c "import nltk;nltk.download('all');"
 
@@ -88,45 +96,46 @@ echo "Your public key for use:"
 cat ~/.ssh/id_rsa.pub
 ~/jupyter_start.sh
 
-pip install tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer jsonlines imgaug albumentations attrdict
-pip install dataclasses-json einops nlpaug pytorch-fast-transformers
-pip install unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json
+pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer jsonlines imgaug albumentations attrdict > /dev/null
+pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U dataclasses-json einops nlpaug pytorch-fast-transformers timm attrdict tabulate > /dev/null
+pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json > /dev/null
 
 cd ~ && mkdir mygit && cd mygit && git clone https://github.com/faizanahemad/fastformer.git && cd fastformer && pip install -e .
+python -c "import wandb; wandb.login(\"never\", \"7fcf597a1a07dcb2e98622a96838a7eb41b1245d\")"
 
 #cd ~/mygit && git clone https://github.com/NVIDIA/apex
 #cd ~/mygit/apex
 #pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 #DS_BUILD_OPS=1 pip install deepspeed
 
-pip install fairscale > /dev/null
-
-cd ~/mygit
-
-cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
-cd ~/mygit/fairseq
-cd fairseq/modules/lightconv_layer
-python cuda_function_gen.py > /dev/null
-python setup.py install > /dev/null
-cd ~/mygit/fairseq
-cd fairseq/modules/dynamicconv_layer
-python cuda_function_gen.py > /dev/null
-python setup.py install > /dev/null
-cd ~/mygit/fairseq
-pip install -e .
-cd ~/mygit/fairseq
-cd fairseq/modules/lightconv_layer
-python cuda_function_gen.py > /dev/null
-python setup.py install > /dev/null
-cd ~/mygit/fairseq
-cd fairseq/modules/dynamicconv_layer
-python cuda_function_gen.py > /dev/null
-python setup.py install > /dev/null
-cd ~/mygit/fastformer
-
-pip freeze | grep dynamicconv-layer
-pip freeze | grep fairscale
-pip freeze | grep torch
+#pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U fairscale > /dev/null
+#
+#cd ~/mygit
+#
+#cd ~/mygit && git clone https://github.com/pytorch/fairseq.git
+#cd ~/mygit/fairseq
+#cd fairseq/modules/lightconv_layer
+#python cuda_function_gen.py > /dev/null
+#python setup.py install > /dev/null
+#cd ~/mygit/fairseq
+#cd fairseq/modules/dynamicconv_layer
+#python cuda_function_gen.py > /dev/null
+#python setup.py install > /dev/null
+#cd ~/mygit/fairseq
+#pip install -e .
+#cd ~/mygit/fairseq
+#cd fairseq/modules/lightconv_layer
+#python cuda_function_gen.py > /dev/null
+#python setup.py install > /dev/null
+#cd ~/mygit/fairseq
+#cd fairseq/modules/dynamicconv_layer
+#python cuda_function_gen.py > /dev/null
+#python setup.py install > /dev/null
+#cd ~/mygit/fastformer
+#
+#pip freeze | grep dynamicconv-layer
+#pip freeze | grep fairscale
+#pip freeze | grep torch
 
 
 
