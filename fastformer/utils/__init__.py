@@ -1362,8 +1362,10 @@ class CoOccurenceModel(PreTrainedModel):
             sp_corr = []
             corr = []
             for i in range(b):
-                sp_corr.append(spearman_correlation(under_confidence_scores[i][attention_mask[i]].view(-1), word_ce[i][attention_mask][i].view(-1)).item())
-                corr.append(corrcoef(under_confidence_scores[i][attention_mask[i]].view(1, -1), word_ce[i][attention_mask][i].view(1, -1)).mean().item())
+                uc = under_confidence_scores[i][attention_mask[i]].view(-1)
+                wc = word_ce[i][attention_mask[i]].view(-1)
+                sp_corr.append(spearman_correlation(uc, wc).item())
+                corr.append(corrcoef(uc.view(1, -1), wc.view(1, -1)).mean().item())
             # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
             # corrcoef_under_confidence_ce = corrcoef(under_confidence_scores, word_ce).mean().item()
             spearman_under_confidence_ce = torch.mean(torch.tensor(sp_corr))
