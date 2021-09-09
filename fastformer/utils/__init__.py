@@ -1335,7 +1335,7 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
         confidences = F.softmax(prediction_scores, dim=-1)
-        top_confs, _ = confidences.topk(4, -1)
+        top_confs, _ = confidences.topk(3, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
         under_confidence_scores = 1 + (1 - confidences) * 4
