@@ -537,7 +537,7 @@ class RTDMLMModel(PreTrainedModel):
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         word_ce = mlm_rtd_hints["word_ce"]
         word_logits = mlm_rtd_hints["prediction_scores"]
-        rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
+        # rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
 
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask.bool()), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
@@ -546,8 +546,10 @@ class RTDMLMModel(PreTrainedModel):
         word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
+        top_k = mlm_rtd_hints["top_k_alternatives"]
+        top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        input_ids[rtd_mask[0], rtd_mask[1]] = rtd_words[rtd_mask[0], rtd_mask[1]]
+        input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
 
         mask_accuracy = None
         rtd_accuracy = None
@@ -559,7 +561,7 @@ class RTDMLMModel(PreTrainedModel):
             rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
-            rtd_post_replacement_accuracy = (rtd_words[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
+            rtd_post_replacement_accuracy = (top_k[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_post_replacement_accuracy
@@ -997,7 +999,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [1.0, 0.75, 0.5, 0.25])
+                                                                        [5.0, 4.0, 3.0, 2.0])
 
 
         epoch = dataloader.epoch
