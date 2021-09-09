@@ -1349,7 +1349,8 @@ class CoOccurenceModel(PreTrainedModel):
         under_confidence_scores_max = None
         under_confidence_scores_mean = None
         under_confidence_scores_std = None
-        correlation_under_confidence_ce = None
+        spearman_under_confidence_ce = None
+        corrcoef_under_confidence_ce = None
 
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             word_accuracy = (lm_predictions == input_ids)
@@ -1358,7 +1359,16 @@ class CoOccurenceModel(PreTrainedModel):
             under_confidence_scores_max = under_confidence_scores.max().item()
             under_confidence_scores_mean = under_confidence_scores.mean().item()
             under_confidence_scores_std = under_confidence_scores.std().item()
-            correlation_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
+            sp_corr = []
+            corr = []
+            for i in range(b):
+                sp_corr.append(spearman_correlation(under_confidence_scores[i][attention_mask[i]].view(-1), word_ce[i][attention_mask][i].view(-1)).item())
+                corr.append(corrcoef(under_confidence_scores[i][attention_mask[i]].view(1, -1), word_ce[i][attention_mask][i].view(1, -1)).mean().item())
+            # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
+            # corrcoef_under_confidence_ce = corrcoef(under_confidence_scores, word_ce).mean().item()
+            spearman_under_confidence_ce = torch.mean(torch.tensor(sp_corr))
+            corrcoef_under_confidence_ce = torch.mean(torch.tensor(corr))
+
             correct_underconfident = under_confidence_scores[word_accuracy][attention_mask].float().mean().item()
             incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
 
@@ -1369,7 +1379,7 @@ class CoOccurenceModel(PreTrainedModel):
                     word_ce_min=word_ce_min, word_ce_max=word_ce_max, word_ce_mean=word_ce_mean, word_ce_std=word_ce_std,
                     under_confidence_scores_min=under_confidence_scores_min, under_confidence_scores_max=under_confidence_scores_max,
                     under_confidence_scores_mean=under_confidence_scores_mean, under_confidence_scores_std=under_confidence_scores_std,
-                    correlation_under_confidence_ce=correlation_under_confidence_ce,
+                    spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
                     word_ce=word_ce, prediction_scores=prediction_scores)
 
@@ -1402,6 +1412,27 @@ def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
     upper = 6 * torch.sum((x_rank - y_rank).pow(2))
     down = n * (n ** 2 - 1.0)
     return 1.0 - (upper / down)
+
+def cov(m):
+    # m = m.type(torch.double)  # uncomment this line if desired
+    fact = 1.0 / (m.shape[-1] - 1)  # 1 / N
+    m -= torch.mean(m, dim=(1, 2), keepdim=True)
+    mt = torch.transpose(m, 1, 2)  # if complex: mt = m.t().conj()
+    return fact * m.matmul(mt).squeeze()
+
+
+def corrcoef(x, y):
+    batch_size = x.shape[0]
+    x = torch.stack((x, y), 1)
+    # calculate covariance matrix of rows
+    c = cov(x)
+    # normalize covariance matrix
+    d = torch.diagonal(c, dim1=1, dim2=2)
+    stddev = torch.pow(d, 0.5)
+    stddev = stddev.repeat(1, 2).view(batch_size, 2, 2)
+    c = c.div(stddev)
+    c = c.div(torch.transpose(stddev, 1, 2))
+    return c[:, 1, 0]
 
 
 
