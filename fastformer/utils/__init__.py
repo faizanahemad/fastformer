@@ -1335,7 +1335,7 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
         confidences = F.softmax(prediction_scores, dim=-1)
-        top_confs, _ = confidences.topk(3, -1)
+        top_confs, top_k_alternatives = confidences.topk(4, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
         under_confidence_scores = 1 + (1 - confidences) * 4
@@ -1400,7 +1400,7 @@ class CoOccurenceModel(PreTrainedModel):
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
-                    word_ce=word_ce + under_confidence_scores, prediction_scores=prediction_scores)
+                    word_ce=word_ce + under_confidence_scores, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives)
 
 
 def try_float(v):
