@@ -1351,6 +1351,8 @@ class CoOccurenceModel(PreTrainedModel):
         under_confidence_scores_std = None
         spearman_under_confidence_ce = None
         corrcoef_under_confidence_ce = None
+        correct_word_ce = None
+        incorrect_word_ce = None
 
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             word_accuracy = (lm_predictions == input_ids)
@@ -1378,6 +1380,8 @@ class CoOccurenceModel(PreTrainedModel):
 
             correct_underconfident = under_confidence_scores[word_accuracy][attention_mask].float().mean().item()
             incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
+            correct_word_ce = word_ce[word_accuracy][attention_mask].float().mean().item()
+            incorrect_word_ce = word_ce[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
 
         masked_lm_loss = masked_lm_loss.mean()
 
@@ -1387,6 +1391,7 @@ class CoOccurenceModel(PreTrainedModel):
                     under_confidence_scores_min=under_confidence_scores_min, under_confidence_scores_max=under_confidence_scores_max,
                     under_confidence_scores_mean=under_confidence_scores_mean, under_confidence_scores_std=under_confidence_scores_std,
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
+                    correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
                     word_ce=word_ce, prediction_scores=prediction_scores)
 
