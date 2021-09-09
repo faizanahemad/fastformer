@@ -1366,6 +1366,7 @@ class CoOccurenceModel(PreTrainedModel):
                 wc = word_ce[i][attention_mask[i]].view(-1)
                 sp_corr.append(spearman_correlation(uc, wc).item())
                 corrs.append(corr(uc, wc).item())
+            print("\n", sp_corr, "\n", corrs)
             # spearman_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
             # corrcoef_under_confidence_ce = corrcoef(under_confidence_scores, word_ce).mean().item()
             spearman_under_confidence_ce = torch.mean(torch.tensor(sp_corr))
@@ -1447,7 +1448,7 @@ def corr(x, y):
     vy2 = torch.sum(vy ** 2)
     root_vx2 = torch.sqrt(vx2) + 1e-5
     root_vy2 = torch.sqrt(vy2) + 1e-5
-    cost =  numerator / (root_vx2 * root_vy2)
+    cost = numerator / (root_vx2 * root_vy2)
     return cost
 
 class PreNormResidual(nn.Module):
