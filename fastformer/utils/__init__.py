@@ -1334,7 +1334,10 @@ class CoOccurenceModel(PreTrainedModel):
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
-        under_confidence_scores = 1 + (1 - F.softmax(prediction_scores, dim=-1).max(-1).values) * 4
+        confidences = F.softmax(prediction_scores, dim=-1)
+        top_confs, _ = prediction_scores.topk(4, -1)[:, 1:].mean(-1)
+        confidences = confidences.max(-1).values - top_confs
+        under_confidence_scores = 1 + (1 - confidences) * 4
         word_ce = torch.sqrt(masked_lm_loss.detach().view(b, s) + 1.0)
         word_ce = 1 + ((word_ce - word_ce.min(1).values) / (word_ce.max(1).values - word_ce.min(1)).values) * 4
 
