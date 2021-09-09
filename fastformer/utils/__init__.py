@@ -1385,7 +1385,7 @@ def try_float(v):
 def _get_ranks(x: torch.Tensor) -> torch.Tensor:
     tmp = x.argsort()
     ranks = torch.zeros_like(tmp)
-    ranks[tmp] = torch.arange(len(x))
+    ranks[tmp] = torch.arange(len(x), device=ranks.device)
     return ranks
 
 
