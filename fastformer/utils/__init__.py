@@ -1332,19 +1332,46 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = self.lm_head(embeddings)  # B, S, vocab
 
         masked_lm_loss = self.loss_ce(prediction_scores.view(-1, self.config.vocab_size), input_ids.view(-1))
-        lm_predictions = prediction_scores.detach().argmax(dim=-1).squeeze(-1)
+        prediction_scores = prediction_scores.detach()
+        lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
+        under_confidence_scores = 1 - F.softmax(prediction_scores, dim=-1).max(-1).values
+        word_ce = torch.sqrt(masked_lm_loss.detach().view(b, s) + 1.0)
 
         word_accuracy = None
         accuracy = None
+        correct_underconfident = None
+        incorrect_underconfident = None
+        word_ce_min = word_ce.min().item()
+        word_ce_max = word_ce.max().item()
+        word_ce_mean = word_ce.mean().item()
+        word_ce_std = word_ce.std().item()
+        under_confidence_scores_min = None
+        under_confidence_scores_max = None
+        under_confidence_scores_mean = None
+        under_confidence_scores_std = None
+        correlation_under_confidence_ce = None
+
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             word_accuracy = (lm_predictions == input_ids)
             accuracy = word_accuracy[attention_mask].float().mean().item()
-        word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
+            under_confidence_scores_min = under_confidence_scores.min().item()
+            under_confidence_scores_max = under_confidence_scores.max().item()
+            under_confidence_scores_mean = under_confidence_scores.mean().item()
+            under_confidence_scores_std = under_confidence_scores.std().item()
+            correlation_under_confidence_ce = spearman_correlation(under_confidence_scores[attention_mask].view(-1), word_ce[attention_mask].view(-1)).item()
+            correct_underconfident = under_confidence_scores[word_accuracy][attention_mask].float().mean().item()
+            incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
+
         masked_lm_loss = masked_lm_loss.mean()
 
         return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss,
                     accuracy=accuracy, word_accuracy=word_accuracy,
-                    word_ce=word_ce, prediction_scores=prediction_scores.detach())
+                    word_ce_min=word_ce_min, word_ce_max=word_ce_max, word_ce_mean=word_ce_mean, word_ce_std=word_ce_std,
+                    under_confidence_scores_min=under_confidence_scores_min, under_confidence_scores_max=under_confidence_scores_max,
+                    under_confidence_scores_mean=under_confidence_scores_mean, under_confidence_scores_std=under_confidence_scores_std,
+                    correlation_under_confidence_ce=correlation_under_confidence_ce,
+                    correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
+                    word_ce=word_ce, prediction_scores=prediction_scores)
 
 
 def try_float(v):
@@ -1353,6 +1380,28 @@ def try_float(v):
         return True
     except:
         return False
+
+
+def _get_ranks(x: torch.Tensor) -> torch.Tensor:
+    tmp = x.argsort()
+    ranks = torch.zeros_like(tmp)
+    ranks[tmp] = torch.arange(len(x))
+    return ranks
+
+
+def spearman_correlation(x: torch.Tensor, y: torch.Tensor):
+    """Compute correlation between 2 1-D vectors
+    Args:
+        x: Shape (N, )
+        y: Shape (N, )
+    """
+    x_rank = _get_ranks(x)
+    y_rank = _get_ranks(y)
+
+    n = x.size(0)
+    upper = 6 * torch.sum((x_rank - y_rank).pow(2))
+    down = n * (n ** 2 - 1.0)
+    return 1.0 - (upper / down)
 
 
 
@@ -1501,7 +1550,7 @@ def gumbel_sample(t, temperature=2.0):
 def temperature_sampling(logits, temperature=2.0):
     if temperature is None or temperature == 0.0:
         return torch.argmax(logits)
-    probs = F.softmax(logits / temperature)
+    probs = F.softmax(logits / temperature,  dim=-1)
     pred_ids = probs.view(-1, probs.size(-1)).clip(0.0, 1.0).multinomial(1, replacement=False)
     if logits.ndim == 3:
         pred_ids = pred_ids.view(*probs.shape[:2])
