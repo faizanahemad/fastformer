@@ -1335,10 +1335,11 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
         confidences = F.softmax(prediction_scores, dim=-1)
-        top_confs, _ = confidences.topk(8, -1)
+        top_confs, _ = confidences.topk(4, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
         under_confidence_scores = 1 + (1 - confidences) * 4
+        del top_confs
         word_ce = torch.sqrt(masked_lm_loss.detach().view(b, s) + 1.0)
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
         word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 4
@@ -1372,7 +1373,6 @@ class CoOccurenceModel(PreTrainedModel):
             for i in range(b):
                 uc = under_confidence_scores[i][:attention_mask[i].sum()].view(-1)
                 wc = word_ce[i][:attention_mask[i].sum()].view(-1)
-                assert torch.all(uc == under_confidence_scores[i][:attention_mask[i].sum()].view(-1)).item()
                 sp_corr.append(spearman_correlation(uc, wc).item())
                 corrs.append(corr(uc, wc).item())
             # print("under_confidence_scores", "\n", under_confidence_scores.size(), "\n")
