@@ -561,7 +561,7 @@ class RTDMLMModel(PreTrainedModel):
             rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
-            rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids).float()[rtd_locations].mean().item()
+            rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids)[rtd_locations].float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_post_replacement_accuracy
