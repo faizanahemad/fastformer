@@ -1400,7 +1400,7 @@ class CoOccurenceModel(PreTrainedModel):
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
-                    word_ce=word_ce + 0.1 * under_confidence_scores, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives)
+                    word_ce=word_ce, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives)
 
 
 def try_float(v):
