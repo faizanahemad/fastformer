@@ -568,6 +568,8 @@ class RTDMLMModel(PreTrainedModel):
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             print(top_k.size(), "\n",
                   (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
+                  (lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
+                  word_wise_accuracy[rtd_locations].float().mean().item(),
                   "\n",
                   # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
                   input_ids[rtd_locations].view(-1), "\n",
