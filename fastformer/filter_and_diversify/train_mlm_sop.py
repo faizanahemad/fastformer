@@ -537,7 +537,7 @@ class RTDMLMModel(PreTrainedModel):
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         attention_mask = attention_mask.bool()
         word_ce = mlm_rtd_hints["word_ce"]
-        word_logits = mlm_rtd_hints["prediction_scores"]
+        # word_logits = mlm_rtd_hints["prediction_scores"]
         # rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
 
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
@@ -549,9 +549,10 @@ class RTDMLMModel(PreTrainedModel):
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = mlm_rtd_hints["top_k_alternatives"]
+        lm_predictions = mlm_rtd_hints["lm_predictions"]
         top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
+        input_ids[rtd_mask[0], rtd_mask[1]] = lm_predictions[rtd_mask[0], rtd_mask[1]]
 
 
         mask_accuracy = None
@@ -565,7 +566,9 @@ class RTDMLMModel(PreTrainedModel):
                                               torch.logical_and(attention_mask, input_ids != label_mlm_input_ids))
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
-            print((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), "\n",
+            print(top_k.size(), "\n",
+                  (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
+                  "\n",
                   # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
                   input_ids[rtd_locations].view(-1), "\n",
                   label_mlm_input_ids[rtd_locations].view(-1)
