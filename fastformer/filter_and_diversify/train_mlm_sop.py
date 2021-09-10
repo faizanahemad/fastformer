@@ -549,13 +549,13 @@ class RTDMLMModel(PreTrainedModel):
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = mlm_rtd_hints["top_k_alternatives"]
-        lm_predictions = mlm_rtd_hints["lm_predictions"]
+        # lm_predictions = mlm_rtd_hints["lm_predictions"]
         top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        rtd_locations_2 = torch.zeros_like(input_ids)
-        rtd_locations_2[rtd_mask[0], rtd_mask[1]] = 1.0
-        rtd_locations_2 = rtd_locations_2.bool()
-        input_ids[rtd_mask[0], rtd_mask[1]] = lm_predictions[rtd_mask[0], rtd_mask[1]]
+        rtd_locations = torch.zeros_like(input_ids)
+        rtd_locations[rtd_mask[0], rtd_mask[1]] = 1.0
+        rtd_locations = rtd_locations.bool()
+        input_ids[rtd_mask[0], rtd_mask[1]] = top_k[rtd_mask[0], rtd_mask[1]]
 
 
         mask_accuracy = None
@@ -565,12 +565,11 @@ class RTDMLMModel(PreTrainedModel):
         if validation_iter:
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
-            rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
-            print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
-                  list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
+            # print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
+            #       list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
                     # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
                     #   ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
                     #   (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
@@ -580,8 +579,8 @@ class RTDMLMModel(PreTrainedModel):
                   # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
                   # input_ids[rtd_locations].view(-1), "\n",
                   # label_mlm_input_ids[rtd_locations].view(-1)
-                  )
-            rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids).float().sum().item()
+                  # )
+            rtd_post_replacement_accuracy = (top_k[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().sum().item()
             accuracy = mlm_rtd_hints["accuracy"]
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
         return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_post_replacement_accuracy
@@ -1019,7 +1018,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [1.0, 1.0, 1.0, 1.0])
+                                                                        [5.0, 4.0, 3.0, 2.0])
 
 
         epoch = dataloader.epoch
