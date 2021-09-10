@@ -535,11 +535,12 @@ class RTDMLMModel(PreTrainedModel):
         ss = attention_mask.sum(1).float().mean().item()
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
+        attention_mask = attention_mask.bool()
         word_ce = mlm_rtd_hints["word_ce"]
         word_logits = mlm_rtd_hints["prediction_scores"]
         # rtd_words = temperature_sampling(word_logits, self.rtd_temperature)
 
-        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask.bool()), input_ids == self.tokenizer.bos_token_id))
+        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
         indices = torch.multinomial(word_ce, int((0.15 + random.random() * 0.05) * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
@@ -560,7 +561,8 @@ class RTDMLMModel(PreTrainedModel):
         if validation_iter:
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
-            rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
+            rtd_locations = torch.logical_and(input_ids != self.tokenizer.mask_token_id,
+                                              torch.logical_and(attention_mask, input_ids != label_mlm_input_ids))
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_post_replacement_accuracy = (top_k.long() == label_mlm_input_ids.long()).float().sum().item()
