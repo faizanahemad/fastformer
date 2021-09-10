@@ -569,13 +569,14 @@ class RTDMLMModel(PreTrainedModel):
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
-            print(((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
-
-                  ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
-                  (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
-                   (lm_predictions[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
-                  (word_wise_accuracy[mask_locations].float().mean().item(), word_wise_accuracy[rtd_locations].float().mean().item(), word_wise_accuracy[rtd_locations_2].float().mean().item()),
-                  "\n",
+            print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
+                  rtd_locations[:, :16], "\n", rtd_locations_2[:, :16],
+                    # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
+                    #   ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
+                    #   (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
+                    #    (lm_predictions[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
+                    #   (word_wise_accuracy[mask_locations].float().mean().item(), word_wise_accuracy[rtd_locations].float().mean().item(), word_wise_accuracy[rtd_locations_2].float().mean().item()),
+                    #   "\n",
                   # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
                   # input_ids[rtd_locations].view(-1), "\n",
                   # label_mlm_input_ids[rtd_locations].view(-1)
