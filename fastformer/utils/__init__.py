@@ -1338,7 +1338,7 @@ class CoOccurenceModel(PreTrainedModel):
         top_confs, top_k_alternatives = confidences.topk(8, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
-        under_confidence_scores = 1 + torch.log1p(1 - confidences) * 10
+        under_confidence_scores = 1 + torch.log1p(1 - confidences) * 9
         del confidences
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
