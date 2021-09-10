@@ -552,6 +552,9 @@ class RTDMLMModel(PreTrainedModel):
         lm_predictions = mlm_rtd_hints["lm_predictions"]
         top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
+        rtd_locations_2 = torch.zeros_like(input_ids)
+        rtd_locations_2[rtd_mask[0], rtd_mask[1]] = 1.0
+        rtd_locations_2 = rtd_locations_2.bool()
         input_ids[rtd_mask[0], rtd_mask[1]] = lm_predictions[rtd_mask[0], rtd_mask[1]]
 
 
@@ -563,14 +566,10 @@ class RTDMLMModel(PreTrainedModel):
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
             rtd_locations = torch.logical_and(input_ids != label_mlm_input_ids, torch.logical_not(mask_locations))
-            rtd_locations_2 = torch.zeros_like(input_ids)
-            rtd_locations_2[rtd_mask[0], rtd_mask[1]] = 1.0
-            rtd_locations_2 = rtd_locations_2.bool()
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
-            print(top_k.size(), "\n",
-                  (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
+            print(((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
 
                   ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
                   (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
