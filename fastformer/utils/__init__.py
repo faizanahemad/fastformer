@@ -1338,15 +1338,15 @@ class CoOccurenceModel(PreTrainedModel):
         top_confs, top_k_alternatives = confidences.topk(8, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
-        under_confidence_scores = 1 + (1 - confidences) * 4
+        under_confidence_scores = 1 + torch.log1p(1 - confidences) * 10
         del confidences
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
-        word_ce = torch.sqrt(masked_lm_loss.detach().view(b, s) + 1.0)
+        word_ce = masked_lm_loss.detach().view(b, s)
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
-        word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 4
-        word_ce = 10.0 ** word_ce
-        under_confidence_scores = 10.0 ** under_confidence_scores
+        word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 10
+        word_ce = torch.exp(word_ce)
+        under_confidence_scores = torch.exp(under_confidence_scores)
 
         word_accuracy = None
         accuracy = None
@@ -1403,7 +1403,7 @@ class CoOccurenceModel(PreTrainedModel):
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
-                    word_ce=word_ce, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives, lm_predictions=lm_predictions)
+                    word_ce=word_ce + under_confidence_scores, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives, lm_predictions=lm_predictions)
 
 
 def try_float(v):
