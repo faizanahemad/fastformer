@@ -545,8 +545,8 @@ class RTDMLMModel(PreTrainedModel):
         rtd_mask, word_mask = torch.chunk(indices, 2, dim=1)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
-        top_k = mlm_rtd_hints["top_k_alternatives"]
-        top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
+        # top_k = mlm_rtd_hints["top_k_alternatives"]
+        # top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
         rtd_locations = torch.zeros_like(input_ids)
         rtd_locations[rtd_mask[0], rtd_mask[1]] = 1.0
@@ -1016,7 +1016,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [1.0, 6.0, 4.0, 3.0])
+                                                                        [0.25, 1, 0.5, 0.25])
 
 
         epoch = dataloader.epoch
