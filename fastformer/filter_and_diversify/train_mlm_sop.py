@@ -543,7 +543,8 @@ class RTDMLMModel(PreTrainedModel):
         word_ce[non_mask_locations] = 0.0
         indices = torch.multinomial(word_ce, int((0.15 + random.random() * 0.05) * ss), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
-        word_mask, rtd_mask = torch.chunk(indices, 2, dim=1)
+
+        rtd_mask, word_mask = torch.chunk(indices, 2, dim=1)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         top_k = mlm_rtd_hints["top_k_alternatives"]
