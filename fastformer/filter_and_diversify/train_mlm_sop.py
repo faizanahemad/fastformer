@@ -566,8 +566,9 @@ class RTDMLMModel(PreTrainedModel):
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             print((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), "\n",
-                  (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
-                  # input_ids[rtd_locations].view(-1), "\n", label_mlm_input_ids[rtd_locations].view(-1)
+                  # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
+                  input_ids[rtd_locations].view(-1), "\n",
+                  label_mlm_input_ids[rtd_locations].view(-1)
                   )
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids).float().sum().item()
