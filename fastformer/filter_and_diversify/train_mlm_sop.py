@@ -570,7 +570,7 @@ class RTDMLMModel(PreTrainedModel):
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
-                  list(zip(rtd_locations[:, :32].long().tolist(), rtd_locations_2[:, :32].long().tolist())),
+                  list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
                     # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
                     #   ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
                     #   (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
