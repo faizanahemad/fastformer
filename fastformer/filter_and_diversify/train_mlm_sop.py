@@ -45,6 +45,7 @@ import signal
 from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
 import nltk
 from torch.distributed.optim import ZeroRedundancyOptimizer
+import pandas as pd
 
 from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
@@ -1020,6 +1021,7 @@ def train(local_rank, args):
     full_times = []
     batch_times = []
     model_times = []
+    logs_save = []
     model.zero_grad(set_to_none=True)
     samples_processed = 0
     samples_processed_this_log_iter = 0
@@ -1075,6 +1077,7 @@ def train(local_rank, args):
         samples_processed += int(batch[key].size(0))
         samples_processed_this_log_iter += int(batch[key].size(0))
         validation_iter = (step + 1) % log_every_steps == 0 or step == 0
+        printable_iter = (step + 1) % (4 * log_every_steps) == 0
         model_start = time.time()
         if no_sync and (step + 1) % iter_size != 0 and hasattr(model, "no_sync"):
             with model.no_sync():
@@ -1108,14 +1111,16 @@ def train(local_rank, args):
                              epoch=epoch,
                              **{k: v for k, v in output.items() if v is not None})
 
+            logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
             if local_rank <= (16 // args["world_size"]) or args["world_size"] <= 8:
                 wandb.log(wandb_log)
-            if local_rank == 0:
-                print(json.dumps(dict(time=get_time_string(), rank=rank, steps=step, samples_processed=samples_processed,
-                                      bs_size=bs_size, lr=optimizer.param_groups[0]['lr'], batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),
-                                      samples_per_second=samples_per_second, steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
-                                      **wandb_log), skipkeys=True, indent=2, sort_keys=True))
-                # print("Step = %s, Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s, validation_iter = %s, %s" % (step, steps_done, log_every_steps, total_steps, steps_remaining, validation_iter, (step + 1) % log_every_steps == 0))
+            if printable_iter:
+                printed = pd.concat(logs_save, axis=1)
+                printed["mean"] = printed.mean(1)
+                logs_save = []
+                if local_rank == 0:
+                    print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
+                    print(printed)
             batch_times = []
             full_times = []
             model_times = []
