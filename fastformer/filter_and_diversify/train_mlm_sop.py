@@ -48,6 +48,8 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
+from pprint import pprint
+import json
 
 try:
     from torch.cuda.amp import GradScaler, autocast
@@ -572,6 +574,7 @@ class RTDMLMModel(PreTrainedModel):
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
         sampled_replacements = temperature_sampling(prediction_scores, 8 * self.rtd_temperature).view(-1)
         input_ids[rtd_locations_model] = sampled_replacements
+        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
 
         mask_accuracy = None
         rtd_accuracy = None
@@ -579,6 +582,8 @@ class RTDMLMModel(PreTrainedModel):
         rtd_model_post_replacement_accuracy = None
         rtd_model_accuracy = None
         accuracy = None
+        rtd_replaced_proportion = None
+        all_rtd_proportion = None
         if validation_iter:
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
@@ -586,6 +591,9 @@ class RTDMLMModel(PreTrainedModel):
             # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_model_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
+            all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
+            rtd_replaced_proportion = (rtd_labels.sum() / all_rtd.sum()).item()
+            all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_mask.sum()).item()
             # print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
             #       list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
                     # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
@@ -601,8 +609,9 @@ class RTDMLMModel(PreTrainedModel):
             rtd_post_replacement_accuracy = (top_k[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
             rtd_model_post_replacement_accuracy = (input_ids[rtd_locations_model] == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
-        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
-        return input_ids, label_mlm_input_ids, rtd_labels, mask_accuracy, rtd_accuracy, accuracy, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy
+        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, rtd_labels=rtd_labels, mask_accuracy=mask_accuracy, rtd_accuracy=rtd_accuracy,
+                    accuracy=accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy,
+                    rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy, rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion)
 
 
     def get_output_embeddings(self):
@@ -618,7 +627,9 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy = self.do_masking(input_ids, attention_mask, validation_iter)
+        mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
+        input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels", "only_mask_accuracy_masking_model", "only_rtd_accuracy_masking_model", "all_rtd_proportion")
+        accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy_masking_model", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -645,6 +656,8 @@ class RTDMLMModel(PreTrainedModel):
         non_rtd_accuracy = None
         only_rtd_lm_accuracy = None
         if validation_iter:
+            only_rtd_proportion = rtd_labels.mean().item()
+            am_sum = attention_mask.sum()
             rtd_labels = rtd_labels.bool()
             not_rtd_labels = torch.logical_not(rtd_labels)
             not_rtd_labels_mean = not_rtd_labels.float().mean().item()  # majority class prediction
@@ -656,9 +669,8 @@ class RTDMLMModel(PreTrainedModel):
             rtd_accuracy = ((rtd_binary == rtd_labels).float().mean().item() - not_rtd_labels_mean) / (1 - not_rtd_labels_mean)
             rtd_accuracy = max(0, rtd_accuracy)
             non_rtd_accuracy = torch.logical_not(rtd_binary)[not_rtd_labels].float().mean().item()
-            mask_proportion = (mask_indices.sum() / attention_mask.sum()).item()
-            only_mask_proportion = (only_mask_indices.sum() / attention_mask.sum()).item()
-            only_rtd_proportion = (rtd_labels.sum() / attention_mask.sum()).item()
+            mask_proportion = (mask_indices.sum() / am_sum).item()
+            only_mask_proportion = (only_mask_indices.sum() / am_sum).item()
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[mask_indices].mean().item()
@@ -670,7 +682,7 @@ class RTDMLMModel(PreTrainedModel):
         return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
                     mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
                     rtd_post_replacement_accuracy=rtd_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy, rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
-                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy,
+                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
                     mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
@@ -1104,6 +1116,7 @@ def train(local_rank, args):
                 print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
                     get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
                 print("[Train]: Time = %s, wandb_log = %s" % (get_time_string(), wandb_log))
+                print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
                 # print("Step = %s, Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s, validation_iter = %s, %s" % (step, steps_done, log_every_steps, total_steps, steps_remaining, validation_iter, (step + 1) % log_every_steps == 0))
             batch_times = []
             full_times = []

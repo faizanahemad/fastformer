@@ -1621,6 +1621,10 @@ def temperature_sampling(logits, temperature=2.0):
         pred_ids = pred_ids.view(*probs.shape[:2])
     return pred_ids
 
+def dict_get(d, *k):
+    for i in k:
+        yield d[i]
+
 
 
 
