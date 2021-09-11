@@ -1247,7 +1247,8 @@ class CoOccurenceModel(PreTrainedModel):
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
         self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
-        del model
+        self.model = model.eval()
+        change_dropout(self.model, 0.0)
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
@@ -1343,6 +1344,23 @@ class CoOccurenceModel(PreTrainedModel):
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
         word_ce = masked_lm_loss.detach().view(b, s)
+        spearman_transformer_ce = None
+        corrcoef_transformer_ce = None
+        if "validation_iter" in kwargs and kwargs["validation_iter"]:
+            with torch.no_grad():
+                logits = self.model(inputs_embeds=nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)),
+                           attention_mask=attention_mask, labels=input_ids)["logits"]
+                transformer_ce = self.loss_ce(logits.view(-1, self.config.vocab_size), input_ids.view(-1)).detach().view(b, s)
+                transformer_spearman = []
+                transformer_corr = []
+                for i in range(b):
+                    uc = transformer_ce[i][:attention_mask[i].sum()].view(-1)
+                    wc = word_ce[i][:attention_mask[i].sum()].view(-1)
+                    transformer_spearman.append(spearman_correlation(uc, wc).item())
+                    transformer_corr.append(corr(uc, wc).item())
+                spearman_transformer_ce = torch.mean(torch.tensor(transformer_spearman)).item()
+                corrcoef_transformer_ce = torch.mean(torch.tensor(transformer_corr)).item()
+
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
         word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 10
         word_ce = torch.exp(word_ce)
@@ -1397,6 +1415,7 @@ class CoOccurenceModel(PreTrainedModel):
 
         return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss,
                     accuracy=accuracy, word_accuracy=word_accuracy,
+                    spearman_transformer_ce=spearman_transformer_ce, corrcoef_transformer_ce=corrcoef_transformer_ce,
                     word_ce_min=word_ce_min, word_ce_max=word_ce_max, word_ce_mean=word_ce_mean, word_ce_std=word_ce_std,
                     under_confidence_scores_min=under_confidence_scores_min, under_confidence_scores_max=under_confidence_scores_max,
                     under_confidence_scores_mean=under_confidence_scores_mean, under_confidence_scores_std=under_confidence_scores_std,
