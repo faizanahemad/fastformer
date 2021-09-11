@@ -1227,6 +1227,40 @@ def get_filter_mapper(keep_above):
     return mapper_filter_by_length
 
 
+class GaussianNoise(nn.Module):
+    """Gaussian noise regularizer.
+    Args:
+        sigma (float, optional): relative standard deviation used to generate the
+            noise. Relative means that it will be multiplied by the magnitude of
+            the value your are adding the noise to. This means that sigma can be
+            the same regardless of the scale of the vector.
+        is_relative_detach (bool, optional): whether to detach the variable before
+            computing the scale of the noise. If `False` then the scale of the noise
+            won't be seen as a constant but something to optimize: this will bias the
+            network to generate vectors with smaller values.
+    """
+
+    def __init__(self, sigma=0.1):
+        super().__init__()
+        if type(sigma) == GaussianNoise:
+            sigma = sigma.sigma
+        self.sigma = sigma
+        self.noise = torch.tensor(0.0)
+
+    def forward(self, x):
+        if self.training and self.sigma != 0:
+            sigma = self.sigma  # * 1.0/np.sqrt(x.size(-1))
+            if isinstance(x, torch.Tensor):
+                scale = sigma * x.detach()
+                sampled_noise = self.noise.to(x.device).repeat(*x.size()).normal_() * scale
+                x = x + sampled_noise
+            else:
+                scale = sigma * x
+                sampled_noise = np.random.randn(*x.shape) * scale
+                x = x + sampled_noise
+        return x
+
+
 class CoOccurenceModel(PreTrainedModel):
     def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
         super().__init__(PretrainedConfig())
@@ -1350,7 +1384,8 @@ class CoOccurenceModel(PreTrainedModel):
         transformer_accuracy = None
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             with torch.no_grad():
-                transformer_results = self.model(inputs_embeds=nn.Dropout(0.85)(self.model.roberta.embeddings.word_embeddings(input_ids)),
+                inputs_embeds = GaussianNoise(0.1)(nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)))
+                transformer_results = self.model(inputs_embeds,
                            attention_mask=attention_mask, labels=input_ids)
                 logits = transformer_results["logits"]
                 transformer_loss = transformer_results["loss"].item()
