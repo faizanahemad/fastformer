@@ -562,7 +562,7 @@ class RTDMLMModel(PreTrainedModel):
         input_ids[rtd_locations] = top_k[rtd_locations]
 
         rtd_locations_model = torch.zeros_like(input_ids)
-        rtd_locations_model[rtd_mask[0], rtd_mask[1]] = 1.0
+        rtd_locations_model[rtd_mask_model[0], rtd_mask_model[1]] = 1.0
         rtd_locations_model = rtd_locations_model.bool()
 
         rtd_input_ids = label_mlm_input_ids.clone()
@@ -599,7 +599,8 @@ class RTDMLMModel(PreTrainedModel):
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_model_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
-            all_rtd_fraction = (all_rtd.sum() / attention_sum).item()
+            # model_rtd_fraction = (rtd_locations_model.sum() / attention_sum).item()
+            # all_rtd_fraction = (all_rtd.sum() / attention_sum).item()
             rtd_replaced_proportion = (rtd_labels.sum() / all_rtd.sum()).item()
             all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_sum).item()
             # print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
