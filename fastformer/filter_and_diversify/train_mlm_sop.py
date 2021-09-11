@@ -575,7 +575,8 @@ class RTDMLMModel(PreTrainedModel):
             )
             sequence_output = outputs[0]
             prediction_scores = self.lm_head(sequence_output)[rtd_locations_model]
-            lm_predictions = prediction_scores.detach().argmax(dim=-1)
+            if validation_iter:
+                lm_predictions = prediction_scores.detach().argmax(dim=-1)
         sampled_replacements = temperature_sampling(prediction_scores, 8 * self.rtd_temperature).view(-1)
         input_ids[rtd_locations_model] = sampled_replacements
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
@@ -588,7 +589,9 @@ class RTDMLMModel(PreTrainedModel):
         accuracy = None
         rtd_replaced_proportion = None
         all_rtd_proportion = None
+        all_rtd_fraction = None
         if validation_iter:
+            attention_sum = attention_mask.sum()
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
@@ -596,8 +599,9 @@ class RTDMLMModel(PreTrainedModel):
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_model_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
+            all_rtd_fraction = (all_rtd.sum() / attention_sum).item()
             rtd_replaced_proportion = (rtd_labels.sum() / all_rtd.sum()).item()
-            all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_mask.sum()).item()
+            all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_sum).item()
             # print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
             #       list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
                     # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
@@ -617,7 +621,7 @@ class RTDMLMModel(PreTrainedModel):
                     accuracy=accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy,
                     rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
-                    rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion)
+                    rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion, all_rtd_fraction=all_rtd_fraction)
 
 
     def get_output_embeddings(self):
@@ -636,7 +640,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels", "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
         accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
-        decided_noise_proportion, average_tokens_per_sample =  dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample")
+        decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction =  dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -692,7 +696,7 @@ class RTDMLMModel(PreTrainedModel):
                     only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
-                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
+                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion, all_rtd_fraction=all_rtd_fraction,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample)
 
 
@@ -1126,7 +1130,8 @@ def train(local_rank, args):
                 printed["mean"] = printed.mean(1)
                 logs_save = []
                 if local_rank == 0:
-                    print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
+                    # print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
+                    print("-" * 80)
                     print(printed)
             batch_times = []
             full_times = []
