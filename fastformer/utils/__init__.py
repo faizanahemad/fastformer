@@ -1346,6 +1346,8 @@ class CoOccurenceModel(PreTrainedModel):
         word_ce = masked_lm_loss.detach().view(b, s)
         spearman_transformer_ce = None
         corrcoef_transformer_ce = None
+        transformer_loss = None
+        transformer_accuracy = None
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             with torch.no_grad():
                 transformer_results = self.model(inputs_embeds=nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)),
