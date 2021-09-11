@@ -1348,8 +1348,10 @@ class CoOccurenceModel(PreTrainedModel):
         corrcoef_transformer_ce = None
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             with torch.no_grad():
-                logits = self.model(inputs_embeds=nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)),
-                           attention_mask=attention_mask, labels=input_ids)["logits"]
+                transformer_results = self.model(inputs_embeds=nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)),
+                           attention_mask=attention_mask, labels=input_ids)
+                logits = transformer_results["logits"]
+                transformer_loss = transformer_results["loss"].item()
                 transformer_ce = self.loss_ce(logits.view(-1, self.config.vocab_size), input_ids.view(-1)).detach().view(b, s)
                 transformer_spearman = []
                 transformer_corr = []
@@ -1360,6 +1362,7 @@ class CoOccurenceModel(PreTrainedModel):
                     transformer_corr.append(corr(uc, wc).item())
                 spearman_transformer_ce = torch.mean(torch.tensor(transformer_spearman)).item()
                 corrcoef_transformer_ce = torch.mean(torch.tensor(transformer_corr)).item()
+                transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
 
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
         word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 10
@@ -1413,8 +1416,8 @@ class CoOccurenceModel(PreTrainedModel):
 
         masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss,
-                    accuracy=accuracy, word_accuracy=word_accuracy,
+        return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss, transformer_loss=transformer_loss,
+                    accuracy=accuracy, word_accuracy=word_accuracy, transformer_accuracy=transformer_accuracy,
                     spearman_transformer_ce=spearman_transformer_ce, corrcoef_transformer_ce=corrcoef_transformer_ce,
                     word_ce_min=word_ce_min, word_ce_max=word_ce_max, word_ce_mean=word_ce_mean, word_ce_std=word_ce_std,
                     under_confidence_scores_min=under_confidence_scores_min, under_confidence_scores_max=under_confidence_scores_max,
