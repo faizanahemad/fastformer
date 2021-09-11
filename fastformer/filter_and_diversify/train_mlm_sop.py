@@ -542,7 +542,9 @@ class RTDMLMModel(PreTrainedModel):
         word_ce = mlm_rtd_hints["word_ce"]
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
-        indices = torch.multinomial(word_ce, int((0.175 + random.random() * 0.05) * ss), False)
+        decided_noise_proportion = (0.175 + random.random() * 0.05)
+        average_tokens_per_sample = ss
+        indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
 
         rtd_mask, word_mask, rtd_mask_model = torch.chunk(indices, 3, dim=1)
@@ -550,6 +552,7 @@ class RTDMLMModel(PreTrainedModel):
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         # top_k = mlm_rtd_hints["top_k_alternatives"]
         # top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
+
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
         rtd_locations = torch.zeros_like(input_ids)
         rtd_locations[rtd_mask[0], rtd_mask[1]] = 1.0
@@ -612,7 +615,9 @@ class RTDMLMModel(PreTrainedModel):
             accuracy = mlm_rtd_hints["accuracy"]
         return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, rtd_labels=rtd_labels, mask_accuracy=mask_accuracy, rtd_accuracy=rtd_accuracy,
                     accuracy=accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy,
-                    rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy, rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion)
+                    rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
+                    decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
+                    rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion)
 
 
     def get_output_embeddings(self):
@@ -631,6 +636,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels", "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
         accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
+        decided_noise_proportion, average_tokens_per_sample =  dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample")
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -686,7 +692,8 @@ class RTDMLMModel(PreTrainedModel):
                     only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy, rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion,
                     mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
                     accuracy_masking_model=accuracy_masking_model, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model,
-                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion)
+                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
+                    decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample)
 
 
 def training_args():
