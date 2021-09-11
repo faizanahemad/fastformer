@@ -960,7 +960,7 @@ def train(local_rank, args):
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
-        trainable_model.load_state_dict(state_dict, strict=True)
+        trainable_model.load_state_dict(state_dict, strict=False)
         print("[Train]: Time = %s, Loaded Pretrained model, Torch Version = %s" % (get_time_string(), torch.__version__))
         del state_dict
     model = model.train()
