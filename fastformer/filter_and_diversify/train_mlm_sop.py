@@ -1111,12 +1111,10 @@ def train(local_rank, args):
             if local_rank <= (16 // args["world_size"]) or args["world_size"] <= 8:
                 wandb.log(wandb_log)
             if local_rank == 0:
-                print("[Train]: Time = %s, Rank = %s, steps = %s, samples_processed=%s, batch_size = %s, Details = %s, LR = %s" %
-                      (get_time_string(), rank, step, samples_processed, bs_size, output, optimizer.param_groups[0]['lr']))
-                print("[Train-Timings]: Time = %s, Batch time = %.4f, Full Time = %.4f, Model Time = %.4f, samples_per_second = %s, steps_remaining = %s, pct_complete = %.4f" % (
-                    get_time_string(), np.mean(batch_times), np.mean(full_times), np.mean(model_times), samples_per_second, steps_remaining, (100 * steps_done / total_steps),))
-                print("[Train]: Time = %s, wandb_log = %s" % (get_time_string(), wandb_log))
-                print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
+                print(json.dumps(dict(time=get_time_string(), rank=rank, steps=step, samples_processed=samples_processed,
+                                      bs_size=bs_size, lr=optimizer.param_groups[0]['lr'], batch_times=np.mean(batch_times), full_times=np.mean(full_times), model_times=np.mean(model_times),
+                                      samples_per_second=samples_per_second, steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                                      **wandb_log), skipkeys=True, indent=2, sort_keys=True))
                 # print("Step = %s, Steps Done = %s, log_every_steps = %s, total_steps = %s, steps_remaining = %s, validation_iter = %s, %s" % (step, steps_done, log_every_steps, total_steps, steps_remaining, validation_iter, (step + 1) % log_every_steps == 0))
             batch_times = []
             full_times = []
