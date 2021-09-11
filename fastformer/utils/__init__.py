@@ -1385,7 +1385,7 @@ class CoOccurenceModel(PreTrainedModel):
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             with torch.no_grad():
                 inputs_embeds = GaussianNoise(0.1)(nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)))
-                transformer_results = self.model(inputs_embeds,
+                transformer_results = self.model(inputs_embeds=inputs_embeds,
                            attention_mask=attention_mask, labels=input_ids)
                 logits = transformer_results["logits"]
                 transformer_loss = transformer_results["loss"].item()
