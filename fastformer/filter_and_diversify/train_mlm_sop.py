@@ -1110,11 +1110,11 @@ def train(local_rank, args):
                              steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
                              epoch=epoch,
                              **{k: v for k, v in output.items() if v is not None})
-
+            wandb_log = {k: float(v) for k, v in wandb_log.items()}
             logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
             if local_rank <= (16 // args["world_size"]) or args["world_size"] <= 8:
                 wandb.log(wandb_log)
-            if validation_iter:
+            if printable_iter:
                 printed = pd.concat(logs_save, axis=1)
                 printed["mean"] = printed.mean(1)
                 logs_save = []
