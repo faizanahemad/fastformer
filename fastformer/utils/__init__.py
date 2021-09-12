@@ -1403,7 +1403,7 @@ class CoOccurenceModel(PreTrainedModel):
         #         transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
 
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
-        word_ce = 2 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 10
+        word_ce = 2 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 11
         word_ce = torch.exp(word_ce)
         under_confidence_scores = torch.exp(under_confidence_scores)
 
