@@ -1375,7 +1375,7 @@ class CoOccurenceModel(PreTrainedModel):
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
         # under_confidence_scores = torch.log1p(1 - confidences) * 8
-        under_confidence_scores = F.relu(((1 - confidences) ** 2) - 0.5)
+        under_confidence_scores = (1 - confidences) ** 4
         del confidences
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
@@ -1408,9 +1408,9 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce = 4 ** word_ce
         # under_confidence_scores = 4 ** under_confidence_scores
 
-        word_ce = 0.1 + F.relu(word_ce - 0.1)
-        word_ce_max = word_ce.max(1).values.unsqueeze(-1)
-        word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
+        # word_ce = 0.1 + F.relu(word_ce - 0.1)
+        # word_ce_max = word_ce.max(1).values.unsqueeze(-1)
+        # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
 
         word_accuracy = None
