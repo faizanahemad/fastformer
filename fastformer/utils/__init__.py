@@ -1351,6 +1351,25 @@ class CoOccurenceModel(PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.word_embeddings = new_embeddings
 
+    def masking_stats(self, input_ids, attention_mask, word_ce, word_accuracy):
+        label_mlm_input_ids = input_ids.clone()
+        b, s = input_ids.shape[:2]
+        ss = attention_mask.sum(1).float().mean().item()
+        attention_mask = attention_mask.bool()
+        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
+        word_ce[non_mask_locations] = 0.0
+        decided_noise_proportion = (0.175 + random.random() * 0.05)
+        average_tokens_per_sample = ss
+        indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
+        indices = indices[:, torch.randperm(indices.size()[1])]
+
+        word_mask = [torch.arange(b, device=indices.device).repeat_interleave(indices.size(1)), indices.reshape(-1)]
+        mask_locations = torch.zeros_like(input_ids)
+        mask_locations[word_mask[0], word_mask[1]] = 1.0
+        mask_locations = mask_locations.bool()
+        mask_accuracy = word_accuracy[mask_locations].float().mean().item()
+        return mask_accuracy
+
     def forward(self, input_ids, attention_mask, *args, **kwargs):
         b, s = input_ids.shape[:2]
         folded_inputs = self.unfold(F.pad(input_ids, (self.window, self.window), value=self.tokenizer.pad_token_id).unsqueeze(1).unsqueeze(-1).float()).type(input_ids.dtype).transpose(1, 2)
@@ -1429,6 +1448,7 @@ class CoOccurenceModel(PreTrainedModel):
         corrcoef_under_confidence_ce = None
         correct_word_ce = None
         incorrect_word_ce = None
+        selected_mask_accuracy = None
 
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             word_accuracy = (lm_predictions == input_ids)
@@ -1457,10 +1477,11 @@ class CoOccurenceModel(PreTrainedModel):
             incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
             correct_word_ce = word_ce[word_accuracy][attention_mask].float().mean().item()
             incorrect_word_ce = word_ce[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
+            selected_mask_accuracy = self.masking_stats(input_ids, attention_mask, word_ce, word_accuracy)
 
         masked_lm_loss = masked_lm_loss.mean()
 
-        return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss, transformer_loss=transformer_loss,
+        return dict(loss=masked_lm_loss, masked_lm_loss=masked_lm_loss, transformer_loss=transformer_loss, selected_mask_accuracy=selected_mask_accuracy,
                     accuracy=accuracy, word_accuracy=word_accuracy, transformer_accuracy=transformer_accuracy,
                     spearman_transformer_ce=spearman_transformer_ce, corrcoef_transformer_ce=corrcoef_transformer_ce,
                     word_ce_min=word_ce_min, word_ce_max=word_ce_max, word_ce_mean=word_ce_mean, word_ce_std=word_ce_std,
