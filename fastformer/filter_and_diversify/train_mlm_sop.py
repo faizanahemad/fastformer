@@ -559,7 +559,7 @@ class RTDMLMModel(PreTrainedModel):
         rtd_locations[rtd_mask[0], rtd_mask[1]] = 1.0
         rtd_locations = rtd_locations.bool()
         word_logits = mlm_rtd_hints["prediction_scores"]
-        top_k = temperature_sampling(word_logits, self.rtd_temperature)
+        top_k = temperature_sampling(word_logits, 0.8 * self.rtd_temperature)
         input_ids[rtd_locations] = top_k[rtd_locations]
 
         rtd_locations_model = torch.zeros_like(input_ids)
@@ -578,7 +578,7 @@ class RTDMLMModel(PreTrainedModel):
             prediction_scores = self.lm_head(sequence_output)[rtd_locations_model]
             if validation_iter:
                 lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        sampled_replacements = temperature_sampling(prediction_scores, 8 * self.rtd_temperature).view(-1)
+        sampled_replacements = temperature_sampling(prediction_scores, 3 * self.rtd_temperature).view(-1)
         input_ids[rtd_locations_model] = sampled_replacements
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
 
@@ -1064,7 +1064,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [2.0, 1.0, 0.5, 0.25])
+                                                                        [2.0, 1.5, 1.0, 0.75])
 
 
         epoch = dataloader.epoch
