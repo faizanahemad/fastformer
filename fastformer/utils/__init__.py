@@ -1408,7 +1408,7 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce = 4 ** word_ce
         # under_confidence_scores = 4 ** under_confidence_scores
 
-        word_ce = 1 + F.relu(torch.sqrt(word_ce) - 1)
+        word_ce = 0.1 + F.relu(word_ce - 0.1)
         word_ce_max = word_ce.max(1).values.unsqueeze(-1)
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
