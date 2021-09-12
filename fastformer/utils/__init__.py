@@ -1374,7 +1374,8 @@ class CoOccurenceModel(PreTrainedModel):
         top_confs, top_k_alternatives = confidences.topk(2, -1)
         top_confs = top_confs[:, :, 1:].mean(-1)
         confidences = confidences.max(-1).values - top_confs
-        under_confidence_scores = torch.log1p(1 - confidences) * 8
+        # under_confidence_scores = torch.log1p(1 - confidences) * 8
+        under_confidence_scores = 1 - confidences
         del confidences
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
@@ -1402,10 +1403,15 @@ class CoOccurenceModel(PreTrainedModel):
         #         corrcoef_transformer_ce = torch.mean(torch.tensor(transformer_corr)).item()
         #         transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
 
+        # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
+        # word_ce = ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 12
+        # word_ce = 4 ** word_ce
+        # under_confidence_scores = 4 ** under_confidence_scores
+
+        word_ce = torch.log1p(word_ce)
+        word_ce_max = word_ce.max(1).values.unsqueeze(-1)
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
-        word_ce = ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 12
-        word_ce = 4 ** word_ce
-        under_confidence_scores = 4 ** under_confidence_scores
+
 
         word_accuracy = None
         accuracy = None
