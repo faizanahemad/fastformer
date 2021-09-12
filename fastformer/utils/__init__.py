@@ -1281,8 +1281,9 @@ class CoOccurenceModel(PreTrainedModel):
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
         self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
-        self.model = model.eval()
-        change_dropout(self.model, 0.0)
+        # self.model = model.eval()
+        # change_dropout(self.model, 0.0)
+        del model
         self.kernel_size = (2 * window + 1)
         self.unfold = nn.Unfold((self.kernel_size, 1), stride=(1, 1))
         assert config.hidden_size % 8 == 0
@@ -1382,24 +1383,24 @@ class CoOccurenceModel(PreTrainedModel):
         corrcoef_transformer_ce = None
         transformer_loss = None
         transformer_accuracy = None
-        if "validation_iter" in kwargs and kwargs["validation_iter"]:
-            with torch.no_grad():
-                inputs_embeds = GaussianNoise(0.25)(nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)))
-                transformer_results = self.model(inputs_embeds=inputs_embeds,
-                           attention_mask=attention_mask, labels=input_ids)
-                logits = transformer_results["logits"]
-                transformer_loss = transformer_results["loss"].item()
-                transformer_ce = self.loss_ce(logits.view(-1, self.config.vocab_size), input_ids.view(-1)).detach().view(b, s)
-                transformer_spearman = []
-                transformer_corr = []
-                for i in range(b):
-                    uc = transformer_ce[i][:attention_mask[i].sum()].view(-1)
-                    wc = word_ce[i][:attention_mask[i].sum()].view(-1)
-                    transformer_spearman.append(spearman_correlation(uc, wc).item())
-                    transformer_corr.append(corr(uc, wc).item())
-                spearman_transformer_ce = torch.mean(torch.tensor(transformer_spearman)).item()
-                corrcoef_transformer_ce = torch.mean(torch.tensor(transformer_corr)).item()
-                transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
+        # if "validation_iter" in kwargs and kwargs["validation_iter"]:
+        #     with torch.no_grad():
+        #         inputs_embeds = GaussianNoise(0.25)(nn.Dropout(0.75)(self.model.roberta.embeddings.word_embeddings(input_ids)))
+        #         transformer_results = self.model(inputs_embeds=inputs_embeds,
+        #                    attention_mask=attention_mask, labels=input_ids)
+        #         logits = transformer_results["logits"]
+        #         transformer_loss = transformer_results["loss"].item()
+        #         transformer_ce = self.loss_ce(logits.view(-1, self.config.vocab_size), input_ids.view(-1)).detach().view(b, s)
+        #         transformer_spearman = []
+        #         transformer_corr = []
+        #         for i in range(b):
+        #             uc = transformer_ce[i][:attention_mask[i].sum()].view(-1)
+        #             wc = word_ce[i][:attention_mask[i].sum()].view(-1)
+        #             transformer_spearman.append(spearman_correlation(uc, wc).item())
+        #             transformer_corr.append(corr(uc, wc).item())
+        #         spearman_transformer_ce = torch.mean(torch.tensor(transformer_spearman)).item()
+        #         corrcoef_transformer_ce = torch.mean(torch.tensor(transformer_corr)).item()
+        #         transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
 
         word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
         word_ce = 1 + ((word_ce - word_ce_mins) / (word_ce.max(1).values.unsqueeze(-1) - word_ce_mins)) * 10
