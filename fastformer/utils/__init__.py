@@ -1431,7 +1431,7 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce_max = word_ce.max(1).values.unsqueeze(-1)
         # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
-        word_ce = word_ce ** 2
+        # word_ce = word_ce ** 2
 
 
         word_accuracy = None
