@@ -632,19 +632,16 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
-        mask_stats = dict()
-        label_mlm_input_ids, rtd_labels = input_ids.clone(), torch.ones_like(input_ids, dtype=torch.float)
-        if False:
-            mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
-            input_ids, label_mlm_input_ids, rtd_labels = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels")
-            only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
-            accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
-            decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction = dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
-            mask_stats = dict(decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
-                              all_rtd_fraction=all_rtd_fraction, accuracy_masking_model=accuracy_masking_model, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
-                              rtd_model_accuracy=rtd_model_accuracy, rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
-                              rtd_replaced_proportion=rtd_replaced_proportion, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
-                              only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model, all_rtd_proportion=all_rtd_proportion)
+        mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
+        input_ids, label_mlm_input_ids, rtd_labels = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels")
+        only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
+        accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
+        decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction = dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
+        mask_stats = dict(decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
+                          all_rtd_fraction=all_rtd_fraction, accuracy_masking_model=accuracy_masking_model, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
+                          rtd_model_accuracy=rtd_model_accuracy, rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
+                          rtd_replaced_proportion=rtd_replaced_proportion, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
+                          only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model, all_rtd_proportion=all_rtd_proportion)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -660,17 +657,8 @@ class RTDMLMModel(PreTrainedModel):
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
 
-        mask_proportion = None
-        mlm_accuracy = None
-        copy_token_lm_accuracy = None
-        rtd_accuracy = None
-        only_rtd_accuracy = None
-        only_mask_lm_accuracy = None
-        only_mask_proportion = None
-        only_rtd_proportion = None
-        non_rtd_accuracy = None
-        only_rtd_lm_accuracy = None
-        if validation_iter and False:
+        val_stats = dict()
+        if validation_iter:
             only_rtd_proportion = rtd_labels.mean().item()
             am_sum = attention_mask.sum()
             rtd_labels = rtd_labels.bool()
@@ -693,12 +681,12 @@ class RTDMLMModel(PreTrainedModel):
             only_rtd_lm_accuracy = only_rtd_lm_accuracy.reshape(-1)[rtd_labels].mean().item()
             only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
+            val_stats = dict(mask_proportion=mask_proportion, mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy,
+                             only_rtd_accuracy=only_rtd_accuracy, only_mask_lm_accuracy=only_mask_lm_accuracy, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
+                             non_rtd_accuracy=non_rtd_accuracy, only_rtd_lm_accuracy=only_rtd_lm_accuracy)
 
         return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
-                    mlm_loss=masked_lm_loss.item(), only_rtd_lm_accuracy=only_rtd_lm_accuracy,
-                    only_mask_lm_accuracy=only_mask_lm_accuracy, only_rtd_accuracy=only_rtd_accuracy,
-                    mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy, non_rtd_accuracy=non_rtd_accuracy,
-                    mask_proportion=mask_proportion, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion, **mask_stats)
+                    mlm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
 def training_args():
@@ -1067,7 +1055,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [-1.0, 1.0, 1.0, 1.0])
+                                                                        [-2.0, 1.0, 1.0, 1.0])
 
 
         epoch = dataloader.epoch
