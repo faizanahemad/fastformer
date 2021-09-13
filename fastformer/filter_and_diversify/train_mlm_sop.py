@@ -653,7 +653,7 @@ class RTDMLMModel(PreTrainedModel):
         attention_mask = attention_mask.bool()
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
-        rtd_scores = self.rtd_nn(sequence_output).squeeze(-1)[attention_mask].view(-1)
+        rtd_scores = self.rtd_nn(sequence_output[attention_mask]).view(-1)
         rtd_labels = rtd_labels[attention_mask].view(-1)
         rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
