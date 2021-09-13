@@ -633,7 +633,7 @@ class RTDMLMModel(PreTrainedModel):
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
         mask_stats = dict()
-        label_mlm_input_ids, rtd_labels = input_ids.clone(), torch.ones_like(input_ids)
+        label_mlm_input_ids, rtd_labels = input_ids.clone(), torch.ones_like(input_ids, dtype=torch.float)
         if False:
             mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
             input_ids, label_mlm_input_ids, rtd_labels = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels")
