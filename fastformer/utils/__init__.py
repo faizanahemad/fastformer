@@ -1423,8 +1423,6 @@ class CoOccurenceModel(PreTrainedModel):
         #         transformer_accuracy = (logits.argmax(dim=-1).squeeze(-1) == input_ids)[attention_mask].float().mean().item()
 
 
-
-        word_accuracy = None
         accuracy = None
         correct_underconfident = None
         incorrect_underconfident = None
