@@ -1067,7 +1067,7 @@ def train(local_rank, args):
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [0.0, 0.5, 1.0, 1.0])
+                                                                        [-1.0, 1.0, 1.0, 1.0])
 
 
         epoch = dataloader.epoch
