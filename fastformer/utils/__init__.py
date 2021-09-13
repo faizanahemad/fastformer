@@ -1390,9 +1390,8 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = prediction_scores.detach()
         lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
         confidences = F.softmax(prediction_scores, dim=-1)
-        top_confs, top_k_alternatives = confidences.topk(2, -1)
-        top_confs = top_confs[:, :, 1:].mean(-1)
-        confidences = confidences.max(-1).values - top_confs
+        top_confs, _ = confidences.topk(2, -1)
+        confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
         # under_confidence_scores = torch.log1p(1 - confidences) * 8
         under_confidence_scores = (1 - confidences) ** 2
         del confidences
@@ -1432,7 +1431,7 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
         word_ce = word_ce ** 2
-        final_ce = torch.sqrt(word_ce + under_confidence_scores)
+        final_ce = word_ce + under_confidence_scores
 
         word_accuracy = None
         accuracy = None
@@ -1492,7 +1491,7 @@ class CoOccurenceModel(PreTrainedModel):
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
-                    word_ce=final_ce, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives, lm_predictions=lm_predictions)
+                    word_ce=final_ce, prediction_scores=prediction_scores, top_k_alternatives=None, lm_predictions=lm_predictions)
 
 
 def try_float(v):

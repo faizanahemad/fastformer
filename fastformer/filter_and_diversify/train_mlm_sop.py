@@ -515,6 +515,7 @@ class RTDMLMModel(PreTrainedModel):
         self.config = backbone.config
         self.config.gradient_checkpointing = True
         self.rtd_temperature = 1.0
+        self.word_ce_schedule = 1.0
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
         self.masking_model = masking_model.eval()
@@ -539,10 +540,10 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         attention_mask = attention_mask.bool()
-        word_ce = mlm_rtd_hints["word_ce"]
+        word_ce = mlm_rtd_hints["word_ce"] ** self.word_ce_schedule
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
-        decided_noise_proportion = (0.175 + random.random() * 0.05)
+        decided_noise_proportion = (0.15 + random.random() * 0.05)
         average_tokens_per_sample = ss
         indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         indices = indices[:, torch.randperm(indices.size()[1])]
@@ -555,16 +556,14 @@ class RTDMLMModel(PreTrainedModel):
         # top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
 
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        rtd_locations = torch.zeros_like(input_ids)
-        rtd_locations[rtd_mask[0], rtd_mask[1]] = 1.0
-        rtd_locations = rtd_locations.bool()
+        rtd_locations = torch.zeros_like(input_ids, dtype=torch.bool)
+        rtd_locations[rtd_mask[0], rtd_mask[1]] = True
         word_logits = mlm_rtd_hints["prediction_scores"]
-        top_k = temperature_sampling(word_logits, 0.8 * self.rtd_temperature)
-        input_ids[rtd_locations] = top_k[rtd_locations]
+        top_k = temperature_sampling(word_logits[rtd_locations], 0.8 * self.rtd_temperature)
+        input_ids[rtd_locations] = top_k.view(-1)
 
-        rtd_locations_model = torch.zeros_like(input_ids)
-        rtd_locations_model[rtd_mask_model[0], rtd_mask_model[1]] = 1.0
-        rtd_locations_model = rtd_locations_model.bool()
+        rtd_locations_model = torch.zeros_like(input_ids, dtype=torch.bool)
+        rtd_locations_model[rtd_mask_model[0], rtd_mask_model[1]] = True
 
         rtd_input_ids = label_mlm_input_ids.clone()
         rtd_input_ids[rtd_locations_model] = self.tokenizer.mask_token_id
@@ -574,8 +573,8 @@ class RTDMLMModel(PreTrainedModel):
                 attention_mask=attention_mask,
                 return_dict=False,
             )
-            sequence_output = outputs[0]
-            prediction_scores = self.lm_head(sequence_output)[rtd_locations_model]
+            sequence_output = outputs[0][rtd_locations_model]
+            prediction_scores = self.lm_head(sequence_output)
             if validation_iter:
                 lm_predictions = prediction_scores.detach().argmax(dim=-1)
         sampled_replacements = temperature_sampling(prediction_scores, 3 * self.rtd_temperature).view(-1)
@@ -616,7 +615,7 @@ class RTDMLMModel(PreTrainedModel):
                   # input_ids[rtd_locations].view(-1), "\n",
                   # label_mlm_input_ids[rtd_locations].view(-1)
                   # )
-            rtd_post_replacement_accuracy = (top_k[rtd_locations] == label_mlm_input_ids[rtd_locations]).float().mean().item()
+            rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids[rtd_locations]).float().mean().item()
             rtd_model_post_replacement_accuracy = (input_ids[rtd_locations_model] == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
         return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, rtd_labels=rtd_labels, mask_accuracy=mask_accuracy, rtd_accuracy=rtd_accuracy,
@@ -642,7 +641,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids, rtd_labels, only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels", "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
         accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy, rtd_model_post_replacement_accuracy, rtd_replaced_proportion = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy", "rtd_model_post_replacement_accuracy", "rtd_replaced_proportion")
-        decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction =  dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
+        decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction = dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -1065,6 +1064,10 @@ def train(local_rank, args):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
                                                                         [2.0, 1.5, 1.0, 0.75])
+        if hasattr(getattr(model, "module", model), "word_ce_schedule"):
+            getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
+                                                                        [0, total_steps // 5, total_steps // 4, total_steps // 2],
+                                                                        [0.0, 0.5, 1.0, 1.0])
 
 
         epoch = dataloader.epoch
