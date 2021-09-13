@@ -563,7 +563,7 @@ class RTDMLMModel(PreTrainedModel):
         rtd_locations = torch.zeros_like(input_ids, dtype=torch.bool)
         rtd_locations[rtd_mask[0], rtd_mask[1]] = True
         word_logits = mlm_rtd_hints["prediction_scores"]
-        top_k = temperature_sampling(word_logits[rtd_locations], 0.8 * self.rtd_temperature)
+        top_k = temperature_sampling(word_logits[rtd_locations], self.rtd_temperature)
         input_ids[rtd_locations] = top_k.view(-1)
 
         rtd_locations_model = torch.zeros_like(input_ids, dtype=torch.bool)
@@ -581,7 +581,7 @@ class RTDMLMModel(PreTrainedModel):
             prediction_scores = self.lm_head(sequence_output)
             if validation_iter:
                 lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        sampled_replacements = temperature_sampling(prediction_scores, 3 * self.rtd_temperature).view(-1)
+        sampled_replacements = temperature_sampling(prediction_scores, 2 * self.rtd_temperature).view(-1)
         input_ids[rtd_locations_model] = sampled_replacements
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
 
@@ -670,7 +670,7 @@ class RTDMLMModel(PreTrainedModel):
         only_rtd_proportion = None
         non_rtd_accuracy = None
         only_rtd_lm_accuracy = None
-        if validation_iter:
+        if validation_iter and False:
             only_rtd_proportion = rtd_labels.mean().item()
             am_sum = attention_mask.sum()
             rtd_labels = rtd_labels.bool()
@@ -1062,8 +1062,8 @@ def train(local_rank, args):
 
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
-                                                                        [0, total_steps // 5, total_steps // 4, total_steps // 2],
-                                                                        [2.0, 1.5, 1.0, 0.75])
+                                                                        [0, total_steps // 5, total_steps // 3],
+                                                                        [3.0, 1.5, 1.0])
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 4, total_steps // 2],
