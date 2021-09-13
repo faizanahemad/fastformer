@@ -368,9 +368,9 @@ class SuperGlueTest:
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
                 try:
-                    main_model, tokenizer = get_backbone(model_name, reinit=False, dropout_prob=None)
+                    main_model, tokenizer, _ = get_backbone(model_name, reinit=False, dropout_prob=None)
                 except:
-                    main_model, tokenizer = get_backbone(model, reinit=False, dropout_prob=None)
+                    main_model, tokenizer, _ = get_backbone(model, reinit=False, dropout_prob=None)
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
                 state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -1681,7 +1681,7 @@ def train(local_rank, args):
     set_seeds(args["seed"])
 
     model = args["pretrained_model"]
-    _, tokenizer = get_backbone(args["pretrained_model"])
+    _, tokenizer, _ = get_backbone(args["pretrained_model"])
     SuperGlueTest(None, model, device, tokenizer, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"],
                   args["weight_decay"], args["dropout"], args["scheduler_policy"], args["scheduler_warmup"],

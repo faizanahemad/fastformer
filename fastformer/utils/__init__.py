@@ -915,11 +915,12 @@ def sync_layer_normalizers():
     pass
 
 
-def get_backbone(model_name, reinit=False, dropout_prob=0.05):
+def get_backbone(model_name, reinit=False, dropout_prob=0.0):
     # TODO: Later also add a QnA boolean / fixed number of options question
     # TODO: Add extra CLS attr and tokens in embedding
-    from transformers import AutoModel, RobertaTokenizerFast, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
+    from transformers import AutoModel, RobertaTokenizerFast, RobertaForMaskedLM, DebertaV2ForMaskedLM, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
     import re
+    lm_head = None
     if "co-oc" in model_name:
         temp1 = re.findall(r'\d+', model_name)  # find number of digits through regular expression
         window = 3 if len(temp1) == 0 else int(temp1[0])
@@ -953,16 +954,22 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
             config.attention_probs_dropout_prob = dropout_prob
 
         # config.gradient_checkpointing = True
-        model = AutoModel.from_pretrained(model_name)
+        model = RobertaForMaskedLM.from_pretrained(model_name)
+        lm_head = model.lm_head
+        model = model.roberta
     elif "deberta" in model_name:
         if "xlarge" in model_name:
             model_name = "microsoft/deberta-xlarge-v2"
-            model = DebertaV2Model.from_pretrained(model_name)
+            model = DebertaV2ForMaskedLM.from_pretrained(model_name)
+            lm_head = model.cls
+            model = model.deberta
             tokenizer = DebertaV2Tokenizer.from_pretrained(model_name)
         elif "xxlarge" in model_name:
             model_name = "microsoft/deberta-xxlarge-v2"
             tokenizer = DebertaV2Tokenizer.from_pretrained(model_name)
-            model = DebertaV2Model.from_pretrained(model_name)
+            model = DebertaV2ForMaskedLM.from_pretrained(model_name)
+            lm_head = model.cls
+            model = model.deberta
         elif "large" in model_name:
             config = DebertaV2Config()
             config.hidden_size = 1024
@@ -979,7 +986,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.05):
         model.init_weights()
     if dropout_prob is not None:
         change_dropout(model, dropout_prob)
-    return model, tokenizer
+    return model, tokenizer, lm_head
 
 
 def clean_text(text):

@@ -51,6 +51,9 @@ from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
 from pprint import pprint
 import json
+from transformers.models.roberta.modeling_roberta import RobertaLMHead
+from transformers.models.deberta_v2.modeling_deberta_v2 import DebertaV2OnlyMLMHead
+
 
 try:
     from torch.cuda.amp import GradScaler, autocast
@@ -505,7 +508,7 @@ class MaskedLanguageSentenceOrderModel(PreTrainedModel):
 
 
 class RTDMLMModel(PreTrainedModel):
-    def __init__(self, backbone: PreTrainedModel, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, reinit=False):
+    def __init__(self, backbone: PreTrainedModel, lm_head: nn.Module, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
@@ -524,13 +527,14 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone = backbone
         self.mlm_w = mlm_w
         self.tokenizer = tokenizer
-        self.rtd_nn = nn.Linear(hidden_size, 1)
+        self.rtd_nn = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.GELU(), nn.Linear(hidden_size, 1))
         init_weights(self.rtd_nn, 0.01)
 
         if reinit:
             self.backbone.init_weights()
+            init_weights(self.lm_head, 0.01)
 
-        self.lm_head = RobertaLMHead(backbone.config)
+        self.lm_head = lm_head
         self.tie_weights()
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
@@ -554,8 +558,6 @@ class RTDMLMModel(PreTrainedModel):
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         rtd_mask = [torch.arange(b, device=rtd_mask.device).repeat_interleave(rtd_mask.size(1)), rtd_mask.reshape(-1)]
         rtd_mask_model = [torch.arange(b, device=rtd_mask_model.device).repeat_interleave(rtd_mask_model.size(1)), rtd_mask_model.reshape(-1)]
-        # top_k = mlm_rtd_hints["top_k_alternatives"]
-        # top_k = top_k[:, :, torch.randint(0, int(max(1, min(self.rtd_temperature, top_k.size(2)))), (1,))].squeeze(-1)
 
         input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
         rtd_locations = torch.zeros_like(input_ids, dtype=torch.bool)
@@ -597,26 +599,11 @@ class RTDMLMModel(PreTrainedModel):
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_locations = input_ids == self.tokenizer.mask_token_id
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
-            # print(rtd_locations.size(), rtd_locations.sum(1).tolist())
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_model_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
-            # model_rtd_fraction = (rtd_locations_model.sum() / attention_sum).item()
-            # all_rtd_fraction = (all_rtd.sum() / attention_sum).item()
             rtd_replaced_proportion = (rtd_labels.sum() / all_rtd.sum()).item()
             all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_sum).item()
-            # print((rtd_locations.sum(1).tolist(), rtd_locations_2.sum(1).tolist(),),
-            #       list(zip(rtd_locations[:, :32].long().view(-1).tolist(), rtd_locations_2[:, :32].long().view(-1).tolist())),
-                    # ((input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(), (input_ids[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
-                    #   ((lm_predictions[mask_locations].view(-1) == label_mlm_input_ids[mask_locations].view(-1)).float().mean().item(),
-                    #   (lm_predictions[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).float().mean().item(),
-                    #    (lm_predictions[rtd_locations_2].view(-1) == label_mlm_input_ids[rtd_locations_2].view(-1)).float().mean().item()),
-                    #   (word_wise_accuracy[mask_locations].float().mean().item(), word_wise_accuracy[rtd_locations].float().mean().item(), word_wise_accuracy[rtd_locations_2].float().mean().item()),
-                    #   "\n",
-                  # (input_ids[rtd_locations].view(-1) == label_mlm_input_ids[rtd_locations].view(-1)).long()
-                  # input_ids[rtd_locations].view(-1), "\n",
-                  # label_mlm_input_ids[rtd_locations].view(-1)
-                  # )
             rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids[rtd_locations]).float().mean().item()
             rtd_model_post_replacement_accuracy = (input_ids[rtd_locations_model] == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
@@ -628,7 +615,12 @@ class RTDMLMModel(PreTrainedModel):
 
 
     def get_output_embeddings(self):
-        return self.lm_head.decoder
+        if isinstance(self.lm_head, RobertaLMHead):
+            return self.lm_head.decoder
+        elif isinstance(self.lm_head, DebertaV2OnlyMLMHead):
+            return self.lm_head.predictions.decoder
+        else:
+            raise ValueError("Only Roberta & Deberta LM heads supported")
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
@@ -933,7 +925,7 @@ def train(local_rank, args):
     eps = 1e-7
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer = get_backbone(args["model_config"], reinit, dropout_prob=0.01)
+    backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.01)
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
@@ -943,21 +935,21 @@ def train(local_rank, args):
         trainable_model = model
         mlm_sop_enabled = False
     elif args["hard_mlm"]:
-        masking_model, _ = get_backbone("co-oc-7-roberta-base", False, dropout_prob=0.0)
+        masking_model, _ , _ = get_backbone("co-oc-7-roberta-base", False, dropout_prob=0.0)
         state_dict = torch.load(args["hard_mlm_model"], map_location='cpu')
         masking_model.load_state_dict(state_dict, strict=True)
         masking_model = masking_model.eval()
         if hasattr(masking_model, "model"):
             masking_model.model = None
             del masking_model.model
-        model = RTDMLMModel(backbone, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
+        model = RTDMLMModel(backbone, lm_head, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
         mlm_sop_enabled = False
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
         trainable_model = model.backbone
         mlm_sop_enabled = True
     if local_rank == 0 and rank == 0:
-        print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), numel(model) / 1_000_000))
+        print("[Train]: Time = %s, Trainable Params = %s, reinit = %s" % (get_time_string(), numel(model) / 1_000_000, reinit))
 
     if args["pretrained_model"] is not None and os.path.exists(args["pretrained_model"]):
         state_dict = torch.load(args["pretrained_model"], map_location='cpu' if args['cpu'] else 'cuda:%d' % gpu_device)
