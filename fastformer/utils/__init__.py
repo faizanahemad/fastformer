@@ -1390,7 +1390,6 @@ class CoOccurenceModel(PreTrainedModel):
         prediction_scores = prediction_scores.detach()
         with torch.no_grad():
             lm_predictions = prediction_scores.argmax(dim=-1).squeeze(-1)
-            word_accuracy = (lm_predictions == input_ids)
             top_confs, _ = prediction_scores.topk(2, -1)
             top_confs = F.softmax(top_confs, dim=-1)
             confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
@@ -1439,8 +1438,12 @@ class CoOccurenceModel(PreTrainedModel):
         correct_word_ce = None
         incorrect_word_ce = None
         selected_mask_accuracy = None
-        if "validation_iter" in kwargs and kwargs["validation_iter"] and torch.is_grad_enabled():
+        word_accuracy = None
+
+        if "validation_iter" in kwargs and kwargs["validation_iter"]:
+            word_accuracy = (lm_predictions == input_ids)
             accuracy = word_accuracy[attention_mask].float().mean().item()
+        if "validation_iter" in kwargs and kwargs["validation_iter"] and torch.is_grad_enabled():
             word_ce_min = word_ce.min().item()
             word_ce_max = word_ce.max().item()
             word_ce_mean = word_ce.mean().item()
