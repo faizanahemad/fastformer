@@ -1352,7 +1352,6 @@ class CoOccurenceModel(PreTrainedModel):
         self.word_embeddings = new_embeddings
 
     def masking_stats(self, input_ids, attention_mask, word_ce, word_accuracy):
-        label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
         attention_mask = attention_mask.bool()
@@ -1393,7 +1392,7 @@ class CoOccurenceModel(PreTrainedModel):
         top_confs, _ = confidences.topk(2, -1)
         confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
         # under_confidence_scores = torch.log1p(1 - confidences) * 8
-        under_confidence_scores = (1 - confidences) ** 2
+        under_confidence_scores = (1 - confidences)
         del confidences
         del top_confs
         # word_ce = torch.log1p(masked_lm_loss.detach().view(b, s))
@@ -1430,8 +1429,8 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce_max = word_ce.max(1).values.unsqueeze(-1)
         # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
-        word_ce = word_ce ** 2
-        final_ce = word_ce + under_confidence_scores
+        word_ce = word_ce
+        final_ce = (word_ce + under_confidence_scores) ** 2
 
         word_accuracy = None
         accuracy = None
