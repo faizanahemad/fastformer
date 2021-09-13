@@ -529,12 +529,11 @@ class RTDMLMModel(PreTrainedModel):
         self.tokenizer = tokenizer
         self.rtd_nn = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.GELU(), nn.Linear(hidden_size, 1))
         init_weights(self.rtd_nn, 0.01)
-
+        self.lm_head = lm_head
         if reinit:
             self.backbone.init_weights()
             init_weights(self.lm_head, 0.01)
 
-        self.lm_head = lm_head
         self.tie_weights()
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
