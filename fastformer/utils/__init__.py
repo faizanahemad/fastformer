@@ -1432,7 +1432,7 @@ class CoOccurenceModel(PreTrainedModel):
         # word_ce_mins = word_ce.min(1).values.unsqueeze(-1)
 
         word_ce = word_ce ** 2
-
+        final_ce = torch.sqrt(word_ce + under_confidence_scores)
 
         word_accuracy = None
         accuracy = None
@@ -1479,7 +1479,7 @@ class CoOccurenceModel(PreTrainedModel):
             incorrect_underconfident = under_confidence_scores[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
             correct_word_ce = word_ce[word_accuracy][attention_mask].float().mean().item()
             incorrect_word_ce = word_ce[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
-            selected_mask_accuracy = self.masking_stats(input_ids, attention_mask, word_ce + under_confidence_scores, word_accuracy)
+            selected_mask_accuracy = self.masking_stats(input_ids, attention_mask, final_ce, word_accuracy)
 
         masked_lm_loss = masked_lm_loss.mean()
 
@@ -1492,7 +1492,7 @@ class CoOccurenceModel(PreTrainedModel):
                     spearman_under_confidence_ce=spearman_under_confidence_ce, corrcoef_under_confidence_ce=corrcoef_under_confidence_ce,
                     correct_word_ce=correct_word_ce, incorrect_word_ce=incorrect_word_ce,
                     correct_underconfident=correct_underconfident, incorrect_underconfident=incorrect_underconfident,
-                    word_ce=word_ce + under_confidence_scores, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives, lm_predictions=lm_predictions)
+                    word_ce=final_ce, prediction_scores=prediction_scores, top_k_alternatives=top_k_alternatives, lm_predictions=lm_predictions)
 
 
 def try_float(v):
