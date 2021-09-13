@@ -540,7 +540,9 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         attention_mask = attention_mask.bool()
-        word_ce = mlm_rtd_hints["word_ce"] ** self.word_ce_schedule
+        word_ce = mlm_rtd_hints["word_ce"]
+        word_ce_max = word_ce.max()
+        word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
         decided_noise_proportion = (0.15 + random.random() * 0.05)
