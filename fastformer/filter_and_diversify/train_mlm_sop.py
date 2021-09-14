@@ -547,6 +547,9 @@ class RTDMLMModel(PreTrainedModel):
         if self.word_ce_schedule < 1.0:
             word_ce_max = word_ce.max()
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
+        co_oc_teacher_prediction_scores = None
+        if self.word_ce_schedule < 0:
+            co_oc_teacher_prediction_scores = mlm_rtd_hints["prediction_scores"]
         non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
         word_ce[non_mask_locations] = 0.0
         decided_noise_proportion = (0.15 + random.random() * 0.05)
@@ -584,7 +587,9 @@ class RTDMLMModel(PreTrainedModel):
         sampled_replacements = temperature_sampling(prediction_scores, 2 * self.rtd_temperature).view(-1)
         input_ids[rtd_locations_model] = sampled_replacements
         rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
-
+        all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
+        mask_locations = input_ids == self.tokenizer.mask_token_id
+        all_noise_locations = torch.logical_or(mask_locations, all_rtd)
         mask_accuracy = None
         rtd_accuracy = None
         rtd_post_replacement_accuracy = None
@@ -597,11 +602,9 @@ class RTDMLMModel(PreTrainedModel):
         if validation_iter:
             attention_sum = attention_mask.sum()
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
-            mask_locations = input_ids == self.tokenizer.mask_token_id
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             rtd_accuracy = word_wise_accuracy[rtd_locations].float().mean().item()
             rtd_model_accuracy = (lm_predictions == label_mlm_input_ids[rtd_locations_model]).float().mean().item()
-            all_rtd = torch.logical_or(rtd_locations, rtd_locations_model)
             rtd_replaced_proportion = (rtd_labels.sum() / all_rtd.sum()).item()
             all_rtd_proportion = ((input_ids[all_rtd] != label_mlm_input_ids[all_rtd]).sum() / attention_sum).item()
             rtd_post_replacement_accuracy = (top_k == label_mlm_input_ids[rtd_locations]).float().mean().item()
@@ -612,6 +615,7 @@ class RTDMLMModel(PreTrainedModel):
                     accuracy=accuracy, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy,
                     rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
+                    co_oc_teacher_prediction_scores=co_oc_teacher_prediction_scores, all_noise_locations=all_noise_locations,
                     rtd_replaced_proportion=rtd_replaced_proportion, all_rtd_proportion=all_rtd_proportion, all_rtd_fraction=all_rtd_fraction)
 
     def get_output_embeddings(self):
@@ -650,6 +654,10 @@ class RTDMLMModel(PreTrainedModel):
         attention_mask = attention_mask.bool()
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
+        co_oc_guidance_loss = None
+        if self.word_ce_schedule < 0:
+            co_oc_teacher_prediction_scores, all_noise_locations = dict_get(mask_dict, "co_oc_teacher_prediction_scores", "all_noise_locations")
+            co_oc_guidance_loss = (prediction_scores - co_oc_teacher_prediction_scores)[all_noise_locations].mean()
         rtd_scores = self.rtd_nn(sequence_output[attention_mask]).view(-1)
         rtd_labels = rtd_labels[attention_mask].view(-1)
         rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
@@ -685,8 +693,8 @@ class RTDMLMModel(PreTrainedModel):
                              only_rtd_accuracy=only_rtd_accuracy, only_mask_lm_accuracy=only_mask_lm_accuracy, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
                              non_rtd_accuracy=non_rtd_accuracy, only_rtd_lm_accuracy=only_rtd_lm_accuracy)
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss), rtd_loss=rtd_loss.item(),
-                    mlm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
+        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + co_oc_guidance_loss, rtd_loss=rtd_loss.item(), co_oc_guidance_loss=co_oc_guidance_loss.item(),
+                    masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
 def training_args():
