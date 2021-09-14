@@ -693,7 +693,8 @@ class RTDMLMModel(PreTrainedModel):
                              only_rtd_accuracy=only_rtd_accuracy, only_mask_lm_accuracy=only_mask_lm_accuracy, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
                              non_rtd_accuracy=non_rtd_accuracy, only_rtd_lm_accuracy=only_rtd_lm_accuracy)
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + co_oc_guidance_loss, rtd_loss=rtd_loss.item(), co_oc_guidance_loss=co_oc_guidance_loss.item(),
+        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + (co_oc_guidance_loss if co_oc_guidance_loss is not None else 0.0),
+                    rtd_loss=rtd_loss.item(), co_oc_guidance_loss=(co_oc_guidance_loss.item() if co_oc_guidance_loss is not None else None),
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
