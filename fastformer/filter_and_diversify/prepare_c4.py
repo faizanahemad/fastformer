@@ -63,8 +63,8 @@ with Pool(cpu_count) as p:
 
     def mapping(x):
         tokens = [[re.sub(r'[^\s0-9a-zA-Z]', ' ', w).strip() for w in t.split()] for t in x["text"]]
-        tokens = [[w for w in t if len(w) >= 3] for t in tokens]
-        tf = [term_frequency_builder(tk) for tk in tokens]
+        tokens = [[w for w in t if len(w) >= 2] for t in tokens]
+        tf = [term_frequency_builder(tk) if len(tk) > 0 else [["", 1.0]] for tk in tokens]
         return tf
 
     def batch_term_frequency_builder(x):
