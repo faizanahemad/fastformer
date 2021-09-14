@@ -657,7 +657,7 @@ class RTDMLMModel(PreTrainedModel):
         co_oc_guidance_loss = None
         if self.word_ce_schedule < 0:
             co_oc_teacher_prediction_scores, all_noise_locations = dict_get(mask_dict, "co_oc_teacher_prediction_scores", "all_noise_locations")
-            co_oc_guidance_loss = 10 * ((prediction_scores - co_oc_teacher_prediction_scores) ** 2)[all_noise_locations].mean()
+            co_oc_guidance_loss = 10 * ((F.softmax(prediction_scores, dim=-1) - F.softmax(co_oc_teacher_prediction_scores, dim=-1)) ** 2)[all_noise_locations].sum(-1).mean()
         rtd_scores = self.rtd_nn(sequence_output[attention_mask]).view(-1)
         rtd_labels = rtd_labels[attention_mask].view(-1)
         rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
