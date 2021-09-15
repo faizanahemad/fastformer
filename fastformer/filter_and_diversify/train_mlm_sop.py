@@ -1062,6 +1062,10 @@ def train(local_rank, args):
                                                                         [0, total_steps // 5, total_steps // 3],
                                                                         [3.0, 1.5, 1.0])
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
+            if reinit:
+                schedule = [-1.0, -0.5, 0.5, 1.0, 1.0]
+            else:
+                schedule = [1.0, 1.0, 1.0, 1.0, 1.0]
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
                                                                         [0, total_steps // 10, total_steps // 5, total_steps // 4, total_steps // 2],
                                                                         [-1.0, -0.5, 0.5, 1.0, 1.0])
