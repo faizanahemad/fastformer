@@ -424,12 +424,12 @@ class SuperGlueTest:
             if os.path.exists(model):
                 model_name = model.split("/")[-1].split(".")[0]
                 try:
-                    main_model, tokenizer = get_mtt_backbone(model_name, 1, self.enable_layer_normalizers, None, reinit=False,
-                                                             train_layer_normalizers=False, enable_layer_normalizers_statistics=self.enable_layer_normalizers,
+                    main_model, tokenizer = get_mtt_backbone(model_name, 1, False, None, reinit=False,
+                                                             train_layer_normalizers=False, enable_layer_normalizers_statistics=False,
                                                              dropout_prob=0.1)
                 except:
-                    main_model, tokenizer = get_mtt_backbone(model, 1, self.enable_layer_normalizers, None, reinit=False,
-                                                             train_layer_normalizers=False, enable_layer_normalizers_statistics=self.enable_layer_normalizers,
+                    main_model, tokenizer = get_mtt_backbone(model, 1, False, None, reinit=False,
+                                                             train_layer_normalizers=False, enable_layer_normalizers_statistics=False,
                                                              dropout_prob=0.1)
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
