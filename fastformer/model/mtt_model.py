@@ -95,7 +95,12 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
             config.sampling_alpha = sampling_alpha
         model = PreNormRobertaModel(config)
     elif "roberta" in model_name:
-        tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+
+        if "large" in model_name:
+            model_name = "roberta-large"
+        elif "base" in model_name or "small" in model_name:
+            model_name = "roberta-base"
+        tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         config = RobertaConfig.from_pretrained(model_name)
         # config.gradient_checkpointing = True
         model = RobertaModel(config)
