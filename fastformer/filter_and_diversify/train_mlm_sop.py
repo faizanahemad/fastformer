@@ -1058,9 +1058,13 @@ def train(local_rank, args):
                                     getattr(model, "module", model).momentum_lm_head, 0.0)
 
         if hasattr(getattr(model, "module", model), "rtd_temperature"):
+            if reinit:
+                schedule = [3.0, 1.5, 1.0]
+            else:
+                schedule = [1.0, 1.0, 1.0]
             getattr(model, "module", model).rtd_temperature = np.interp(steps_done,
                                                                         [0, total_steps // 5, total_steps // 3],
-                                                                        [3.0, 1.5, 1.0])
+                                                                        schedule)
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
             if reinit:
                 schedule = [-1.0, -0.5, 0.5, 1.0, 1.0]
