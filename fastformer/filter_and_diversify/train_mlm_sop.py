@@ -946,6 +946,7 @@ def train(local_rank, args):
             masking_model.model = None
             del masking_model.model
         model = RTDMLMModel(backbone, lm_head, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
+        trainable_model = model.backbone
         mlm_sop_enabled = False
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
