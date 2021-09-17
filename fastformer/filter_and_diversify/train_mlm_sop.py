@@ -53,6 +53,7 @@ from pprint import pprint
 import json
 from transformers.models.roberta.modeling_roberta import RobertaLMHead
 from transformers.models.deberta_v2.modeling_deberta_v2 import DebertaV2OnlyMLMHead
+from transformers.models.deberta.modeling_deberta import DebertaOnlyMLMHead
 
 
 try:
@@ -621,7 +622,7 @@ class RTDMLMModel(PreTrainedModel):
     def get_output_embeddings(self):
         if isinstance(self.lm_head, RobertaLMHead):
             return self.lm_head.decoder
-        elif isinstance(self.lm_head, DebertaV2OnlyMLMHead):
+        elif isinstance(self.lm_head,( DebertaV2OnlyMLMHead, DebertaOnlyMLMHead)):
             return self.lm_head.predictions.decoder
         else:
             raise ValueError("Only Roberta & Deberta LM heads supported")
