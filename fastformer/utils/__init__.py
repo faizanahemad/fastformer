@@ -1450,7 +1450,7 @@ class CoOccurenceModel(PreTrainedModel):
 
         if "validation_iter" in kwargs and kwargs["validation_iter"]:
             word_accuracy = (lm_predictions == input_ids)
-            accuracy = word_accuracy[attention_mask].float().mean().item()
+            accuracy = word_accuracy.view(-1)[attention_mask.view(-1)].float().mean().item()
         if "validation_iter" in kwargs and kwargs["validation_iter"] and torch.is_grad_enabled():
             word_ce_min = word_ce.min().item()
             word_ce_max = word_ce.max().item()
