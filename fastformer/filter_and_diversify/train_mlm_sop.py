@@ -61,7 +61,7 @@ try:
 except:
     pass
 
-optimizer_config = dict(lr=5e-5, eps=1e-4, weight_decay=1e-4, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
+optimizer_config = dict(lr=1e-4, eps=1e-6, weight_decay=1e-3, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
 
 class get_next:
     def __init__(self, dataloader):
@@ -904,7 +904,6 @@ def train(local_rank, args):
     format = "%Y-%m-%d %H-%M %Z"
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
-    ds_name = list(filter(lambda x: len(x.strip()) > 0, args["dataset"].split("/")))[-1].replace("train_fastformer_resampled_", "")
     set_seeds(args["seed"])
     batch_size = 8
 
@@ -913,11 +912,10 @@ def train(local_rank, args):
     optimizer_config["gradient_clipping"] = args["gradient_clipping"]
     optimizer_config["beta_1"] = args["beta_1"]
     optimizer_config["beta_2"] = args["beta_2"]
-    optimizer_config["eps"] = 1e-7
-    eps = 1e-7
+    optimizer_config["eps"] = 1e-6
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
-    backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.01)
+    backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.1)
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
@@ -1049,11 +1047,15 @@ def train(local_rank, args):
 
         if hasattr(getattr(model, "module", model), "word_ce_schedule"):
             if reinit:
-                schedule = [-1.0, -0.5, 0.5, 0.75, 1.0]
+                schedule = [-1.0, -0.5, 0.0, 0.5, 1.0]
             else:
                 schedule = [1.0, 1.0, 1.0, 1.0, 1.0]
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
-                                                                        [0, total_steps // 10, total_steps // 5, total_steps // 4, total_steps // 2],
+                                                                        [0,
+                                                                         min(10000, int(0.05 * total_steps)),
+                                                                         min(20000, int(0.1 * total_steps)), # 0
+                                                                         int(0.25 * total_steps),
+                                                                         int(0.5 * total_steps)],
                                                                         schedule)
 
 
