@@ -178,7 +178,9 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
     def get_representations(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None):
 
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-        hidden_states = self.backbone(**inputs)["hidden_states"]
+        out = self.backbone(**inputs)
+        hidden_states = out["hidden_states"]
+        pooler_output = out["pooler_output"]
         funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
@@ -434,11 +436,12 @@ class SuperGlueTest:
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
                 state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
                 try:
                     main_model.load_state_dict(state_dict, strict=True)
                 except:
-                    state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
-                    main_model.load_state_dict(state_dict, strict=True)
+                    print("[Loading Model]: extra model keys = %s, Extra keys in saved model = %s" % (main_model.state_dict().keys() - state_dict.keys(), state_dict.keys() - main_model.state_dict().keys()))
+                    main_model.load_state_dict(state_dict, strict=False)
                 model = main_model
             else:
 

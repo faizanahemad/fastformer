@@ -103,7 +103,7 @@ def get_mtt_backbone(model_name, cls_tokens, enable_layer_normalizers, sampling_
         tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
         config = RobertaConfig.from_pretrained(model_name)
         # config.gradient_checkpointing = True
-        model = RobertaModel(config)
+        model = AutoModel.from_pretrained(model_name)
     elif "bert" in model_name:
         tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
         model = AutoModel.from_pretrained(model_name)
