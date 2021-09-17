@@ -41,7 +41,7 @@ from albumentations import augmentations as alb
 import imgaug.augmenters as iaa
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import AutoModel, RobertaTokenizerFast, ConvBertTokenizer, ConvBertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, \
-    PretrainedConfig, PreTrainedModel, DebertaV2Config, DebertaV2Model, DebertaV2Tokenizer
+    PretrainedConfig, PreTrainedModel, DebertaV2Config, DebertaV2Model, DebertaV2Tokenizer, DebertaTokenizer
 import torchvision.transforms as transforms
 import warnings
 warnings.simplefilter("ignore")
@@ -971,12 +971,13 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
             lm_head = model.cls
             model = model.deberta
         elif "large" in model_name:
-            config = DebertaV2Config()
-            config.hidden_size = 1024
-            config.intermediate_size = 4096
-            config.num_attention_heads = 16
-            model = DebertaV2Model(config)
-            tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-xlarge-v2")
+            from transformers.models.deberta.modeling_deberta import DebertaForMaskedLM
+            model = DebertaForMaskedLM.from_pretrained("microsoft/deberta-large")
+            tokenizer = DebertaTokenizer.from_pretrained("microsoft/deberta-large")
+            lm_head = model.cls
+            model = model.deberta
+        else:
+            raise ValueError
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
