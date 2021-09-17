@@ -435,8 +435,8 @@ class SuperGlueTest:
                                                              dropout_prob=0.1)
                 main_model = main_model.to(self.device)
                 state_dict = torch.load(model, map_location=self.device)
-                state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-                state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
+                # state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+                # state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
                 try:
                     main_model.load_state_dict(state_dict, strict=True)
                 except:
