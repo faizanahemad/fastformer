@@ -1054,8 +1054,8 @@ def train(local_rank, args):
                                                                         [0,
                                                                          min(10000, int(0.05 * total_steps)),
                                                                          min(20000, int(0.1 * total_steps)), # 0
-                                                                         int(0.25 * total_steps),
-                                                                         int(0.5 * total_steps)],
+                                                                         min(30000, int(0.25 * total_steps)),
+                                                                         min(40000, int(0.5 * total_steps))],
                                                                         schedule)
 
 
