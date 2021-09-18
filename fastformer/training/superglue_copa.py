@@ -180,8 +180,11 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         out = self.backbone(**inputs)
         hidden_states = out["hidden_states"]
-        pooler_output = out["pooler_output"]
-        funnel_outputs = torch.cat((hidden_states[-1][:, 0], hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
+        if "pooler_output" in out:
+            pooler_output = out["pooler_output"]
+        else:
+            pooler_output = hidden_states[-1][:, 0]
+        funnel_outputs = torch.cat((pooler_output, hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):
