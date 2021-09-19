@@ -157,7 +157,8 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
             super().__init__(model.config)
         else:
             raise ValueError
-
+        if hasattr(model, "pooler"):
+            model.pooler = None
         self.backbone = model
         
         if num_classes == 1:
@@ -165,7 +166,7 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
         
-        self.num_features = config.block_channel_size[-1] if isinstance(config, FastFormerConfig) else (model.config.hidden_size if hasattr(model, "config") and hasattr(model.config, "hidden_size") else 768) * 4
+        self.num_features = model.config.hidden_size * 2
         self.head = nn.Linear(self.num_features, num_classes)
         self.num_classes = num_classes
         self.tokenizer = tokenizer
@@ -180,11 +181,8 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         inputs = dict(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
         out = self.backbone(**inputs)
         hidden_states = out["hidden_states"]
-        if "pooler_output" in out:
-            pooler_output = out["pooler_output"]
-        else:
-            pooler_output = hidden_states[-1][:, 0]
-        funnel_outputs = torch.cat((pooler_output, hidden_states[-2][:, 0], hidden_states[-3][:, 0], hidden_states[-4][:, 0]), -1)
+        pooler_output = hidden_states[-1][:, 0]
+        funnel_outputs = torch.cat((pooler_output, hidden_states[-4][:, 0]), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):

@@ -78,16 +78,23 @@ with Pool(cpu_count) as p:
     c4_tokenized = c4.map(batch_term_frequency_builder, batched=True, batch_size=2048)
 
 overall_counts = {k: v for k, v in overall_counts.items()}
+import pickle
+with open('overall_counts.pickle', 'wb') as handle:
+    pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
 count_buckets = {k:int(np.cbrt(v))+1 for k, v in overall_counts.items()}
 
 from collections import defaultdict
 freq2token = defaultdict(list)
 
+with open('overall_counts.pickle', 'rb') as handle:
+    overall_counts = pickle.load(handle)
+
+overall_counts = {k: v for k, v in overall_counts.items() if v >= 5}
 n_docs = len(c4_tokenized)
-idf = {k: np.log1p(n_docs) - np.log1p(v) + 1 for k, v in overall_counts.items()}
-import pickle
-with open('overall_counts.pickle', 'wb') as handle:
-    pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+log_docs = np.log2(n_docs)
+idf = {k: log_docs - np.log2(1 + v) + 1 for k, v in overall_counts.items()}
+
 with open('idf.pickle', 'wb') as handle:
     pickle.dump(idf, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -102,14 +109,13 @@ with open('idf.pickle', 'rb') as handle:
 
 
 def tfidf_one(tf):
-    tf = [[t, float(v)*idf[t]] for t, v in tf]
+    tf = [[t, (float(v)*idf[t]) if t in idf else float(v)] for t, v in tf]
     v_only = sorted([v for t, v in tf], reverse=True)
-
-
     average = np.mean(v_only)
     top_16 = np.mean(v_only[:16])
     top_128 = np.mean(v_only[:128])
-    truncated_average = np.mean(v_only[16:-16])
+    truncated_average = np.mean(v_only[8:-8])
+    truncated_average = average if np.isnan(truncated_average) else truncated_average
     return top_16, top_128, average, truncated_average
 
 
