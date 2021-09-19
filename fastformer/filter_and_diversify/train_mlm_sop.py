@@ -518,7 +518,7 @@ class RTDMLMModel(PreTrainedModel):
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
         self.config.gradient_checkpointing = True
-        self.rtd_temperature = 2.0
+        self.rtd_temperature = 1.5
         self.word_ce_schedule = 1.0
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
