@@ -166,8 +166,8 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         else:
             self.ce = CrossEntropyLoss(ignore_index=-100)
         
-        self.num_features = model.config.hidden_size * 2
-        self.head = nn.Linear(self.num_features, num_classes)
+        self.num_features = model.config.hidden_size * 4
+        self.head = nn.Sequential(nn.Dropout(0.1), nn.Linear(self.num_features, num_classes))
         self.num_classes = num_classes
         self.tokenizer = tokenizer
         self.train_backbone = train_backbone
@@ -182,7 +182,10 @@ class FastFormerForClassification(FastFormerPreTrainedModel):
         out = self.backbone(**inputs)
         hidden_states = out["hidden_states"]
         pooler_output = hidden_states[-1][:, 0]
-        funnel_outputs = torch.cat((pooler_output, hidden_states[-2][:, 0]), -1)
+        pool2 = hidden_states[-2][:, 0]
+        pool3 = hidden_states[-3][:, 0]
+        pool4 = hidden_states[-4][:, 0]
+        funnel_outputs = torch.cat((pooler_output, pool2, pool3, pool4), -1)
         return funnel_outputs
 
     def forward(self, input_ids, attention_mask, char_ids=None, char_offsets=None, label=None, token_type_ids=None, **kwargs):

@@ -134,6 +134,13 @@ with Pool(cpu_count) as p:
         return dict(tfidf_top_k_16=list(top_k_16), tfidf_top_k_128=list(top_k_128), tfidf_average=list(average), tfidf_truncated_average=list(truncated_average))
     print(tfidf_batch(c4_tokenized[0:128]))
     c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=2048)
+
+def tfidf_batch(x):
+    tfidf = [np.mean([float(v)*idf.get(t, 1) for t, v in tf]) for tf in x["tf"]]
+    return dict(tfidf_average=tfidf)
+print(tfidf_batch(c4_tokenized[0:32]))
+c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=256)
+
 c4_tokenized = c4_tokenized.add_column("identifier", list(range(1, len(c4_tokenized)+1)))
 c4_tokenized.save_to_disk("/home/ahemf/processed/c4_extended")
 
