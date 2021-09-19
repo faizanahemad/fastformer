@@ -514,7 +514,7 @@ class RTDMLMModel(PreTrainedModel):
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
         hidden_size = backbone.config.hidden_size
-        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id)
+        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id, reduction="none")
         self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
         self.config.gradient_checkpointing = True
@@ -644,8 +644,8 @@ class RTDMLMModel(PreTrainedModel):
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
         co_oc_guidance_loss = None
+        co_oc_teacher_prediction_scores, all_noise_locations = dict_get(mask_dict, "co_oc_teacher_prediction_scores", "all_noise_locations")
         if self.word_ce_schedule < 0:
-            co_oc_teacher_prediction_scores, all_noise_locations = dict_get(mask_dict, "co_oc_teacher_prediction_scores", "all_noise_locations")
             co_oc_guidance_loss = 10 * ((F.softmax(prediction_scores, dim=-1) - F.softmax(co_oc_teacher_prediction_scores, dim=-1)) ** 2)[all_noise_locations].sum(-1).mean()
         rtd_scores = self.rtd_nn(sequence_output[attention_mask]).view(-1)
         rtd_labels = rtd_labels[attention_mask].view(-1)
@@ -653,6 +653,8 @@ class RTDMLMModel(PreTrainedModel):
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
+        masked_lm_loss = masked_lm_loss.mean() + masked_lm_loss[all_noise_locations.view(-1)].mean()
+        # All token MLM averages over all tokens and copy tokens have low average.
 
         val_stats = dict()
         if validation_iter:
