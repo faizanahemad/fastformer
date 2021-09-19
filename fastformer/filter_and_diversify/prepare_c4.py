@@ -119,14 +119,22 @@ def tfidf_one(tf):
     return top_16, top_128, average, truncated_average
 
 
-def tfidf_batch(x):
-    tf = x["tf"]
-    tfidf = [tfidf_one(t) for t in tf]
-    top_k_16, top_k_128, average, truncated_average = zip(*tfidf)
-    return dict(tfidf_top_k_16=list(top_k_16), tfidf_top_k_128=list(top_k_128), tfidf_average=list(average), tfidf_truncated_average=list(truncated_average))
-tfidf_batch(c4_tokenized[0:2])
+with Pool(cpu_count) as p:
+    def tfidf_many(tf):
+        return [tfidf_one(t) for t in tf]
 
-c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=256, num_proc=cpu_count)
+
+    def tfidf_batch(x):
+        tf = x["tf"]
+        # tfidf = [tfidf_one(t) for t in tf]
+        csz = int(np.ceil(len(tf) / cpu_count))
+        chunks = [tf[i: i + csz] for i in range(0, len(tf), csz)]
+        tfidf = [t for r in p.map(tfidf_many, chunks) for t in r]
+        top_k_16, top_k_128, average, truncated_average = zip(*tfidf)
+        return dict(tfidf_top_k_16=list(top_k_16), tfidf_top_k_128=list(top_k_128), tfidf_average=list(average), tfidf_truncated_average=list(truncated_average))
+    tfidf_batch(c4_tokenized[0:128])
+
+    c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=2048, num_proc=cpu_count)
 c4_tokenized = c4_tokenized.add_column("identifier", list(range(1, len(c4_tokenized)+1)))
 c4_tokenized.save_to_disk("/home/ahemf/processed/c4_extended")
 
