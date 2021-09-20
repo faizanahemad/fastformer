@@ -598,12 +598,14 @@ class SuperGlueTest:
                     # print(label.size(), batch['input_ids'].size())
                     if (step + 1) % iter_size != 0:
                         with model.no_sync():
-                            weight_decay_loss = torch.cat([((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]).mean()
+                            wd = [((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]
+                            weight_decay_loss = sum(wd) / len(wd)
                             output = model(**batch, label=label)
                             loss = (output["loss"] + weight_decay_loss) / iter_size
                             loss.backward()
                     else:
-                        weight_decay_loss = torch.cat([((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]).mean()
+                        wd = [((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]
+                        weight_decay_loss = sum(wd) / len(wd)
                         output = model(**batch, label=label)
                         loss = (output["loss"] + weight_decay_loss) / iter_size
                         loss.backward()
