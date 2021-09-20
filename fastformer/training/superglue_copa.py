@@ -555,7 +555,8 @@ class SuperGlueTest:
                     validation=validation, test=test, optc=optc, test_idx=test_idx, num_classes=num_classes,
                     dataset_key=dataset_key, rank=rank, train_backbone=train_backbone)
 
-    def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None):
+    def train_classifier(self, model, device, classifier_data, predict_only=False, max_epochs=None,
+                         l2_regularization=False, momentum_weights=0.0, weighted_inference=0.0):
         all_val_loss = []
         all_val_acc = []
         all_train_acc = []
@@ -598,14 +599,20 @@ class SuperGlueTest:
                     # print(label.size(), batch['input_ids'].size())
                     if (step + 1) % iter_size != 0:
                         with model.no_sync():
-                            wd = [((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]
-                            weight_decay_loss = sum(wd) / len(wd)
+                            if l2_regularization:
+                                wd = [((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]
+                                weight_decay_loss = sum(wd) / len(wd)
+                            else:
+                                weight_decay_loss = 0.0
                             output = model(**batch, label=label)
                             loss = (output["loss"] + weight_decay_loss) / iter_size
                             loss.backward()
                     else:
-                        wd = [((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]
-                        weight_decay_loss = sum(wd) / len(wd)
+                        if l2_regularization:
+                            wd = [((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]
+                            weight_decay_loss = sum(wd) / len(wd)
+                        else:
+                            weight_decay_loss = 0.0
                         output = model(**batch, label=label)
                         loss = (output["loss"] + weight_decay_loss) / iter_size
                         loss.backward()
@@ -613,6 +620,8 @@ class SuperGlueTest:
                         optimizer.step()
                         scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
+                        if momentum_weights > 0:
+                            pass
                     preds = output["predictions"].cpu().tolist()
                     train_predictions.extend(preds)
                     if rank == 0:
@@ -976,7 +985,7 @@ class SuperGlueTest:
         copa_ns["validation"] = copa_pretrain["validation"]
         max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
         classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True)
         model_dict["model"] = classifier_data["model"]
 
         init_weights(model_dict["model"].module.head, 0.01)
@@ -985,7 +994,7 @@ class SuperGlueTest:
         copa_aux["validation"] = copa_pretrain["validation"]
         max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
         classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
+        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True)
         model_dict["model"] = classifier_data["model"]
 
         # init_weights(model_dict["model"].module.head, 0.01)
@@ -1003,7 +1012,7 @@ class SuperGlueTest:
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True)
         if rank != 0:
             return None, None
         elif self.hpo is not None:
