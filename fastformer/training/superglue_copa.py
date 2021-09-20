@@ -638,6 +638,10 @@ class SuperGlueTest:
             if rank == 0:
                 pbar.close()
 
+            if momentum_weights > 0:
+                with torch.no_grad():
+                    for st, mt in zip(static_parameters, list(model.parameters())):
+                        mt.data.mul_(momentum_weights).add_((1 - momentum_weights) * st.detach().data)
             if rank == 0:
                 model = model.eval()
                 inner_model = model.module.eval()
