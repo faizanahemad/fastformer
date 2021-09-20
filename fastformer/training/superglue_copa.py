@@ -501,7 +501,7 @@ class SuperGlueTest:
             except:
                 print("[Train]: Time = %s, No fp16_compress_hook present, Torch Version = %s" % (get_time_string(), torch.__version__))
             clean_memory()
-        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=self.weight_decay,
+        optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=self.lr, eps=optc["eps"], weight_decay=0,
                                       betas=(optc["beta_1"], optc["beta_2"]))
         optimizer.zero_grad(set_to_none=True)
 
@@ -568,6 +568,9 @@ class SuperGlueTest:
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
         max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
+        static_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
+        for p in static_parameters:
+            p.requires_grad = False
 
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
@@ -595,12 +598,14 @@ class SuperGlueTest:
                     # print(label.size(), batch['input_ids'].size())
                     if (step + 1) % iter_size != 0:
                         with model.no_sync():
+                            weight_decay_loss = torch.cat([((mt-st)**2).view(-1) * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]).mean()
                             output = model(**batch, label=label)
-                            loss = output["loss"] / iter_size
+                            loss = (output["loss"] + weight_decay_loss) / iter_size
                             loss.backward()
                     else:
+                        weight_decay_loss = torch.cat([((mt - st) ** 2).view(-1) * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]).mean()
                         output = model(**batch, label=label)
-                        loss = output["loss"] / iter_size
+                        loss = (output["loss"] + weight_decay_loss) / iter_size
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                         optimizer.step()
