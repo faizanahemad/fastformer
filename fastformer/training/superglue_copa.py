@@ -109,6 +109,9 @@ def training_args():
     parser.add_argument('--weight_decay', default=0.1, type=float,
                         help='weight_decay')
 
+    parser.add_argument('--pretrain', action="store_true", default=False,
+                        help='pretrain')
+
     parser.add_argument('--hpo', required=False, type=str,
                         help='hpo dict with lr, epochs, warmup steps')
     parser.add_argument('--pretrain_config', required=False, type=str,
@@ -363,9 +366,10 @@ class SuperGlueTest:
                  seed, batch_size, accumulation_steps,
                  weight_decay, dropout, scheduler_policy, scheduler_warmup,
                  pretrain_config=None,
-                 hpo=None, dataset_key=None, finetune=True):
+                 hpo=None, dataset_key=None, finetune=True, pretrain=False):
         self.location = location
         self.model = model
+        self.pretrain = pretrain
 
         self.device = device
         self.rank = rank
@@ -923,89 +927,90 @@ class SuperGlueTest:
         # Dropout
         # Bigger head
 
-        copa_aux = copa.map(
-            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_aux_2 = copa.map(
-            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"] + f" {tokenizer.sep_token} " + x["choice1"], label=int(not x["label"])),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_aux = DatasetDict({split: concatenate_datasets([copa_aux[split], copa_aux_2[split]]) for split in copa_aux.keys()})
-        del copa_aux["test"]
-        # classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
-        # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
-        # model_dict["model"] = classifier_data["model"]
+        if self.pretrain:
+            copa_aux = copa.map(
+                lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux_2 = copa.map(
+                lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"] + f" {tokenizer.sep_token} " + x["choice1"], label=int(not x["label"])),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux = DatasetDict({split: concatenate_datasets([copa_aux[split], copa_aux_2[split]]) for split in copa_aux.keys()})
+            del copa_aux["test"]
+            # classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
+            # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
+            # model_dict["model"] = classifier_data["model"]
 
-        copa_options = list(copa["train"]["choice1"]) + list(copa["train"]["choice2"]) + list(copa["validation"]["choice1"]) + list(
-            copa["validation"]["choice2"]) + list(copa["test"]["choice1"]) + list(copa["test"]["choice2"])
-        copa_aux1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"], label=1),
-                             remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_aux2 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"], label=1),
-                             remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_ns = None
-        for i in range(10):
-            random.seed(3413 + i)
-            copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
-                                remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
-            if copa_ns is None:
-                copa_ns = copa_ns1
-            else:
-                copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
-        copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
-        copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
-        del copa_ns["test"]
+            copa_options = list(copa["train"]["choice1"]) + list(copa["train"]["choice2"]) + list(copa["validation"]["choice1"]) + list(
+                copa["validation"]["choice2"]) + list(copa["test"]["choice1"]) + list(copa["test"]["choice2"])
+            copa_aux1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice1"], label=1),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux2 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"], label=1),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_ns = None
+            for i in range(10):
+                random.seed(3413 + i)
+                copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
+                                    remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
+                if copa_ns is None:
+                    copa_ns = copa_ns1
+                else:
+                    copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
+            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
+            copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
+            del copa_ns["test"]
 
-        copa_correct_question = copa.map(
-            lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][0], label=1),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_correct_question1 = copa.map(
-            lambda x: dict(
-                text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1],
-                label=1),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_incorrect_question = copa.map(
-            lambda x: dict(
-                text=x["premise"] + f" {tokenizer.sep_token} " + list({'cause', 'effect'} - {x["question"]})[0] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][0],
-                label=0),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_incorrect_question1 = copa.map(
-            lambda x: dict(
-                text=x["premise"] + f" {tokenizer.sep_token} " + list({'cause', 'effect'} - {x["question"]})[0] + f" {tokenizer.sep_token} " +
-                     [x["choice1"], x["choice2"]][1],
-                label=0),
-            remove_columns=["premise", 'question', "choice1", "choice2"])
-        copa_questions = merge_datasets_as_df([copa_correct_question,copa_correct_question1, copa_incorrect_question,copa_incorrect_question1], ["train", "validation", "test"], ["label", "text"]).shuffle()
-        copa_questions["train"] = concatenate_datasets([copa_questions["train"], copa_questions["validation"], copa_questions["test"]])
+            copa_correct_question = copa.map(
+                lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][0], label=1),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_correct_question1 = copa.map(
+                lambda x: dict(
+                    text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1],
+                    label=1),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_incorrect_question = copa.map(
+                lambda x: dict(
+                    text=x["premise"] + f" {tokenizer.sep_token} " + list({'cause', 'effect'} - {x["question"]})[0] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][0],
+                    label=0),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_incorrect_question1 = copa.map(
+                lambda x: dict(
+                    text=x["premise"] + f" {tokenizer.sep_token} " + list({'cause', 'effect'} - {x["question"]})[0] + f" {tokenizer.sep_token} " +
+                         [x["choice1"], x["choice2"]][1],
+                    label=0),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_questions = merge_datasets_as_df([copa_correct_question,copa_correct_question1, copa_incorrect_question,copa_incorrect_question1], ["train", "validation", "test"], ["label", "text"]).shuffle()
+            copa_questions["train"] = concatenate_datasets([copa_questions["train"], copa_questions["validation"], copa_questions["test"]])
 
-        # cosmos_qa, scitail, commonsense_qa, hellaswag,
-        merged_pretrain = merge_datasets_as_df([swag, copa_ns, commonsense_qa], ["train", "validation"], ["label", "text"]).shuffle()
-        # merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
-        merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_questions, copa_aux], ["train"], ["label", "text"]).shuffle()
-        merged_pretrain["validation"] = copa_pretrain["validation"]
-        max_epochs = self.pretrain_config["epoch1"] if "epoch1" in self.pretrain_config else 3
-        classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
-        model_dict["model"] = classifier_data["model"]
+            # cosmos_qa, scitail, commonsense_qa, hellaswag,
+            merged_pretrain = merge_datasets_as_df([swag, copa_ns, commonsense_qa], ["train", "validation"], ["label", "text"]).shuffle()
+            # merged_pretrain["train"] = concatenate_datasets([merged_pretrain["train"], merged_pretrain["validation"]])
+            merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_questions, copa_aux], ["train"], ["label", "text"]).shuffle()
+            merged_pretrain["validation"] = copa_pretrain["validation"]
+            max_epochs = self.pretrain_config["epoch1"] if "epoch1" in self.pretrain_config else 3
+            classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=max_epochs)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
+            model_dict["model"] = classifier_data["model"]
 
-        copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
-        copa_ns["validation"] = copa_pretrain["validation"]
-        max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
-        classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
-        model_dict["model"] = classifier_data["model"]
+            copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
+            copa_ns["validation"] = copa_pretrain["validation"]
+            max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
+            classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
+            model_dict["model"] = classifier_data["model"]
 
-        init_weights(model_dict["model"].module.head, 0.01)
+            init_weights(model_dict["model"].module.head, 0.01)
 
-        copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
-        copa_aux["validation"] = copa_pretrain["validation"]
-        max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
-        classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
-        _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
-        model_dict["model"] = classifier_data["model"]
+            copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
+            copa_aux["validation"] = copa_pretrain["validation"]
+            max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
+            classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
+            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
+            model_dict["model"] = classifier_data["model"]
 
-        # init_weights(model_dict["model"].module.head, 0.01)
+            # init_weights(model_dict["model"].module.head, 0.01)
 
 
-        # init_weights(model_dict["model"].module.head, 0.01)
+            # init_weights(model_dict["model"].module.head, 0.01)
         copa_c1 = copa.map(
             lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"], label=x["label"] == 0,
                            choice=0),
@@ -1201,7 +1206,7 @@ def train_test(local_rank, args):
     SuperGlueTest(None, model, device, rank, args["world_size"], args["epochs"], args["lr"],
                   args["seed"], args["batch_size"], args["accumulation_steps"], args["weight_decay"],
                   args["dropout"], args["scheduler_policy"], args["scheduler_warmup"], args["pretrain_config"],
-                args["hpo"], args["dataset_key"], True)()
+                args["hpo"], args["dataset_key"], True, args["pretrain"])()
     return
 
 # I've been tracking an ema of sample training loss during training and using that to guide weighted data sampling (rather than the typical uniform sampling).
