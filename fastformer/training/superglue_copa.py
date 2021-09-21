@@ -576,6 +576,9 @@ class SuperGlueTest:
         static_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
         for p in static_parameters:
             p.requires_grad = False
+        momentum_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
+        for p in momentum_parameters:
+            p.requires_grad = False
 
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
@@ -625,7 +628,7 @@ class SuperGlueTest:
                         scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
                         if momentum_weights > 0:
-                            for st, mt in zip(static_parameters, list(model.parameters())):
+                            for st, mt in zip(momentum_parameters, list(model.parameters())):
                                 st.data.mul_(momentum_weights).add_((1 - momentum_weights) * mt.detach().data)
                     preds = output["predictions"].cpu().tolist()
                     train_predictions.extend(preds)
@@ -644,8 +647,8 @@ class SuperGlueTest:
 
             if momentum_weights > 0:
                 with torch.no_grad():
-                    for st, mt in zip(static_parameters, list(model.parameters())):
-                        mt.data.mul_(momentum_weights).add_((1 - momentum_weights) * st.detach().data)
+                    for st, mt in zip(momentum_parameters, list(model.parameters())):
+                        mt.data.mul_((1 - momentum_weights)).add_(momentum_weights * st.detach().data)
             if rank == 0:
                 model = model.eval()
                 inner_model = model.module.eval()
