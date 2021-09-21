@@ -573,7 +573,7 @@ class SuperGlueTest:
         rank = classifier_data["rank"]
         dataset_key = classifier_data["dataset_key"]
         max_allowed_epochs = int(self.epochs) if max_epochs is None else max_epochs
-        static_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
+        static_parameters = [p for p in map(lambda x: x.detach().clone(), model.backbone.parameters())]
         for p in static_parameters:
             p.requires_grad = False
         momentum_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
@@ -607,7 +607,7 @@ class SuperGlueTest:
                     if (step + 1) % iter_size != 0:
                         with model.no_sync():
                             if l2_regularization:
-                                wd = [((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.parameters()))]
+                                wd = [((mt-st)**2).mean() * self.weight_decay for st, mt in zip(static_parameters,list(model.backbone.parameters()))]
                                 weight_decay_loss = sum(wd) / len(wd)
                             else:
                                 weight_decay_loss = 0.0
@@ -616,7 +616,7 @@ class SuperGlueTest:
                             loss.backward()
                     else:
                         if l2_regularization:
-                            wd = [((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.parameters()))]
+                            wd = [((mt - st) ** 2).mean() * self.weight_decay for st, mt in zip(static_parameters, list(model.backbone.parameters()))]
                             weight_decay_loss = sum(wd) / len(wd)
                         else:
                             weight_decay_loss = 0.0
@@ -651,7 +651,7 @@ class SuperGlueTest:
                         mt.data.mul_((1 - momentum_weights)).add_(momentum_weights * st.detach().data)
             if weighted_inference > 0:
                 with torch.no_grad():
-                    for st, mt in zip(static_parameters, list(model.parameters())):
+                    for st, mt in zip(static_parameters, list(model.backbone.parameters())):
                         mt.data.mul_((1 - weighted_inference)).add_(weighted_inference * st.detach().data)
             if rank == 0:
                 model = model.eval()
@@ -1029,7 +1029,7 @@ class SuperGlueTest:
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.99, weighted_inference=0.1)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.99, weighted_inference=0.0)
         if rank != 0:
             return None, None
         elif self.hpo is not None:
