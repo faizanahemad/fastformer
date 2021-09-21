@@ -965,10 +965,10 @@ class SuperGlueTest:
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_aux4 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]], label=1),
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
-            copa_aux5 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1-x["label"]], label=0),
+            copa_aux5 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])], label=0),
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_aux6 = copa.map(lambda x: dict(
-                text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1-x["label"]],
+                text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][int(not x["label"])],
                 label=0),
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_ns = None
