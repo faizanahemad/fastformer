@@ -1042,6 +1042,11 @@ class SuperGlueTest:
                 classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
                 _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.0)
                 model_dict["model"] = classifier_data["model"]
+            del copa_pretrain
+            del copa_aux
+            del copa_ns
+            del merged_pretrain
+            del copa_questions
 
             # init_weights(model_dict["model"].module.head, 0.01)
 
@@ -1058,7 +1063,7 @@ class SuperGlueTest:
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.99, weighted_inference=0.0)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.0, weighted_inference=0.0)
         if rank != 0:
             return None, None
         elif self.hpo is not None:
