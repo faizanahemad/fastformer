@@ -962,8 +962,16 @@ class SuperGlueTest:
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_aux3 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]], label=1),
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux4 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]], label=1),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux5 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1-x["label"]], label=0),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux6 = copa.map(lambda x: dict(
+                text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][1-x["label"]],
+                label=0),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_ns = None
-            for i in range(5):
+            for i in range(3):
                 random.seed(3413 + i)
                 copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
                                     remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
@@ -971,7 +979,15 @@ class SuperGlueTest:
                     copa_ns = copa_ns1
                 else:
                     copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
-            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split], copa_aux3[split]]) for split in copa_ns.keys()}).shuffle()
+            for i in range(3):
+                random.seed(3413 + i)
+                copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
+                                    remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
+                if copa_ns is None:
+                    copa_ns = copa_ns1
+                else:
+                    copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
+            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split], copa_aux3[split], copa_aux4[split], copa_aux5[split], copa_aux6[split]]) for split in copa_ns.keys()}).shuffle()
             copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
             del copa_ns["test"]
 
