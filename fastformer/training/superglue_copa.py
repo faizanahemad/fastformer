@@ -576,9 +576,10 @@ class SuperGlueTest:
         static_parameters = [p for p in map(lambda x: x.detach().clone(), model.module.backbone.parameters())]
         for p in static_parameters:
             p.requires_grad = False
-        momentum_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
-        for p in momentum_parameters:
-            p.requires_grad = False
+        if momentum_weights > 0:
+            momentum_parameters = [p for p in map(lambda x: x.detach().clone(), model.parameters())]
+            for p in momentum_parameters:
+                p.requires_grad = False
 
         if not predict_only:
             gradient_clipping = classifier_data["optc"]["gradient_clipping"]
