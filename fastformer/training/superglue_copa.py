@@ -941,7 +941,14 @@ class SuperGlueTest:
             copa_aux_2 = copa.map(
                 lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"] + f" {tokenizer.sep_token} " + x["choice1"], label=int(not x["label"])),
                 remove_columns=["premise", 'question', "choice1", "choice2"])
-            copa_aux = DatasetDict({split: concatenate_datasets([copa_aux[split], copa_aux_2[split]]) for split in copa_aux.keys()})
+            copa_aux_3 = copa.map(
+                lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice1"] + f" {tokenizer.sep_token} " + x["choice2"], label=x["label"]),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux_4 = copa.map(
+                lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["question"] + f" {tokenizer.sep_token} " + x["choice2"] + f" {tokenizer.sep_token} " + x["choice1"],
+                               label=int(not x["label"])),
+                remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux = DatasetDict({split: concatenate_datasets([copa_aux[split], copa_aux_2[split], copa_aux_3[split], copa_aux_4[split]]) for split in copa_aux.keys()})
             del copa_aux["test"]
             # classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=10)
             # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=10)
@@ -953,8 +960,10 @@ class SuperGlueTest:
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_aux2 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + x["choice2"], label=1),
                                  remove_columns=["premise", 'question', "choice1", "choice2"])
+            copa_aux3 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + [x["choice1"], x["choice2"]][x["label"]], label=1),
+                                 remove_columns=["premise", 'question', "choice1", "choice2"])
             copa_ns = None
-            for i in range(10):
+            for i in range(5):
                 random.seed(3413 + i)
                 copa_ns1 = copa.map(lambda x: dict(text=x["premise"] + f" {tokenizer.sep_token} " + random.sample(copa_options, 1)[0], label=0),
                                     remove_columns=["premise", 'question', "choice1", "choice2"], load_from_cache_file=False)
@@ -962,7 +971,7 @@ class SuperGlueTest:
                     copa_ns = copa_ns1
                 else:
                     copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
-            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split]]) for split in copa_ns.keys()}).shuffle()
+            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split], copa_aux3[split]]) for split in copa_ns.keys()}).shuffle()
             copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
             del copa_ns["test"]
 
@@ -994,25 +1003,28 @@ class SuperGlueTest:
             merged_pretrain = merge_datasets_as_df([copa_pretrain, merged_pretrain, copa_questions, copa_aux], ["train"], ["label", "text"]).shuffle()
             merged_pretrain["validation"] = copa_pretrain["validation"]
             max_epochs = self.pretrain_config["epoch1"] if "epoch1" in self.pretrain_config else 3
-            classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=max_epochs)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
-            model_dict["model"] = classifier_data["model"]
+            if max_epochs > 0:
+                classifier_data = self.prepare_classifier(model_dict, merged_pretrain, device, 1, "merged_pretrain", rank, max_epochs=max_epochs)
+                _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
+                model_dict["model"] = classifier_data["model"]
 
-            # copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
-            # copa_ns["validation"] = copa_pretrain["validation"]
-            # max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
-            # classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
-            # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
-            # model_dict["model"] = classifier_data["model"]
+            copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
+            copa_ns["validation"] = copa_pretrain["validation"]
+            max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
+            if max_epochs > 0:
+                classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
+                _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
+                model_dict["model"] = classifier_data["model"]
             #
             # init_weights(model_dict["model"].module.head, 0.01)
 
             copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
             copa_aux["validation"] = copa_pretrain["validation"]
             max_epochs = self.pretrain_config["epoch2"] if "epoch2" in self.pretrain_config else 10
-            classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
-            model_dict["model"] = classifier_data["model"]
+            if max_epochs > 0:
+                classifier_data = self.prepare_classifier(model_dict, copa_aux, device, 1, "copa_aux", rank, max_epochs=max_epochs)
+                _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
+                model_dict["model"] = classifier_data["model"]
 
             # init_weights(model_dict["model"].module.head, 0.01)
 
