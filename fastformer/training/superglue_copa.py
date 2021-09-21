@@ -649,6 +649,10 @@ class SuperGlueTest:
                 with torch.no_grad():
                     for st, mt in zip(momentum_parameters, list(model.parameters())):
                         mt.data.mul_((1 - momentum_weights)).add_(momentum_weights * st.detach().data)
+            if weighted_inference > 0:
+                with torch.no_grad():
+                    for st, mt in zip(static_parameters, list(model.parameters())):
+                        mt.data.mul_((1 - weighted_inference)).add_(weighted_inference * st.detach().data)
             if rank == 0:
                 model = model.eval()
                 inner_model = model.module.eval()
@@ -994,14 +998,14 @@ class SuperGlueTest:
             _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs)
             model_dict["model"] = classifier_data["model"]
 
-            copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
-            copa_ns["validation"] = copa_pretrain["validation"]
-            max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
-            classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
-            _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
-            model_dict["model"] = classifier_data["model"]
-
-            init_weights(model_dict["model"].module.head, 0.01)
+            # copa_ns = merge_datasets_as_df([copa_ns, copa_questions], ["train"], ["label", "text"]).shuffle()
+            # copa_ns["validation"] = copa_pretrain["validation"]
+            # max_epochs = self.pretrain_config["epoch3"] if "epoch3" in self.pretrain_config else 8
+            # classifier_data = self.prepare_classifier(model_dict, copa_ns, device, 1, "copa_ns", rank, max_epochs=max_epochs)
+            # _ = self.train_classifier(classifier_data["model"], device, classifier_data, max_epochs=max_epochs, l2_regularization=True, momentum_weights=0.99)
+            # model_dict["model"] = classifier_data["model"]
+            #
+            # init_weights(model_dict["model"].module.head, 0.01)
 
             copa_aux = merge_datasets_as_df([copa_pretrain, copa_aux], ["train"], ["label", "text"]).shuffle()
             copa_aux["validation"] = copa_pretrain["validation"]
@@ -1025,7 +1029,7 @@ class SuperGlueTest:
         copa = DatasetDict({k: concatenate_datasets([v, copa_c2[k]]) for k, v in copa_c1.items()})
 
         classifier_data = self.prepare_classifier(model_dict, copa, device, 1, dataset_key, rank)
-        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.99)
+        classifier_results = self.train_classifier(classifier_data["model"], device, classifier_data, l2_regularization=True, momentum_weights=0.99, weighted_inference=0.1)
         if rank != 0:
             return None, None
         elif self.hpo is not None:
