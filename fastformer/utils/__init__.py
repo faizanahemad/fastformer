@@ -1365,10 +1365,8 @@ class CoOccurenceModel(PreTrainedModel):
         self.ln1 = nn.Sequential(nn.Linear(channels, config.hidden_size), nn.GELU(), nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps))
         init_weights(self.ln1, 0.01)
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
-        if self.tokenizer.eos_token_id is None:
-            self.tokenizer.eos_token_id = self.tokenizer.sep_token_id
-        if self.tokenizer.bos_token_id is None:
-            self.tokenizer.bos_token_id = self.tokenizer.cls_token_id
+        self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
+        self.bos_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.cls_token_id
 
         self.tie_weights()
 
@@ -1404,7 +1402,7 @@ class CoOccurenceModel(PreTrainedModel):
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
         attention_mask = attention_mask.bool()
-        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
+        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         word_ce[non_mask_locations] = 0.0
         decided_noise_proportion = (0.175 + random.random() * 0.05)
         average_tokens_per_sample = ss

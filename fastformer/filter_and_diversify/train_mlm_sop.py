@@ -538,6 +538,8 @@ class RTDMLMModel(PreTrainedModel):
             init_weights(self.lm_head, 0.01)
 
         self.tie_weights()
+        self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
+        self.bos_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.cls_token_id
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
@@ -554,7 +556,7 @@ class RTDMLMModel(PreTrainedModel):
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         else:
             word_ce = (word_ce ** self.word_ce_schedule)
-        non_mask_locations = torch.logical_or(input_ids == self.tokenizer.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.tokenizer.bos_token_id))
+        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         word_ce[non_mask_locations] = 0.0
         decided_noise_proportion = (0.15 + random.random() * 0.05)
         average_tokens_per_sample = ss
