@@ -1515,8 +1515,8 @@ class CoOccurenceModel(PreTrainedModel):
 
             correct_underconfident = under_confidence_scores[torch.logical_and(word_accuracy, attention_mask)].float().mean().item()
             incorrect_underconfident = under_confidence_scores[torch.logical_and(torch.logical_not(word_accuracy), attention_mask)].float().mean().item()
-            correct_word_ce = word_ce[word_accuracy][attention_mask].float().mean().item()
-            incorrect_word_ce = word_ce[torch.logical_not(word_accuracy)][attention_mask].float().mean().item()
+            correct_word_ce = word_ce[torch.logical_and(word_accuracy, attention_mask)].float().mean().item()
+            incorrect_word_ce = word_ce[torch.logical_and(torch.logical_not(word_accuracy), attention_mask)].float().mean().item()
             selected_mask_accuracy = self.masking_stats(input_ids, attention_mask, final_ce, word_accuracy)
 
         masked_lm_loss = masked_lm_loss.mean()
