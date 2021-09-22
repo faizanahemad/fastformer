@@ -978,10 +978,29 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
             model = model.deberta
         else:
             raise ValueError
+    elif "bert" in model_name:
+        from transformers import AutoModelForMaskedLM
+        if "large" in model_name:
+            model_name = "bert-large-uncased"
+            model = AutoModelForMaskedLM.from_pretrained(model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            lm_head = model.cls
+            model = model.bert
+        elif "base" in model_name:
+            model_name = "bert-base-uncased"
+            model = AutoModelForMaskedLM.from_pretrained(model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            lm_head = model.cls
+            model = model.bert
+        else:
+            raise ValueError
 
     else:
+        from transformers import AutoModelForMaskedLM
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModel.from_pretrained(model_name)
+        model = AutoModelForMaskedLM.from_pretrained(model_name)
+        lm_head = model.cls if hasattr(model, "cls") else model.lm_head
+        raise ValueError
 
     if reinit:
         model.init_weights()
