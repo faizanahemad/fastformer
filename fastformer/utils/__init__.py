@@ -921,7 +921,7 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
     from transformers import AutoModel, RobertaTokenizerFast, RobertaForMaskedLM, DebertaV2ForMaskedLM, BertTokenizerFast, RobertaTokenizer, RobertaConfig, RobertaModel, AutoTokenizer
     import re
     lm_head = None
-    if "co-oc" in model_name:
+    if "co-oc" in model_name or "cooc" in model_name:
         temp1 = re.findall(r'\d+', model_name)  # find number of digits through regular expression
         window = 3 if len(temp1) == 0 else int(temp1[0])
         if "smixer" in model_name:
@@ -935,6 +935,8 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
                 model_name = "roberta-large"
             elif "base" in model_name or "small" in model_name:
                 model_name = "roberta-base"
+            else:
+                model_name = "roberta-base"
         elif "deberta" in model_name:
             if "xlarge" in model_name:
                 model_name = "microsoft/deberta-xlarge-v2"
@@ -947,6 +949,8 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
             if "large" in model_name:
                 model_name = "bert-large-uncased"
             elif "base" in model_name:
+                model_name = "bert-base-uncased"
+            else:
                 model_name = "bert-base-uncased"
 
         else:
