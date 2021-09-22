@@ -935,13 +935,27 @@ def get_backbone(model_name, reinit=False, dropout_prob=0.0):
                 model_name = "roberta-large"
             elif "base" in model_name or "small" in model_name:
                 model_name = "roberta-base"
-            tokenizer = RobertaTokenizerFast.from_pretrained(model_name)
-            if model_type == "mixer":
-                model = MixerCoOccurenceModel(window, model_name, tokenizer)
-            else:
-                model = CoOccurenceModel(window, model_name, tokenizer)
+        elif "deberta" in model_name:
+            if "xlarge" in model_name:
+                model_name = "microsoft/deberta-xlarge-v2"
+            elif "xxlarge" in model_name:
+                model_name = "microsoft/deberta-xxlarge-v2"
+            elif "large" in model_name or "base" in model_name or "small" in model_name:
+                from transformers.models.deberta.modeling_deberta import DebertaForMaskedLM
+                model_name = "microsoft/deberta-large"
+        elif "bert" in model_name:
+            if "large" in model_name:
+                model_name = "bert-large-uncased"
+            elif "base" in model_name:
+                model_name = "bert-base-uncased"
+
         else:
             raise ValueError("Co-Oc model only supports roberta-base and roberta-large")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if model_type == "mixer":
+            model = MixerCoOccurenceModel(window, model_name, tokenizer)
+        else:
+            model = CoOccurenceModel(window, model_name, tokenizer)
     elif "roberta" in model_name:
         if "large" in model_name:
             model_name = "roberta-large"
@@ -1292,8 +1306,7 @@ class CoOccurenceModel(PreTrainedModel):
     def __init__(self, window, model_name, tokenizer: RobertaTokenizerFast):
         super().__init__(PretrainedConfig())
         from sklearn.decomposition import PCA
-        from transformers import AutoModelForMaskedLM
-        model = AutoModelForMaskedLM.from_pretrained(model_name).eval()
+        model, _, lm_head = get_backbone(model_name)
         for p in model.parameters():
             p.requires_grad = False
         config = model.config
@@ -1307,7 +1320,8 @@ class CoOccurenceModel(PreTrainedModel):
         self.channels = channels
         self.lm_head = nn.Linear(channels, config.vocab_size)
         self.word_embeddings = nn.Embedding(config.vocab_size, channels)
-        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.roberta.embeddings.word_embeddings.weight.detach().numpy())))
+
+        self.word_embeddings.weight = nn.Parameter(torch.tensor(PCA(channels).fit_transform(model.embeddings.word_embeddings.weight.detach().numpy())))
         # self.model = model.eval()
         # change_dropout(self.model, 0.0)
         del model
