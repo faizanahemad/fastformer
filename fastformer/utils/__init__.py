@@ -1365,6 +1365,10 @@ class CoOccurenceModel(PreTrainedModel):
         self.ln1 = nn.Sequential(nn.Linear(channels, config.hidden_size), nn.GELU(), nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps))
         init_weights(self.ln1, 0.01)
         self.loss_ce = CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction="none")
+        if self.tokenizer.eos_token_id is None:
+            self.tokenizer.eos_token_id = self.tokenizer.sep_token_id
+        if self.tokenizer.bos_token_id is None:
+            self.tokenizer.bos_token_id = self.tokenizer.cls_token_id
 
         self.tie_weights()
 
