@@ -988,8 +988,9 @@ class SuperGlueTest:
                     copa_ns = copa_ns1
                 else:
                     copa_ns = DatasetDict({split: concatenate_datasets([copa_ns[split], copa_ns1[split]]) for split in copa_ns.keys()})
-            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split], copa_aux3[split], copa_aux4[split], copa_aux5[split], copa_aux6[split]]) for split in copa_ns.keys()}).shuffle()
+            # This line order of next 2 lines if reversed causes data leak.
             copa_ns["train"] = concatenate_datasets([copa_ns["train"], copa_ns["validation"], copa_ns["test"]])
+            copa_ns = DatasetDict({split: concatenate_datasets([copa_aux1[split], copa_ns[split], copa_aux2[split], copa_aux3[split], copa_aux4[split], copa_aux5[split], copa_aux6[split]]) for split in copa_ns.keys()}).shuffle()
             del copa_ns["test"]
 
             copa_correct_question = copa.map(
