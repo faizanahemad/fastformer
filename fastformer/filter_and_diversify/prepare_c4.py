@@ -147,6 +147,114 @@ c4_tokenized.save_to_disk("/home/ahemf/processed/c4_extended")
 
 
 ###################################################################
+## BiGram-TF-IDF
+###################################################################
+
+from collections import Counter
+from transformers import AutoTokenizer, AutoModel, RobertaTokenizerFast
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+import os
+import numpy as np
+import re
+import gc
+from multiprocess.pool import Pool
+from nltk.corpus import stopwords
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+os.environ['TOKENIZERS_PARALLELISM'] = "true"
+c4 = Dataset.load_from_disk("/home/ahemf/processed/c4_extended")
+cpu_count = os.cpu_count() // 2
+overall_counts = [Counter()]
+overall_counts_faster = [Counter()]
+check_before = [0]
+
+def term_frequency_builder(tokens):
+    raw_counts = Counter(tokens)
+    most_common_count = raw_counts.most_common()[0][1]
+    tf = [[str(k), str(0.5 + 0.5 * (v / most_common_count))] for k, v in raw_counts.items()]
+    return tf
+
+
+with Pool(cpu_count) as p:
+
+    def mapping(x):
+        tokens = [[re.sub(r'[^\s0-9a-zA-Z\']', ' ', w).strip() for w in t.split()] for t in x]
+        tokens = [[w1+" "+w2 for w1, w2 in zip(t[:-1], t[1:]) if len(w1) >= 2 and len(w2) >= 2 and w1 not in stop_words and w2 not in stop_words] for t in tokens]
+        tf = [term_frequency_builder(tk) if len(tk) > 0 else [["", "1.0"]] for tk in tokens]
+        return tf
+
+    def batch_term_frequency_builder(x):
+        texts = x["text"]
+        csz = int(np.ceil(len(texts) / cpu_count))
+        chunks = [texts[i: i + csz] for i in range(0, len(texts), csz)]
+        tf = [t for r in p.map(mapping, chunks) for t in r]
+        overall_counts_faster[-1].update(Counter([k for t in tf for k, _ in t]))
+        check_before[0] = check_before[0] + 1
+        if len(overall_counts_faster[-1]) > 2 ** 24:
+            overall_counts_faster.append(Counter())
+
+        if check_before[0] > 100 and len(overall_counts_faster) > 16:
+            check_before[0] = 0
+            for i in range(len(overall_counts_faster)):
+                overall_counts[0].update(overall_counts_faster.pop())
+            overall_counts_faster.append(Counter())
+            pre_len = len(overall_counts[0])
+            if pre_len > 2 ** 26:
+                ones = dict([(k, v) for k, v in overall_counts[0].items() if v > 1])
+                overall_counts[0] = Counter(ones)
+                post_len = len(overall_counts[0])
+                if post_len > 2 ** 24:
+                    deletions = dict([(k, v) for k, v in overall_counts[0].most_common()[2 ** 24:]])
+                    overall_counts[0] = Counter(deletions)
+                    post_len = len(overall_counts[0])
+
+                print("Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s" % (pre_len, post_len, len(ones), len(deletions)))
+                _ = gc.collect()
+
+        return dict(tf=tf)
+
+    c4_tokenized = c4.map(batch_term_frequency_builder, batched=True, batch_size=2048, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
+
+overall_counts = {k: v for k, v in overall_counts.items()}
+import pickle
+with open('overall_counts.pickle', 'wb') as handle:
+    pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+from collections import defaultdict
+freq2token = defaultdict(list)
+
+with open('overall_counts.pickle', 'rb') as handle:
+    overall_counts = pickle.load(handle)
+
+overall_counts = {k: v for k, v in overall_counts.items() if v >= 5}
+n_docs = len(c4_tokenized)
+log_docs = np.log2(n_docs)
+idf = {k: log_docs - np.log2(1 + v) + 1 for k, v in overall_counts.items()}
+
+with open('idf.pickle', 'wb') as handle:
+    pickle.dump(idf, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+with open('count_buckets.pickle', 'wb') as handle:
+    pickle.dump(count_buckets, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+with open('overall_counts.pickle', 'rb') as handle:
+    oc = pickle.load(handle)
+with open('idf.pickle', 'rb') as handle:
+    idf = pickle.load(handle)
+
+def tfidf_batch(x):
+    tfidf = [np.mean([float(v)*idf.get(t, 1) for t, v in tf]) for tf in x["tf"]]
+    return dict(bigram_tfidf_average=tfidf)
+print(tfidf_batch(c4_tokenized[0:32]))
+c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=256)
+#
+c4_tokenized = c4_tokenized.remove_columns(["tf"])
+c4_tokenized.save_to_disk("/home/ahemf/processed/c4_extended")
+
+
+###################################################################
 ## SBERT
 ###################################################################
 
