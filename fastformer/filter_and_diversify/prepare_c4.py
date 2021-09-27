@@ -158,7 +158,9 @@ import numpy as np
 import re
 import gc
 from multiprocess.pool import Pool
+from concurrent.futures import ThreadPoolExecutor
 from nltk.corpus import stopwords
+import nltk
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -188,13 +190,12 @@ with Pool(cpu_count) as p:
         csz = int(np.ceil(len(texts) / cpu_count))
         chunks = [texts[i: i + csz] for i in range(0, len(texts), csz)]
         tf = [t for r in p.map(mapping, chunks) for t in r]
-        overall_counts_faster[-1].update(Counter([k for t in tf for k, _ in t]))
+        overall_counts_faster[-1].update([k for t in tf for k, _ in t])
         check_before[0] = check_before[0] + 1
-        if len(overall_counts_faster[-1]) > 2 ** 24:
+        if len(overall_counts_faster[-1]) > 2 ** 22:
             overall_counts_faster.append(Counter())
 
         if check_before[0] > 100 and len(overall_counts_faster) > 16:
-            check_before[0] = 0
             for i in range(len(overall_counts_faster)):
                 overall_counts[0].update(overall_counts_faster.pop())
             overall_counts_faster.append(Counter())
@@ -203,13 +204,16 @@ with Pool(cpu_count) as p:
                 ones = dict([(k, v) for k, v in overall_counts[0].items() if v > 1])
                 overall_counts[0] = Counter(ones)
                 post_len = len(overall_counts[0])
-                if post_len > 2 ** 24:
+                deletions = post_len
+                if check_before[0] > 500 and post_len > 2 ** 24:
                     deletions = dict([(k, v) for k, v in overall_counts[0].most_common()[2 ** 24:]])
                     overall_counts[0] = Counter(deletions)
                     post_len = len(overall_counts[0])
+                    deletions = len(deletions)
 
-                print("Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s" % (pre_len, post_len, len(ones), len(deletions)))
+                print("Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s" % (pre_len, post_len, pre_len - len(ones), post_len - deletions))
                 _ = gc.collect()
+                check_before[0] = 0
 
         return dict(tf=tf)
 
@@ -308,10 +312,14 @@ with ThreadPoolExecutor(max_workers=devices) as p:
         t128 = values.mean(1).tolist()
         return dict(sbert_top_128_avg=t128)
 
+    with torch.no_grad():
+        c4_sbert2 = c4_extended.add_column("identifier", list(range(len(c4_extended)))).shuffle(341257, writer_batch_size=8192*4).map(forkjoin, batched=True, batch_size=8192 * 4, remove_columns=['dataset', 'length', 'text', 'tfidf_average']).sort("identifier").remove_columns(["identifier"])
+
     print(forkjoin(c4_extended[:1024]))
 
     with torch.no_grad():
         c4_sbert = c4_extended.map(forkjoin, batched=True, batch_size=8192 * 4, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
+
 
 
 c4_sbert.save_to_disk("/home/ahemf/processed_datasets/c4_sbert")
