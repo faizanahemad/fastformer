@@ -161,6 +161,7 @@ from multiprocess.pool import Pool
 from concurrent.futures import ThreadPoolExecutor
 from nltk.corpus import stopwords
 import nltk
+import time
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
@@ -190,19 +191,37 @@ with Pool(cpu_count) as p:
         csz = int(np.ceil(len(texts) / cpu_count))
         chunks = [texts[i: i + csz] for i in range(0, len(texts), csz)]
         tf = [t for r in p.map(mapping, chunks) for t in r]
-        overall_counts_faster[-1].update([k for t in tf for k, _ in t])
-        check_before[0] = check_before[0] + 1
-        if len(overall_counts_faster[-1]) > 2 ** 22:
-            overall_counts_faster.append(Counter())
+        overall_counts_faster.append(Counter([k for t in tf for k, _ in t]))
 
-        if check_before[0] > 100 and len(overall_counts_faster) > 16:
-            for i in range(len(overall_counts_faster)):
-                overall_counts[0].update(overall_counts_faster.pop())
-            overall_counts_faster.append(Counter())
+        if len(overall_counts_faster) > 128:
+            overalls = []
+            while len(overall_counts_faster) > 0:
+                ctr = overall_counts_faster.pop()
+                if len(overall_counts_faster) > 0:
+                    ctr.update(overall_counts_faster.pop())
+                if len(overall_counts_faster) > 0:
+                    ctr.update(overall_counts_faster.pop())
+                if len(overall_counts_faster) > 0:
+                    ctr.update(overall_counts_faster.pop())
+                overalls.append(ctr)
+            while len(overalls) > 0:
+                ctr = overalls.pop()
+                if len(overalls) > 0:
+                    ctr.update(overalls.pop())
+                if len(overalls) > 0:
+                    ctr.update(overalls.pop())
+                if len(overalls) > 0:
+                    ctr.update(overalls.pop())
+                overall_counts[0].update(ctr)
+            del overalls
             pre_len = len(overall_counts[0])
+            ones = 0
+            post_len = pre_len
+            deletions = post_len
             if pre_len > 2 ** 26:
                 ones = dict([(k, v) for k, v in overall_counts[0].items() if v > 1])
                 overall_counts[0] = Counter(ones)
+                ones = len(ones)
                 post_len = len(overall_counts[0])
                 deletions = post_len
                 if check_before[0] > 500 and post_len > 2 ** 24:
@@ -210,10 +229,11 @@ with Pool(cpu_count) as p:
                     overall_counts[0] = Counter(deletions)
                     post_len = len(overall_counts[0])
                     deletions = len(deletions)
-
-                print("Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s" % (pre_len, post_len, pre_len - len(ones), post_len - deletions))
-                _ = gc.collect()
-                check_before[0] = 0
+            gc_start = time.time()
+            _ = gc.collect()
+            gc_total = time.time() - gc_start
+            print("Filtering = %s, Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s, gc time = %.2f" %
+                  (pre_len > 2 ** 26, pre_len, post_len, pre_len - ones, post_len - deletions, gc_total))
 
         return dict(tf=tf)
 
