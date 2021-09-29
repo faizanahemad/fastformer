@@ -194,6 +194,8 @@ with Pool(cpu_count) as p:
         overall_counts_faster.append(Counter([k for t in tf for k, _ in t]))
 
         if len(overall_counts_faster) > 128:
+            collect_start = time.time()
+            full_counter = None
             overalls = []
             while len(overall_counts_faster) > 0:
                 ctr = overall_counts_faster.pop()
@@ -212,7 +214,12 @@ with Pool(cpu_count) as p:
                     ctr.update(overalls.pop())
                 if len(overalls) > 0:
                     ctr.update(overalls.pop())
-                overall_counts[0].update(ctr)
+                if full_counter is None:
+                    full_counter = ctr
+                else:
+                    full_counter.update(ctr)
+            overall_counts[0].update(full_counter)
+            del full_counter
             del overalls
             pre_len = len(overall_counts[0])
             ones = 0
@@ -224,7 +231,7 @@ with Pool(cpu_count) as p:
                 ones = len(ones)
                 post_len = len(overall_counts[0])
                 deletions = post_len
-                if check_before[0] > 500 and post_len > 2 ** 24:
+                if post_len > 2 ** 24:
                     deletions = dict([(k, v) for k, v in overall_counts[0].most_common()[2 ** 24:]])
                     overall_counts[0] = Counter(deletions)
                     post_len = len(overall_counts[0])
@@ -232,8 +239,9 @@ with Pool(cpu_count) as p:
             gc_start = time.time()
             _ = gc.collect()
             gc_total = time.time() - gc_start
-            print("Filtering = %s, Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s, gc time = %.2f" %
-                  (pre_len > 2 ** 26, pre_len, post_len, pre_len - ones, post_len - deletions, gc_total))
+            collect_total = time.time() - collect_start
+            print("Filtering = %s, Overall counts pre-len = %s, after filtering len = %s, num ones = %s, num_deletions = %s, gc time = %.2f, collect time = %.2f" %
+                  (pre_len > 2 ** 26, pre_len, post_len, pre_len - ones, post_len - deletions, gc_total, collect_total))
 
         return dict(tf=tf)
 
@@ -357,6 +365,7 @@ import torch
 import os
 import numpy as np
 import torch
+import gc
 os.environ['TOKENIZERS_PARALLELISM'] = "true"
 device = torch.device("cuda:0")
 model_id = "distilgpt2"
@@ -393,10 +402,10 @@ def perplexity(x, device):
             loss_fct = CrossEntropyLoss(reduction="none")
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)).reshape(shift_logits.size(0), shift_logits.size(1)).mean(1).squeeze().unsqueeze(-1)
             log_likelihood = loss * trg_len  # B x 1
-        lls.append(log_likelihood)
+        lls.append(log_likelihood if log_likelihood.ndim == 2 else log_likelihood.unsqueeze(-1))
 
-    lls = torch.cat(lls, 1).squeeze()
-    ppl = torch.exp(lls.sum(1) / lengths)
+    lls = torch.cat(lls, -1).squeeze()
+    ppl = torch.exp(lls.sum(-1) / lengths)
     return dict(perplexity=ppl.tolist())
 
 
