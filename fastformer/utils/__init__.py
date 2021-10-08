@@ -1444,7 +1444,7 @@ class CoOccurenceModel(PreTrainedModel):
             del confidences
             del top_confs
             word_ce = masked_lm_loss.detach().view(b, s)
-            final_ce = (word_ce + under_confidence_scores) ** 2
+            final_ce = (word_ce + under_confidence_scores) ** 1
             spearman_transformer_ce = None
             corrcoef_transformer_ce = None
             transformer_loss = None

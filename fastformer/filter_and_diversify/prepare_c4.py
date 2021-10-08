@@ -168,7 +168,7 @@ os.environ['TOKENIZERS_PARALLELISM'] = "true"
 c4 = Dataset.load_from_disk("/home/ahemf/processed/c4_extended")
 cpu_count = os.cpu_count() // 2
 overall_counts = [Counter()]
-overall_counts_faster = [Counter()]
+overall_counts_faster = []
 check_before = [0]
 
 def term_frequency_builder(tokens):
@@ -247,16 +247,17 @@ with Pool(cpu_count) as p:
 
     c4_tokenized = c4.map(batch_term_frequency_builder, batched=True, batch_size=2048, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
 
-overall_counts = {k: v for k, v in overall_counts.items()}
+overall_counts = overall_counts[0]
+overall_counts = {k: v for k, v in overall_counts.items() if v >= 2}
 import pickle
-with open('overall_counts.pickle', 'wb') as handle:
+with open('overall_counts_bigram.pickle', 'wb') as handle:
     pickle.dump(overall_counts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 from collections import defaultdict
 freq2token = defaultdict(list)
 
-with open('overall_counts.pickle', 'rb') as handle:
+with open('overall_counts_bigram.pickle', 'rb') as handle:
     overall_counts = pickle.load(handle)
 
 overall_counts = {k: v for k, v in overall_counts.items() if v >= 5}
@@ -264,16 +265,13 @@ n_docs = len(c4_tokenized)
 log_docs = np.log2(n_docs)
 idf = {k: log_docs - np.log2(1 + v) + 1 for k, v in overall_counts.items()}
 
-with open('idf.pickle', 'wb') as handle:
+with open('idf_bigram.pickle', 'wb') as handle:
     pickle.dump(idf, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-with open('count_buckets.pickle', 'wb') as handle:
-    pickle.dump(count_buckets, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-
-with open('overall_counts.pickle', 'rb') as handle:
+with open('overall_counts_bigram.pickle', 'rb') as handle:
     oc = pickle.load(handle)
-with open('idf.pickle', 'rb') as handle:
+with open('idf_bigram.pickle', 'rb') as handle:
     idf = pickle.load(handle)
 
 def tfidf_batch(x):
@@ -283,7 +281,7 @@ print(tfidf_batch(c4_tokenized[0:32]))
 c4_tokenized = c4_tokenized.map(tfidf_batch, batched=True, batch_size=256)
 #
 c4_tokenized = c4_tokenized.remove_columns(["tf"])
-c4_tokenized.save_to_disk("/home/ahemf/processed/c4_extended")
+c4_tokenized.save_to_disk("/home/ahemf/processed/c4_bigram_tfidf")
 
 
 ###################################################################
@@ -348,9 +346,13 @@ with ThreadPoolExecutor(max_workers=devices) as p:
     with torch.no_grad():
         c4_sbert = c4_extended.map(forkjoin, batched=True, batch_size=8192 * 4, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
 
-
-
-c4_sbert.save_to_disk("/home/ahemf/processed_datasets/c4_sbert")
+split1 = c4_sbert.to_pandas()
+split2 = c4_sbert2.to_pandas()
+split1["split2"] = split2["sbert_top_128_avg"]
+split1["split1"] = split1["sbert_top_128_avg"]
+split1["sbert_top_128_avg"] = split1.max(axis=1)
+c4_sbert_final = Dataset.from_pandas(split1[["sbert_top_128_avg"]])
+c4_sbert_final.save_to_disk("/home/ahemf/processed_datasets/c4_sbert")
 
 
 ###################################################################
@@ -420,26 +422,48 @@ tokenizer.pad_token = tokenizer.eos_token
 
 from multiprocess.pool import Pool
 device = []
-with Pool(8) as p:
-    def mapper(x, device_id):
-        import torch
-        if len(device) == 0:
-            device.append(torch.device("cuda:%s" % device_id))
-        model.to(device[0])
-        return perplexity(x, device[0])
 
-    def forkjoin(x):
+
+def mapper(x, device_id):
+    import torch
+    if len(device) == 0:
+        device.append(torch.device("cuda:%s" % device_id))
+    model.to(device[0])
+    return perplexity(x, device[0])
+
+
+class get_fork_join:
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, x):
         texts = x["text"]
         csz = int(np.ceil(len(texts) / 8))
-        chunks = [dict(text=texts[i: i+csz]) for i in range(0, len(texts), csz)]
+        chunks = [dict(text=texts[i: i + csz]) for i in range(0, len(texts), csz)]
         assert len(chunks) == 8
-        perplexities = [ppl for r in p.starmap(mapper, list(zip(chunks, range(8)))) for ppl in r["perplexity"]]
+        perplexities = [ppl for r in self.p.starmap(mapper, list(zip(chunks, range(8)))) for ppl in r["perplexity"]]
         return dict(perplexity=perplexities)
-    print(forkjoin(c4_extended[:128]))
 
 
+with Pool(8) as p:
+    fj = get_fork_join(p)
+    print(fj(c4_extended[:128]))
     with torch.no_grad():
-        c4_perplexity = c4_extended.map(forkjoin, batched=True, batch_size=128, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
+        c4_perplexity = c4_extended.map(fj, batched=True, batch_size=128, remove_columns=['dataset', 'length', 'text', 'tfidf_average'])
 
 c4_perplexity.save_to_disk("/home/ahemf/processed_datasets/c4_perplexity")
 
+
+###################################################################
+## Join ALL
+###################################################################
+
+from datasets import concatenate_datasets
+from collections import Counter
+from transformers import AutoTokenizer, AutoModel, RobertaTokenizerFast
+from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
+c4 = Dataset.load_from_disk("/home/ahemf/processed/c4_extended")
+c4_perplexity = Dataset.load_from_disk("/home/ahemf/processed/c4_perplexity")
+c4_sbert = Dataset.load_from_disk("/home/ahemf/processed/c4_sbert")
+c4_bigram = Dataset.load_from_disk("/home/ahemf/processed/c4_bigram_tfidf")
+c4 = concatenate_datasets([c4, c4_bigram, c4_sbert, c4_perplexity], axis=1)

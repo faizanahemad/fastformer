@@ -846,8 +846,11 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
             ppl = np.log1p(dataset["perplexity"])
             weights = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
         elif "tfidf" in sampling_column:
-            tfidf_top = np.array(dataset["tfidf_top_k_128"])
-            weights = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            tfidf_top = np.array(dataset["tfidf_average"])
+            tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            bigram_tfidf_average = np.array(dataset["bigram_tfidf_average"])
+            bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
+            weights = tfidf_top + bigram_tfidf_average
         elif "tfidf_truncated" in sampling_column:
             tfidf_top = np.array(dataset["tfidf_truncated_average"])
             mean = tfidf_top[~np.isnan(tfidf_top)].mean()
