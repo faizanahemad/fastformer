@@ -833,9 +833,11 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
             ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
             sbert = 1 - np.array(dataset["sbert_top_128_avg"])
             sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
-            tfidf_top = np.array(dataset["tfidf_top_k_128"])
+            tfidf_top = np.array(dataset["tfidf_average"])
             tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
-            weights = (ppl + sbert + tfidf_top) / 3.0
+            bigram_tfidf_average = np.array(dataset["bigram_tfidf_average"])
+            bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
+            weights = (ppl + sbert + ((tfidf_top + bigram_tfidf_average)/2.0)) / 3.0
         elif "sbert" in sampling_column and "perplexity" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
             ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
