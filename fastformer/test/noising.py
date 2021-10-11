@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 pd.set_option('display.max_columns', None)
 pd.set_option('precision', 2)
+pd.set_option('display.width', 1000)
 from fastformer.utils import CoOccurenceModel, get_backbone, spearman_correlation, corr, clean_text, GaussianNoise, VectorDisplacementNoise
 from tqdm.auto import tqdm
 
