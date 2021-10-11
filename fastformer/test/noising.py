@@ -226,6 +226,7 @@ preds = reg.predict(lrdata[:, :lrdata.size(1) - 2].cpu().numpy())
 pres = torch.tensor(preds).to(device)
 print(spearman_correlation(preds, lrdata[:, lrdata.size(1) -1]))
 print(corr(torch.tensor(preds).to(device), lrdata[:, lrdata.size(1) - 1]))
+print(reg.coef_)
 
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "mlm", "pred"]
 ranked_corr, standard_corr = get_corrs(compared_values + [preds], compared_values_names)
