@@ -1318,7 +1318,7 @@ class VectorDisplacementNoise(nn.Module):
             sigma = self.sigma  # * 1.0/np.sqrt(x.size(-1))
             if isinstance(x, torch.Tensor):
                 norm = x.detach().norm(2, -1, keepdim=True)
-                rand = torch.rand(x.size())
+                rand = torch.rand(x.size(), device=x.device)
                 rand = (sigma * norm) * rand / rand.norm(2, -1, keepdim=True)
                 x = x + rand
                 x = norm * (x / x.norm(2, -1, keepdim=True))
