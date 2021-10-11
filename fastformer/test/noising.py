@@ -219,8 +219,16 @@ overall_vd = torch.cat(overall_vd)
 
 
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_mlm]
-compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "mlm"]
-ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+
+lrdata = torch.stack(compared_values, 1)
+reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), lrdata[:, lrdata.size(1)].cpu().numpy())
+preds = reg.predict(lrdata[:, :lrdata.size(1) - 1].cpu().numpy())
+pres = torch.tensor(preds).to(device)
+print(spearman_correlation(preds, lrdata[:, lrdata.size(1)]))
+print(corr(torch.tensor(preds).to(device), lrdata[:, lrdata.size(1)]))
+
+compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "mlm", "pred"]
+ranked_corr, standard_corr = get_corrs(compared_values + [preds], compared_values_names)
 print(ranked_corr)
 print(standard_corr)
 
