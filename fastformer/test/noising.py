@@ -60,8 +60,8 @@ with torch.no_grad():
         drop = nn.Dropout(0.85).to(device)
         out = roberta(inputs_embeds=drop(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"], labels=inputs["input_ids"])
         monte_carlo_stddev.append(out["logits"])
-        ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view( inputs["input_ids"].size())
-        monte_carlo_ce.append(ce)
+        ce_loss = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view( inputs["input_ids"].size())
+        monte_carlo_ce.append(ce_loss)
         top_confs, _ = out["logits"].topk(2, -1)
         top_confs = F.softmax(top_confs, dim=-1)
         confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
@@ -79,23 +79,24 @@ flattened_mc_bt = monte_carlo_bt.view(-1)[inputs["attention_mask"].view(-1).bool
 
 compared_values = [co_oc_word_ce, ce, bt, flattened_mc, flattened_mc_ce, flattened_mc_bt]
 compared_values_names = ["co_oc", "ce", "bt", "mc_std", "mc_ce", "mc_bt"]
-cross_compared = [(v, u) for v in compared_values for u in compared_values]
-
-ranked_corr, standard_corr = [], []
-for v in compared_values:
-    rc, nc = [], []
-    for u in compared_values:
-        rc.append(spearman_correlation(v, u).item())
-        nc.append(corr(v, u).item())
-    ranked_corr.append(rc)
-    standard_corr.append(nc)
-
-ranked_corr = pd.DataFrame(ranked_corr, columns=compared_values_names,  index=compared_values_names)
-standard_corr = pd.DataFrame(standard_corr, columns=compared_values_names,  index=compared_values_names)
 
 
-#######
-# TODO: compare ce, co_oc_word_ce, bt with actual mask difficulty
+def get_corrs(cv, cvn):
+    ranked_corr, standard_corr = [], []
+    for v in cv:
+        rc, nc = [], []
+        for u in cv:
+            rc.append(spearman_correlation(v, u).item())
+            nc.append(corr(v, u).item())
+        ranked_corr.append(rc)
+        standard_corr.append(nc)
+
+    rc_corr = pd.DataFrame(ranked_corr, columns=cvn,  index=cvn)
+    sd_corr = pd.DataFrame(standard_corr, columns=cvn,  index=cvn)
+    return rc_corr, sd_corr
+
+ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+
 
 from datasets import load_dataset
 import copy
@@ -147,6 +148,7 @@ class MLMDataset(torch.utils.data.Dataset):
 
 
 dataset = MLMDataset(tokenizer, wikitext["train"])
+dataset, _ = torch.utils.data.random_split(dataset, [1024, len(dataset) - 1024])
 dataloader = DataLoader(dataset, batch_size=8, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
 
 
@@ -215,18 +217,7 @@ overall_vd = torch.cat(overall_vd)
 
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_mlm]
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "mlm"]
-
-ranked_corr, standard_corr = [], []
-for v in compared_values:
-    rc, nc = [], []
-    for u in compared_values:
-        rc.append(spearman_correlation(v, u).item())
-        nc.append(corr(v, u).item())
-    ranked_corr.append(rc)
-    standard_corr.append(nc)
-
-ranked_corr = pd.DataFrame(ranked_corr, columns=compared_values_names,  index=compared_values_names)
-standard_corr = pd.DataFrame(standard_corr, columns=compared_values_names,  index=compared_values_names)
+ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
 print(ranked_corr)
 print(standard_corr)
 
