@@ -146,10 +146,10 @@ class MLMDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-
+print(wikitext)
 dataset = MLMDataset(tokenizer, wikitext["train"])
-dataset, _ = torch.utils.data.random_split(dataset, [1024, len(dataset) - 1024])
-dataloader = DataLoader(dataset, batch_size=8, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
+dataset, _ = torch.utils.data.random_split(dataset, [4096, len(dataset) - 4096])
+dataloader = DataLoader(dataset, batch_size=16, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
 
 
 overall_ce = []
