@@ -207,7 +207,7 @@ for inputs in tqdm(dataloader):
             inputs["input_ids"].size())
         overall_vd.append(ce[inputs["mask_locations"]].detach())
 
-        out = roberta(inputs_embeds=drop(gn(vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])))),
+        out = roberta(inputs_embeds=gn(vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"]))),
                       attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
