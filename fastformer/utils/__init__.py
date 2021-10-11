@@ -1044,7 +1044,7 @@ def clean_text(text):
     text = re.sub('<pre><code>.*?</code></pre>', EMPTY, text)
     text = re.sub('<code>.*?</code>', EMPTY, text)
     text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    text = re.sub('[ ]+', ' ', text)
+    text = re.sub('[ ]+', ' ', text.strip())
 
     return text
 
@@ -1303,6 +1303,27 @@ class GaussianNoise(nn.Module):
                 scale = sigma * x
                 sampled_noise = np.random.randn(*x.shape) * scale
                 x = x + sampled_noise
+        return x
+
+
+class VectorDisplacementNoise(nn.Module):
+    def __init__(self, sigma=0.1):
+        super().__init__()
+        if type(sigma) == VectorDisplacementNoise:
+            sigma = sigma.sigma
+        self.sigma = sigma
+
+    def forward(self, x):
+        if self.training and self.sigma != 0:
+            sigma = self.sigma  # * 1.0/np.sqrt(x.size(-1))
+            if isinstance(x, torch.Tensor):
+                norm = x.detach().norm(2, -1, keepdim=True)
+                rand = torch.rand(x.size())
+                rand = (sigma * norm) * rand / rand.norm(2, -1, keepdim=True)
+                x = x + rand
+                x = norm * (x / x.norm(2, -1, keepdim=True))
+            else:
+                raise ValueError("only tensors supported.")
         return x
 
 
