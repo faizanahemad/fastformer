@@ -158,6 +158,7 @@ overall_mlm = []
 overall_vd = []
 overall_gaussian = []
 overall_cooc = []
+overall_drop_gaussian_vd = []
 i = 0
 
 for inputs in tqdm(dataloader):
@@ -205,6 +206,13 @@ for inputs in tqdm(dataloader):
             inputs["input_ids"].size())
         overall_vd.append(ce[inputs["mask_locations"]].detach())
 
+        out = roberta(inputs_embeds=drop(gn(vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])))),
+                      attention_mask=inputs["attention_mask"],
+                      labels=inputs["input_ids"])
+        ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
+            inputs["input_ids"].size())
+        overall_drop_gaussian_vd.append(ce[inputs["mask_locations"]].detach())
+
 
     i = i + 1
     if i > 32:
@@ -216,9 +224,10 @@ overall_mlm = torch.cat(overall_mlm)
 overall_cooc = torch.cat(overall_cooc)
 overall_gaussian = torch.cat(overall_gaussian)
 overall_vd = torch.cat(overall_vd)
+overall_drop_gaussian_vd = torch.cat(overall_drop_gaussian_vd)
 
 
-compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_mlm]
+compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 
 lrdata = torch.stack(compared_values, 1)
 reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), lrdata[:, lrdata.size(1) -1].cpu().numpy())
@@ -228,7 +237,7 @@ print(spearman_correlation(preds, lrdata[:, lrdata.size(1) -1]))
 print(corr(torch.tensor(preds).to(device), lrdata[:, lrdata.size(1) - 1]))
 print(reg.coef_)
 
-compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "mlm", "pred"]
+compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm", "pred"]
 ranked_corr, standard_corr = get_corrs(compared_values + [preds], compared_values_names)
 print(ranked_corr)
 print(standard_corr)
