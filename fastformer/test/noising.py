@@ -223,7 +223,7 @@ compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overa
 lrdata = torch.stack(compared_values, 1)
 reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 2].cpu().numpy(), lrdata[:, lrdata.size(1) -1].cpu().numpy())
 preds = reg.predict(lrdata[:, :lrdata.size(1) - 2].cpu().numpy())
-pres = torch.tensor(preds).to(device)
+preds = torch.tensor(preds).to(device).squeeze()
 print(spearman_correlation(preds, lrdata[:, lrdata.size(1) -1]))
 print(corr(torch.tensor(preds).to(device), lrdata[:, lrdata.size(1) - 1]))
 print(reg.coef_)
