@@ -162,9 +162,9 @@ i = 0
 
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
-    drop = nn.Dropout(0.85).to(device)
-    gn = GaussianNoise(0.15).to(device)
-    vd = VectorDisplacementNoise(0.15).to(device)
+    drop = nn.Dropout(0.8).to(device)
+    gn = GaussianNoise(0.1).to(device)
+    vd = VectorDisplacementNoise(0.1).to(device)
     with torch.no_grad():
         out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
                       labels=inputs["label_mlm_input_ids"])
@@ -221,8 +221,8 @@ overall_vd = torch.cat(overall_vd)
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_mlm]
 
 lrdata = torch.stack(compared_values, 1)
-reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 2].cpu().numpy(), lrdata[:, lrdata.size(1) -1].cpu().numpy())
-preds = reg.predict(lrdata[:, :lrdata.size(1) - 2].cpu().numpy())
+reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), lrdata[:, lrdata.size(1) -1].cpu().numpy())
+preds = reg.predict(lrdata[:, :lrdata.size(1) - 1].cpu().numpy())
 preds = torch.tensor(preds).to(device).squeeze()
 print(spearman_correlation(preds, lrdata[:, lrdata.size(1) -1]))
 print(corr(torch.tensor(preds).to(device), lrdata[:, lrdata.size(1) - 1]))
