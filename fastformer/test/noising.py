@@ -162,6 +162,9 @@ i = 0
 
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
+    drop = nn.Dropout(0.85).to(device)
+    gn = GaussianNoise(0.15).to(device)
+    vd = VectorDisplacementNoise(0.15).to(device)
     with torch.no_grad():
         out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
                       labels=inputs["label_mlm_input_ids"])
@@ -172,7 +175,7 @@ for inputs in tqdm(dataloader):
 
 
         inputs["input_ids"] = inputs["label_mlm_input_ids"]
-        out = roberta(inputs_embeds=nn.Dropout(0.85)(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
+        out = roberta(inputs_embeds=drop(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
 
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
@@ -189,13 +192,13 @@ for inputs in tqdm(dataloader):
         overall_cooc.append(co_oc_word_ce)
 
 
-        out = roberta(inputs_embeds=GaussianNoise(0.15)(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
+        out = roberta(inputs_embeds=gn(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
         overall_gaussian.append(ce[inputs["mask_locations"]].detach())
 
-        out = roberta(inputs_embeds=VectorDisplacementNoise(0.15)(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])),
+        out = roberta(inputs_embeds=vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])),
                       attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
