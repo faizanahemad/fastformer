@@ -124,7 +124,7 @@ class MLMDataset(torch.utils.data.Dataset):
             self.tokenizer = copy.deepcopy(tokenizer)
         except:
             self.tokenizer = tokenizer
-        self.tokenizer_args = dict(max_length=512, padding="max_length", return_tensors="pt")
+        self.tokenizer_args = dict(max_length=512, padding="max_length", return_tensors="pt", truncation=True)
 
         self.dataset = dataset
         self.word_mask_proba = word_mask_proba
