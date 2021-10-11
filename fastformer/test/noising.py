@@ -4,6 +4,7 @@ import torch
 from torch.nn import functional as F
 import pandas as pd
 from sklearn.linear_model import LinearRegression
+from scipy import stats
 pd.set_option('display.max_columns', None)
 pd.set_option('precision', 2)
 pd.set_option('display.width', 1000)
@@ -231,7 +232,9 @@ overall_drop_gaussian_vd = torch.cat(overall_drop_gaussian_vd)
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 
 lrdata = torch.stack(compared_values, 1)
-reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), lrdata[:, lrdata.size(1) -1].cpu().numpy())
+labels = lrdata[:, lrdata.size(1) -1].cpu().numpy()
+labels = (100 * stats.rankdata(labels, "average") / len(labels)).astype(int) / 100
+reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), labels)
 preds = reg.predict(lrdata[:, :lrdata.size(1) - 1].cpu().numpy())
 preds = torch.tensor(preds).to(device).squeeze()
 print(spearman_correlation(preds, lrdata[:, lrdata.size(1) -1]))
