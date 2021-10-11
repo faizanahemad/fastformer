@@ -160,7 +160,7 @@ overall_gaussian = []
 overall_cooc = []
 i = 0
 
-for inputs in dataloader:
+for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
     with torch.no_grad():
         out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
