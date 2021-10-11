@@ -163,8 +163,8 @@ i = 0
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
     drop = nn.Dropout(0.8).to(device)
-    gn = GaussianNoise(0.1).to(device)
-    vd = VectorDisplacementNoise(0.1).to(device)
+    gn = GaussianNoise(0.2).to(device)
+    vd = VectorDisplacementNoise(0.2).to(device)
     with torch.no_grad():
         out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
                       labels=inputs["label_mlm_input_ids"])
