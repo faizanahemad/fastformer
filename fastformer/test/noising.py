@@ -191,7 +191,6 @@ for inputs in tqdm(dataloader):
         mlm_top_indices = set(torch.topk(mask_ce, int(0.4 * mask_ce.size(0))).indices[int(0.2 * mask_ce.size(0)):].tolist())
         overall_mlm.append(mask_ce.detach())
 
-
         inputs["input_ids"] = inputs["label_mlm_input_ids"]
         out = roberta(inputs_embeds=drop(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
@@ -247,15 +246,23 @@ for inputs in tqdm(dataloader):
         percentile_intersection["gn_vd"].append(len(mlm_top_indices.intersection(gn_vd_top_indices)) / len(mlm_top_indices))
         overall_drop_gaussian_vd.append(ce)
 
+        inputs["input_ids"] = torch.stack([token_id_masking(t, tokenizer) for t in inputs["input_ids"]])
+        out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
+                      labels=inputs["label_mlm_input_ids"])
+        ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
+            inputs["label_mlm_input_ids"].size())
+        mask_ce = ce[inputs["mask_locations"]]
+        mlm_two_top_indices = set(torch.topk(mask_ce, int(0.4 * mask_ce.size(0))).indices[int(0.2 * mask_ce.size(0)):].tolist())
+        percentile_intersection["mlm_two"].append(len(mlm_top_indices.intersection(mlm_two_top_indices)) / len(mlm_top_indices))
 
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm"]
-ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
 percentile_intersection = {k: np.mean(v) for k, v in percentile_intersection.items()}
 print("percentile_intersection = %s" % percentile_intersection)
-print(dict([(cvn, len(cv)) for cvn, cv in zip(compared_values_names, compared_values)]))
-print(ranked_corr)
-print(standard_corr)
+# ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+# print(dict([(cvn, len(cv)) for cvn, cv in zip(compared_values_names, compared_values)]))
+# print(ranked_corr)
+# print(standard_corr)
 
 overall_ce = torch.cat(overall_ce)
 overall_bt = torch.cat(overall_bt)
