@@ -87,9 +87,14 @@ def get_corrs(cv, cvn):
     ranked_corr, standard_corr = [], []
     for v in cv:
         rc, nc = [], []
-        for u in cv:
-            rc.append(spearman_correlation(v, u).item())
-            nc.append(corr(v, u).item())
+        if isinstance(v, list):
+            for u in cv:
+                rc.append(np.mean([spearman_correlation(v[i], u[i]).item() for i in range(len(v))]))
+                nc.append(np.mean([corr(v[i], u[i]).item() for i in range(len(v))]))
+        else:
+            for u in cv:
+                rc.append(spearman_correlation(v, u).item())
+                nc.append(corr(v, u).item())
         ranked_corr.append(rc)
         standard_corr.append(nc)
 
@@ -220,6 +225,12 @@ for inputs in tqdm(dataloader):
     if i > 32:
         break
 
+compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
+compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm"]
+ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+print(ranked_corr)
+print(standard_corr)
+
 overall_ce = torch.cat(overall_ce)
 overall_bt = torch.cat(overall_bt)
 overall_mlm = torch.cat(overall_mlm)
@@ -233,7 +244,7 @@ compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overa
 
 lrdata = torch.stack(compared_values, 1)
 labels = lrdata[:, lrdata.size(1) -1].cpu().numpy()
-labels = (100 * stats.rankdata(labels, "average") / len(labels)).astype(int) / 100
+labels = (100 * stats.rankdata(labels, "average") / len(labels)).astype(int) / 100  # https://stackoverflow.com/questions/44607537/convert-array-into-percentiles
 reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), labels)
 preds = reg.predict(lrdata[:, :lrdata.size(1) - 1].cpu().numpy())
 preds = torch.tensor(preds).to(device).squeeze()
