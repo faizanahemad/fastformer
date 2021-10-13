@@ -738,10 +738,10 @@ class RTDMLMModel(PreTrainedModel):
             word_ce_max = word_ce.max()
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         else:
-            word_ce = (word_ce ** self.word_ce_schedule)
+            word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.9 * (word_ce_max ** self.word_ce_schedule))
         non_mask_locations = torch.logical_or(input_ids == self.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         word_ce[non_mask_locations] = 0.0
-        decided_noise_proportion = (0.15 + random.random() * 0.05)
+        decided_noise_proportion = (0.15 + random.random() * 0.03)
         average_tokens_per_sample = ss
         indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         indices = indices[:, torch.randperm(indices.size()[1])]

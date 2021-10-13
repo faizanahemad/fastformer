@@ -163,7 +163,7 @@ class MLMDataset(torch.utils.data.Dataset):
 print(wikitext)
 dataset = MLMDataset(tokenizer, wikitext["train"])
 dataset, _ = torch.utils.data.random_split(dataset, [4096, len(dataset) - 4096])
-dataloader = DataLoader(dataset, batch_size=16, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=1, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
 
 
 overall_ce = []
@@ -173,7 +173,7 @@ overall_vd = []
 overall_gaussian = []
 overall_cooc = []
 overall_drop_gaussian_vd = []
-i = 0
+
 
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -227,10 +227,6 @@ for inputs in tqdm(dataloader):
             inputs["input_ids"].size())
         overall_drop_gaussian_vd.append(ce[inputs["mask_locations"]].detach())
 
-
-    i = i + 1
-    if i > 32:
-        break
 
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm"]
