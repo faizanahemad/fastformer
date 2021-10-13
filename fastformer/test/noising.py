@@ -247,7 +247,7 @@ for inputs in tqdm(dataloader):
         overall_drop_gaussian_vd.append(ce)
 
         inputs["input_ids"] = torch.stack([token_id_masking(t, tokenizer) for t in inputs["input_ids"]]).to(device)
-        out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
+        out = roberta(inputs_embeds=gn(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])), attention_mask=inputs["attention_mask"],
                       labels=inputs["label_mlm_input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
             inputs["label_mlm_input_ids"].size())
