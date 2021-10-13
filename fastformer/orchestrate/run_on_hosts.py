@@ -308,7 +308,7 @@ if __name__ == "__main__":
         tail_cmd = mlm_cmd_dir + " && tail -n %s output.log" % args["ntail"]
         run_command_v2(hosts, tail_cmd)
     if args["gpustat"]:
-        gpustat_cmd = cmd_dir + " && gpustat"
+        gpustat_cmd = mlm_cmd_dir + " && gpustat"
         run_command_v2(hosts, gpustat_cmd)
     if args["custom"] is not None:
         custom_cmd = cmd_dir + " && " + args["custom"]

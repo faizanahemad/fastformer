@@ -28,6 +28,10 @@ inputs = {k: v.to(device) for k, v in inputs.items()}
 
 roberta = AutoModelForMaskedLM.from_pretrained("roberta-base")
 roberta = roberta.eval().to(device)
+
+distil_roberta = AutoModelForMaskedLM.from_pretrained("distilroberta-base")
+distil_roberta = distil_roberta.eval().to(device)
+
 cooc = "cooc_7_roberta.pth"  # "fastformer/test/cooc_7_roberta.pth"
 masking_model, _, _ = get_backbone(cooc.split("/")[-1], False, dropout_prob=0.0)
 state_dict = torch.load(cooc, map_location='cpu')
@@ -114,7 +118,7 @@ wikitext = load_dataset("wikitext", "wikitext-103-v1")
 wikitext = wikitext.filter(lambda x: len(x["text"].split())>64)
 
 
-def token_id_masking(tokens, tokenizer, probability: float = 0.1) -> str:
+def token_id_masking(tokens, tokenizer, probability: float = 0.15) -> str:
     tokens = np.array(tokens.tolist())
     original_tokens = tokens.copy()
     special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
@@ -127,7 +131,7 @@ def token_id_masking(tokens, tokenizer, probability: float = 0.1) -> str:
 
 
 class MLMDataset(torch.utils.data.Dataset):
-    def __init__(self, tokenizer, dataset: torch.utils.data.Dataset, word_mask_proba=0.1):
+    def __init__(self, tokenizer, dataset: torch.utils.data.Dataset, word_mask_proba=0.15):
         try:
             self.tokenizer = copy.deepcopy(tokenizer)
         except:
@@ -259,8 +263,7 @@ print(ranked_corr)
 print(standard_corr)
 
 
-
-# TODO: Can also investigate ce+bt combo, a tensor displacement based noising instead of dropout, Gaussian Noise.
+# Model Based performance estimator
 
 
 
