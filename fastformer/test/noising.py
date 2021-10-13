@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from transformers import AutoModelForMaskedLM, AutoModel, AutoTokenizer
 from torch import nn
 import torch
@@ -97,7 +99,6 @@ def get_corrs(cv, cvn):
                 rc.append(np.mean(spcc))
                 cocc = [corr(v[i], u[i]).item() for i in range(len(v))]
                 nc.append(np.mean(cocc))
-                print(spcc)
         else:
             for u in cv:
                 rc.append(spearman_correlation(v, u).item())
@@ -173,6 +174,7 @@ overall_vd = []
 overall_gaussian = []
 overall_cooc = []
 overall_drop_gaussian_vd = []
+percentile_intersection = defaultdict(list)
 
 
 for inputs in tqdm(dataloader):
@@ -186,6 +188,7 @@ for inputs in tqdm(dataloader):
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
             inputs["label_mlm_input_ids"].size())
         mask_ce = ce[inputs["mask_locations"]]
+        mlm_top_indices = set(torch.topk(mask_ce, int(0.4 * mask_ce.size(0))).indices[int(0.2 * mask_ce.size(0)):].tolist())
         overall_mlm.append(mask_ce.detach())
 
 
@@ -195,15 +198,23 @@ for inputs in tqdm(dataloader):
 
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        overall_ce.append(ce[inputs["mask_locations"]].detach())
+        ce = ce[inputs["mask_locations"]].detach()
+        drop_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
+        percentile_intersection["drop"].append(len(mlm_top_indices.intersection(drop_top_indices))/len(mlm_top_indices))
+        overall_ce.append(ce)
         top_confs, _ = out["logits"].topk(2, -1)
         top_confs = F.softmax(top_confs, dim=-1)
         confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
         under_confidence_scores = (1 - confidences)  # 1/confidences
-        overall_bt.append(under_confidence_scores[inputs["mask_locations"]].detach())
+        bt = under_confidence_scores[inputs["mask_locations"]].detach()
+        bt_top_indices = set(torch.topk(bt, int(0.4 * bt.size(0))).indices[int(0.2 * bt.size(0)):].tolist())
+        percentile_intersection["bt"].append(len(mlm_top_indices.intersection(bt_top_indices)) / len(mlm_top_indices))
+        overall_bt.append(bt)
 
         mlm_rtd_hints = masking_model(inputs["input_ids"], inputs["attention_mask"], validation_iter=True)
         co_oc_word_ce = mlm_rtd_hints["word_ce"][inputs["mask_locations"]].detach()
+        co_oc_top_indices = set(torch.topk(co_oc_word_ce, int(0.4 * co_oc_word_ce.size(0))).indices[int(0.2 * co_oc_word_ce.size(0)):].tolist())
+        percentile_intersection["co_oc"].append(len(mlm_top_indices.intersection(co_oc_top_indices)) / len(mlm_top_indices))
         overall_cooc.append(co_oc_word_ce)
 
 
@@ -211,26 +222,37 @@ for inputs in tqdm(dataloader):
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        overall_gaussian.append(ce[inputs["mask_locations"]].detach())
+        ce = ce[inputs["mask_locations"]].detach()
+        gn_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
+        percentile_intersection["gn"].append(len(mlm_top_indices.intersection(gn_top_indices)) / len(mlm_top_indices))
+        overall_gaussian.append(ce)
 
         out = roberta(inputs_embeds=vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"])),
                       attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        overall_vd.append(ce[inputs["mask_locations"]].detach())
+        ce = ce[inputs["mask_locations"]].detach()
+        vd_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
+        percentile_intersection["vd"].append(len(mlm_top_indices.intersection(vd_top_indices)) / len(mlm_top_indices))
+        overall_vd.append(ce)
 
         out = roberta(inputs_embeds=gn(vd(roberta.roberta.embeddings.word_embeddings(inputs["input_ids"]))),
                       attention_mask=inputs["attention_mask"],
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        overall_drop_gaussian_vd.append(ce[inputs["mask_locations"]].detach())
+        ce = ce[inputs["mask_locations"]].detach()
+        gn_vd_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
+        percentile_intersection["gn_vd"].append(len(mlm_top_indices.intersection(gn_vd_top_indices)) / len(mlm_top_indices))
+        overall_drop_gaussian_vd.append(ce)
 
 
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm"]
 ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+percentile_intersection = {k: np.mean(v) for k, v in percentile_intersection.items()}
+print("percentile_intersection = %s" % percentile_intersection)
 print(dict([(cvn, len(cv)) for cvn, cv in zip(compared_values_names, compared_values)]))
 print(ranked_corr)
 print(standard_corr)
