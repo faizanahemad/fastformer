@@ -93,9 +93,11 @@ def get_corrs(cv, cvn):
         rc, nc = [], []
         if isinstance(v, (list, tuple)):
             for u in cv:
-                rc.append(np.mean([spearman_correlation(v[i], u[i]).item() for i in range(len(v))]))
-                nc.append(np.mean([corr(v[i], u[i]).item() for i in range(len(v))]))
-                print(rc[-1], nc[-1])
+                spcc = [spearman_correlation(v[i], u[i]).item() for i in range(len(v))]
+                rc.append(np.mean(spcc))
+                cocc = [corr(v[i], u[i]).item() for i in range(len(v))]
+                nc.append(np.mean(cocc))
+                print(spcc)
         else:
             for u in cv:
                 rc.append(spearman_correlation(v, u).item())
@@ -233,6 +235,7 @@ for inputs in tqdm(dataloader):
 compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overall_vd, overall_drop_gaussian_vd, overall_mlm]
 compared_values_names = ["ce", "bt", "co_oc", "gaussian", "vector", "drop_gaussian_vector", "mlm"]
 ranked_corr, standard_corr = get_corrs(compared_values, compared_values_names)
+print(dict([(cvn, len(cv)) for cvn, cv in zip(compared_values_names, compared_values)]))
 print(ranked_corr)
 print(standard_corr)
 
