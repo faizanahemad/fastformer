@@ -87,10 +87,11 @@ def get_corrs(cv, cvn):
     ranked_corr, standard_corr = [], []
     for v in cv:
         rc, nc = [], []
-        if isinstance(v, list):
+        if isinstance(v, (list, tuple)):
             for u in cv:
                 rc.append(np.mean([spearman_correlation(v[i], u[i]).item() for i in range(len(v))]))
                 nc.append(np.mean([corr(v[i], u[i]).item() for i in range(len(v))]))
+                print(rc[-1], nc[-1])
         else:
             for u in cv:
                 rc.append(spearman_correlation(v, u).item())
