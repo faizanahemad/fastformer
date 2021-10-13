@@ -267,6 +267,8 @@ print(standard_corr)
 
 
 # Model Based performance estimator
+# Try distilroberta
+# Try Last Layer Enhance (Masked Embeddings, Model outputs, Word Embeddings, CE of mask locations) -> predict diff from average CE of sequence
 
 
 
