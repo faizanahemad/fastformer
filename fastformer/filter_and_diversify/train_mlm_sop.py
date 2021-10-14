@@ -859,7 +859,6 @@ class RTDMLMModel(PreTrainedModel):
         predicted_ce_use[non_mask_locations] = 0.0
         predicted_ce_use[mask_locations] = mask_ce[mask_locations]
         asum = attention_mask.sum(1)
-        print("asum and predicted_ce_use size = ", asum.size(), predicted_ce_use.size())
         hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(predicted_ce_use)]
         hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
         hard_masks_batches = [torch.tensor([ix]*hm.size(0), device=input_ids.device) for ix, hm in enumerate(hard_masks)]
