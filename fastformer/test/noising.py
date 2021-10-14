@@ -177,7 +177,8 @@ for inputs in tqdm(dataloader):
         ce = torch.zeros_like(inputs["input_ids"])
         for ic in index_chunks:
             inputs["input_ids"] = inputs["label_mlm_input_ids"].clone()
-            inputs["input_ids"] = inputs["input_ids"].squeeze()[ic] = tokenizer.mask_token_id
+            inputs["input_ids"] = inputs["input_ids"].squeeze()
+            inputs["input_ids"][ic] = tokenizer.mask_token_id
             inputs["input_ids"] = inputs["input_ids"].unsqueeze(0)
             mask_locations = inputs["input_ids"] == tokenizer.mask_token_id
             out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
