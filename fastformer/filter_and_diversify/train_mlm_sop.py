@@ -802,7 +802,6 @@ class RTDMLMModel(PreTrainedModel):
         co_oc_teacher_prediction_scores = None
         word_ce_max = word_ce.max()
         if self.word_ce_schedule < 0.0:
-            co_oc_teacher_prediction_scores = mlm_rtd_hints["prediction_scores"]
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         else:
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.9 * (word_ce_max ** self.word_ce_schedule))
@@ -831,11 +830,12 @@ class RTDMLMModel(PreTrainedModel):
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
             hard_mask_accuracy = word_wise_accuracy[hard_mask_locations].float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
-        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids,
+        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, predicted_ce=predicted_ce,
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
                     accuracy=accuracy, hard_mask_accuracy=hard_mask_accuracy,
+                    hard_mask_locations=hard_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
-                    co_oc_teacher_prediction_scores=co_oc_teacher_prediction_scores, all_noise_locations=all_noise_locations)
+                    all_noise_locations=all_noise_locations)
 
     def get_output_embeddings(self):
         if isinstance(self.lm_head, RobertaLMHead):
@@ -856,13 +856,13 @@ class RTDMLMModel(PreTrainedModel):
 
     def forward(self, input_ids, attention_mask, validation_iter=False):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
-        input_ids, label_mlm_input_ids, rtd_labels = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels")
+        input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
         only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
-        accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy")
-        decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction = dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
-        mask_stats = dict(decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
-                          all_rtd_fraction=all_rtd_fraction, accuracy_masking_model=accuracy_masking_model, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
-                          rtd_model_accuracy=rtd_model_accuracy, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
+        accuracy_masking_model, predicted_ce = dict_get(mask_dict, "accuracy", "predicted_ce")
+        average_tokens_per_sample = dict_get(mask_dict,"average_tokens_per_sample")
+        mask_stats = dict(average_tokens_per_sample=average_tokens_per_sample,
+                          accuracy_masking_model=accuracy_masking_model,
+                          only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
                           only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion=only_hard_mask_proportion)
         outputs = self.backbone(
             input_ids,
@@ -873,48 +873,40 @@ class RTDMLMModel(PreTrainedModel):
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
         co_oc_guidance_loss = None
-        co_oc_teacher_prediction_scores, all_noise_locations = dict_get(mask_dict, "co_oc_teacher_prediction_scores", "all_noise_locations")
-        if self.word_ce_schedule < 0:
-            co_oc_guidance_loss = 10 * ((F.softmax(prediction_scores, dim=-1) - F.softmax(co_oc_teacher_prediction_scores, dim=-1)) ** 2)[all_noise_locations].sum(-1).mean()
-        rtd_scores = self.rtd_nn(sequence_output[attention_mask]).view(-1)
-        rtd_labels = rtd_labels[attention_mask].view(-1)
-        rtd_loss = 10.0 * self.loss_bce(rtd_scores, rtd_labels)
+        all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
+        all_noise_locations = all_noise_locations.view(-1)
+        hard_mask_locations = hard_mask_locations.view(-1)
+        co_oc_mask_locations = co_oc_mask_locations.view(-1)
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
-        masked_lm_loss = masked_lm_loss[all_noise_locations.view(-1)].mean()
+        masked_lm_loss = masked_lm_loss[all_noise_locations]
+        predicted_ce_loss = torch.abs(predicted_ce[all_noise_locations] - masked_lm_loss.detach())
+        predicted_ce_loss_mape = (predicted_ce_loss.detach() / masked_lm_loss.detach()).mean().item()
+        masked_lm_loss = masked_lm_loss.mean()
+        predicted_ce_loss = predicted_ce_loss.mean()
         # All token MLM averages over all tokens and copy tokens have low average.
 
         val_stats = dict()
         if validation_iter:
-            only_rtd_proportion = rtd_labels.mean().item()
             am_sum = attention_mask.sum()
-            rtd_labels = rtd_labels.bool()
-            not_rtd_labels = torch.logical_not(rtd_labels)
-            not_rtd_labels_mean = not_rtd_labels.float().mean().item()  # majority class prediction
-            input_ids = input_ids.view(-1).int()
-            mask_indices = (input_ids != label_mlm_input_ids.int())
-            only_mask_indices = (input_ids == self.tokenizer.mask_token_id)
-            rtd_binary = rtd_scores > 0.0
-            only_rtd_accuracy = rtd_binary[rtd_labels].float().mean().item()
-            rtd_accuracy = ((rtd_binary == rtd_labels).float().mean().item() - not_rtd_labels_mean) / (1 - not_rtd_labels_mean)
-            rtd_accuracy = max(0, rtd_accuracy)
-            non_rtd_accuracy = torch.logical_not(rtd_binary)[not_rtd_labels].float().mean().item()
-            mask_proportion = (mask_indices.sum() / am_sum).item()
-            only_mask_proportion = (only_mask_indices.sum() / am_sum).item()
+            mask_proportion = (all_noise_locations.sum() / am_sum).item()
+            co_oc_mask_proportion = (co_oc_mask_locations.sum() / am_sum).item()
+            hard_mask_proportion = (hard_mask_locations.sum() / am_sum).item()
+
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
-            mlm_accuracy = lm_accuracy[mask_indices].mean().item()
-            only_rtd_lm_accuracy = lm_accuracy[attention_mask.view(-1)]
-            only_rtd_lm_accuracy = only_rtd_lm_accuracy[rtd_labels].mean().item()
-            only_mask_lm_accuracy = lm_accuracy[only_mask_indices].mean().item()
-            copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(mask_indices), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
-            val_stats = dict(mask_proportion=mask_proportion, mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy, rtd_accuracy=rtd_accuracy,
-                             only_rtd_accuracy=only_rtd_accuracy, only_mask_lm_accuracy=only_mask_lm_accuracy, only_mask_proportion=only_mask_proportion, only_rtd_proportion=only_rtd_proportion,
-                             non_rtd_accuracy=non_rtd_accuracy, only_rtd_lm_accuracy=only_rtd_lm_accuracy)
+            mlm_accuracy = lm_accuracy[all_noise_locations].mean().item()
+            co_oc_mask_lm_accuracy = lm_accuracy[co_oc_mask_locations].mean().item()
+            hard_mask_lm_accuracy = lm_accuracy[hard_mask_locations].mean().item()
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + rtd_loss) + (co_oc_guidance_loss if co_oc_guidance_loss is not None else 0.0),
-                    rtd_loss=rtd_loss.item(), co_oc_guidance_loss=(co_oc_guidance_loss.item() if co_oc_guidance_loss is not None else None),
+            copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(all_noise_locations), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
+            val_stats = dict(mask_proportion=mask_proportion, mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy,
+                             co_oc_mask_lm_accuracy=co_oc_mask_lm_accuracy, hard_mask_lm_accuracy=hard_mask_lm_accuracy,
+                             co_oc_mask_proportion=co_oc_mask_proportion, hard_mask_proportion=hard_mask_proportion)
+
+        return dict(loss=self.mlm_w * (masked_lm_loss + predicted_ce_loss),
+                    predicted_ce_loss=predicted_ce_loss.item(), predicted_ce_loss_mape=predicted_ce_loss_mape,
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
