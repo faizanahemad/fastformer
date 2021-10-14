@@ -797,7 +797,6 @@ class RTDMLMModel(PreTrainedModel):
         hard_mask_locations[hard_masks_batches, hard_masks] = True
 
 
-
         word_ce = mlm_rtd_hints["word_ce"]
         co_oc_teacher_prediction_scores = None
         word_ce_max = word_ce.max()
@@ -824,7 +823,6 @@ class RTDMLMModel(PreTrainedModel):
         co_oc_mask_accuracy = None
         hard_mask_accuracy = None
         if validation_iter:
-            attention_sum = attention_mask.sum()
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
@@ -872,7 +870,6 @@ class RTDMLMModel(PreTrainedModel):
         attention_mask = attention_mask.bool()
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
-        co_oc_guidance_loss = None
         all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
         all_noise_locations = all_noise_locations.view(-1)
         hard_mask_locations = hard_mask_locations.view(-1)
@@ -1039,13 +1036,14 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
     dataset_args = dict(tokenizer=tokenizer, dataset=dataset, mlm_sop_enabled=mlm_sop_enabled,
                         tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length),
                         word_mask_proba=0.15)
-    print("[Train]: Time = %s, Initializing Dataloader with dataset args = %s" % (dataset_args, get_time_string()))
+    # print("[Train]: Time = %s, Initializing Dataloader with dataset args = %s" % (dataset_args, get_time_string()))
 
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     dataset = MaskedLanguageSentenceOrderModelDataset(**dataset_args)
 
     weights = None
     if sampling_column is not None:
+        bigram_tfidf_average_column = "bigram_tfidf_average" if "bigram_tfidf_average" in dataset.column_names else "tfidf_average"
         if "sbert" in sampling_column and "perplexity" in sampling_column and "tfidf" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
             ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
@@ -1053,7 +1051,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
             sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
             tfidf_top = np.array(dataset["tfidf_average"])
             tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
-            bigram_tfidf_average = np.array(dataset["bigram_tfidf_average"])
+            bigram_tfidf_average = np.array(dataset[bigram_tfidf_average_column])
             bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
             weights = (ppl + sbert + ((tfidf_top + bigram_tfidf_average)/2.0)) / 3.0
         elif "sbert" in sampling_column and "perplexity" in sampling_column:
@@ -1068,7 +1066,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
         elif "tfidf" in sampling_column:
             tfidf_top = np.array(dataset["tfidf_average"])
             tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
-            bigram_tfidf_average = np.array(dataset["bigram_tfidf_average"])
+            bigram_tfidf_average = np.array(dataset[bigram_tfidf_average_column])
             bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
             weights = tfidf_top + bigram_tfidf_average
         elif "tfidf_truncated" in sampling_column:
