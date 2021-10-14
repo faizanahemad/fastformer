@@ -788,7 +788,7 @@ class CEPredictor(nn.Module):
         model_outputs = self.in_fc3(model_outputs)
         mask_ce = self.in_fc4(encode_scalar_column(mask_ce))
         input_embeddings = masked_embeddings + word_embeddings + model_outputs + mask_ce
-        last_hidden_state = self.ce_pred(input_embeddings, attention_mask, return_dict=False)["last_hidden_state"]
+        last_hidden_state = self.ce_pred(input_embeddings, attention_mask, return_dict=False)[0]
         outputs = self.out_fc(last_hidden_state)
         return outputs
 
