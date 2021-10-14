@@ -209,7 +209,6 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
         self.mlm_sop_enabled = mlm_sop_enabled
-        self.column_names = dataset.column_names
 
     def __getitem__(self, item):
         if isinstance(item, str):
