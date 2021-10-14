@@ -712,6 +712,7 @@ class CEPredictor(nn.Module):
         init_weights(self.ce_pred, 0.01)
 
     def forward(self, masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask):
+        print("CEPredictor attention_mask = ", attention_mask.size())
         masked_embeddings = self.in_fc1(masked_embeddings)
         word_embeddings = self.in_fc2(word_embeddings)
         model_outputs = self.in_fc3(model_outputs)
@@ -796,9 +797,7 @@ class RTDMLMModel(PreTrainedModel):
         hard_masks = torch.cat(hard_masks)
         hard_mask_locations[hard_masks_batches, hard_masks] = True
 
-
         word_ce = mlm_rtd_hints["word_ce"]
-        co_oc_teacher_prediction_scores = None
         word_ce_max = word_ce.max()
         if self.word_ce_schedule < 0.0:
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
