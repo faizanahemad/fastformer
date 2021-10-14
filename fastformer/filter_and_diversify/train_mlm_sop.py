@@ -209,6 +209,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
         self.mlm_sop_enabled = mlm_sop_enabled
+        self.column_names = dataset.column_names
 
     def __getitem__(self, item):
         if isinstance(item, str):
@@ -1043,7 +1044,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
 
     weights = None
     if sampling_column is not None:
-        bigram_tfidf_average_column = "bigram_tfidf_average" if "bigram_tfidf_average" in dataset.column_names else "tfidf_average"
+        bigram_tfidf_average_column = "bigram_tfidf_average" if "bigram_tfidf_average" in dataset.dataset.column_names else "tfidf_average"
         if "sbert" in sampling_column and "perplexity" in sampling_column and "tfidf" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
             ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
