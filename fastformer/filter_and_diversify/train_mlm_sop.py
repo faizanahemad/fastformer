@@ -1,12 +1,12 @@
 import copy
 import sys
 import traceback
-from typing import Optional, Iterator
+from typing import Optional, Iterator, Tuple
 
 import numpy as np
 import torch
 from more_itertools import windowed
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F
 import random
 import os
@@ -25,6 +25,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
+from transformers.modeling_utils import get_parameter_dtype
 from transformers.models.roberta.modeling_roberta import RobertaLMHead, RobertaEncoder
 
 from fastformer.config import *
@@ -698,6 +699,7 @@ class CEPredictor(nn.Module):
         super().__init__()
         self.in_dims = in_dims
         self.hidden_size = config.hidden_size
+        self.config = config
         self.ce_pred = RobertaEncoder(config)
         self.in_fc1 = nn.Linear(self.in_dims, self.hidden_size)
         self.in_fc2 = nn.Linear(self.in_dims, self.hidden_size)
@@ -711,8 +713,76 @@ class CEPredictor(nn.Module):
         init_weights(self.out_fc, 0.01)
         init_weights(self.ce_pred, 0.01)
 
+    @property
+    def dtype(self) -> torch.dtype:
+        """
+        :obj:`torch.dtype`: The dtype of the module (assuming that all the module parameters have the same dtype).
+        """
+        return get_parameter_dtype(self)
+
+    def get_extended_attention_mask(self, attention_mask: Tensor, input_shape: Tuple[int], device: torch.device) -> Tensor:
+        """
+        Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
+
+        Arguments:
+            attention_mask (:obj:`torch.Tensor`):
+                Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
+            input_shape (:obj:`Tuple[int]`):
+                The shape of the input to the model.
+            device: (:obj:`torch.device`):
+                The device of the input to the model.
+
+        Returns:
+            :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
+        """
+        # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
+        # ourselves in which case we just need to make it broadcastable to all heads.
+        if attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            # Provided a padding mask of dimensions [batch_size, seq_length]
+            # - if the model is a decoder, apply a causal mask in addition to the padding mask
+            # - if the model is an encoder, make the mask broadcastable to [batch_size, num_heads, seq_length, seq_length]
+            if self.config.is_decoder:
+                batch_size, seq_length = input_shape
+                seq_ids = torch.arange(seq_length, device=device)
+                causal_mask = seq_ids[None, None, :].repeat(batch_size, seq_length, 1) <= seq_ids[None, :, None]
+                # in case past_key_values are used we need to add a prefix ones mask to the causal mask
+                # causal and attention masks must have same type with pytorch version < 1.3
+                causal_mask = causal_mask.to(attention_mask.dtype)
+
+                if causal_mask.shape[1] < attention_mask.shape[1]:
+                    prefix_seq_len = attention_mask.shape[1] - causal_mask.shape[1]
+                    causal_mask = torch.cat(
+                        [
+                            torch.ones(
+                                (batch_size, seq_length, prefix_seq_len), device=device, dtype=causal_mask.dtype
+                            ),
+                            causal_mask,
+                        ],
+                        axis=-1,
+                    )
+
+                extended_attention_mask = causal_mask[:, None, :, :] * attention_mask[:, None, None, :]
+            else:
+                extended_attention_mask = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(
+                f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
+            )
+
+        # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
+        # masked positions, this operation will create a tensor which is 0.0 for
+        # positions we want to attend and -10000.0 for masked positions.
+        # Since we are adding it to the raw scores before the softmax, this is
+        # effectively the same as removing these entirely.
+        extended_attention_mask = extended_attention_mask.to(dtype=self.dtype)  # fp16 compatibility
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        return extended_attention_mask
+
     def forward(self, masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask):
-        print("CEPredictor attention_mask = ", attention_mask.size(), attention_mask.dtype)
+        # print("CEPredictor attention_mask = ", attention_mask.size(), attention_mask.dtype)
+        attention_mask = self.get_extended_attention_mask(attention_mask, attention_mask.size(), attention_mask.device)
         masked_embeddings = self.in_fc1(masked_embeddings)
         word_embeddings = self.in_fc2(word_embeddings)
         model_outputs = self.in_fc3(model_outputs)
