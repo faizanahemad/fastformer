@@ -941,9 +941,6 @@ class RTDMLMModel(PreTrainedModel):
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
         all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
-        all_noise_locations = all_noise_locations.view(-1)
-        hard_mask_locations = hard_mask_locations.view(-1)
-        co_oc_mask_locations = co_oc_mask_locations.view(-1)
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
@@ -956,6 +953,9 @@ class RTDMLMModel(PreTrainedModel):
 
         val_stats = dict()
         if validation_iter:
+            all_noise_locations = all_noise_locations.view(-1)
+            hard_mask_locations = hard_mask_locations.view(-1)
+            co_oc_mask_locations = co_oc_mask_locations.view(-1)
             am_sum = attention_mask.sum()
             mask_proportion = (all_noise_locations.sum() / am_sum).item()
             co_oc_mask_proportion = (co_oc_mask_locations.sum() / am_sum).item()
