@@ -712,7 +712,7 @@ class CEPredictor(nn.Module):
         init_weights(self.ce_pred, 0.01)
 
     def forward(self, masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask):
-        print("CEPredictor attention_mask = ", attention_mask.size())
+        print("CEPredictor attention_mask = ", attention_mask.size(), attention_mask.dtype)
         masked_embeddings = self.in_fc1(masked_embeddings)
         word_embeddings = self.in_fc2(word_embeddings)
         model_outputs = self.in_fc3(model_outputs)
@@ -771,7 +771,7 @@ class RTDMLMModel(PreTrainedModel):
                                               torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
-        attention_mask = attention_mask.bool()
+
 
         with torch.no_grad():
             mask_probas = torch.rand((b, s), device=input_ids.device)
@@ -789,6 +789,7 @@ class RTDMLMModel(PreTrainedModel):
         predicted_ce_use[non_mask_locations] = 0.0
         predicted_ce_use[mask_locations] = mask_ce[mask_locations]
         asum = attention_mask.sum(1)
+        attention_mask = attention_mask.bool()
         hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(predicted_ce_use)]
         hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
         hard_masks_batches = [torch.tensor([ix]*hm.size(0), device=input_ids.device) for ix, hm in enumerate(hard_masks)]
