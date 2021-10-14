@@ -896,7 +896,7 @@ class RTDMLMModel(PreTrainedModel):
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
             hard_mask_accuracy = word_wise_accuracy[hard_mask_locations].float().mean().item()
-            accuracy = mlm_rtd_hints["accuracy"]
+            accuracy = mlm_rtd_hints["word_accuracy"].float().mean().item()
         return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, predicted_ce=predicted_ce,
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
                     accuracy=accuracy, hard_mask_accuracy=hard_mask_accuracy,
@@ -924,13 +924,13 @@ class RTDMLMModel(PreTrainedModel):
     def forward(self, input_ids, attention_mask, validation_iter=False):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
-        only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
+        only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
         accuracy_masking_model, predicted_ce = dict_get(mask_dict, "accuracy", "predicted_ce")
         average_tokens_per_sample = dict_get(mask_dict,"average_tokens_per_sample")
         mask_stats = dict(average_tokens_per_sample=average_tokens_per_sample,
                           accuracy_masking_model=accuracy_masking_model,
                           only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
-                          only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion=only_hard_mask_proportion)
+                          only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_hard_mask_accuracy_masking_model=only_hard_mask_accuracy_masking_model)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
