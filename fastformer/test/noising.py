@@ -10,7 +10,7 @@ from scipy import stats
 pd.set_option('display.max_columns', None)
 pd.set_option('precision', 2)
 pd.set_option('display.width', 1000)
-from fastformer.utils import CoOccurenceModel, get_backbone, spearman_correlation, corr, clean_text, GaussianNoise, VectorDisplacementNoise
+from fastformer.utils import CoOccurenceModel, get_backbone, spearman_correlation, corr, clean_text, GaussianNoise, VectorDisplacementNoise, token_id_masking
 from tqdm.auto import tqdm
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -121,18 +121,6 @@ wikitext = load_dataset("wikitext", "wikitext-103-v1")
 wikitext = wikitext.filter(lambda x: len(x["text"].split())>64)
 
 
-def token_id_masking(tokens, tokenizer, probability: float = 0.15) -> str:
-    tokens = np.array(tokens.tolist())
-    original_tokens = tokens.copy()
-    special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
-    probas = np.random.random(len(tokens))
-    masked = probas <= probability
-    tokens[masked] = tokenizer.mask_token_id
-    tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
-    tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
-    return torch.tensor(list(tokens))
-
-
 class MLMDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, dataset: torch.utils.data.Dataset, word_mask_proba=0.15):
         try:
@@ -183,11 +171,22 @@ for inputs in tqdm(dataloader):
     gn = GaussianNoise(0.2).to(device)
     vd = VectorDisplacementNoise(0.2).to(device)
     with torch.no_grad():
-        out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
-                      labels=inputs["label_mlm_input_ids"])
-        ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
-            inputs["label_mlm_input_ids"].size())
-        mask_ce = ce[inputs["mask_locations"]]
+
+        indices = torch.arange(inputs["attention_mask"].sum(), device=inputs["input_ids"].device)
+        index_chunks = torch.chunk(indices, 7, dim=0)
+        ce = torch.zeros_like(inputs["input_ids"])
+        for ic in index_chunks:
+            inputs["input_ids"] = inputs["label_mlm_input_ids"].clone()
+            inputs["input_ids"] = inputs["input_ids"].squeeze()[ic] = tokenizer.mask_token_id
+            inputs["input_ids"] = inputs["input_ids"].unsqueeze(0)
+            mask_locations = inputs["input_ids"] == tokenizer.mask_token_id
+            out = roberta(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"],
+                          labels=inputs["label_mlm_input_ids"])
+            cur_ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
+                inputs["label_mlm_input_ids"].size())
+            ce[mask_locations] = cur_ce[mask_locations]
+
+        mask_ce = ce[inputs["attention_mask"].bool()].squeeze()
         mlm_top_indices = set(torch.topk(mask_ce, int(0.4 * mask_ce.size(0))).indices[int(0.2 * mask_ce.size(0)):].tolist())
         overall_mlm.append(mask_ce.detach())
 
@@ -197,7 +196,7 @@ for inputs in tqdm(dataloader):
 
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        ce = ce[inputs["mask_locations"]].detach()
+        ce = ce[inputs["attention_mask"].bool()].detach().squeeze()
         drop_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
         percentile_intersection["drop"].append(len(mlm_top_indices.intersection(drop_top_indices))/max(len(mlm_top_indices), 1))
         overall_ce.append(ce)
@@ -205,13 +204,13 @@ for inputs in tqdm(dataloader):
         top_confs = F.softmax(top_confs, dim=-1)
         confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
         under_confidence_scores = (1 - confidences)  # 1/confidences
-        bt = under_confidence_scores[inputs["mask_locations"]].detach()
+        bt = under_confidence_scores[inputs["attention_mask"].bool()].detach().squeeze()
         bt_top_indices = set(torch.topk(bt, int(0.4 * bt.size(0))).indices[int(0.2 * bt.size(0)):].tolist())
         percentile_intersection["bt"].append(len(mlm_top_indices.intersection(bt_top_indices)) / max(len(mlm_top_indices), 1))
         overall_bt.append(bt)
 
         mlm_rtd_hints = masking_model(inputs["input_ids"], inputs["attention_mask"], validation_iter=True)
-        co_oc_word_ce = mlm_rtd_hints["word_ce"][inputs["mask_locations"]].detach()
+        co_oc_word_ce = mlm_rtd_hints["word_ce"][inputs["attention_mask"].bool()].detach().squeeze()
         co_oc_top_indices = set(torch.topk(co_oc_word_ce, int(0.4 * co_oc_word_ce.size(0))).indices[int(0.2 * co_oc_word_ce.size(0)):].tolist())
         percentile_intersection["co_oc"].append(len(mlm_top_indices.intersection(co_oc_top_indices)) / max(len(mlm_top_indices), 1))
         overall_cooc.append(co_oc_word_ce)
@@ -221,7 +220,7 @@ for inputs in tqdm(dataloader):
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        ce = ce[inputs["mask_locations"]].detach()
+        ce = ce[inputs["attention_mask"].bool()].detach().squeeze()
         gn_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
         percentile_intersection["gn"].append(len(mlm_top_indices.intersection(gn_top_indices)) / max(len(mlm_top_indices), 1))
         overall_gaussian.append(ce)
@@ -231,7 +230,7 @@ for inputs in tqdm(dataloader):
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        ce = ce[inputs["mask_locations"]].detach()
+        ce = ce[inputs["attention_mask"].bool()].detach().squeeze()
         vd_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
         percentile_intersection["vd"].append(len(mlm_top_indices.intersection(vd_top_indices)) / max(len(mlm_top_indices), 1))
         overall_vd.append(ce)
@@ -241,7 +240,7 @@ for inputs in tqdm(dataloader):
                       labels=inputs["input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["input_ids"].view(-1)).view(
             inputs["input_ids"].size())
-        ce = ce[inputs["mask_locations"]].detach()
+        ce = ce[inputs["attention_mask"].bool()].detach().squeeze()
         gn_vd_top_indices = set(torch.topk(ce, int(0.4 * ce.size(0))).indices[int(0.2 * ce.size(0)):].tolist())
         percentile_intersection["gn_vd"].append(len(mlm_top_indices.intersection(gn_vd_top_indices)) / max(len(mlm_top_indices), 1))
         overall_drop_gaussian_vd.append(ce)
@@ -251,7 +250,7 @@ for inputs in tqdm(dataloader):
                       labels=inputs["label_mlm_input_ids"])
         ce = nn.CrossEntropyLoss(reduction='none')(out["logits"].detach().view(-1, out3["logits"].size(-1)), inputs["label_mlm_input_ids"].view(-1)).view(
             inputs["label_mlm_input_ids"].size())
-        mask_ce = ce[inputs["mask_locations"]]
+        mask_ce = ce[inputs["attention_mask"].bool()].squeeze()
         mlm_two_top_indices = set(torch.topk(mask_ce, int(0.4 * mask_ce.size(0))).indices[int(0.2 * mask_ce.size(0)):].tolist())
         percentile_intersection["mlm_two"].append(len(mlm_top_indices.intersection(mlm_two_top_indices)) / max(len(mlm_top_indices), 1))
 
@@ -293,7 +292,7 @@ print(standard_corr)
 
 # Model Based performance estimator
 # Try distilroberta
-# Try Last Layer Enhance (Masked Embeddings, Model outputs, Word Embeddings, CE of mask locations) -> predict diff from average CE of sequence
+# Try Last Layer Enhance (Masked Embeddings, Model outputs, Word Embeddings, CE of mask locations, avg CE) -> predict diff from average CE of sequence
 
 
 

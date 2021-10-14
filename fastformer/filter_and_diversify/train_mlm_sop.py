@@ -25,7 +25,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from torch.cuda.amp import GradScaler, autocast
-from transformers.models.roberta.modeling_roberta import RobertaLMHead
+from transformers.models.roberta.modeling_roberta import RobertaLMHead, RobertaEncoder
 
 from fastformer.config import *
 from fastformer.utils import *
@@ -693,6 +693,35 @@ class RTDMLMModelOld(PreTrainedModel):
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
+class CEPredictor(nn.Module):
+    def __init__(self, config, in_dims=768):
+        super().__init__()
+        self.in_dims = in_dims
+        self.hidden_size = config.hidden_size
+        self.ce_pred = RobertaEncoder(config)
+        self.in_fc1 = nn.Linear(self.in_dims, self.hidden_size)
+        self.in_fc2 = nn.Linear(self.in_dims, self.hidden_size)
+        self.in_fc3 = nn.Linear(self.in_dims, self.hidden_size)
+        self.in_fc4 = nn.Linear(64, self.hidden_size)
+        self.out_fc = nn.Linear(self.hidden_size, 1)
+        init_weights(self.in_fc1, 0.01)
+        init_weights(self.in_fc2, 0.01)
+        init_weights(self.in_fc3, 0.01)
+        init_weights(self.in_fc4, 0.01)
+        init_weights(self.out_fc, 0.01)
+        init_weights(self.ce_pred, 0.01)
+
+    def forward(self, masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask):
+        masked_embeddings = self.in_fc1(masked_embeddings)
+        word_embeddings = self.in_fc2(word_embeddings)
+        model_outputs = self.in_fc3(model_outputs)
+        mask_ce = self.in_fc4(encode_scalar_column(mask_ce))
+        input_embeddings = masked_embeddings + word_embeddings + model_outputs + mask_ce
+        last_hidden_state = self.ce_pred(input_embeddings, attention_mask, return_dict=False)["last_hidden_state"]
+        outputs = self.out_fc(last_hidden_state)
+        return outputs
+
+
 class RTDMLMModel(PreTrainedModel):
     def __init__(self, backbone: PreTrainedModel, lm_head: nn.Module, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
@@ -713,8 +742,15 @@ class RTDMLMModel(PreTrainedModel):
         self.backbone = backbone
         self.mlm_w = mlm_w
         self.tokenizer = tokenizer
-        self.rtd_nn = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.GELU(), nn.Linear(hidden_size, 1))
-        init_weights(self.rtd_nn, 0.01)
+        encoder_config = copy.deepcopy(backbone.config)
+        encoder_config.hidden_size = 256
+        encoder_config.num_hidden_layers = 4
+        encoder_config.num_attention_heads = 8
+        encoder_config.intermediate_size = 1024
+        encoder_config.hidden_dropout_prob = 0.0
+        encoder_config.attention_probs_dropout_prob = 0.0
+        self.ce_pred = CEPredictor(encoder_config, hidden_size)
+
         self.lm_head = lm_head
         if reinit:
             self.backbone.init_weights()
@@ -728,72 +764,78 @@ class RTDMLMModel(PreTrainedModel):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
         ss = attention_mask.sum(1).float().mean().item()
+        mask_token_id = self.tokenizer.mask_token_id
+
+        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id,
+                                              torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
         attention_mask = attention_mask.bool()
+
+        with torch.no_grad():
+            mask_probas = torch.rand((b, s), device=input_ids.device)
+            mask_probas[non_mask_locations] = 1.0
+            mask_locations = mask_probas < 0.15
+            masked_input_ids = input_ids.clone()
+            masked_input_ids[mask_locations] = mask_token_id
+            masked_embeddings = self.backbone.embeddings.word_embeddings(masked_input_ids)
+            word_embeddings = self.backbone.embeddings.word_embeddings(input_ids)
+            model_outputs = self.backbone(inputs_embeds=masked_embeddings, attention_mask=attention_mask, return_dict=False)[0]
+            prediction_scores = self.lm_head(model_outputs)
+            mask_ce = self.loss_ce(prediction_scores.view(-1, prediction_scores.size(-1)), input_ids.view(-1)).reshape(b, s)
+        predicted_ce = self.ce_pred(masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask)
+        predicted_ce_use = predicted_ce.detach()
+        predicted_ce_use[non_mask_locations] = 0.0
+        predicted_ce_use[mask_locations] = mask_ce[mask_locations]
+        asum = attention_mask.sum(1)
+        hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(predicted_ce_use)]
+        hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
+        hard_masks_batches = [torch.tensor([ix]*hm.size(0), device=input_ids.device) for ix, hm in enumerate(hard_masks)]
+        hard_mask_locations = torch.zeros_like(input_ids, dtype=torch.bool)
+        hard_masks_batches = torch.cat(hard_masks_batches)
+        hard_masks = torch.cat(hard_masks)
+        hard_mask_locations[hard_masks_batches, hard_masks] = True
+
+
+
         word_ce = mlm_rtd_hints["word_ce"]
         co_oc_teacher_prediction_scores = None
+        word_ce_max = word_ce.max()
         if self.word_ce_schedule < 0.0:
             co_oc_teacher_prediction_scores = mlm_rtd_hints["prediction_scores"]
-            word_ce_max = word_ce.max()
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         else:
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.9 * (word_ce_max ** self.word_ce_schedule))
-        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
-        word_ce[non_mask_locations] = 0.0
-        decided_noise_proportion = (0.15 + random.random() * 0.03)
+        word_ce[torch.logical_or(non_mask_locations, hard_mask_locations)] = 0.0
+        decided_noise_proportion = (0.06 + random.random() * 0.03)
         average_tokens_per_sample = ss
         indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
-        indices = indices[:, torch.randperm(indices.size()[1])]
+        word_mask = indices[:, torch.randperm(indices.size()[1])]
 
-        word_mask, rtd_mask_model = torch.chunk(indices, 2, dim=1)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
-        rtd_mask_model = [torch.arange(b, device=rtd_mask_model.device).repeat_interleave(rtd_mask_model.size(1)), rtd_mask_model.reshape(-1)]
 
-        input_ids[word_mask[0], word_mask[1]] = self.tokenizer.mask_token_id
-        rtd_locations_model = torch.zeros_like(input_ids, dtype=torch.bool)
-        rtd_locations_model[rtd_mask_model[0], rtd_mask_model[1]] = True
-        rtd_input_ids = label_mlm_input_ids.clone()
-        rtd_input_ids[rtd_locations_model] = self.tokenizer.mask_token_id
-        with torch.no_grad():
-            outputs = self.backbone(
-                rtd_input_ids,
-                attention_mask=attention_mask,
-                return_dict=False,
-            )
-            sequence_output = outputs[0][rtd_locations_model]
-            prediction_scores = self.lm_head(sequence_output)
-            if validation_iter:
-                lm_predictions = prediction_scores.detach().argmax(dim=-1)
-        sampled_replacements = temperature_sampling(prediction_scores, self.rtd_temperature).view(-1)
-        input_ids[rtd_locations_model] = sampled_replacements
-        rtd_labels = torch.logical_and(input_ids != label_mlm_input_ids, input_ids != self.tokenizer.mask_token_id).float()
+        input_ids[word_mask[0], word_mask[1]] = mask_token_id
+        co_oc_mask_locations = input_ids == self.tokenizer.mask_token_id
+        input_ids[hard_mask_locations] = mask_token_id
         mask_locations = input_ids == self.tokenizer.mask_token_id
-        all_noise_locations = torch.logical_or(mask_locations, rtd_locations_model)
+        all_noise_locations = mask_locations
+
         mask_accuracy = None
-        rtd_masking_accuracy = None
-        rtd_model_post_replacement_accuracy = None
-        rtd_model_accuracy = None
         accuracy = None
-        all_rtd_proportion = None
-        all_rtd_fraction = None
+        co_oc_mask_accuracy = None
+        hard_mask_accuracy = None
         if validation_iter:
             attention_sum = attention_mask.sum()
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
-            rtd_masking_accuracy = word_wise_accuracy[rtd_locations_model].float().mean().item()
-            labels_rtd = label_mlm_input_ids[rtd_locations_model]
-            rtd_model_accuracy = (lm_predictions == labels_rtd).float().mean().item()
-            rtd_input_ids = input_ids[rtd_locations_model]
-            all_rtd_proportion = ((rtd_input_ids != labels_rtd).sum() / attention_sum).item()
-            rtd_model_post_replacement_accuracy = (rtd_input_ids == labels_rtd).float().mean().item()
+            co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
+            hard_mask_accuracy = word_wise_accuracy[hard_mask_locations].float().mean().item()
             accuracy = mlm_rtd_hints["accuracy"]
-        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, rtd_labels=rtd_labels,
-                    mask_accuracy=mask_accuracy, rtd_accuracy=rtd_masking_accuracy,
-                    accuracy=accuracy, rtd_post_replacement_accuracy=rtd_model_post_replacement_accuracy, rtd_model_accuracy=rtd_model_accuracy,
-                    rtd_model_post_replacement_accuracy=rtd_model_post_replacement_accuracy,
+        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids,
+                    mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
+                    accuracy=accuracy, hard_mask_accuracy=hard_mask_accuracy,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
-                    co_oc_teacher_prediction_scores=co_oc_teacher_prediction_scores, all_noise_locations=all_noise_locations, all_rtd_proportion=all_rtd_proportion, all_rtd_fraction=all_rtd_fraction)
+                    co_oc_teacher_prediction_scores=co_oc_teacher_prediction_scores, all_noise_locations=all_noise_locations)
 
     def get_output_embeddings(self):
         if isinstance(self.lm_head, RobertaLMHead):
@@ -815,7 +857,7 @@ class RTDMLMModel(PreTrainedModel):
     def forward(self, input_ids, attention_mask, validation_iter=False):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids, rtd_labels = dict_get(mask_dict, "input_ids", "label_mlm_input_ids", "rtd_labels")
-        only_mask_accuracy_masking_model, only_rtd_accuracy_masking_model, all_rtd_proportion = dict_get(mask_dict, "mask_accuracy", "rtd_accuracy", "all_rtd_proportion")
+        only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
         accuracy_masking_model, rtd_post_replacement_accuracy, rtd_model_accuracy = dict_get(mask_dict, "accuracy", "rtd_post_replacement_accuracy", "rtd_model_accuracy")
         decided_noise_proportion, average_tokens_per_sample, all_rtd_fraction = dict_get(mask_dict, "decided_noise_proportion", "average_tokens_per_sample", "all_rtd_fraction")
         mask_stats = dict(decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,

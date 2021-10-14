@@ -1776,6 +1776,24 @@ def dict_get(d, *k):
         yield d[i]
 
 
+def encode_scalar_column(x, scales=list(range(-16, 16))):
+    scales = torch.tensor([pow(2., i) for i in scales]).to(x.device)
+    x = x.unsqueeze(-1) / scales
+    # https://ogb.stanford.edu/paper/kddcup2021/mag240m_SyneriseAI.pdf
+    return torch.cat([torch.sin(x), torch.cos(x)], -1)
+
+def token_id_masking(tokens, tokenizer, probability: float = 0.15) -> str:
+    tokens = np.array(tokens.tolist())
+    original_tokens = tokens.copy()
+    special_tokens_idx = np.in1d(original_tokens, tokenizer.all_special_ids)
+    probas = np.random.random(len(tokens))
+    masked = probas <= probability
+    tokens[masked] = tokenizer.mask_token_id
+    tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
+    tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
+    return torch.tensor(list(tokens))
+
+
 
 
 
