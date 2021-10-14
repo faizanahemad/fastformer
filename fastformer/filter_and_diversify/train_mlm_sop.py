@@ -857,7 +857,8 @@ class RTDMLMModel(PreTrainedModel):
         predicted_ce = self.ce_pred(masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask)
         predicted_ce_use = predicted_ce.detach()
         predicted_ce_use[non_mask_locations] = 0.0
-        predicted_ce_use[mask_locations] = mask_ce[mask_locations]
+        print(predicted_ce_use[mask_locations].size(), mask_ce[mask_locations].size())
+        predicted_ce_use[mask_locations] = mask_ce[mask_locations].unsqueeze(-1)
         asum = attention_mask.sum(1)
         attention_mask = attention_mask.bool()
         hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(predicted_ce_use)]
