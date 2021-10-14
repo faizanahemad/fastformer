@@ -943,6 +943,8 @@ class RTDMLMModel(PreTrainedModel):
         all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
+        predicted_ce = predicted_ce.view(-1)
+        all_noise_locations = all_noise_locations.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
         masked_lm_loss = masked_lm_loss[all_noise_locations]
         predicted_ce_loss = torch.abs(predicted_ce[all_noise_locations] - masked_lm_loss.detach())
@@ -953,7 +955,6 @@ class RTDMLMModel(PreTrainedModel):
 
         val_stats = dict()
         if validation_iter:
-            all_noise_locations = all_noise_locations.view(-1)
             hard_mask_locations = hard_mask_locations.view(-1)
             co_oc_mask_locations = co_oc_mask_locations.view(-1)
             am_sum = attention_mask.sum()
