@@ -174,7 +174,7 @@ for inputs in tqdm(dataloader):
 
         indices = torch.arange(inputs["attention_mask"].sum(), device=inputs["input_ids"].device)
         index_chunks = torch.chunk(indices, 7, dim=0)
-        ce = torch.zeros_like(inputs["input_ids"])
+        ce = torch.zeros_like(inputs["input_ids"], dtype=torch.float)
         for ic in index_chunks:
             inputs["input_ids"] = inputs["label_mlm_input_ids"].clone()
             inputs["input_ids"] = inputs["input_ids"].squeeze()

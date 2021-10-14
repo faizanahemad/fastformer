@@ -863,7 +863,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_stats = dict(decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
                           all_rtd_fraction=all_rtd_fraction, accuracy_masking_model=accuracy_masking_model, rtd_post_replacement_accuracy=rtd_post_replacement_accuracy,
                           rtd_model_accuracy=rtd_model_accuracy, only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
-                          only_rtd_accuracy_masking_model=only_rtd_accuracy_masking_model, all_rtd_proportion=all_rtd_proportion)
+                          only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_hard_mask_proportion=only_hard_mask_proportion)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
