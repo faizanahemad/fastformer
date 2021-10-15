@@ -863,6 +863,11 @@ class RTDMLMModel(PreTrainedModel):
         b, s = input_ids.shape[:2]
         mask_token_id = self.tokenizer.mask_token_id
         mask_probas = torch.rand((b, s), device=input_ids.device)
+        mask_probas[non_mask_locations] = 0.0
+        probas_sections = [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+        for p_start, p_end in zip(probas_sections[:-1], probas_sections[1:]):
+            pass
+
 
         with torch.no_grad():
             mask_probas = torch.rand((b, s), device=input_ids.device)
