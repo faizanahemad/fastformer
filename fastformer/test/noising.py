@@ -167,7 +167,7 @@ percentile_intersection = defaultdict(list)
 
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
-    drop = nn.Dropout(0.75).to(device)
+    drop = nn.Dropout(0.5).to(device)
     gn = GaussianNoise(0.15).to(device)
     vd = VectorDisplacementNoise(0.15).to(device)
     with torch.no_grad():
