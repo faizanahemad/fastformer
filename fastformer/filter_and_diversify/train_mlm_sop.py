@@ -907,7 +907,7 @@ class RTDMLMModel(PreTrainedModel):
         ce = mask_ce
         ce[non_mask_locations] = -1e-3
         asum = attention_mask.sum(1)
-        hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(ce)]
+        hard_masks = [torch.topk(pce, int(0.3 * asum[ix])).indices[int(0.1 * asum[ix]):] for ix, pce in enumerate(ce)]
         hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
         hard_masks_batches = [torch.tensor([ix]*hm.size(0), device=input_ids.device) for ix, hm in enumerate(hard_masks)]
         hard_mask_locations = torch.zeros_like(input_ids, dtype=torch.bool)
