@@ -865,7 +865,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_probas = torch.rand((b, s), device=input_ids.device)
         mask_probas[non_mask_locations] = 0.0
         probas_sections = [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
-        ce = torch.zeros_like("input_ids", dtype=torch.float)
+        ce = torch.zeros_like(input_ids, dtype=torch.float)
         for p_start, p_end in zip(probas_sections[:-1], probas_sections[1:]):
             mask_locations = p_start < mask_probas
             mask_locations = torch.logical_and(mask_locations, mask_probas < p_end)
