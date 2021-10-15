@@ -278,7 +278,7 @@ compared_values = [overall_ce, overall_bt, overall_cooc, overall_gaussian, overa
 
 lrdata = torch.stack(compared_values, 1)
 labels = lrdata[:, lrdata.size(1) -1].cpu().numpy()
-labels = (100 * stats.rankdata(labels, "average") / len(labels)).astype(int) / 100  # https://stackoverflow.com/questions/44607537/convert-array-into-percentiles
+labels = (20 * stats.rankdata(labels, "average") / len(labels)).astype(int) / 20  # https://stackoverflow.com/questions/44607537/convert-array-into-percentiles
 reg = LinearRegression().fit(lrdata[:, :lrdata.size(1) - 1].cpu().numpy(), labels)
 preds = reg.predict(lrdata[:, :lrdata.size(1) - 1].cpu().numpy())
 preds = torch.tensor(preds).to(device).squeeze()
