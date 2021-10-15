@@ -800,9 +800,8 @@ class RTDMLMModel(PreTrainedModel):
         self.mask_token_id = tokenizer.mask_token_id
         hidden_size = backbone.config.hidden_size
         self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id, reduction="none")
-        self.loss_bce = nn.BCEWithLogitsLoss()
         self.config = backbone.config
-        self.config.gradient_checkpointing = True
+        self.config.gradient_checkpointing = False
         self.rtd_temperature = 1.5
         self.word_ce_schedule = 1.0
         if hasattr(backbone, "pooler"):
@@ -820,8 +819,6 @@ class RTDMLMModel(PreTrainedModel):
         encoder_config.intermediate_size = 1024
         encoder_config.hidden_dropout_prob = 0.0
         encoder_config.attention_probs_dropout_prob = 0.0
-        self.drop = nn.Dropout(0.75)
-        # self.ce_pred = CEPredictor(encoder_config, hidden_size)
 
         self.lm_head = lm_head
         if reinit:
