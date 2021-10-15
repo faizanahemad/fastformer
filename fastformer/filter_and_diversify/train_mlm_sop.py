@@ -917,6 +917,14 @@ class RTDMLMModel(PreTrainedModel):
         # print("hard_mask_locations correctness = %s" % correctness[hard_mask_locations].float().mean().item())
         return dict(hard_mask_locations=hard_mask_locations, predicted_ce=ce)
 
+    def get_hard_mask_v4(self, input_ids, attention_mask, non_mask_locations):
+        b, s = input_ids.shape[:2]
+        mask_probas = torch.rand((b, s), device=input_ids.device)
+        mask_probas[non_mask_locations] = 1.0
+        mask_probas[:, 0] = 1.0
+        mask_locations = mask_probas < 0.06
+        return dict(hard_mask_locations=mask_locations, predicted_ce=mask_probas)
+
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
@@ -928,7 +936,7 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
 
-        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v3(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
+        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v4(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce_max = word_ce.max()
@@ -937,7 +945,7 @@ class RTDMLMModel(PreTrainedModel):
         else:
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.9 * (word_ce_max ** self.word_ce_schedule))
         word_ce[torch.logical_or(non_mask_locations, hard_mask_locations)] = 0.0
-        decided_noise_proportion = (0.06 + random.random() * 0.03)
+        decided_noise_proportion = (0.09 + random.random() * 0.03)
         average_tokens_per_sample = ss
         indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         word_mask = indices[:, torch.randperm(indices.size()[1])]
