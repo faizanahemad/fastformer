@@ -965,7 +965,7 @@ class RTDMLMModel(PreTrainedModel):
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
             hard_mask_accuracy = word_wise_accuracy[hard_mask_locations].float().mean().item()
             accuracy = mlm_rtd_hints["word_accuracy"].float().mean().item()
-        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, predicted_ce=predicted_ce,
+        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids,
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
                     accuracy=accuracy, hard_mask_accuracy=hard_mask_accuracy,
                     hard_mask_locations=hard_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
@@ -993,7 +993,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
         only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
-        accuracy_masking_model, predicted_ce = dict_get(mask_dict, "accuracy", "predicted_ce")
+        accuracy_masking_model = dict_get(mask_dict, "accuracy")
         average_tokens_per_sample = dict_get(mask_dict,"average_tokens_per_sample")
         mask_stats = dict(average_tokens_per_sample=average_tokens_per_sample,
                           accuracy_masking_model=accuracy_masking_model,
@@ -1010,14 +1010,10 @@ class RTDMLMModel(PreTrainedModel):
         all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
-        predicted_ce = predicted_ce.view(-1)
         all_noise_locations = all_noise_locations.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
         masked_lm_loss = masked_lm_loss[all_noise_locations]
-        predicted_ce_loss = (predicted_ce[all_noise_locations] - masked_lm_loss.detach()) ** 2
-        predicted_ce_loss_mape = (predicted_ce_loss.detach() / masked_lm_loss.detach()).mean().item()
         masked_lm_loss = masked_lm_loss.mean()
-        predicted_ce_loss = predicted_ce_loss.mean()
         # All token MLM averages over all tokens and copy tokens have low average.
 
         val_stats = dict()
@@ -1040,8 +1036,7 @@ class RTDMLMModel(PreTrainedModel):
                              co_oc_mask_lm_accuracy=co_oc_mask_lm_accuracy, hard_mask_lm_accuracy=hard_mask_lm_accuracy,
                              co_oc_mask_proportion=co_oc_mask_proportion, hard_mask_proportion=hard_mask_proportion)
 
-        return dict(loss=self.mlm_w * (masked_lm_loss + predicted_ce_loss),
-                    predicted_ce_loss=predicted_ce_loss.item(), predicted_ce_loss_mape=predicted_ce_loss_mape,
+        return dict(loss=self.mlm_w * masked_lm_loss,
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
