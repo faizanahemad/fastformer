@@ -151,7 +151,7 @@ class MLMDataset(torch.utils.data.Dataset):
 
 print(wikitext)
 dataset = MLMDataset(tokenizer, wikitext["train"])
-dataset, _ = torch.utils.data.random_split(dataset, [4096, len(dataset) - 4096])
+dataset, _ = torch.utils.data.random_split(dataset, [2048, len(dataset) - 4096])
 dataloader = DataLoader(dataset, batch_size=1, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
 
 
@@ -167,9 +167,9 @@ percentile_intersection = defaultdict(list)
 
 for inputs in tqdm(dataloader):
     inputs = {k: v.to(device) for k, v in inputs.items()}
-    drop = nn.Dropout(0.8).to(device)
-    gn = GaussianNoise(0.2).to(device)
-    vd = VectorDisplacementNoise(0.2).to(device)
+    drop = nn.Dropout(0.75).to(device)
+    gn = GaussianNoise(0.15).to(device)
+    vd = VectorDisplacementNoise(0.15).to(device)
     with torch.no_grad():
 
         indices = torch.arange(inputs["attention_mask"].sum(), device=inputs["input_ids"].device)

@@ -831,18 +831,9 @@ class RTDMLMModel(PreTrainedModel):
         self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
         self.bos_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.cls_token_id
 
-    def do_masking(self, input_ids, attention_mask, validation_iter=False):
-        label_mlm_input_ids = input_ids.clone()
+    def get_hard_mask(self, input_ids, attention_mask, non_mask_locations):
         b, s = input_ids.shape[:2]
-        ss = attention_mask.sum(1).float().mean().item()
         mask_token_id = self.tokenizer.mask_token_id
-
-        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id,
-                                              torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
-        with torch.no_grad():
-            mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
-
-
         with torch.no_grad():
             mask_probas = torch.rand((b, s), device=input_ids.device)
             mask_probas[non_mask_locations] = 1.0
@@ -865,7 +856,22 @@ class RTDMLMModel(PreTrainedModel):
         hard_mask_locations = torch.zeros_like(input_ids, dtype=torch.bool)
         hard_masks_batches = torch.cat(hard_masks_batches)
         hard_masks = torch.cat(hard_masks)
-        hard_mask_locations[hard_masks_batches, hard_masks] = True
+        hard_mask_locations[hard_masks_batches.long(), hard_masks.long()] = True
+        return dict(hard_mask_locations=hard_mask_locations, predicted_ce=predicted_ce)
+
+
+    def do_masking(self, input_ids, attention_mask, validation_iter=False):
+        label_mlm_input_ids = input_ids.clone()
+        b, s = input_ids.shape[:2]
+        ss = attention_mask.sum(1).float().mean().item()
+        mask_token_id = self.tokenizer.mask_token_id
+
+        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id,
+                                              torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
+        with torch.no_grad():
+            mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
+
+        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce_max = word_ce.max()
