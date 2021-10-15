@@ -151,7 +151,7 @@ class MLMDataset(torch.utils.data.Dataset):
 
 print(wikitext)
 dataset = MLMDataset(tokenizer, wikitext["train"])
-dataset, _ = torch.utils.data.random_split(dataset, [2048, len(dataset) - 4096])
+dataset, _ = torch.utils.data.random_split(dataset, [2048, len(dataset) - 2048])
 dataloader = DataLoader(dataset, batch_size=1, num_workers=2, pin_memory=True, prefetch_factor=2, shuffle=True)
 
 
