@@ -914,7 +914,7 @@ class RTDMLMModel(PreTrainedModel):
         hard_masks_batches = torch.cat(hard_masks_batches)
         hard_masks = torch.cat(hard_masks)
         hard_mask_locations[hard_masks_batches.long(), hard_masks.long()] = True
-        print("hard_mask_locations correctness = %s" % correctness[hard_mask_locations].mean().item())
+        print("hard_mask_locations correctness = %s" % correctness[hard_mask_locations].float().mean().item())
         return dict(hard_mask_locations=hard_mask_locations, predicted_ce=ce)
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
