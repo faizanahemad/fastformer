@@ -895,9 +895,17 @@ class RTDMLMModel(PreTrainedModel):
             model_outputs = self.backbone(inputs_embeds=self.drop(self.backbone.embeddings.word_embeddings(input_ids)), attention_mask=attention_mask, return_dict=False)[0]
             prediction_scores = self.lm_head(model_outputs)
             mask_ce = self.loss_ce(prediction_scores.view(-1, prediction_scores.size(-1)), input_ids.view(-1)).reshape(b, s)
-            mask_ce[prediction_scores.argmax(dim=-1) == input_ids] = 0.0
+            top_confs, _ = prediction_scores["logits"].topk(2, -1)
+            top_confs = F.softmax(top_confs, dim=-1)
+            confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
+            under_confidence_scores = (1 - confidences)  # 1/confidences
+
+            predictions = prediction_scores.argmax(dim=-1)
+            correctness = predictions == input_ids
+            mask_ce = mask_ce + under_confidence_scores
+            mask_ce[correctness] = -1e-3
         ce = mask_ce
-        ce[non_mask_locations] = 0.0
+        ce[non_mask_locations] = -1e-3
         asum = attention_mask.sum(1)
         hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(ce)]
         hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
@@ -906,6 +914,7 @@ class RTDMLMModel(PreTrainedModel):
         hard_masks_batches = torch.cat(hard_masks_batches)
         hard_masks = torch.cat(hard_masks)
         hard_mask_locations[hard_masks_batches.long(), hard_masks.long()] = True
+        print("hard_mask_locations correctness = %s" % correctness[hard_mask_locations].mean().item())
         return dict(hard_mask_locations=hard_mask_locations, predicted_ce=ce)
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
