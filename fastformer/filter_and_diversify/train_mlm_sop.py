@@ -895,7 +895,7 @@ class RTDMLMModel(PreTrainedModel):
             model_outputs = self.backbone(inputs_embeds=self.drop(self.backbone.embeddings.word_embeddings(input_ids)), attention_mask=attention_mask, return_dict=False)[0]
             prediction_scores = self.lm_head(model_outputs)
             mask_ce = self.loss_ce(prediction_scores.view(-1, prediction_scores.size(-1)), input_ids.view(-1)).reshape(b, s)
-            top_confs, _ = prediction_scores["logits"].topk(2, -1)
+            top_confs, _ = prediction_scores.topk(2, -1)
             top_confs = F.softmax(top_confs, dim=-1)
             confidences = top_confs[:, :, 0] - top_confs[:, :, 1]
             under_confidence_scores = (1 - confidences)  # 1/confidences
