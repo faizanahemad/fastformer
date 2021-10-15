@@ -865,34 +865,26 @@ class RTDMLMModel(PreTrainedModel):
         mask_probas = torch.rand((b, s), device=input_ids.device)
         mask_probas[non_mask_locations] = 0.0
         probas_sections = [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+        ce = torch.zeros_like("input_ids", dtype=torch.float)
         for p_start, p_end in zip(probas_sections[:-1], probas_sections[1:]):
-            pass
-
-
-        with torch.no_grad():
-            mask_probas = torch.rand((b, s), device=input_ids.device)
-            mask_probas[non_mask_locations] = 1.0
-            mask_locations = mask_probas < 0.15
+            mask_locations = p_start < mask_probas
+            mask_locations = torch.logical_and(mask_locations, mask_probas < p_end)
             masked_input_ids = input_ids.clone()
             masked_input_ids[mask_locations] = mask_token_id
-            masked_embeddings = self.backbone.embeddings.word_embeddings(masked_input_ids)
-            word_embeddings = self.backbone.embeddings.word_embeddings(input_ids)
-            model_outputs = self.backbone(inputs_embeds=masked_embeddings, attention_mask=attention_mask, return_dict=False)[0]
+            model_outputs = self.backbone(input_ids=masked_input_ids, attention_mask=attention_mask, return_dict=False)[0][mask_locations]
             prediction_scores = self.lm_head(model_outputs)
-            mask_ce = self.loss_ce(prediction_scores.view(-1, prediction_scores.size(-1)), input_ids.view(-1)).reshape(b, s)
-        predicted_ce = self.ce_pred(masked_embeddings, word_embeddings, model_outputs, mask_ce, attention_mask)
-        predicted_ce_use = predicted_ce.detach()
-        predicted_ce_use[non_mask_locations] = 0.0
-        predicted_ce_use[mask_locations] = mask_ce[mask_locations]
+            mask_ce = self.loss_ce(prediction_scores, input_ids[mask_locations])
+            ce[mask_locations] = mask_ce
+        ce[non_mask_locations] = 0.0
         asum = attention_mask.sum(1)
-        hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(predicted_ce_use)]
+        hard_masks = [torch.topk(pce, int(0.4 * asum[ix])).indices[int(0.2 * asum[ix]):] for ix, pce in enumerate(ce)]
         hard_masks = [hm[torch.randperm(hm.size(0))[:int(0.08 * asum[ix])]] for ix, hm in enumerate(hard_masks)]
         hard_masks_batches = [torch.tensor([ix]*hm.size(0), device=input_ids.device) for ix, hm in enumerate(hard_masks)]
         hard_mask_locations = torch.zeros_like(input_ids, dtype=torch.bool)
         hard_masks_batches = torch.cat(hard_masks_batches)
         hard_masks = torch.cat(hard_masks)
         hard_mask_locations[hard_masks_batches.long(), hard_masks.long()] = True
-        return dict(hard_mask_locations=hard_mask_locations, predicted_ce=predicted_ce)
+        return dict(hard_mask_locations=hard_mask_locations, predicted_ce=ce)
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
@@ -905,7 +897,7 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
 
-        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
+        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v2(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce_max = word_ce.max()
