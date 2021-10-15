@@ -940,7 +940,7 @@ class RTDMLMModel(PreTrainedModel):
         if self.word_ce_schedule < 0.0:
             word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
         else:
-            word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.9 * (word_ce_max ** self.word_ce_schedule))
+            word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.95 * (word_ce_max ** self.word_ce_schedule))
         word_ce[torch.logical_or(non_mask_locations, hard_mask_locations)] = 0.0
         decided_noise_proportion = (0.09 + random.random() * 0.03)
         average_tokens_per_sample = ss
@@ -1415,7 +1415,7 @@ def train(local_rank, args):
             if reinit:
                 schedule = [-1.0, -0.5, 0.0, 0.5, 1.0]
             else:
-                schedule = [1.0, 1.0, 1.0, 1.0, 1.0]
+                schedule = [1.5] * 5
             getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
                                                                         [0,
                                                                          min(10000, int(0.05 * total_steps)),
