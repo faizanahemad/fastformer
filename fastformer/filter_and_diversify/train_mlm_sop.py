@@ -871,9 +871,10 @@ class RTDMLMModel(PreTrainedModel):
             mask_locations = torch.logical_and(mask_locations, mask_probas < p_end)
             masked_input_ids = input_ids.clone()
             masked_input_ids[mask_locations] = mask_token_id
-            model_outputs = self.backbone(input_ids=masked_input_ids, attention_mask=attention_mask, return_dict=False)[0][mask_locations]
-            prediction_scores = self.lm_head(model_outputs)
-            mask_ce = self.loss_ce(prediction_scores, input_ids[mask_locations])
+            with torch.no_grad():
+                model_outputs = self.backbone(input_ids=masked_input_ids, attention_mask=attention_mask, return_dict=False)[0][mask_locations]
+                prediction_scores = self.lm_head(model_outputs)
+                mask_ce = self.loss_ce(prediction_scores, input_ids[mask_locations])
             ce[mask_locations] = mask_ce
         ce[non_mask_locations] = 0.0
         asum = attention_mask.sum(1)
