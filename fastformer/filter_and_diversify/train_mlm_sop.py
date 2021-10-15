@@ -820,7 +820,7 @@ class RTDMLMModel(PreTrainedModel):
         encoder_config.intermediate_size = 1024
         encoder_config.hidden_dropout_prob = 0.0
         encoder_config.attention_probs_dropout_prob = 0.0
-        self.ce_pred = CEPredictor(encoder_config, hidden_size)
+        # self.ce_pred = CEPredictor(encoder_config, hidden_size)
 
         self.lm_head = lm_head
         if reinit:
