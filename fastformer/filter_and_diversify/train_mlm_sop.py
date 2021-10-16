@@ -1136,7 +1136,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 61526837
+    seed = 37529837
     args.seed = seed
     return vars(args)
 
