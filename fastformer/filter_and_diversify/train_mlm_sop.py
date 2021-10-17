@@ -1386,7 +1386,7 @@ def train(local_rank, args):
 
     start_time = time.time()
     while steps_done < total_steps:
-        random.seed(step)
+        random.seed(args["seed"] + step)
         batch = dataloader()
 
         if hasattr(getattr(model, "module", model), "distillation_loss_w"):
