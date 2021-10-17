@@ -936,11 +936,11 @@ class RTDMLMModel(PreTrainedModel):
         hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v4(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
-        word_ce_max = word_ce.max()
+        word_ce_max = max(1e-2, word_ce.max().item())
         if self.word_ce_schedule < 0.0:
-            word_ce = (word_ce ** self.word_ce_schedule).clip(0, word_ce_max)
+            word_ce = (word_ce ** self.word_ce_schedule).clip(1e-5, word_ce_max)
         else:
-            word_ce = (word_ce ** self.word_ce_schedule).clip(0, 0.95 * (word_ce_max ** self.word_ce_schedule))
+            word_ce = (word_ce ** self.word_ce_schedule).clip(1e-5, 0.95 * (word_ce_max ** self.word_ce_schedule))
         word_ce[torch.logical_or(non_mask_locations, hard_mask_locations)] = 0.0
         decided_noise_proportion = (0.09 + random.random() * 0.03)
         average_tokens_per_sample = ss
@@ -1136,7 +1136,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 37529837
+    seed = 33529837
     args.seed = seed
     return vars(args)
 
