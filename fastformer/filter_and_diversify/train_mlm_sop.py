@@ -799,11 +799,11 @@ class RTDMLMModel(PreTrainedModel):
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
         hidden_size = backbone.config.hidden_size
-        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id, reduction="none")
+        self.loss_ce = CrossEntropyLoss(ignore_index=self.pad_token_id, reduction="mean")
         self.config = backbone.config
         self.config.gradient_checkpointing = False
         self.rtd_temperature = 1.5
-        self.word_ce_schedule = 1.0
+        self.word_ce_schedule = 1.5
         if hasattr(backbone, "pooler"):
             backbone.pooler = None
         self.masking_model = masking_model.eval()
@@ -919,7 +919,7 @@ class RTDMLMModel(PreTrainedModel):
         mask_probas = torch.rand((b, s), device=input_ids.device)
         mask_probas[non_mask_locations] = 1.0
         mask_probas[:, 0] = 1.0
-        mask_locations = mask_probas < 0.06
+        mask_locations = mask_probas < 0.05
         return dict(hard_mask_locations=mask_locations, predicted_ce=mask_probas)
 
     def do_masking(self, input_ids, attention_mask, validation_iter=False):
@@ -933,42 +933,37 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
 
-        hard_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v4(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
+        random_mask_locations, predicted_ce = dict_get(self.get_hard_mask_v4(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce_max = max(1e-2, word_ce.max().item())
-        if self.word_ce_schedule < 0.0:
-            word_ce = (word_ce ** self.word_ce_schedule).clip(1e-5, word_ce_max)
-        else:
-            word_ce = (word_ce ** self.word_ce_schedule).clip(1e-5, 0.95 * (word_ce_max ** self.word_ce_schedule))
-        word_ce[torch.logical_or(non_mask_locations, hard_mask_locations)] = 0.0
+        word_ce = (word_ce ** self.word_ce_schedule).clip(1e-5, 0.98 * (word_ce_max ** self.word_ce_schedule))
+        word_ce[torch.logical_or(non_mask_locations, random_mask_locations)] = 1e-5
         decided_noise_proportion = (0.09 + random.random() * 0.03)
         average_tokens_per_sample = ss
-        indices = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
-        word_mask = indices[:, torch.randperm(indices.size()[1])]
-
+        word_mask = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
 
         input_ids[word_mask[0], word_mask[1]] = mask_token_id
         co_oc_mask_locations = input_ids == self.tokenizer.mask_token_id
-        input_ids[hard_mask_locations] = mask_token_id
+        input_ids[random_mask_locations] = mask_token_id
         mask_locations = input_ids == self.tokenizer.mask_token_id
         all_noise_locations = mask_locations
 
         mask_accuracy = None
         accuracy = None
         co_oc_mask_accuracy = None
-        hard_mask_accuracy = None
+        random_mask_accuracy = None
         if validation_iter:
             word_wise_accuracy = mlm_rtd_hints["word_accuracy"]
             mask_accuracy = word_wise_accuracy[mask_locations].float().mean().item()
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
-            hard_mask_accuracy = word_wise_accuracy[hard_mask_locations].float().mean().item()
+            random_mask_accuracy = word_wise_accuracy[random_mask_locations].float().mean().item()
             accuracy = mlm_rtd_hints["word_accuracy"].float().mean().item()
         return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids,
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
-                    accuracy=accuracy, hard_mask_accuracy=hard_mask_accuracy,
-                    hard_mask_locations=hard_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
+                    accuracy=accuracy, random_mask_accuracy=random_mask_accuracy,
+                    random_mask_locations=random_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
                     decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
                     all_noise_locations=all_noise_locations)
 
@@ -992,13 +987,13 @@ class RTDMLMModel(PreTrainedModel):
     def forward(self, input_ids, attention_mask, validation_iter=False):
         mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
-        only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_hard_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "hard_mask_accuracy")
+        only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "random_mask_accuracy")
         accuracy_masking_model = dict_get(mask_dict, "accuracy")
         average_tokens_per_sample = dict_get(mask_dict,"average_tokens_per_sample")
         mask_stats = dict(average_tokens_per_sample=average_tokens_per_sample,
                           accuracy_masking_model=accuracy_masking_model,
                           only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
-                          only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_hard_mask_accuracy_masking_model=only_hard_mask_accuracy_masking_model)
+                          only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model=only_random_mask_accuracy_masking_model)
         outputs = self.backbone(
             input_ids,
             attention_mask=attention_mask,
@@ -1007,36 +1002,34 @@ class RTDMLMModel(PreTrainedModel):
         attention_mask = attention_mask.bool()
         sequence_output = outputs[0]
         prediction_scores = self.lm_head(sequence_output)
-        all_noise_locations, co_oc_mask_locations, hard_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "hard_mask_locations")
+        all_noise_locations, co_oc_mask_locations, random_mask_locations = dict_get(mask_dict, "all_noise_locations", "co_oc_mask_locations", "random_mask_locations")
         prediction_scores = prediction_scores.view(-1, self.config.vocab_size)
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         all_noise_locations = all_noise_locations.view(-1)
-        masked_lm_loss = self.loss_ce(prediction_scores, label_mlm_input_ids)
-        masked_lm_loss = masked_lm_loss[all_noise_locations]
-        masked_lm_loss = masked_lm_loss.mean()
+        masked_lm_loss = self.loss_ce(prediction_scores[all_noise_locations], label_mlm_input_ids[all_noise_locations])
         # All token MLM averages over all tokens and copy tokens have low average.
 
         val_stats = dict()
         if validation_iter:
-            hard_mask_locations = hard_mask_locations.view(-1)
+            random_mask_locations = random_mask_locations.view(-1)
             co_oc_mask_locations = co_oc_mask_locations.view(-1)
             am_sum = attention_mask.sum()
             mask_proportion = (all_noise_locations.sum() / am_sum).item()
             co_oc_mask_proportion = (co_oc_mask_locations.sum() / am_sum).item()
-            hard_mask_proportion = (hard_mask_locations.sum() / am_sum).item()
+            random_mask_proportion = (random_mask_locations.sum() / am_sum).item()
 
             lm_predictions = prediction_scores.detach().argmax(dim=-1)
             lm_accuracy = (lm_predictions == label_mlm_input_ids).float()
             mlm_accuracy = lm_accuracy[all_noise_locations].mean().item()
             co_oc_mask_lm_accuracy = lm_accuracy[co_oc_mask_locations].mean().item()
-            hard_mask_lm_accuracy = lm_accuracy[hard_mask_locations].mean().item()
+            random_mask_lm_accuracy = lm_accuracy[random_mask_locations].mean().item()
 
             copy_token_lm_accuracy = lm_accuracy[torch.logical_and(torch.logical_not(all_noise_locations), label_mlm_input_ids != self.tokenizer.pad_token_id)].mean().item()
             val_stats = dict(mask_proportion=mask_proportion, mlm_accuracy=mlm_accuracy, copy_token_lm_accuracy=copy_token_lm_accuracy,
-                             co_oc_mask_lm_accuracy=co_oc_mask_lm_accuracy, hard_mask_lm_accuracy=hard_mask_lm_accuracy,
-                             co_oc_mask_proportion=co_oc_mask_proportion, hard_mask_proportion=hard_mask_proportion)
+                             co_oc_mask_lm_accuracy=co_oc_mask_lm_accuracy, random_mask_lm_accuracy=random_mask_lm_accuracy,
+                             co_oc_mask_proportion=co_oc_mask_proportion, random_mask_proportion=random_mask_proportion)
 
-        return dict(loss=self.mlm_w * masked_lm_loss,
+        return dict(loss=masked_lm_loss,
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
@@ -1360,10 +1353,10 @@ def train(local_rank, args):
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     div_factor = optc["lr"]/1e-7
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
-    #                                                 div_factor=div_factor, three_phase=False, pct_start=0.06, anneal_strategy="linear", cycle_momentum=False)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
+                                                    div_factor=div_factor, three_phase=False, pct_start=0.04, anneal_strategy="linear", cycle_momentum=False)
 
-    scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(0.06 * args["total_steps"]))
+    # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(0.06 * args["total_steps"]))
     barrier()
 
     gradient_clipping = optc["gradient_clipping"]
@@ -1405,19 +1398,6 @@ def train(local_rank, args):
                                     getattr(model, "module", model).momentum_backbone, 0.0)
                 momentum_param_copy(getattr(model, "module", model).lm_head,
                                     getattr(model, "module", model).momentum_lm_head, 0.0)
-
-        if hasattr(getattr(model, "module", model), "word_ce_schedule"):
-            if reinit:
-                schedule = [-1.0, -0.5, 0.0, 0.5, 1.0]
-            else:
-                schedule = [1.5] * 5
-            getattr(model, "module", model).word_ce_schedule = np.interp(steps_done,
-                                                                        [0,
-                                                                         min(10000, int(0.05 * total_steps)),
-                                                                         min(20000, int(0.1 * total_steps)), # 0
-                                                                         min(30000, int(0.25 * total_steps)),
-                                                                         min(40000, int(0.5 * total_steps))],
-                                                                        schedule)
 
 
         epoch = dataloader.epoch
