@@ -1458,7 +1458,7 @@ def train(local_rank, args):
                              **{k: v for k, v in output.items() if v is not None})
             wandb_log = {k: float(v) for k, v in wandb_log.items()}
             logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
-            if local_rank <= (16 // args["world_size"]) or args["world_size"] <= 8:
+            if local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8:
                 wandb.log(wandb_log)
             if printable_iter:
                 printed = pd.concat(logs_save, axis=1)
