@@ -47,6 +47,9 @@ from torch.multiprocessing.spawn import _prctl_pr_set_pdeathsig
 import nltk
 from torch.distributed.optim import ZeroRedundancyOptimizer
 import pandas as pd
+pd.set_option('display.max_columns', None)
+pd.set_option('precision', 2)
+pd.set_option('display.width', 1000)
 
 from tabulate import tabulate
 from torch.multiprocessing import Process, ProcessContext
