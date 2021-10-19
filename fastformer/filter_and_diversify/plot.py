@@ -12,4 +12,4 @@ result = my_shell.getoutput("cat output.log | grep %s | awk '{print $NF}'" % (ar
 
 from uniplot import plot
 result = list(map(float, result))
-plot(pd.DataFrame({0:result}).ewm(alpha=float(argv[2])).mean()[0])
+plot(pd.DataFrame({0:result}).ewm(alpha=float(argv[2])).mean().fillna(0.0)[0].clip(0.0, 1e9))
