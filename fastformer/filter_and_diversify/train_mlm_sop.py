@@ -831,8 +831,7 @@ class RTDMLMModel(PreTrainedModel):
         else:
             self.weight_decay = weight_decay
             self.initial_backbone_parameters = torch.cat([p.detach().data.clone().reshape(-1) for p in self.backbone.parameters()])
-            for p in self.initial_backbone_parameters:
-                p.requires_grad = False
+            self.initial_backbone_parameters.requires_grad = False
 
         self.tie_weights()
         self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
