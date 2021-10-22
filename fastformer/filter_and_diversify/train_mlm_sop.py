@@ -830,7 +830,7 @@ class RTDMLMModel(PreTrainedModel):
             self.initial_backbone_parameters = None
         else:
             self.weight_decay = weight_decay
-            self.initial_backbone_parameters = [p.detach().clone() for p in self.backbone.parameters()]
+            self.initial_backbone_parameters = torch.cat([p.detach().clone().view(-1) for p in self.backbone.parameters()])
             for p in self.initial_backbone_parameters:
                 p.requires_grad = False
 
@@ -1020,8 +1020,7 @@ class RTDMLMModel(PreTrainedModel):
         # All token MLM averages over all tokens and copy tokens have low average.
         backbone_divergence_loss = None
         if self.initial_backbone_parameters is not None:
-            backbone_divergence_loss = [((param - init) ** 2).mean() for param, init in zip(list(self.backbone.parameters()), self.initial_backbone_parameters)]
-            backbone_divergence_loss = sum(backbone_divergence_loss) / len(backbone_divergence_loss)
+            backbone_divergence_loss = ((self.initial_backbone_parameters - torch.cat([p.view(-1) for p in self.backbone.parameters()])) ** 2).mean()
             loss = loss + self.weight_decay * backbone_divergence_loss
             backbone_divergence_loss = backbone_divergence_loss.item()
 
