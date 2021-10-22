@@ -828,10 +828,10 @@ class RTDMLMModel(PreTrainedModel):
             self.backbone.init_weights()
             init_weights(self.lm_head, 0.01)
             self.initial_backbone_parameters = None
-        else:
-            self.weight_decay = weight_decay
-            self.initial_backbone_parameters = torch.cat([p.detach().data.clone().reshape(-1) for p in self.backbone.parameters()])
-            self.initial_backbone_parameters.requires_grad = False
+        # else:
+        #     self.weight_decay = weight_decay
+        #     self.initial_backbone_parameters = torch.cat([p.detach().data.clone().reshape(-1) for p in self.backbone.parameters()])
+        #     self.initial_backbone_parameters.requires_grad = False
 
         self.tie_weights()
         self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
