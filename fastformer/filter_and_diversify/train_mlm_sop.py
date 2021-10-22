@@ -797,7 +797,7 @@ class CEPredictor(nn.Module):
 
 
 class RTDMLMModel(PreTrainedModel):
-    def __init__(self, backbone: PreTrainedModel, lm_head: nn.Module, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, reinit=False):
+    def __init__(self, backbone: PreTrainedModel, lm_head: nn.Module, masking_model: nn.Module, tokenizer, mlm_w, sentence_order_w, weight_decay, reinit=False):
         super().__init__(backbone.config if hasattr(backbone, "config") else PretrainedConfig(initializer_std=1.0))
         self.pad_token_id = tokenizer.pad_token_id
         self.mask_token_id = tokenizer.mask_token_id
@@ -829,6 +829,7 @@ class RTDMLMModel(PreTrainedModel):
             init_weights(self.lm_head, 0.01)
             self.initial_backbone_parameters = None
         else:
+            self.weight_decay = weight_decay
             self.initial_backbone_parameters = [p.detach().clone() for p in self.backbone.parameters()]
             for p in self.initial_backbone_parameters:
                 p.requires_grad = False
@@ -1021,7 +1022,7 @@ class RTDMLMModel(PreTrainedModel):
         if self.initial_backbone_parameters is not None:
             backbone_divergence_loss = [((param - init) ** 2).mean() for param, init in zip(list(self.backbone.parameters()), self.initial_backbone_parameters)]
             backbone_divergence_loss = sum(backbone_divergence_loss) / len(backbone_divergence_loss)
-            loss = loss + backbone_divergence_loss
+            loss = loss + self.weight_decay * backbone_divergence_loss
             backbone_divergence_loss = backbone_divergence_loss.item()
 
         val_stats = dict()
@@ -1283,6 +1284,7 @@ def train(local_rank, args):
     optimizer_config["eps"] = 1e-6
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
+    optimizer_config["weight_decay"] = optimizer_config["weight_decay"] if reinit else 0.0
     backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.0)
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
@@ -1300,7 +1302,7 @@ def train(local_rank, args):
         if hasattr(masking_model, "model"):
             masking_model.model = None
             del masking_model.model
-        model = RTDMLMModel(backbone, lm_head, masking_model, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
+        model = RTDMLMModel(backbone, lm_head, masking_model, tokenizer, mlm_w, sentence_order_w, args["weight_decay"], reinit).to(device)
         trainable_model = model.backbone
         mlm_sop_enabled = False
     else:
