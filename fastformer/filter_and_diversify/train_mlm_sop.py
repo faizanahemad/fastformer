@@ -827,6 +827,11 @@ class RTDMLMModel(PreTrainedModel):
         if reinit:
             self.backbone.init_weights()
             init_weights(self.lm_head, 0.01)
+            self.initial_backbone_parameters = None
+        else:
+            self.initial_backbone_parameters = [p.detach().clone() for p in self.backbone.parameters()]
+            for p in self.initial_backbone_parameters:
+                p.requires_grad = False
 
         self.tie_weights()
         self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
@@ -1010,7 +1015,14 @@ class RTDMLMModel(PreTrainedModel):
         label_mlm_input_ids = label_mlm_input_ids.view(-1)
         all_noise_locations = all_noise_locations.view(-1)
         masked_lm_loss = self.loss_ce(prediction_scores[all_noise_locations], label_mlm_input_ids[all_noise_locations])
+        loss = masked_lm_loss
         # All token MLM averages over all tokens and copy tokens have low average.
+        backbone_divergence_loss = None
+        if self.initial_backbone_parameters is not None:
+            backbone_divergence_loss = [((param - init) ** 2).mean() for param, init in zip(list(self.backbone.parameters()), self.initial_backbone_parameters)]
+            backbone_divergence_loss = sum(backbone_divergence_loss) / len(backbone_divergence_loss)
+            loss = loss + backbone_divergence_loss
+            backbone_divergence_loss = backbone_divergence_loss.item()
 
         val_stats = dict()
         if validation_iter:
@@ -1032,7 +1044,7 @@ class RTDMLMModel(PreTrainedModel):
                              co_oc_mask_lm_accuracy=co_oc_mask_lm_accuracy, random_mask_lm_accuracy=random_mask_lm_accuracy,
                              co_oc_mask_proportion=co_oc_mask_proportion, random_mask_proportion=random_mask_proportion)
 
-        return dict(loss=masked_lm_loss,
+        return dict(loss=loss, backbone_divergence_loss=backbone_divergence_loss,
                     masked_lm_loss=masked_lm_loss.item(), **val_stats, **mask_stats)
 
 
