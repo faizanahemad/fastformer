@@ -1304,6 +1304,8 @@ def train(local_rank, args):
             del masking_model.model
         model = RTDMLMModel(backbone, lm_head, masking_model, tokenizer, mlm_w, sentence_order_w, args["weight_decay"], reinit).to(device)
         trainable_model = model.backbone
+        if hasattr(model, "initial_backbone_parameters") and model.initial_backbone_parameters is not None:
+            model.initial_backbone_parameters = [p.to(device) for p in model.initial_backbone_parameters]
         mlm_sop_enabled = False
     else:
         model = MaskedLanguageSentenceOrderModel(backbone, tokenizer, mlm_w, sentence_order_w, reinit).to(device)
