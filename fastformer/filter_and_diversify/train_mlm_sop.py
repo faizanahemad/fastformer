@@ -830,7 +830,7 @@ class RTDMLMModel(PreTrainedModel):
             self.initial_backbone_parameters = None
         else:
             self.weight_decay = weight_decay
-            self.initial_backbone_parameters = torch.cat([p.detach().clone().reshape(-1) for p in self.backbone.parameters()])
+            self.initial_backbone_parameters = torch.cat([p.detach().data.clone().reshape(-1) for p in self.backbone.parameters()])
             for p in self.initial_backbone_parameters:
                 p.requires_grad = False
 
