@@ -824,10 +824,10 @@ class RTDMLMModel(PreTrainedModel):
         encoder_config.attention_probs_dropout_prob = 0.0
 
         self.lm_head = lm_head
+        self.initial_backbone_parameters = None
         if reinit:
             self.backbone.init_weights()
             init_weights(self.lm_head, 0.01)
-            self.initial_backbone_parameters = None
         # else:
         #     self.weight_decay = weight_decay
         #     self.initial_backbone_parameters = torch.cat([p.detach().data.clone().reshape(-1) for p in self.backbone.parameters()])
