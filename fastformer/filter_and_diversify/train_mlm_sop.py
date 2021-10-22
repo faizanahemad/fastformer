@@ -1384,7 +1384,9 @@ def train(local_rank, args):
                            settings=wandb.Settings(start_method="fork"))
 
     time.sleep(random.random())
-    wandb.init(**wandb_init_args)
+    activate_wandb_log = local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8
+    if activate_wandb_log:
+        wandb.init(**wandb_init_args)
 
     full_times = []
     batch_times = []
@@ -1475,7 +1477,7 @@ def train(local_rank, args):
                              **{k: v for k, v in output.items() if v is not None})
             wandb_log = {k: float(v) for k, v in wandb_log.items()}
             logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
-            if local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8:
+            if activate_wandb_log:
                 time.sleep(random.random() * 0.1)
                 wandb.log(wandb_log)
             if printable_iter:
