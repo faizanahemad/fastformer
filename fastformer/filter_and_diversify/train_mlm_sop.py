@@ -69,50 +69,6 @@ except:
 
 optimizer_config = dict(lr=1e-4, eps=1e-6, weight_decay=1e-3, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
 
-class get_next:
-    def __init__(self, dataloader):
-        self.dataloader = dataloader
-        self.iter = iter(dataloader)
-        self.epoch = 0
-
-    def __call__(self):
-        try:
-            return next(self.iter)
-        except StopIteration as st:
-            self.epoch += 1
-            dataloader = self.dataloader
-            if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
-                dataloader.sampler.set_epoch(self.epoch)
-            else:
-                print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), self.epoch))
-            self.iter = iter(dataloader)
-            return next(self.iter)
-
-
-def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, required_length_max):
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    sents = sent_detector.tokenize(text)
-    tokenizer_args = dict(padding="none", truncation=True, return_tensors="pt", max_length=512)
-    sent_lengths = [tokenizer(s, return_offsets_mapping=False, **tokenizer_args)["attention_mask"].squeeze().sum() for s in sents]
-    valid_pairs = []
-    valid_lengths = []
-    sents_n_lengths = list(zip(sents, sent_lengths))
-    for wlen in range(len(sents_n_lengths), 1, -1):
-        for ws in windowed(sents_n_lengths, wlen, step=max(wlen - 2, 1)):
-            current_sents, current_lengths = zip(*ws)
-            tl = sum(current_lengths)
-            if tl >= required_length_min and tl < required_length_max - 2:
-                valid_pairs.append(" ".join(current_sents))
-                valid_lengths.append(tl)
-        if len(valid_pairs) > 2:
-            break
-    if len(valid_pairs) > 0:
-        text = random.choices(valid_pairs, np.array(valid_lengths)/sum(valid_lengths), k=1)[0]
-    else:
-        raise ValueError
-
-    return text
-
 
 class sample_random_token:
     def __init__(self, tokenizer):
@@ -130,29 +86,6 @@ class sample_random_token:
     def __call__(self):
         t_id = random.choices(range(self.length), self.probas)[0]
         return t_id
-
-
-def segment(text, n_segments, sent_detector, pad_token):
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    sents = sent_detector.tokenize(text)
-    sent_wc = list(map(lambda x: len(x.split()), sents))
-    twc = len(text.split())
-    segments = defaultdict(str)
-    tol = 0.1
-    while len(segments) < n_segments and tol <= (n_segments/2):
-        segments = defaultdict(str)
-        expected_wc = max(twc // (n_segments + tol), 16)  # Each segment is atleast 16 words
-        tol += 0.2
-        cwc = 0
-        sidx = 0
-        for s, wc in zip(sents, sent_wc):
-            segments[sidx] = (segments[sidx] + " " + s).strip()
-            cwc += wc
-            if cwc >= expected_wc and sidx < n_segments - 1:
-                cwc = 0
-                sidx += 1
-
-    return list(segments.values()) + [pad_token] * (n_segments - len(segments))
 
 
 def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str:
@@ -192,7 +125,6 @@ def token_id_masking(tokens, tokenizer, probability: float, sampler=None) -> str
                 else:
                     pass
 
-
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
     return torch.tensor(list(tokens))
 
@@ -226,10 +158,10 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
 
         if length > self.allowed_raw_length:
             try:
-                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.6), self.tokenizer_args["max_length"])
+                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.75), self.tokenizer_args["max_length"])
             except:
-                text = " ".join(text.split()[:self.allowed_raw_length])
-            length = len(text.strip().split())
+                splits = text.split()
+                text = " ".join(splits[:self.allowed_raw_length]) if random.random() < 0.5 else " ".join(splits[len(splits) - self.allowed_raw_length:])
 
         seg_sep_token = f" {tokenizer.sep_token} "
         if self.mlm_sop_enabled:
@@ -1182,41 +1114,42 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
     dataset = MaskedLanguageSentenceOrderModelDataset(**dataset_args)
 
     weights = None
+    sm_wr = 2
     if sampling_column is not None:
         bigram_tfidf_average_column = "bigram_tfidf_average" if "bigram_tfidf_average" in dataset.dataset.column_names else "tfidf_average"
         if "sbert" in sampling_column and "perplexity" in sampling_column and "tfidf" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
-            ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+            ppl = sm_wr + ((ppl - ppl.mean()) / ppl.std()).clip(-sm_wr, sm_wr) + 1
             sbert = 1 - np.array(dataset["sbert_top_128_avg"])
-            sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+            sbert = sm_wr + ((sbert - sbert.mean()) / sbert.std()).clip(-sm_wr, sm_wr) + 1
             tfidf_top = np.array(dataset["tfidf_average"])
-            tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            tfidf_top = sm_wr + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-sm_wr, sm_wr) + 1
             bigram_tfidf_average = np.array(dataset[bigram_tfidf_average_column])
-            bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
+            bigram_tfidf_average = sm_wr + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-sm_wr, sm_wr) + 1
             weights = (ppl + sbert + ((tfidf_top + bigram_tfidf_average)/2.0)) / 3.0
         elif "sbert" in sampling_column and "perplexity" in sampling_column:
             ppl = np.log1p(dataset["perplexity"])
-            ppl = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+            ppl = sm_wr + ((ppl - ppl.mean()) / ppl.std()).clip(-sm_wr, sm_wr) + 1
             sbert = 1 - np.array(dataset["sbert_top_128_avg"])
-            sbert = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+            sbert = sm_wr + ((sbert - sbert.mean()) / sbert.std()).clip(-sm_wr, sm_wr) + 1
             weights = (ppl + sbert) / 2.0
         elif sampling_column == "perplexity":
             ppl = np.log1p(dataset["perplexity"])
-            weights = 3 + ((ppl - ppl.mean()) / ppl.std()).clip(-3, 3) + 1e-5
+            weights = sm_wr + ((ppl - ppl.mean()) / ppl.std()).clip(-sm_wr, sm_wr) + 1
         elif "tfidf" in sampling_column:
             tfidf_top = np.array(dataset["tfidf_average"])
-            tfidf_top = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            tfidf_top = sm_wr + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-sm_wr, sm_wr) + 1
             bigram_tfidf_average = np.array(dataset[bigram_tfidf_average_column])
-            bigram_tfidf_average = 3 + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-3, 3) + 1e-5
+            bigram_tfidf_average = sm_wr + ((bigram_tfidf_average - bigram_tfidf_average.mean()) / bigram_tfidf_average.std()).clip(-sm_wr, sm_wr) + 1
             weights = tfidf_top + bigram_tfidf_average
         elif "tfidf_truncated" in sampling_column:
             tfidf_top = np.array(dataset["tfidf_truncated_average"])
             mean = tfidf_top[~np.isnan(tfidf_top)].mean()
             tfidf_top[np.isnan(tfidf_top)] = mean
-            weights = 3 + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-3, 3) + 1e-5
+            weights = sm_wr + ((tfidf_top - tfidf_top.mean()) / tfidf_top.std()).clip(-sm_wr, sm_wr) + 1
         elif "sbert" in sampling_column:
             sbert = 1 - np.array(dataset["sbert_top_128_avg"])
-            weights = 3 + ((sbert - sbert.mean()) / sbert.std()).clip(-3, 3) + 1e-5
+            weights = sm_wr + ((sbert - sbert.mean()) / sbert.std()).clip(-sm_wr, sm_wr) + 1
         else:
             raise ValueError("Sampling column = %s is not valid" % (sampling_column))
 
@@ -1369,7 +1302,7 @@ def train(local_rank, args):
 
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
-    div_factor = optc["lr"]/1e-7
+    div_factor = optc["lr"]/1e-9
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
                                                     div_factor=div_factor, three_phase=False, pct_start=0.04, anneal_strategy="linear", cycle_momentum=False)
 
@@ -1455,6 +1388,7 @@ def train(local_rank, args):
                                       scheduler, gradient_clipping, iter_size=iter_size,
                                       no_sync=False, validation_iter=validation_iter)
             optimizer.zero_grad(set_to_none=True)
+            model.zero_grad(set_to_none=True)
             steps_done += 1
             model_times.append(time.time() - model_start)
 

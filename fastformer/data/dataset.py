@@ -52,52 +52,6 @@ def isnumber(text):
     return False
 
 
-def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, required_length_max):
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    sents = sent_detector.tokenize(text)
-    tokenizer_args = dict(padding="none", truncation=True, return_tensors="pt", max_length=512)
-    sent_lengths = [tokenizer(s, return_offsets_mapping=False, **tokenizer_args)["attention_mask"].squeeze().sum() for s in sents]
-    valid_pairs = []
-    valid_lengths = []
-    sents_n_lengths = list(zip(sents, sent_lengths))
-    for wlen in range(1, len(sents_n_lengths)):
-        for ws in windowed(sents_n_lengths, wlen):
-            current_sents, current_lengths = zip(*ws)
-            tl = sum(current_lengths)
-            if tl >= required_length_min and tl < required_length_max - 2:
-                valid_pairs.append(" ".join(current_sents))
-                valid_lengths.append(tl)
-    if len(valid_pairs) > 0:
-        text = random.choices(valid_pairs, np.array(valid_lengths)/sum(valid_lengths), k=1)[0]
-    else:
-        raise ValueError
-
-    return text
-
-
-def segment(text, n_segments, sent_detector, pad_token):
-    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
-    sents = sent_detector.tokenize(text)
-    sent_wc = list(map(lambda x: len(x.split()), sents))
-    twc = len(text.split())
-    segments = defaultdict(str)
-    tol = 0.1
-    while len(segments) < n_segments and tol <= (n_segments/2):
-        segments = defaultdict(str)
-        expected_wc = max(twc // (n_segments + tol), 16)  # Each segment is atleast 16 words
-        tol += 0.2
-        cwc = 0
-        sidx = 0
-        for s, wc in zip(sents, sent_wc):
-            segments[sidx] = (segments[sidx] + " " + s).strip()
-            cwc += wc
-            if cwc >= expected_wc and sidx < n_segments - 1:
-                cwc = 0
-                sidx += 1
-
-    return list(segments.values()) + [pad_token] * (n_segments - len(segments))
-
-
 punctuation_list = ".,\"'?!;()"
 
 
@@ -803,26 +757,6 @@ class get_simple_collate_fn:
             del samples['token_type_ids']
         samples = {k: v.contiguous() if isinstance(v, torch.Tensor) else v for k, v in samples.items()}
         return samples
-
-
-class get_next:
-    def __init__(self, dataloader):
-        self.dataloader = dataloader
-        self.iter = iter(dataloader)
-        self.epoch = 0
-
-    def __call__(self):
-        try:
-            return next(self.iter)
-        except StopIteration as st:
-            self.epoch += 1
-            dataloader = self.dataloader
-            if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
-                dataloader.sampler.set_epoch(self.epoch)
-            else:
-                print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), self.epoch))
-            self.iter = iter(dataloader)
-            return next(self.iter)
 
 
 

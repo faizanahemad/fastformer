@@ -1,5 +1,6 @@
 import argparse
 import functools
+from collections import defaultdict
 from typing import Iterable
 
 import dill
@@ -14,6 +15,7 @@ import time
 from datetime import datetime, timedelta
 
 import torchvision
+from more_itertools import windowed
 from pytz import timezone
 import time
 from torch import nn
@@ -1782,6 +1784,7 @@ def encode_scalar_column(x, scales=list(range(-16, 16))):
     # https://ogb.stanford.edu/paper/kddcup2021/mag240m_SyneriseAI.pdf
     return torch.cat([torch.sin(x), torch.cos(x)], -1)
 
+
 def token_id_masking(tokens, tokenizer, probability: float = 0.15) -> str:
     tokens = np.array(tokens.tolist())
     original_tokens = tokens.copy()
@@ -1792,6 +1795,84 @@ def token_id_masking(tokens, tokenizer, probability: float = 0.15) -> str:
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
     tokens[special_tokens_idx] = original_tokens[special_tokens_idx]
     return torch.tensor(list(tokens))
+
+
+def get_valid_sentences(text, sent_detector, tokenizer, required_length_min, required_length_max, short_seq_proba=0.1):
+    # text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+    sents = sent_detector.tokenize(text)
+    tokenizer_args = dict(padding="do_not_pad", truncation=True, max_length=512, add_special_tokens=False)
+    sent_lengths = [len(tokenizer(s, return_offsets_mapping=False, **tokenizer_args)["input_ids"]) for s in sents]
+
+    if random.random() < short_seq_proba:
+        sent_lengths_dict = dict()
+        for i in range(len(sent_lengths)):
+            for j in range(i + 1, len(sent_lengths) + 1):
+                sent_lengths_dict[(i, j)] = sum(sent_lengths[i:j])
+        sent_lengths_dict = [k for k, v in sent_lengths_dict.items() if 48 < v < 192]
+        short_sent = random.choice(sent_lengths_dict)
+        short_sent = " ".join(sents[short_sent[0]: short_sent[1]]).strip()
+        return short_sent
+    valid_pairs = []
+    valid_lengths = []
+    sents_n_lengths = list(zip(sents, sent_lengths))
+    for wlen in range(len(sents_n_lengths), 1, -1):
+        for ws in windowed(sents_n_lengths, wlen, step=max(len(sents_n_lengths) - wlen, 1), fillvalue=""):
+            current_sents, current_lengths = zip(*ws)
+            tl = sum(current_lengths)
+            if tl >= required_length_min and tl < required_length_max - 2:
+                valid_pairs.append(current_sents)
+                valid_lengths.append(tl)
+        if len(valid_pairs) > 6:
+            break
+    if len(valid_pairs) > 0:
+        text = random.choices(valid_pairs, np.sqrt(np.array(valid_lengths)/sum(valid_lengths)), k=1)[0]
+        text = " ".join(text).strip()
+    else:
+        raise ValueError
+
+    return text
+
+
+def segment(text, n_segments, sent_detector, pad_token):
+    text = re.sub(r'(?<=[.,;!?])(?=[^\s0-9])', ' ', text)
+    sents = sent_detector.tokenize(text)
+    sent_wc = list(map(lambda x: len(x.split()), sents))
+    twc = len(text.split())
+    segments = defaultdict(str)
+    tol = 0.1
+    while len(segments) < n_segments and tol <= (n_segments/2):
+        segments = defaultdict(str)
+        expected_wc = max(twc // (n_segments + tol), 16)  # Each segment is atleast 16 words
+        tol += 0.2
+        cwc = 0
+        sidx = 0
+        for s, wc in zip(sents, sent_wc):
+            segments[sidx] = (segments[sidx] + " " + s).strip()
+            cwc += wc
+            if cwc >= expected_wc and sidx < n_segments - 1:
+                cwc = 0
+                sidx += 1
+
+    return list(segments.values()) + [pad_token] * (n_segments - len(segments))
+
+class get_next:
+    def __init__(self, dataloader):
+        self.dataloader = dataloader
+        self.iter = iter(dataloader)
+        self.epoch = 0
+
+    def __call__(self):
+        try:
+            return next(self.iter)
+        except StopIteration as st:
+            self.epoch += 1
+            dataloader = self.dataloader
+            if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
+                dataloader.sampler.set_epoch(self.epoch)
+            else:
+                print("Time = %s: Unable to set Epoch = %s" % (get_time_string(), self.epoch))
+            self.iter = iter(dataloader)
+            return next(self.iter)
 
 
 
