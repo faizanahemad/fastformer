@@ -524,7 +524,7 @@ class SuperGlueTest:
             steps_per_epoch = int(np.ceil(len(train.sampler) / (batch_size * iter_size)) if train.sampler is not None else (len(train) / iter_size))
             print("epochs = ", int(max_allowed_epochs), " steps_per_epoch=", steps_per_epoch, " lr=", self.lr)
             if self.scheduler_policy == "olr":
-                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e2,
+                scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, self.lr, epochs=int(max_allowed_epochs), steps_per_epoch=steps_per_epoch, div_factor=1e3,
                                                                 three_phase=False, pct_start=self.scheduler_warmup, anneal_strategy="linear")
             else:
                 total_steps = int(max_allowed_epochs) * steps_per_epoch
