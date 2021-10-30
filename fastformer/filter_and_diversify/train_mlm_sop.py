@@ -1216,7 +1216,7 @@ def train(local_rank, args):
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
     optimizer_config["weight_decay"] = optimizer_config["weight_decay"]  # if reinit else 0.0
-    backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.0)
+    backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.1)
     batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
