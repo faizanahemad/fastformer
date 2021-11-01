@@ -881,7 +881,7 @@ class RTDMLMModel(PreTrainedModel):
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
 
-        random_mask_locations, _ = dict_get(self.get_hard_mask_v4(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
+        random_mask_locations, _ = dict_get(self.get_hard_mask_v5(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce = word_ce ** self.word_ce_schedule
@@ -901,7 +901,6 @@ class RTDMLMModel(PreTrainedModel):
             word_mask = torch.multinomial(word_ce[i], int(decided_noise_proportion * ss[i]), False)
             input_ids[i][word_mask] = mask_token_id
             current_span = spans[i]
-            print(spans.size(), current_span.size(), word_mask.size())
             current_span[word_mask] = True
             current_span = torch.logical_and(span_select[i], current_span)
             if random.random() < 0.5:
