@@ -896,7 +896,7 @@ class RTDMLMModel(PreTrainedModel):
 
         ss = attention_mask.sum(1)
         spans = torch.zeros_like(input_ids, dtype=torch.bool)
-        span_select = torch.rand_like(spans) < 0.1
+        span_select = torch.rand_like(spans.float()) < 0.1
         for i in range(b):
             word_mask = torch.multinomial(word_ce[i], int(decided_noise_proportion * ss[i]), False)
             input_ids[i][word_mask] = mask_token_id
