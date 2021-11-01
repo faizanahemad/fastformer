@@ -895,14 +895,18 @@ class RTDMLMModel(PreTrainedModel):
         # input_ids[word_mask[0], word_mask[1]] = mask_token_id
 
         ss = attention_mask.sum(1)
+        spans = torch.zeros_like(input_ids, dtype=torch.bool)
+        span_select = torch.rand_like(spans) < 0.1
         for i in range(b):
             word_mask = torch.multinomial(word_ce[i], int(decided_noise_proportion * ss[i]), False)
             input_ids[i][word_mask] = mask_token_id
-            spans = torch.logical_and(torch.rand_like(word_mask) < 0.1, word_mask)
+
+            spans[i][word_mask] = True
+            current_span = torch.logical_and(span_select[i], spans[i])
             if random.random() < 0.5:
-                spans = F.pad(spans, (1, 0), value=False)[:-1]
+                spans = F.pad(current_span, (1, 0), value=False)[:-1]
             else:
-                spans = F.pad(spans, (0, 1), value=False)[1:]
+                spans = F.pad(current_span, (0, 1), value=False)[1:]
             input_ids[i][spans] = mask_token_id
 
         co_oc_mask_locations = input_ids == self.tokenizer.mask_token_id
