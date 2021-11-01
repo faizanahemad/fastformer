@@ -1326,7 +1326,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, optc["warmup_steps"])
     # scheduler = optimization.get_linear_schedule_with_warmup(optimizer, optc["warmup_steps"], args["epochs"] * len(dataloader))
     div_factor = optc["lr"]/1e-11
-    pct_start = min(0.04, 20_000/args["total_steps"])
+    pct_start = min(0.04, 10_000/args["total_steps"])
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=args["total_steps"],
                                                     div_factor=div_factor, three_phase=False, pct_start=pct_start, anneal_strategy="linear", cycle_momentum=False)
 
