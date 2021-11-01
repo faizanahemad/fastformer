@@ -896,13 +896,13 @@ class RTDMLMModel(PreTrainedModel):
 
         ss = attention_mask.sum(1)
         spans = torch.zeros_like(input_ids, dtype=torch.bool)
-        span_select = torch.rand_like(spans.float()) < 0.1
+        span_select = torch.rand(spans.size(), device=spans.device) < 0.1
         for i in range(b):
             word_mask = torch.multinomial(word_ce[i], int(decided_noise_proportion * ss[i]), False)
             input_ids[i][word_mask] = mask_token_id
-
-            spans[i][word_mask] = True
-            current_span = torch.logical_and(span_select[i], spans[i])
+            current_span = spans[i]
+            current_span[word_mask] = True
+            current_span = torch.logical_and(span_select[i], current_span)
             if random.random() < 0.5:
                 spans = F.pad(current_span, (1, 0), value=False)[:-1]
             else:
