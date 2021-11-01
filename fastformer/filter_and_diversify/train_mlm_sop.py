@@ -929,7 +929,7 @@ class RTDMLMModel(PreTrainedModel):
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
                     accuracy=accuracy, random_mask_accuracy=random_mask_accuracy,
                     random_mask_locations=random_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
-                    decided_noise_proportion=decided_noise_proportion, average_tokens_per_sample=average_tokens_per_sample,
+                    decided_noise_proportion=decided_noise_proportion,
                     all_noise_locations=all_noise_locations)
 
     def get_output_embeddings(self):
@@ -954,9 +954,8 @@ class RTDMLMModel(PreTrainedModel):
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
         only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "random_mask_accuracy")
         accuracy_masking_model = dict_get(mask_dict, "accuracy")
-        average_tokens_per_sample = dict_get(mask_dict,"average_tokens_per_sample")
-        mask_stats = dict(average_tokens_per_sample=average_tokens_per_sample,
-                          accuracy_masking_model=accuracy_masking_model,
+
+        mask_stats = dict(accuracy_masking_model=accuracy_masking_model,
                           only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
                           only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model=only_random_mask_accuracy_masking_model)
         outputs = self.backbone(
