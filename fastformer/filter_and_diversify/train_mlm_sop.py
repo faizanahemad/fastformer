@@ -905,10 +905,10 @@ class RTDMLMModel(PreTrainedModel):
             current_span[word_mask] = True
             current_span = torch.logical_and(span_select[i], current_span)
             if random.random() < 0.5:
-                spans = F.pad(current_span, (1, 0), value=False)[:-1]
+                current_span = F.pad(current_span, (1, 0), value=False)[:-1]
             else:
-                spans = F.pad(current_span, (0, 1), value=False)[1:]
-            input_ids[i][spans] = mask_token_id
+                current_span = F.pad(current_span, (0, 1), value=False)[1:]
+            input_ids[i][current_span] = mask_token_id
 
         co_oc_mask_locations = input_ids == self.tokenizer.mask_token_id
         input_ids[random_mask_locations] = mask_token_id
