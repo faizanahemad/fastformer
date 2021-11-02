@@ -163,7 +163,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
                 text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.75), self.tokenizer_args["max_length"])
             except:
                 splits = text.split()
-                text = " ".join(splits[:self.allowed_raw_length]) if random.random() < 0.5 else " ".join(splits[len(splits) - self.allowed_raw_length:])
+                text = " ".join(splits[:self.allowed_raw_length])
 
         seg_sep_token = f" {tokenizer.sep_token} "
         if self.mlm_sop_enabled:
@@ -913,6 +913,8 @@ class RTDMLMModel(PreTrainedModel):
         ss = attention_mask.sum(1).clip(min=1)
         for i in range(b):
             mp = int(decided_noise_proportion * ss[i])
+            if mp < 4:
+                print("[ERROR] Batch Seq = %s, seq lens = %s, input_ids = %s" % (i, ss.cpu(), input_ids[i].cpu()))
             word_mask = torch.multinomial(word_ce[i], mp, False)
             wmi = torch.randperm(word_mask.size(-1), device=word_mask.device)[:int(0.1 * mp)]
             if random.random() < 0.5:
