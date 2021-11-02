@@ -151,12 +151,17 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
     def __getitem__(self, item):
         if isinstance(item, str):
             return self.dataset[item]
-        item = self.dataset[item]
-        tokenizer = self.tokenizer
+        length = -1
+        it = item - 1
+        while length < 96:
+            item = (it + 1) % len(self.dataset)
+            it = it + 1
+            item = self.dataset[item]
+            tokenizer = self.tokenizer
 
-        text = item["text"]
-        text = clean_text(text)
-        length = len(text.strip().split())
+            text = item["text"]
+            text = clean_text(text)
+            length = len(text.strip().split())
 
         if length > self.allowed_raw_length:
             try:
