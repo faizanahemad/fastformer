@@ -145,6 +145,8 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
         self.allowed_raw_length = self.tokenizer_args["max_length"] - (self.tokenizer_args["max_length"] // 8)
         self.token_sampler = sample_random_token(self.tokenizer)
         self.mlm_sop_enabled = mlm_sop_enabled
+        self.eos_token_id = self.tokenizer.eos_token_id if self.tokenizer.eos_token_id is not None else self.tokenizer.sep_token_id
+        self.bos_token_id = self.tokenizer.bos_token_id if self.tokenizer.bos_token_id is not None else self.tokenizer.cls_token_id
 
     def __getitem__(self, item):
         if isinstance(item, str):
@@ -360,7 +362,21 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
 
         else:
             tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
-            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze())
+            input_ids = tokenizer_outputs["input_ids"]
+            attention_mask = tokenizer_outputs["attention_mask"]
+            non_mask_locations = torch.logical_or(input_ids == self.eos_token_id,
+                                                  torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
+            b, s = input_ids.shape[:2]
+            mr = 0.045
+            r = torch.rand((b, s), device=input_ids.device)
+            r[non_mask_locations] = 1.0
+            r2 = r * torch.cat([torch.ones((r.shape[0], 1), device=r.device), r[:, :-1] / mr], 1)
+            r3 = r2 * torch.cat([torch.ones((r.shape[0], 1), device=r.device), r2[:, :-1] / mr], 1)
+            random_mask_locations = torch.logical_or(r < mr, torch.logical_or(r2 < mr, r3 < 0.5 * mr))
+            non_word_ce_locations = torch.logical_or(non_mask_locations, random_mask_locations)
+            
+            results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze(),
+                           non_mask_locations=non_mask_locations.squeeze(), random_mask_locations=random_mask_locations.squeeze(), non_word_ce_locations=non_word_ce_locations.squeeze())
 
         return results
 
@@ -872,23 +888,23 @@ class RTDMLMModel(PreTrainedModel):
         mask_locations = torch.logical_or(r < mr, torch.logical_or(r2 < mr, r3 < 0.5 * mr))
         return dict(hard_mask_locations=mask_locations, predicted_ce=None)
 
-    def do_masking(self, input_ids, attention_mask, validation_iter=False):
+    def do_masking(self, input_ids, attention_mask, non_word_ce_locations, random_mask_locations, non_mask_locations, validation_iter=False):
         label_mlm_input_ids = input_ids.clone()
         b, s = input_ids.shape[:2]
         mask_token_id = self.tokenizer.mask_token_id
-        non_mask_locations = torch.logical_or(input_ids == self.eos_token_id,
-                                              torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
+        # non_mask_locations = torch.logical_or(input_ids == self.eos_token_id, torch.logical_or(torch.logical_not(attention_mask), input_ids == self.bos_token_id))
         with torch.no_grad():
             mlm_rtd_hints = self.masking_model(input_ids, attention_mask, validation_iter=validation_iter)
 
-        random_mask_locations, _ = dict_get(self.get_hard_mask_v5(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
+        # random_mask_locations, _ = dict_get(self.get_hard_mask_v5(input_ids, attention_mask, non_mask_locations), "hard_mask_locations", "predicted_ce")
 
         word_ce = mlm_rtd_hints["word_ce"]
         word_ce = word_ce ** self.word_ce_schedule
         word_ce_max = max(1e-2, word_ce.max().item())
         word_ce = word_ce.clip(1e-5, 0.98 * word_ce_max)
-        word_ce[torch.logical_or(non_mask_locations, random_mask_locations)] = 1e-7
-        decided_noise_proportion = (0.9 + (random.random() * 0.02 - 0.01))
+        # non_word_ce_locations = torch.logical_or(non_mask_locations, random_mask_locations)
+        word_ce[non_word_ce_locations] = 1e-7
+        decided_noise_proportion = (0.09 + (random.random() * 0.02 - 0.01))
         # average_tokens_per_sample = attention_mask.sum() / b
         # word_mask = torch.multinomial(word_ce, int(decided_noise_proportion * average_tokens_per_sample), False)
         # word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
@@ -948,8 +964,8 @@ class RTDMLMModel(PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.backbone.embeddings.word_embeddings = new_embeddings
 
-    def forward(self, input_ids, attention_mask, validation_iter=False):
-        mask_dict = self.do_masking(input_ids, attention_mask, validation_iter)
+    def forward(self, input_ids, attention_mask, non_word_ce_locations, random_mask_locations, non_mask_locations, validation_iter=False):
+        mask_dict = self.do_masking(input_ids, attention_mask, non_word_ce_locations, random_mask_locations, non_mask_locations, validation_iter)
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
         only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "random_mask_accuracy")
         accuracy_masking_model = dict_get(mask_dict, "accuracy")
