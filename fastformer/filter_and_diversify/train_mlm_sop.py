@@ -910,7 +910,7 @@ class RTDMLMModel(PreTrainedModel):
         # word_mask = [torch.arange(b, device=word_mask.device).repeat_interleave(word_mask.size(1)), word_mask.reshape(-1)]
         # input_ids[word_mask[0], word_mask[1]] = mask_token_id
 
-        ss = attention_mask.sum(1)
+        ss = attention_mask.sum(1).clip(min=1)
         for i in range(b):
             mp = int(decided_noise_proportion * ss[i])
             word_mask = torch.multinomial(word_ce[i], mp, False)
