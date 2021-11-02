@@ -943,7 +943,7 @@ class RTDMLMModel(PreTrainedModel):
             co_oc_mask_accuracy = word_wise_accuracy[co_oc_mask_locations].float().mean().item()
             random_mask_accuracy = word_wise_accuracy[random_mask_locations].float().mean().item()
             accuracy = mlm_rtd_hints["word_accuracy"].float().mean().item()
-        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids,
+        return dict(input_ids=input_ids, label_mlm_input_ids=label_mlm_input_ids, min_seq_len=ss.min().item(),
                     mask_accuracy=mask_accuracy, co_oc_mask_accuracy=co_oc_mask_accuracy,
                     accuracy=accuracy, random_mask_accuracy=random_mask_accuracy,
                     random_mask_locations=random_mask_locations, co_oc_mask_locations=co_oc_mask_locations,
@@ -971,9 +971,9 @@ class RTDMLMModel(PreTrainedModel):
         mask_dict = self.do_masking(input_ids, attention_mask, non_word_ce_locations, random_mask_locations, non_mask_locations, validation_iter)
         input_ids, label_mlm_input_ids = dict_get(mask_dict, "input_ids", "label_mlm_input_ids")
         only_mask_accuracy_masking_model, only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model = dict_get(mask_dict, "mask_accuracy", "co_oc_mask_accuracy", "random_mask_accuracy")
-        accuracy_masking_model = dict_get(mask_dict, "accuracy")
+        accuracy_masking_model, min_seq_len = dict_get(mask_dict, "accuracy", "min_seq_len")
 
-        mask_stats = dict(accuracy_masking_model=accuracy_masking_model,
+        mask_stats = dict(accuracy_masking_model=accuracy_masking_model, min_seq_len=min_seq_len,
                           only_mask_accuracy_masking_model=only_mask_accuracy_masking_model,
                           only_co_oc_mask_accuracy_masking_model=only_co_oc_mask_accuracy_masking_model, only_random_mask_accuracy_masking_model=only_random_mask_accuracy_masking_model)
         outputs = self.backbone(
