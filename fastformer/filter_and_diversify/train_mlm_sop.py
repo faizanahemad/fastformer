@@ -153,11 +153,11 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             return self.dataset[item]
         length = -1
         it = item - 1
+        tokenizer = self.tokenizer
         while length < 96:
             item = (it + 1) % len(self.dataset)
             it = it + 1
             item = self.dataset[item]
-            tokenizer = self.tokenizer
 
             text = item["text"]
             text = clean_text(text)
@@ -165,7 +165,12 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
 
         if length > self.allowed_raw_length:
             try:
-                text = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.75), self.tokenizer_args["max_length"])
+                text_sent = get_valid_sentences(text, self.sent_detector, tokenizer, int(self.tokenizer_args["max_length"] * 0.75), self.tokenizer_args["max_length"])
+                if len(text_sent.split()) < 64:
+                    splits = text.split()
+                    text = " ".join(splits[:self.allowed_raw_length])
+                else:
+                    text = text_sent
             except:
                 splits = text.split()
                 text = " ".join(splits[:self.allowed_raw_length])
@@ -379,7 +384,7 @@ class MaskedLanguageSentenceOrderModelDataset(Dataset):
             r3 = r2 * torch.cat([torch.ones((r.shape[0], 1), device=r.device), r2[:, :-1] / mr], 1)
             random_mask_locations = torch.logical_or(r < mr, torch.logical_or(r2 < mr, r3 < 0.5 * mr))
             non_word_ce_locations = torch.logical_or(non_mask_locations, random_mask_locations)
-            
+
             results = dict(input_ids=tokenizer_outputs["input_ids"].squeeze(), attention_mask=tokenizer_outputs["attention_mask"].squeeze(),
                            non_mask_locations=non_mask_locations.squeeze(), random_mask_locations=random_mask_locations.squeeze(), non_word_ce_locations=non_word_ce_locations.squeeze())
 
