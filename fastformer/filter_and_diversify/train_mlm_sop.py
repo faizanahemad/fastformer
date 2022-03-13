@@ -1451,6 +1451,7 @@ def train(local_rank, args):
         if step == 0 and local_rank == 0:
             print("[Train]: Time = %s, First Batch Training for Rank = %s" % (get_time_string(), rank))
         if validation_iter:
+            clean_memory()
             steps_remaining = total_steps - steps_done
             # print({k for k, v in output.items() if isinstance(v, torch.Tensor)})
             output = {k: float(v) for k, v in output.items() if try_float(v)}
