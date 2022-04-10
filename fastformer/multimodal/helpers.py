@@ -262,8 +262,8 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
-        mean = torch.as_tensor(self.imagenet_normalization.mean).to(device)[None, :, None, None]
-        std = torch.as_tensor(self.imagenet_normalization.std).to(device)[None, :, None, None]
+        mean = torch.as_tensor(self.imagenet_normalization.mean)[None, :, None, None]
+        std = torch.as_tensor(self.imagenet_normalization.std)[None, :, None, None]
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
         masked_text = tokenizer.decode(x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()])
 
