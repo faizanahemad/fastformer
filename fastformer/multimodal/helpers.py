@@ -355,10 +355,14 @@ class MultiModalTrainingDataset(Dataset):
         assert t2t_student_masked_attention_mask.sum() == t2t_student_attention_mask.sum()
         assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
 
-        image_locations = list(" ".join(item[self.image_columns].values[0])[0].split())  # Assuming all images are separated in their columns by space
+        image_locations = item[self.image_columns].values[0]
+        print(image_locations)
+        image_locations = " ".join(image_locations)
+        print(image_locations)
+        image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         count_images = len(image_locations)
         random.shuffle(image_locations)
-        print(image_locations)
+        print(image_locations, len(image_locations))
         image_locations = list(map(pil_loader, image_locations))
 
         one_image = None
