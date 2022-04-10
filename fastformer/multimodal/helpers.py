@@ -425,17 +425,18 @@ class MultiModalTrainingDataset(Dataset):
         masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).long()
         image_locations = torch.tensor(np.stack(image_locations))
-        print(image_locations.shape)
+        print("image_locations", image_locations.shape)
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
                                    p2=image_patch_size)
+        print("images_squeeze", images_squeeze.shape)
         images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)
                        ) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
         print(images_norm.shape)
         # we find that the mean is about 0.48 and standard deviation is about 0.08.
         images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
-        print(images_patch.shape)
+        print(images_patch.shape) # [b, 144, 3072]
         B, _, C = images_patch.shape
-        image_labels = images_patch[image_masks].reshape(B, -1, C)
+        image_labels = images_patch.view(-1, C)[image_masks.view(-1)].reshape(B, -1, C)
         print(image_labels.shape, image_masks.shape, B, C)
 
         # assert (text_attention_mask.sum() == text_masked_attention_mask.sum()).item()
