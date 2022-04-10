@@ -331,14 +331,14 @@ class MultiModalTrainingDataset(Dataset):
         tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
         tabular_to_text_for_teacher = ""
         for k, v in tabular:
-            tabular_to_text_for_teacher = tabular_to_text_for_teacher + " : " + k + " : " + v
+            tabular_to_text_for_teacher = tabular_to_text_for_teacher + " : " + k + " : " + str(v)
         tabular_to_text_for_student_input = ""
         tabular_to_text_for_student_output = ""
         for k, v in tabular:
             if random.random() < self.tabular_feature_drop_proba:
                 continue
-            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " : " + k + " : " + (" ".join([mask] * len(tokenizer.tokenize(" " + v))) if random.random() < self.tabular_feature_mask_proba else v)
-            tabular_to_text_for_student_output = tabular_to_text_for_student_output + " : " + k + " : " + v
+            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " : " + k + " : " + (" ".join([mask] * len(tokenizer.tokenize(" " + str(v)))) if random.random() < self.tabular_feature_mask_proba else v)
+            tabular_to_text_for_student_output = tabular_to_text_for_student_output + " : " + k + " : " + str(v)
 
         tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
         t2t_teacher_input_ids, t2t_teacher_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
