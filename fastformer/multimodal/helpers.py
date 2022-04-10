@@ -306,7 +306,10 @@ class MultiModalTrainingDataset(Dataset):
         mask = self.tokenizer.mask_token
         item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator,
                            low_memory=False, skiprows=item, nrows=1, header=None)
+        print(item)
+        print(item.iloc[0])
         text = item[self.text_columns].values[0]
+        print(text)
         text = self.joiner.join(text)
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
@@ -897,15 +900,13 @@ def training_args():
     args.seed = seed
     return vars(args)
 
-def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, num_workers=None, max_length=512):
-    single_node = world_size == 1
-    num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
+def build_propreitery_dataset(location, tokenizer):
     COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
                'customer_review_count', 'customer_average_review_rating', 'browse_root_name',
                'browse_node_id', 'browse_node_ids', 'browse_node_name', 'browse_node_l2',
                'brand_name', 'gl', 'category_code', 'subcategory_code', 'has_fba_offering',
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
-               'num_offers'] + ["im_paths"]
+               'num_offers'] + ["physical_id"]
     textual = ["text"]
     tabular = ['price', 'has_customer_reviews',
                'customer_review_count', 'customer_average_review_rating', 'browse_root_name',
@@ -913,7 +914,29 @@ def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, 
                'brand_name', 'gl', 'category_code', 'subcategory_code', 'has_fba_offering',
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
                'num_offers']
-    image_columns = ["im_paths"]
+    image_columns = ["physical_id"]
+    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, "\t", COLUMNS, textual, tabular,
+                                        image_columns,
+                                        image_size, image_patch_size, train_image_augments)
+    return dataset
+
+def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, num_workers=None):
+    single_node = world_size == 1
+    num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
+    COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
+               'customer_review_count', 'customer_average_review_rating', 'browse_root_name',
+               'browse_node_id', 'browse_node_ids', 'browse_node_name', 'browse_node_l2',
+               'brand_name', 'gl', 'category_code', 'subcategory_code', 'has_fba_offering',
+               'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
+               'num_offers'] + ["physical_id"]
+    textual = ["text"]
+    tabular = ['price', 'has_customer_reviews',
+               'customer_review_count', 'customer_average_review_rating', 'browse_root_name',
+               'browse_node_id', 'browse_node_ids', 'browse_node_name', 'browse_node_l2',
+               'brand_name', 'gl', 'category_code', 'subcategory_code', 'has_fba_offering',
+               'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
+               'num_offers']
+    image_columns = ["physical_id"]
     dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, "\t", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
