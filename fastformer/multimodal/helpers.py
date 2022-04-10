@@ -262,6 +262,8 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
+        mean = torch.as_tensor(self.imagenet_normalization.mean).to(device)[None, :, None, None]
+        std = torch.as_tensor(self.imagenet_normalization.std).to(device)[None, :, None, None]
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
         masked_text = tokenizer.decode(x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()])
 
@@ -272,7 +274,7 @@ class MultiModalTrainingDataset(Dataset):
             x["tabular_teacher_input_ids"][:x["tabular_teacher_attention_mask"].sum()])
         generated_image_actual = None
         if x["generated_image"] is not None:
-            generated_image_actual = x["generated_image"][3:]*self.imagenet_normalization.std + self.imagenet_normalization.mean
+            generated_image_actual = x["generated_image"][3:]*std + mean
             sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
             generated_image_actual = (generated_image_actual.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8)
             generated_image_actual = Image.fromarray(generated_image_actual)
