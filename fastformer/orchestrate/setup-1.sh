@@ -26,7 +26,7 @@ cd /home/ahemf
 wget https://developer.download.nvidia.com/compute/cuda/11.4.0/local_installers/cuda_11.4.0_470.42.01_linux.run > /dev/null
 chmod +x cuda_11.4.0_470.42.01_linux.run
 sudo sudo sh cuda_11.4.0_470.42.01_linux.run --silent --driver --toolkit
-
+sudo nvidia-smi daemon
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
 

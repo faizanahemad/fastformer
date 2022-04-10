@@ -1,5 +1,5 @@
 source ~/.zshrc
-pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html > /dev/null
+pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113 > /dev/null
 pip install --use-deprecated=legacy-resolver -U tqdm wandb> /dev/null
 pip install --use-deprecated=legacy-resolver -U sacrebleu sacremoses sentencepiece  > /dev/null
 pip install --use-deprecated=legacy-resolver -U dataclasses dataclasses-json  > /dev/null
@@ -9,7 +9,7 @@ pip install --use-deprecated=legacy-resolver -U snakeviz torch-optimizer attrdic
 pip install --use-deprecated=legacy-resolver -U pytorch-fast-transformers pytorch-ranger  > /dev/null
 pip install --use-deprecated=legacy-resolver -U transformers datasets tokenizers  > /dev/null
 pip install --use-deprecated=legacy-resolver -U joblib scikit-learn > /dev/null
-
+pip install opencv-python > /dev/null
 # https://github.com/pypa/pip/issues/9187
 # --use-feature=fast-deps --use-deprecated=legacy-resolver
 

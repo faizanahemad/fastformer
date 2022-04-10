@@ -797,18 +797,32 @@ class Norm(nn.Module):
 
 
 def init_weights(module, std=None):
-    if isinstance(module, nn.Sequential):
+    if isinstance(module, (nn.Sequential, nn.ModuleList)):
         for mod in module:
             init_weights(mod)
+    elif isinstance(module, (nn.ModuleDict,)):
+        for k, mod in module:
+            init_weights(mod)
     else:
-        if std is not None:
-            pass
-        elif hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
-            fan_out, fan_in = module.weight.shape[:2]
-            std = np.sqrt(1.0 / (float(fan_in + fan_out)/2.0))
-        elif hasattr(module, "weight"):
-            std = np.sqrt(1.0 / module.weight.shape[-1])
-        if hasattr(module, "weight"):
+        if std is None:
+            if hasattr(module, "weight") and len(module.weight.shape) >= 2 and not isinstance(module, nn.Embedding):
+                fan_out, fan_in = module.weight.shape[:2]
+                std = np.sqrt(1.0 / (float(fan_in + fan_out) / 2.0))
+            elif hasattr(module, "weight"):
+                std = np.sqrt(1.0 / module.weight.shape[-1])
+            else:
+                std = 0.02
+
+        if isinstance(module, nn.LayerNorm):
+            nn.init.constant_(module.bias, 0)
+            nn.init.constant_(module.weight, 1.0)
+        elif isinstance(module, nn.Parameter):
+            module.data.normal_(mean=0.0, std=std)
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=std)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif hasattr(module, "weight") and module.weight is not None:
             trunc_normal_(module.weight, std=std)
         if hasattr(module, "bias") and module.bias is not None:
             nn.init.constant_(module.bias, 0.0)

@@ -77,7 +77,7 @@ class sample_random_token:
         for i in tokenizer.all_special_ids:
             probas[i] = 0
         for i, token in enumerate(tokenizer.convert_ids_to_tokens(list(range(len(tokenizer))))):
-            if len(token) <= 3:
+            if len(token) <= 2:
                 probas[i] = 0
         probas = probas / np.sum(probas)
         self.probas = probas
@@ -1231,7 +1231,6 @@ def train(local_rank, args):
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
-    torch.backends.cudnn.benchmark = True
     rank = args["nr"] if args["cpu"] else (args["nr"] * args["gpus_per_node"] + local_rank)
     nr = args["nr"]
     if args["cpu"]:
@@ -1255,19 +1254,18 @@ def train(local_rank, args):
     # + timedelta(hours=5, minutes=30)
     time_string = (datetime.fromtimestamp(time.mktime(time.gmtime(rnd.cpu().item())))).astimezone(timezone('Asia/Kolkata')).strftime(format)
     set_seeds(args["seed"])
-    batch_size = 8
 
     optimizer_config["lr"] = args["lr"]
     optimizer_config["weight_decay"] = args["weight_decay"]
     optimizer_config["gradient_clipping"] = args["gradient_clipping"]
     optimizer_config["beta_1"] = args["beta_1"]
     optimizer_config["beta_2"] = args["beta_2"]
-    optimizer_config["eps"] = 1e-6
+    optimizer_config["eps"] = 1e-8
 
     reinit = args["pretrained_model"] is None or "pretrained_model" not in args or args["pretrained_model"] == ""
     optimizer_config["weight_decay"] = optimizer_config["weight_decay"]  # if reinit else 0.0
     backbone, tokenizer, lm_head = get_backbone(args["model_config"], reinit, dropout_prob=0.1)
-    batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else batch_size
+    batch_size = args["batch_size"] if "batch_size" in args and isinstance(args["batch_size"], int) else 8
     mlm_w = args["mlm_w"] if "mlm_w" in args else 1.0
     sentence_order_w = args["sentence_order_w"] if "sentence_order_w" in args else 1.0
 
@@ -1320,12 +1318,19 @@ def train(local_rank, args):
         optimizer = dict(lr=optc["lr"], momentum=0.9, weight_decay=optc["weight_decay"], nesterov=True)
     else:
         raise ValueError
+    no_decay = ['bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
+         'weight_decay': args.weight_decay},
+        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad], 'weight_decay': 0.0}
+    ]
     if args["world_size"] > 1 and False:
-        optimizer = ZeroRedundancyOptimizer(trainable_params, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
+        optimizer = ZeroRedundancyOptimizer(optimizer_grouped_parameters, optimizer_class=optimizer_class, parameters_as_bucket_view=True, **optimizer)
     else:
-        optimizer = optimizer_class(trainable_params, **optimizer)
+        optimizer = optimizer_class(optimizer_grouped_parameters, **optimizer)
     # print("[Train]: Time = %s, Trainable Params = %s" % (get_time_string(), {k for k, v in trainable_model.named_parameters() if v.requires_grad}))
     del trainable_params
+    del optimizer_grouped_parameters
     optimizer.zero_grad(set_to_none=True)
     model_save_dir = args["model_save_dir"]
     model_save_name = args["model_save_name"]
