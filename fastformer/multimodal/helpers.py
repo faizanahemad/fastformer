@@ -200,7 +200,9 @@ def float_detect(v):
 def float_format(v):
     v = str(v)
     if float_detect(v):
-        return "%.3f" % (float(v))
+        precision = min(3, len(v.split(".")[1])) if "." in v else 0
+        precision_str = "%%.%sf" % precision
+        return precision_str % (float(v))
     return v
 
 
