@@ -197,6 +197,12 @@ def float_detect(v):
     except:
         return False
 
+def float_format(v):
+    v = str(v)
+    if float_detect(v):
+        return "%.3f" % (float(v))
+    return v
+
 
 def text_masking(text: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast], mask_probability: float = 0.15):
     mask = tokenizer.mask_token
@@ -273,6 +279,7 @@ class MultiModalTrainingDataset(Dataset):
         input_tabular = tokenizer.decode(
             x["tabular_teacher_input_ids"][:x["tabular_teacher_attention_mask"].sum()])
         generated_image_actual = None
+        sketch_components_of_generated = None
         if x["generated_image"] is not None:
             generated_image_actual = x["generated_image"][3:]*std + mean
             sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
@@ -297,7 +304,7 @@ class MultiModalTrainingDataset(Dataset):
         all_patch = [(x * 255).clip(0, 255).numpy().astype(np.uint8) for x in all_patch]
         actual_images = [Image.fromarray(x) for x in actual_images]
         all_patch = [Image.fromarray(x) for x in all_patch]
-        return dict(input_text=input_text, masked_text=masked_text,
+        return dict(input_text=input_text, masked_text=masked_text, sketch_components_of_generated=sketch_components_of_generated,
                     student_input_tabular=student_input_tabular, student_input_masked_tabular=student_input_masked_tabular,
                     input_tabular=input_tabular, generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
 
@@ -346,14 +353,14 @@ class MultiModalTrainingDataset(Dataset):
         tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
         tabular_to_text_for_teacher = ""
         for k, v in tabular:
-            tabular_to_text_for_teacher = tabular_to_text_for_teacher + " : " + k + " : " + str(v)
+            tabular_to_text_for_teacher = tabular_to_text_for_teacher + " " + k + " = " + float_format(v) + " ;"
         tabular_to_text_for_student_input = ""
         tabular_to_text_for_student_output = ""
         for k, v in tabular:
             if random.random() < self.tabular_feature_drop_proba:
                 continue
-            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " : " + k + " : " + (" ".join([mask] * len(tokenizer.tokenize(" " + str(v)))) if random.random() < self.tabular_feature_mask_proba else str(v))
-            tabular_to_text_for_student_output = tabular_to_text_for_student_output + " : " + k + " : " + str(v)
+            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + float_format(v)))) if random.random() < self.tabular_feature_mask_proba else float_format(v)) + " ;"
+            tabular_to_text_for_student_output = tabular_to_text_for_student_output + " " + k + " = " + float_format(v) + " ;"
 
         tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
         t2t_teacher_input_ids, t2t_teacher_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
