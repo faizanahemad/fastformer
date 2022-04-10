@@ -281,14 +281,20 @@ class MultiModalTrainingDataset(Dataset):
             sketch_components_of_generated = Image.fromarray(sketch_components_of_generated)
         image_labels = x["image_labels"]
         image_masks = x["image_masks"]
-        all_patch = torch.zeros(image_masks.shape[0], image_masks.shape[1], image_patch_size, image_patch_size, 3)
-        image_labels = image_labels.reshape(image_labels.shape[0], -1, image_patch_size, image_patch_size, 3)
-        all_patch[image_masks] = image_labels
-        actual_images = x["images"] * self.imagenet_normalization.std.unsqueeze(0) + self.imagenet_normalization.mean.unsqueeze(0)
-        all_patch[~image_masks] = rearrange(actual_images, 'b c (h p1) (w p2) -> b (h w) p1 p2 c', p1=image_patch_size,
-                                   p2=image_patch_size)[~image_masks]
+        all_patch = torch.zeros(image_masks.shape[0], image_masks.shape[1], image_patch_size * image_patch_size * 3)
+        B, C = all_patch.shape[0], image_patch_size * image_patch_size * 3
+        image_labels = image_labels.reshape(B, -1, image_patch_size * image_patch_size * 3)
+        S = all_patch.shape[1]
+        all_patch = all_patch.view(-1, C)
+        all_patch[image_masks.view(-1)] = image_labels.view(-1, C)
+
+        actual_images = x["images"] * std.unsqueeze(0) + mean.unsqueeze(0)
+        all_patch[~image_masks.view(-1)] = rearrange(actual_images, 'b c (h p1) (w p2) -> b (h w) p1 p2 c', p1=image_patch_size,
+                                   p2=image_patch_size).view(-1, C)[~image_masks.view(-1)]
+        all_patch = all_patch.reshape(B, S, C).reshape(B, S, image_patch_size, image_patch_size, 3)
+        all_patch = rearrange(all_patch, 'b (h w) p1 p2 c -> b (h p1) (w p2) c', h=image_grid, w=image_grid)
         actual_images = [(x.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8) for x in actual_images]
-        all_patch = [(x.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8) for x in all_patch]
+        all_patch = [(x * 255).clip(0, 255).numpy().astype(np.uint8) for x in all_patch]
         actual_images = [Image.fromarray(x) for x in actual_images]
         all_patch = [Image.fromarray(x) for x in all_patch]
         return dict(input_text=input_text, masked_text=masked_text,
@@ -425,19 +431,14 @@ class MultiModalTrainingDataset(Dataset):
         masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).long()
         image_locations = torch.tensor(np.stack(image_locations))
-        print("image_locations", image_locations.shape)
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
                                    p2=image_patch_size)
-        print("images_squeeze", images_squeeze.shape)
         images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)
                        ) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
-        print(images_norm.shape)
         # we find that the mean is about 0.48 and standard deviation is about 0.08.
         images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
-        print(images_patch.shape) # [b, 144, 3072]
         B, _, C = images_patch.shape
-        image_labels = images_patch.view(-1, C)[image_masks.view(-1)].reshape(B, -1, C)
-        print(image_labels.shape, image_masks.shape, B, C)
+        image_labels = images_patch.view(-1, C)[image_masks.view(-1)].reshape(B, -1, C)  # 2D indexing isn't working so bring index to 1D
 
         # assert (text_attention_mask.sum() == text_masked_attention_mask.sum()).item()
         # assert (tabular_student_attention_mask.sum() == tabular_student_masked_attention_mask.sum()).item()
