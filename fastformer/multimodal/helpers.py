@@ -421,7 +421,7 @@ class MultiModalTrainingDataset(Dataset):
         image_inputs = torch.tensor(np.stack(image_locations))
 
 
-        masks = [self.__get_image_mask__() for _ in range(num_images)]
+        masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).long()
         image_locations = torch.tensor(np.stack(image_locations))
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
