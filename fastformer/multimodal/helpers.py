@@ -358,6 +358,7 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(" ".join(item[self.image_columns].values[0])[0].split())  # Assuming all images are separated in their columns by space
         count_images = len(image_locations)
         random.shuffle(image_locations)
+        print(image_locations)
         image_locations = list(map(pil_loader, image_locations))
 
         one_image = None
