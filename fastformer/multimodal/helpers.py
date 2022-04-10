@@ -220,7 +220,7 @@ class MultiModalTrainingDataset(Dataset):
     """
     def __init__(self, tokenizer: PreTrainedTokenizerFast, tokenizer_args, data_csv, separator,
                  columns, text_columns, tabular_columns, image_columns,
-                 image_size, image_patch_size, image_augments, image_to_vector=image_convert_to_tensor,
+                 image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
                  word_mask_proba=0.15, image_mask_proba=0.75, tabular_feature_mask_proba=0.15, tabular_feature_drop_proba=0.1, save_one_image=True,
                  total_image_panels=5,
