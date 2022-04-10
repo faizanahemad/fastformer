@@ -261,6 +261,7 @@ class MultiModalTrainingDataset(Dataset):
         return mask
 
     def __decode__(self, x):
+        tokenizer = self.tokenizer
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
         masked_text = tokenizer.decode(x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()])
 
@@ -293,14 +294,6 @@ class MultiModalTrainingDataset(Dataset):
                     input_tabular=input_tabular, generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
 
 
-
-
-
-
-
-
-
-
     def __len__(self):
         if hasattr(self, "length") and self.length is not None:
             return self.length
@@ -311,16 +304,25 @@ class MultiModalTrainingDataset(Dataset):
             self.length = line_count - 1
             return self.length
 
+    def __get_raw_item__(self, item):
+        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=1, nrows=1,
+                           header=0)
+        text = item[self.text_columns].values[0]
+        text = self.joiner.join(text)
+        tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
+        image_locations = item[self.image_columns].values[0]
+        image_locations = " ".join(image_locations)
+        image_locations = list(image_locations.split())
+        return dict(item=item, text=text, tabular=tabular, image_locations=image_locations)
+
+
     def __getitem__(self, item):
 
         tokenizer = self.tokenizer
         mask = self.tokenizer.mask_token
         item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=1, nrows=1,
                            header=0)
-        print(item)
-        print(item.iloc[0])
         text = item[self.text_columns].values[0]
-        print(text)
         text = self.joiner.join(text)
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
@@ -361,13 +363,10 @@ class MultiModalTrainingDataset(Dataset):
         assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
 
         image_locations = item[self.image_columns].values[0]
-        print(image_locations)
         image_locations = " ".join(image_locations)
-        print(image_locations)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         count_images = len(image_locations)
         random.shuffle(image_locations)
-        print(image_locations, len(image_locations))
         image_locations = list(map(pil_loader, image_locations))
 
         one_image = None
