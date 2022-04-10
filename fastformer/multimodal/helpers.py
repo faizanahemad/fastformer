@@ -248,7 +248,7 @@ class MultiModalTrainingDataset(Dataset):
         self.image_mask_proba = image_mask_proba
         self.image_patch_size = image_patch_size
         assert self.image_size % self.image_patch_size == 0
-        self.num_patches = self.image_size // self.image_patch_size
+        self.num_patches = (self.image_size // self.image_patch_size) ** 2
         self.num_mask = int(image_mask_proba * self.num_patches)
         self.length = len(self)
 
