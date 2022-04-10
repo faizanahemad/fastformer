@@ -300,12 +300,18 @@ class MultiModalTrainingDataset(Dataset):
 
 
 
+    def __len__(self):
+        with open(self.data_csv, "r+") as f:
+            # reader_file = csv.reader(f, delimiter=self.separator)
+            line_count = sum(1 for line in f)
+        return line_count - 1
+
     def __getitem__(self, item):
 
         tokenizer = self.tokenizer
         mask = self.tokenizer.mask_token
-        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator,
-                           low_memory=False, skiprows=item, nrows=1, header=None)
+        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=1, nrows=1,
+                           header=0)
         print(item)
         print(item.iloc[0])
         text = item[self.text_columns].values[0]
@@ -915,7 +921,7 @@ def build_propreitery_dataset(location, tokenizer):
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
                'num_offers']
     image_columns = ["physical_id"]
-    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, "\t", COLUMNS, textual, tabular,
+    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
     return dataset
@@ -937,7 +943,7 @@ def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, 
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
                'num_offers']
     image_columns = ["physical_id"]
-    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, "\t", COLUMNS, textual, tabular,
+    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
