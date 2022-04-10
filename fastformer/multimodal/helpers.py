@@ -250,6 +250,7 @@ class MultiModalTrainingDataset(Dataset):
         assert self.image_size % self.image_patch_size == 0
         self.num_patches = self.image_size // self.image_patch_size
         self.num_mask = int(image_mask_proba * self.num_patches)
+        self.length = len(self)
 
     def __get_image_mask__(self):
         mask = np.hstack([
@@ -301,10 +302,14 @@ class MultiModalTrainingDataset(Dataset):
 
 
     def __len__(self):
-        with open(self.data_csv, "r+") as f:
-            # reader_file = csv.reader(f, delimiter=self.separator)
-            line_count = sum(1 for line in f)
-        return line_count - 1
+        if hasattr(self, "length") and self.length is not None:
+            return self.length
+        else:
+            with open(self.data_csv, "r+") as f:
+                # reader_file = csv.reader(f, delimiter=self.separator)
+                line_count = sum(1 for line in f)
+            self.length = line_count - 1
+            return self.length
 
     def __getitem__(self, item):
 
@@ -417,7 +422,7 @@ class MultiModalTrainingDataset(Dataset):
 
 
         masks = [self.__get_image_mask__() for _ in range(num_images)]
-        image_masks = torch.tensor(np.stack(masks))
+        image_masks = torch.tensor(np.stack(masks)).long()
         image_locations = torch.tensor(np.stack(image_locations))
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
                                    p2=image_patch_size)
