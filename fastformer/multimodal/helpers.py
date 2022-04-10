@@ -337,7 +337,7 @@ class MultiModalTrainingDataset(Dataset):
         for k, v in tabular:
             if random.random() < self.tabular_feature_drop_proba:
                 continue
-            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " : " + k + " : " + (" ".join([mask] * len(tokenizer.tokenize(" " + str(v)))) if random.random() < self.tabular_feature_mask_proba else v)
+            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " : " + k + " : " + (" ".join([mask] * len(tokenizer.tokenize(" " + str(v)))) if random.random() < self.tabular_feature_mask_proba else str(v))
             tabular_to_text_for_student_output = tabular_to_text_for_student_output + " : " + k + " : " + str(v)
 
         tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
