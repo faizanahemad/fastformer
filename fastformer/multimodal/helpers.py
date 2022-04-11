@@ -615,12 +615,12 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
     def vit_forward(self, x, mask):
         x = self.vit.patch_embed(x)
-        x = torch.cat((self.vit.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        # x = torch.cat((self.vit.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
         x = self.vit.pos_drop(x + self.vit.pos_embed)
 
         B, _, C = x.shape
         if mask is not None:
-            x_vis = x[~mask].reshape(B, -1, C)  # ~mask means visible
+            x_vis = x[~mask.view(B, mask.shape[-1])].reshape(B, -1, C)  # ~mask means visible
         else:
             x_vis = x
 
