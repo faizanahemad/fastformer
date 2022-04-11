@@ -684,6 +684,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             b, ex, c, h, w = images.shape
             images = images.view(-1, c, h, w)
             image_features = self.vit_forward(images, mask)
+            image_features = image_features.reshape(b, -1, image_features.shape[2])
         else:
             image_features = None
 
@@ -694,7 +695,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         elif tabular_text_output is None:
             features = image_features
         else:
-            features = torch.cat([tabular_text_output, image_features.reshape(b, -1, image_features.shape[2])], 1)
+            features = torch.cat([tabular_text_output, image_features], 1)
 
         s = features.size(1)
         extra = 512 - s % 512
