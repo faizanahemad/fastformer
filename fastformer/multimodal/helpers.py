@@ -343,7 +343,7 @@ class MultiModalTrainingDataset(Dataset):
             return self.length
 
     def __get_raw_item__(self, item):
-        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=1, nrows=1,
+        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
                            header=0)
         text = item[self.text_columns].values[0]
         text = self.joiner.join(text)
@@ -358,7 +358,7 @@ class MultiModalTrainingDataset(Dataset):
 
         tokenizer = self.tokenizer
         mask = self.tokenizer.mask_token
-        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=1, nrows=1,
+        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
                            header=0)
         text = item[self.text_columns].values[0]
         text = self.joiner.join(text)
