@@ -605,7 +605,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, image_patch_size*image_patch_size*3))
         self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
                                                  nn.Linear(embed_dim, image_patch_size * image_patch_size * 3))
-        self._init_weights()
+        self.init_weights()
         decoder_query = longformer.embeddings.position_embeddings.weight[:144, :decoder_layer_conf.hidden_size].detach().clone()
         self.decoder_inputs = torch.nn.Parameter(decoder_query)
         self.grad_checkpointing = False
