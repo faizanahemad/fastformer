@@ -615,8 +615,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
     def vit_forward(self, x, mask):
         x = self.vit.patch_embed(x)
-        # x = torch.cat((self.vit.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
-        x = self.vit.pos_drop(x + self.vit.pos_embed)
+        x = torch.cat((self.vit.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        x = self.vit.pos_drop(x + self.vit.pos_embed)[:, 1: x.shape[1]]
 
         B, _, C = x.shape
         if mask is not None:
