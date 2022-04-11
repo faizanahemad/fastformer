@@ -209,6 +209,14 @@ def float_format(v):
         return precision_str % (float(v))
     return v
 
+def isnan(v):
+    v = str(v)
+    try:
+        v = float(v)
+        return np.isnan(v)
+    except:
+        return v == "None"
+
 
 def text_masking(text: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast], mask_probability: float = 0.15):
     mask = tokenizer.mask_token
@@ -234,7 +242,7 @@ class MultiModalTrainingDataset(Dataset):
                  columns, text_columns, tabular_columns, image_columns,
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
-                 word_mask_proba=0.15, image_mask_proba=0.75, tabular_feature_mask_proba=0.15, tabular_feature_drop_proba=0.1, save_one_image=True,
+                 word_mask_proba=0.15, image_mask_proba=0.75, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
                  total_image_panels=5,
                  ):
         self.tokenizer = tokenizer
@@ -374,7 +382,7 @@ class MultiModalTrainingDataset(Dataset):
         for k, v in tabular:
             if random.random() < self.tabular_feature_drop_proba:
                 continue
-            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + float_format(v)))) if random.random() < self.tabular_feature_mask_proba else float_format(v)) + " ;"
+            tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + float_format(v)))) if random.random() < self.tabular_feature_mask_proba and not isnan(v) else float_format(v)) + " ;"
             tabular_to_text_for_student_output = tabular_to_text_for_student_output + " " + k + " = " + float_format(v) + " ;"
 
         tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
