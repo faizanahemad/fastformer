@@ -700,7 +700,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         extra = 512 - s % 512
         if extra > 0 and extra < 512:
             features = torch.cat([features, torch.zeros(features.size(0), extra, features.size(2),
-                                                        dtype=features.dtype, device=features.device, requires_grad=False)])
+                                                        dtype=features.dtype, device=features.device, requires_grad=False)], dim=1)
 
         attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
 
