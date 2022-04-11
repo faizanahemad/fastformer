@@ -696,7 +696,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         else:
             features = torch.cat([tabular_text_output, image_features.reshape(b, -1, image_features.shape[2])], 1)
 
-        features = self.mid_fusion_backbone(features)[0]
+        features = self.mid_fusion_backbone(features, attention_mask=torch.ones(features.shape[:2], dtype=torch.long, device=features.device))[0]
         image_out = None
         if image_features is not None:
             image_out = features[:, -image_features.size(1):]
