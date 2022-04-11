@@ -78,12 +78,12 @@ train_image_augments = transforms.Compose([
 
 
 inference_image_shape_augments = transforms.Compose([
-        transforms.Resize(image_size+image_patch_size),
+        transforms.Resize(image_size+image_patch_size//2),
         transforms.CenterCrop(image_size),
 ])
 
 panel_combine_resize = transforms.Compose([
-        transforms.Resize((image_size+image_patch_size)//2),
+        transforms.Resize((image_size+image_patch_size//2)//2),
         transforms.CenterCrop(image_size//2),
 ])
 
@@ -446,8 +446,8 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = torch.tensor(np.stack(image_locations))
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
                                    p2=image_patch_size)
-        images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)
-                       ) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
+        images_norm = images_squeeze
+        # images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
         # we find that the mean is about 0.48 and standard deviation is about 0.08.
         images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
         B, _, C = images_patch.shape
