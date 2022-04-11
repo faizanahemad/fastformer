@@ -274,8 +274,8 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
-        mean = 0 # torch.as_tensor(self.imagenet_normalization.mean)[:, None, None]
-        std = 1  # torch.as_tensor(self.imagenet_normalization.std)[:, None, None]
+        mean = torch.as_tensor(self.imagenet_normalization.mean)[None, :, None, None]
+        std = torch.as_tensor(self.imagenet_normalization.std)[None, :, None, None]
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
         masked_text = tokenizer.decode(x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()])
 
@@ -287,7 +287,7 @@ class MultiModalTrainingDataset(Dataset):
         generated_image_actual = None
         sketch_components_of_generated = None
         if x["generated_image"] is not None:
-            generated_image_actual = x["generated_image"][3:]*std + mean
+            generated_image_actual = x["generated_image"][3:] * std[0] + mean[0]
             sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
             generated_image_actual = (generated_image_actual.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8)
             generated_image_actual = Image.fromarray(generated_image_actual)
@@ -301,11 +301,14 @@ class MultiModalTrainingDataset(Dataset):
         all_patch = all_patch.view(-1, C)
         all_patch[image_masks.view(-1)] = image_labels.view(-1, C)
 
-        actual_images = x["images"] * std.unsqueeze(0) + mean.unsqueeze(0)
+        actual_images = x["images"]
         all_patch[~image_masks.view(-1)] = rearrange(actual_images, 'b c (h p1) (w p2) -> b (h w) p1 p2 c', p1=image_patch_size,
                                    p2=image_patch_size).view(-1, C)[~image_masks.view(-1)]
         all_patch = all_patch.reshape(B, S, C).reshape(B, S, image_patch_size, image_patch_size, 3)
         all_patch = rearrange(all_patch, 'b (h w) p1 p2 c -> b (h p1) (w p2) c', h=image_grid, w=image_grid)
+        all_patch = (all_patch.permute(0, 3, 1, 2) * std + mean).permute(0, 2, 3, 1)
+
+        actual_images = actual_images * std + mean
         actual_images = [(x.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8) for x in actual_images]
         all_patch = [(x * 255).clip(0, 255).numpy().astype(np.uint8) for x in all_patch]
         actual_images = [Image.fromarray(x) for x in actual_images]
@@ -437,7 +440,7 @@ class MultiModalTrainingDataset(Dataset):
         if len(image_locations) < self.total_image_panels:
             image_locations.extend([Image.fromarray(np.random.randint(0, 255, (image_size, image_size, 3)).astype(np.uint8)) for _ in range(self.total_image_panels - len(image_locations))])
         image_locations = list(map(self.image_to_vector, image_locations))
-        # image_locations = list(map(self.imagenet_normalization, image_locations))
+        image_locations = list(map(self.imagenet_normalization, image_locations))
         image_inputs = torch.tensor(np.stack(image_locations))
 
 
