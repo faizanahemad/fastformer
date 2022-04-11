@@ -274,9 +274,9 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
-        text_coincide = x["text_input_ids"][:x["text_attention_mask"].sum()].tolist() == x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()].tolist()
+        text_coincide = x["text_input_ids"][:x["text_attention_mask"].sum()] == x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()]
         text_zipped_ids = list(zip(x["text_input_ids"][:x["text_attention_mask"].sum()].tolist(), x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()].tolist()))
-        tabular_coincide = x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()].tolist() == x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()].tolist()
+        tabular_coincide = x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()] == x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()]
         tabular_zipped_ids = list(zip(x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()].tolist(),
                            x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()].tolist()))
         mean = torch.as_tensor(self.imagenet_normalization.mean)[None, :, None, None]
