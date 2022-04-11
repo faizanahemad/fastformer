@@ -809,9 +809,9 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.lm_head.decoder = new_embeddings
 
     def image_mlm_forward(self, x_vis, mask, image_unmasked_patches):
-        mask = mask.view(-1, mask.shape[2:])
-        x_vis = self.encoder_to_decoder(x_vis).reshape(-1, x_vis.shape[2:])
-        image_unmasked_patches = image_unmasked_patches.view(-1, image_unmasked_patches.shape[2:])
+        mask = mask.view(-1, *mask.shape[2:])
+        x_vis = self.encoder_to_decoder(x_vis).reshape(-1, *x_vis.shape[2:])
+        image_unmasked_patches = image_unmasked_patches.view(-1, *image_unmasked_patches.shape[2:])
         B, N, C = x_vis.shape
 
         # we don't unshuffle the correct visible token order,
