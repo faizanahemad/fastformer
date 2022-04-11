@@ -710,6 +710,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         image_out = None
         if image_features is not None:
             image_out = features[:, -image_features.size(1):]
+            print(image_features.size(), image_out.size())
             image_out = image_out.reshape(b, ex, -1, image_out.shape[2])
             image_features = image_features.reshape(b, ex, -1, image_features.shape[2])
 
