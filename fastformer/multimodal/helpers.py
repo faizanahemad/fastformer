@@ -274,8 +274,8 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
-        mean = torch.as_tensor(self.imagenet_normalization.mean)[:, None, None]
-        std = torch.as_tensor(self.imagenet_normalization.std)[:, None, None]
+        mean = 0 # torch.as_tensor(self.imagenet_normalization.mean)[:, None, None]
+        std = 1  # torch.as_tensor(self.imagenet_normalization.std)[:, None, None]
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
         masked_text = tokenizer.decode(x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()])
 
@@ -437,7 +437,7 @@ class MultiModalTrainingDataset(Dataset):
         if len(image_locations) < self.total_image_panels:
             image_locations.extend([Image.fromarray(np.random.randint(0, 255, (image_size, image_size, 3)).astype(np.uint8)) for _ in range(self.total_image_panels - len(image_locations))])
         image_locations = list(map(self.image_to_vector, image_locations))
-        image_locations = list(map(self.imagenet_normalization, image_locations))
+        # image_locations = list(map(self.imagenet_normalization, image_locations))
         image_inputs = torch.tensor(np.stack(image_locations))
 
 
