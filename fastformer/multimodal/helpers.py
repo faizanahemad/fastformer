@@ -274,6 +274,11 @@ class MultiModalTrainingDataset(Dataset):
 
     def __decode__(self, x):
         tokenizer = self.tokenizer
+        text_coincide = x["text_input_ids"][:x["text_attention_mask"].sum()] == x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()]
+        text_zipped_ids = list(zip(x["text_input_ids"][:x["text_attention_mask"].sum()], x["text_masked_input_ids"][:x["text_masked_attention_mask"].sum()]))
+        tabular_coincide = x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()] == x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()]
+        tabular_zipped_ids = list(zip(x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()],
+                           x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()]))
         mean = torch.as_tensor(self.imagenet_normalization.mean)[None, :, None, None]
         std = torch.as_tensor(self.imagenet_normalization.std)[None, :, None, None]
         input_text = tokenizer.decode(x["text_input_ids"][:x["text_attention_mask"].sum()])
@@ -314,6 +319,7 @@ class MultiModalTrainingDataset(Dataset):
         actual_images = [Image.fromarray(x) for x in actual_images]
         all_patch = [Image.fromarray(x) for x in all_patch]
         return dict(input_text=input_text, masked_text=masked_text, sketch_components_of_generated=sketch_components_of_generated,
+                    text_coincide=text_coincide, text_zipped_ids=text_zipped_ids, tabular_coincide=tabular_coincide, tabular_zipped_ids=tabular_zipped_ids,
                     student_input_tabular=student_input_tabular, student_input_masked_tabular=student_input_masked_tabular,
                     input_tabular=input_tabular, generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
 
