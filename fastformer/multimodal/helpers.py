@@ -777,9 +777,9 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         decoder_layer_conf.is_decoder = False
         self.decoder = nn.ModuleList(
             [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
-        init_weights(self.decoder)
+        init_weights(self.decoder, std=.02)
         self.decoder_head = nn.Linear(decoder_embed_dim, image_patch_size*image_patch_size*3)
-        trunc_normal_(self.decoder_head, std=.02)
+        init_weights(self.decoder_head, std=.02)
         self.mse = nn.MSELoss()
 
     def _init_weights(self, m):
