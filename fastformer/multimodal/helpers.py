@@ -705,6 +705,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
 
         features = self.mid_fusion_backbone(features, attention_mask=attention_mask)[0]
+        if extra > 0 and extra < 512:
+            features = features[:, :-extra]
         image_out = None
         if image_features is not None:
             image_out = features[:, -image_features.size(1):]
