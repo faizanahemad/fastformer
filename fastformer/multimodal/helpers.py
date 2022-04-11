@@ -711,7 +711,6 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         image_out = None
         if image_features is not None:
             image_out = features[:, -image_features.size(1):]
-            print(image_features.size(), image_out.size())
             image_out = image_out.reshape(b, ex, -1, image_out.shape[2])
             image_features = image_features.reshape(b, ex, -1, image_features.shape[2])
 
@@ -843,7 +842,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         lm_feats = (encoder_out["text_output"] + encoder_out["unimodal_text_features"])[masked_lm]
         label_input_ids = label_input_ids[masked_lm]
         lm_out = self.lm_head(self.lm_ffn(lm_feats))
-        mlm_loss = self.mlm_w * self.mlm_ce(lm_out, label_input_ids)
+        mlm_loss = self.text_mlm_w * self.mlm_ce(lm_out, label_input_ids)
         mlm_accuracy = (lm_out.argmax(dim=-1) == label_input_ids).float().mean().item()
 
         masked_tabular = tabular_input_ids == self.mask_token_id
