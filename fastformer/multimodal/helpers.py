@@ -18,7 +18,7 @@ from PIL import Image
 import math
 import torchvision.transforms as transforms
 from torchvision.transforms import ToTensor
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from transformers import PreTrainedTokenizerFast, PreTrainedTokenizer, PreTrainedModel, RobertaConfig, \
     RobertaTokenizerFast
 from transformers import LongformerModel, LongformerTokenizer
@@ -376,10 +376,12 @@ class MultiModalTrainingDataset(Dataset):
         tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
         tabular_to_text_for_teacher = ""
         for k, v in tabular:
+            k = k.replace("_", " ")
             tabular_to_text_for_teacher = tabular_to_text_for_teacher + " " + k + " = " + float_format(v) + " ;"
         tabular_to_text_for_student_input = ""
         tabular_to_text_for_student_output = ""
         for k, v in tabular:
+            k = k.replace("_", " ")
             if random.random() < self.tabular_feature_drop_proba:
                 continue
             tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + float_format(v)))) if random.random() < self.tabular_feature_mask_proba and not isnan(v) else float_format(v)) + " ;"
