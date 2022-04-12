@@ -742,11 +742,12 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             for dec in self.decoder:
                 decoder_output = dec(decoder_output, encoder_hidden_states=features)[0]
             # generate actual image by reshape-ing
+            ips = image_patch_size // 2
             full_reconstruction = self.decoder_head(decoder_output)  # bx144*image_patch_size*image_patch_size*3
             # rearrange(full_reconstruction, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', h=image_grid, w=image_grid, p1=image_patch_size, p2=image_patch_size)
-            full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, image_patch_size*image_patch_size*3).reshape(b, image_grid, image_grid, image_patch_size, image_patch_size, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*image_patch_size, image_grid*image_patch_size)
+            full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
             sketch_reconstruction = self.decoder_sketch_head(decoder_output)
-            sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, image_patch_size*image_patch_size*3).reshape(b, image_grid, image_grid, image_patch_size, image_patch_size, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*image_patch_size, image_grid*image_patch_size)
+            sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
         return dict(full_reconstruction=full_reconstruction, sketch_reconstruction=sketch_reconstruction,
                     image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
