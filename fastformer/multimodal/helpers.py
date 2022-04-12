@@ -418,7 +418,7 @@ class MultiModalTrainingDataset(Dataset):
             one_image = image_locations.pop()
             one_image = one_image_shape_augments(one_image)
             one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
-                                                  sketch_transform(one_image)]) * 255).astype(np.uint8))
+                                                  sketch_transform(one_image)]) * 255).transpose(1, 2, 0).astype(np.uint8))
             one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
             one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             one_image = torch.cat([one_image_p1, one_image_p2], 0).float()
