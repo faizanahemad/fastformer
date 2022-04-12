@@ -416,7 +416,7 @@ class MultiModalTrainingDataset(Dataset):
             one_image_p1 = torch.tensor(np.stack([canny_edge_detector(one_image), gray_scale(one_image),
                                                   sketch_transform(one_image)]))
             one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
-            one_image = torch.cat([one_image_p1, one_image_p2], 0)
+            one_image = torch.cat([one_image_p1, one_image_p2], 0).float()
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
