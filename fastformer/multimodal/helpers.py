@@ -809,9 +809,11 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.lm_head.decoder = new_embeddings
 
     def image_mlm_forward(self, x_vis, mask, image_unmasked_patches):
+        print(x_vis.size(), mask.size(), image_unmasked_patches.size())
         mask = mask.view(-1, *mask.shape[2:])
         x_vis = self.encoder_to_decoder(x_vis).reshape(-1, *x_vis.shape[2:])
         image_unmasked_patches = image_unmasked_patches.view(-1, *image_unmasked_patches.shape[2:])
+        print(x_vis.size(), mask.size(), image_unmasked_patches.size())
         B, N, C = x_vis.shape
         print(x_vis.shape, B, N, C)
 
@@ -852,7 +854,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         tabular_lm_out = self.lm_head(self.lm_ffn(tabular_feats))
         tabular_mlm_loss = self.tabular_mlm_w * self.mlm_ce(tabular_lm_out, label_tabular_input_ids)
         tabular_mlm_accuracy = (tabular_lm_out.argmax(dim=-1) == label_tabular_input_ids).float().mean().item()
-
+        print(encoder_out["unimodal_image_features"].size(), encoder_out["image_output"].size())
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(encoder_out["unimodal_image_features"] + encoder_out["image_output"],
                                                 image_masks, image_labels)
         reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
