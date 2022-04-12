@@ -76,6 +76,10 @@ train_image_augments = transforms.Compose([
                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],)
 ])
 
+one_image_shape_augments = transforms.Compose([
+        transforms.Resize(image_size//2+image_patch_size//2),
+        transforms.CenterCrop(image_size//2),
+])
 
 inference_image_shape_augments = transforms.Compose([
         transforms.Resize(image_size+image_patch_size//2),
@@ -412,9 +416,10 @@ class MultiModalTrainingDataset(Dataset):
         one_image = None
         if self.save_one_image and count_images > 0:
             one_image = image_locations.pop()
-            one_image = inference_image_shape_augments(one_image)
-            one_image_p1 = torch.tensor(np.stack([canny_edge_detector(one_image), gray_scale(one_image),
-                                                  sketch_transform(one_image)]))
+            one_image = one_image_shape_augments(one_image)
+            one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
+                                                  sketch_transform(one_image)]) * 255).astype(np.uint8))
+            one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
             one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             one_image = torch.cat([one_image_p1, one_image_p2], 0).float()
         image_locations = list(map(self.image_augments, image_locations))
@@ -601,10 +606,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         decoder_layer_conf.num_attention_heads = 16 if model_size == "large" else 12
         decoder_layer_conf.add_cross_attention = True
         decoder_layer_conf.is_decoder = True
-        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
-        self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, image_patch_size*image_patch_size*3))
+        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
+        self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
         self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
-                                                 nn.Linear(embed_dim, image_patch_size * image_patch_size * 3))
+                                                 nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
         self.init_weights()
         decoder_query = longformer.embeddings.position_embeddings.weight[:144, :decoder_layer_conf.hidden_size].detach().clone()
         self.decoder_inputs = torch.nn.Parameter(decoder_query)
