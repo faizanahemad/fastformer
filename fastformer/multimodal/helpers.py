@@ -773,6 +773,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.image_mlm_w = image_mlm_w
         self.image_generation_w = image_generation_w
         decoder_embed_dim = self.encoder.embed_dim // 2
+        self.decoder_embed_dim = decoder_embed_dim
         self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         init_weights(self.encoder_to_decoder)
@@ -811,7 +812,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
     def image_mlm_forward(self, x_vis, mask, image_unmasked_patches):
         print(x_vis.size(), mask.size(), image_unmasked_patches.size())
         mask = mask.view(-1, *mask.shape[2:])
-        x_vis = self.encoder_to_decoder(x_vis).reshape(-1, *x_vis.shape[2:])
+        x_vis = self.encoder_to_decoder(x_vis).reshape(-1, x_vis.shape[2], self.decoder_embed_dim)
         image_unmasked_patches = image_unmasked_patches.view(-1, *image_unmasked_patches.shape[2:])
         print(x_vis.size(), mask.size(), image_unmasked_patches.size())
         B, N, C = x_vis.shape
