@@ -813,6 +813,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         x_vis = self.encoder_to_decoder(x_vis).reshape(-1, *x_vis.shape[2:])
         image_unmasked_patches = image_unmasked_patches.view(-1, *image_unmasked_patches.shape[2:])
         B, N, C = x_vis.shape
+        print(v_vis.shape, B, N, C)
 
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
