@@ -778,7 +778,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.tabular_mlm_w = tabular_mlm_w
         self.image_mlm_w = image_mlm_w
         self.image_generation_w = image_generation_w
-        decoder_embed_dim = self.encoder.embed_dim // 2
+        decoder_embed_dim = self.encoder.embed_dim
         self.decoder_embed_dim = decoder_embed_dim
         self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
@@ -796,7 +796,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.decoder = nn.ModuleList(
             [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
         init_weights(self.decoder, std=.02)
-        self.decoder_head = nn.Linear(decoder_embed_dim, image_patch_size*image_patch_size*3)
+        self.decoder_head = nn.Sequential(nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"]), nn.Linear(decoder_embed_dim, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
         self.mse = nn.MSELoss()
 
