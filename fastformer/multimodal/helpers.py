@@ -787,6 +787,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         init_weights(self.encoder_to_decoder)
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         self.image_mlm_ln2 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
+        self.text_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
+        self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
 
         self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
 
@@ -851,14 +853,14 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
                                    tabular_attention_mask=tabular_attention_mask, images=images, mask=image_masks)
         # TODO: masked and non-masked tokens must coincide properly
         masked_lm = input_ids == self.mask_token_id
-        lm_feats = (encoder_out["text_output"] + encoder_out["unimodal_text_features"])[masked_lm]
+        lm_feats = self.text_mlm_ln(encoder_out["text_output"] + encoder_out["unimodal_text_features"])[masked_lm]
         label_input_ids = label_input_ids[masked_lm]
         lm_out = self.lm_head(self.lm_ffn(lm_feats))
         mlm_loss = self.text_mlm_w * self.mlm_ce(lm_out, label_input_ids)
         mlm_accuracy = (lm_out.argmax(dim=-1) == label_input_ids).float().mean().item()
 
         masked_tabular = tabular_input_ids == self.mask_token_id
-        tabular_feats = (encoder_out["tabular_output"] + encoder_out["unimodal_tabular_features"])[masked_tabular]
+        tabular_feats = self.tabular_mlm_ln(encoder_out["tabular_output"] + encoder_out["unimodal_tabular_features"])[masked_tabular]
         label_tabular_input_ids = label_tabular_input_ids[masked_tabular]
         tabular_lm_out = self.lm_head(self.lm_ffn(tabular_feats))
         tabular_mlm_loss = self.tabular_mlm_w * self.mlm_ce(tabular_lm_out, label_tabular_input_ids)
