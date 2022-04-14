@@ -274,10 +274,10 @@ class MultiModalTrainingDataset(Dataset):
         assert self.image_size % self.image_patch_size == 0
         self.num_patches = (self.image_size // self.image_patch_size) ** 2
         self.image_mask_proba = image_mask_proba
+        self.num_mask = int(self.image_mask_proba * self.num_patches)
         self.length = len(self)
 
     def __get_image_mask__(self):
-        num_mask = int(self.image_mask_proba * self.num_patches)
         mask = np.hstack([
             np.zeros(self.num_patches - self.num_mask),
             np.ones(self.num_mask),
