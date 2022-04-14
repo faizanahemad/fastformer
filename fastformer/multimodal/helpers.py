@@ -273,10 +273,11 @@ class MultiModalTrainingDataset(Dataset):
         self.image_patch_size = image_patch_size
         assert self.image_size % self.image_patch_size == 0
         self.num_patches = (self.image_size // self.image_patch_size) ** 2
-        self.num_mask = int(image_mask_proba * self.num_patches)
+        self.image_mask_proba = image_mask_proba
         self.length = len(self)
 
     def __get_image_mask__(self):
+        num_mask = int(self.image_mask_proba * self.num_patches)
         mask = np.hstack([
             np.zeros(self.num_patches - self.num_mask),
             np.ones(self.num_mask),
@@ -741,6 +742,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
             for dec in self.decoder:
                 decoder_output = dec(decoder_output, encoder_hidden_states=features)[0]
+
             # generate actual image by reshape-ing
             ips = image_patch_size // 2
             full_reconstruction = self.decoder_head(decoder_output)  # bx144*image_patch_size*image_patch_size*3
@@ -783,6 +785,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         init_weights(self.encoder_to_decoder)
+        self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
+        self.image_mlm_ln2 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
 
         self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
 
@@ -827,6 +831,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
         x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
+        x_full = self.image_mlm_ln2(x_full)
         for blk in self.decoder:
             x_full = blk(x_full)[0]
         mask_count = pos_emd_mask.shape[1]
@@ -858,7 +863,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         tabular_lm_out = self.lm_head(self.lm_ffn(tabular_feats))
         tabular_mlm_loss = self.tabular_mlm_w * self.mlm_ce(tabular_lm_out, label_tabular_input_ids)
         tabular_mlm_accuracy = (tabular_lm_out.argmax(dim=-1) == label_tabular_input_ids).float().mean().item()
-        image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(encoder_out["unimodal_image_features"] + encoder_out["image_output"],
+        image_mlm_features = self.image_mlm_ln1(encoder_out["unimodal_image_features"] + encoder_out["image_output"])
+        image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
                                                 image_masks, image_labels)
         reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
         reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
