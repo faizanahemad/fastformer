@@ -91,7 +91,7 @@ panel_combine_resize = transforms.Compose([
         transforms.CenterCrop(image_size//2),
 ])
 
-def build_2d_sincos_position_embedding(embed_dim, cls_tokens=0, grid_size=image_grid, temperature=10000.):
+def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
     grid_w = torch.arange(w, dtype=torch.float32)
     grid_h = torch.arange(h, dtype=torch.float32)
@@ -106,18 +106,17 @@ def build_2d_sincos_position_embedding(embed_dim, cls_tokens=0, grid_size=image_
 
     if cls_tokens == 1:
         pe_token = torch.zeros([1, embed_dim], dtype=torch.float32)
-        pos_embed = nn.Parameter(torch.cat([pe_token, pos_emb], dim=0))
-    else:
-        pos_embed = nn.Parameter(pos_emb)
-    pos_embed.requires_grad = False
+        pos_embed = torch.cat([pe_token, pos_emb], dim=0)
+    pos_embed = nn.Parameter(pos_emb.unsqueeze(0))
+    pos_embed.requires_grad = requires_grad
     return pos_embed
 
 
-def get_sinusoid_encoding_table(n_position, d_hid):
+def get_sinusoid_encoding_table(n_position, d_hid, temperature=1000.):
     ''' Sinusoid position encoding table '''
     # TODO: make it with torch instead of numpy
     def get_position_angle_vec(position):
-        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
+        return [position / np.power(temperature, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
 
     sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
     sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2]) # dim 2i
@@ -790,7 +789,9 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.text_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
 
-        self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
+        self.pos_embed = build_2d_sincos_position_embedding(image_grid, decoder_embed_dim,)
+        self.pos_embed_trainable = build_2d_sincos_position_embedding(image_grid, decoder_embed_dim, requires_grad = True)
+        # self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
 
         trunc_normal_(self.mask_token, std=.02)
 
@@ -830,6 +831,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
         expand_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x_vis).to(x_vis.device).clone().detach()
+        expand_pos_embed_trainable = self.pos_embed_trainable.expand(B, -1, -1).type_as(x_vis).to(x_vis.device)
+        expand_pos_embed = expand_pos_embed + expand_pos_embed_trainable
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
         x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
