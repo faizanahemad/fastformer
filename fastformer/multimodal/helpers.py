@@ -804,7 +804,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
             [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
              RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
         init_weights(self.decoder, std=.02)
-        self.decoder_head = nn.Sequential(nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"]), nn.Linear(decoder_embed_dim, image_patch_size*image_patch_size*3))
+        self.decoder_head = nn.Sequential(nn.Linear(decoder_embed_dim, decoder_embed_dim * 4), nn.GELU(), nn.Linear(decoder_embed_dim * 4, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
         self.mse = nn.MSELoss()
 
