@@ -785,7 +785,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         init_weights(self.encoder_to_decoder)
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
-        self.image_mlm_ln2 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
+        self.image_mlm_ln2 = nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"])
+        self.image_mlm_ln3 = nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"])
         self.text_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
 
@@ -830,9 +831,10 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
-        expand_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x_vis).to(x_vis.device).clone().detach()
-        expand_pos_embed_trainable = self.pos_embed_trainable.expand(B, -1, -1).type_as(x_vis).to(x_vis.device)
-        expand_pos_embed = expand_pos_embed + expand_pos_embed_trainable
+        expand_pos_embed = self.image_mlm_ln3(self.pos_embed.detach() + self.pos_embed_trainable).expand(B, -1, -1).type_as(x_vis)
+        # expand_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x_vis).to(x_vis.device).clone().detach()
+        # expand_pos_embed_trainable = self.pos_embed_trainable.expand(B, -1, -1).type_as(x_vis).to(x_vis.device)
+        # expand_pos_embed = expand_pos_embed + expand_pos_embed_trainable
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
         x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
