@@ -791,7 +791,6 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
 
         self.pos_embed = build_2d_sincos_position_embedding(image_grid, decoder_embed_dim,)
-        self.pos_embed_trainable = build_2d_sincos_position_embedding(image_grid, decoder_embed_dim, requires_grad = True)
         # self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
 
         trunc_normal_(self.mask_token, std=.02)
@@ -802,7 +801,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         decoder_layer_conf.add_cross_attention = False
         decoder_layer_conf.is_decoder = False
         self.decoder = nn.ModuleList(
-            [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
+            [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
+             RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
         init_weights(self.decoder, std=.02)
         self.decoder_head = nn.Sequential(nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"]), nn.Linear(decoder_embed_dim, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
@@ -831,7 +831,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
-        expand_pos_embed = self.image_mlm_ln3(self.pos_embed.detach() + self.pos_embed_trainable).expand(B, -1, -1).type_as(x_vis)
+        expand_pos_embed = self.image_mlm_ln3(self.pos_embed).expand(B, -1, -1).type_as(x_vis)
         # expand_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x_vis).to(x_vis.device).clone().detach()
         # expand_pos_embed_trainable = self.pos_embed_trainable.expand(B, -1, -1).type_as(x_vis).to(x_vis.device)
         # expand_pos_embed = expand_pos_embed + expand_pos_embed_trainable
