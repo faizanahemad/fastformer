@@ -8,7 +8,7 @@ pip install --use-deprecated=legacy-resolver -U gpustat nlpaug pyarrow  > /dev/n
 pip install --use-deprecated=legacy-resolver -U snakeviz torch-optimizer attrdict  > /dev/null
 pip install --use-deprecated=legacy-resolver -U pytorch-fast-transformers pytorch-ranger  > /dev/null
 pip install --use-deprecated=legacy-resolver -U transformers datasets tokenizers  > /dev/null
-pip install --use-deprecated=legacy-resolver -U joblib scikit-learn > /dev/null
+pip install --use-deprecated=legacy-resolver -U joblib scikit-learn opencv-python einops timm > /dev/null
 pip install opencv-python > /dev/null
 # https://github.com/pypa/pip/issues/9187
 # --use-feature=fast-deps --use-deprecated=legacy-resolver
