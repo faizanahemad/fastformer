@@ -607,6 +607,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         # self.image_ffn = LongformerFFN(mid_fusion_backbone_config)
         mid_fusion_backbone_config.vocab_size = 2
         mid_fusion_backbone_config.pad_token_id = 1
+        mid_fusion_backbone_config.attention_window = mid_fusion_backbone_config.attention_window[:mid_fusion_backbone_config.num_hidden_layers]
         mid_fusion_backbone = LongformerModel(config=mid_fusion_backbone_config)
         mid_fusion_backbone.pooler = None
         init_weights(mid_fusion_backbone, 0.02)
