@@ -780,6 +780,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             assert images is not None
             decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
             for dec in self.decoder:
+                print(decoder_output.size(), features.size())
                 decoder_output = dec(decoder_output, encoder_hidden_states=features)[0]
 
             # generate actual image by reshape-ing
