@@ -787,7 +787,6 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
             sketch_reconstruction = self.decoder_sketch_head(decoder_output)
             sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
-        print("After reconstruction")
         return dict(full_reconstruction=full_reconstruction, sketch_reconstruction=sketch_reconstruction,
                     image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
@@ -897,19 +896,19 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
                                    tabular_attention_mask=tabular_attention_mask, images=images, mask=image_masks)
         # TODO: masked and non-masked tokens must coincide properly
         masked_lm = input_ids == self.mask_token_id
-        lm_feats = self.text_mlm_ln(encoder_out["text_output"])[masked_lm] # + encoder_out["unimodal_text_features"]
+        lm_feats = self.text_mlm_ln(encoder_out["text_output"] + encoder_out["unimodal_text_features"])[masked_lm]
         label_input_ids = label_input_ids[masked_lm]
         lm_out = self.lm_head(self.lm_ffn(lm_feats))
         mlm_loss = self.text_mlm_w * self.mlm_ce(lm_out, label_input_ids)
         mlm_accuracy = (lm_out.argmax(dim=-1) == label_input_ids).float().mean().item()
 
         masked_tabular = tabular_input_ids == self.mask_token_id
-        tabular_feats = self.tabular_mlm_ln(encoder_out["tabular_output"])[masked_tabular] # + encoder_out["unimodal_tabular_features"]
+        tabular_feats = self.tabular_mlm_ln(encoder_out["tabular_output"] + encoder_out["unimodal_tabular_features"])[masked_tabular]
         label_tabular_input_ids = label_tabular_input_ids[masked_tabular]
         tabular_lm_out = self.lm_head(self.lm_ffn(tabular_feats))
         tabular_mlm_loss = self.tabular_mlm_w * self.mlm_ce(tabular_lm_out, label_tabular_input_ids)
         tabular_mlm_accuracy = (tabular_lm_out.argmax(dim=-1) == label_tabular_input_ids).float().mean().item()
-        image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"]) # encoder_out["unimodal_image_features"] +
+        image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"] + encoder_out["unimodal_image_features"])
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
                                                 image_masks, image_labels)
         reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
