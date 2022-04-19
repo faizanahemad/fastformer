@@ -737,11 +737,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             for i in range(ex):
                 ep2 = (per_img_patches * i)
                 end = tabular_text_output.size(1) + ep2
-                print(i, ex, end, per_img_patches, ep2, tabular_text_output.size(1), global_attention_mask.size(1)) # 0 4 1168 36 144 1024 1168
+                print(i, ex, end, per_img_patches, ep2, tabular_text_output.size(), global_attention_mask.size()) # 0 4 1168 36 144 1024 1168
                 global_attention_mask[:, end] = 1.0
                 global_attention_mask[:, end + 1] = 1.0
                 end_2 = tabular_text_output.size(1) + (per_img_patches * (i + 1)) - 1
-                print(i, ex, end_2, global_attention_mask.size(1))
                 global_attention_mask[:, end_2] = 1.0
         elif images is not None:
             for i in range(ex):
