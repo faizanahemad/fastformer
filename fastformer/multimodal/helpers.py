@@ -605,7 +605,13 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         # self.text_ffn = LongformerFFN(mid_fusion_backbone_config)
         # self.tabular_ffn = LongformerFFN(mid_fusion_backbone_config)
         # self.image_ffn = LongformerFFN(mid_fusion_backbone_config)
-        self.mid_fusion_backbone = LongformerEncoder(config=mid_fusion_backbone_config)
+        mid_fusion_backbone_config.vocab_size = 2
+        mid_fusion_backbone_config.pad_token_id = 1
+        mid_fusion_backbone = LongformerModel(config=mid_fusion_backbone_config)
+        mid_fusion_backbone.pooler = None
+        init_weights(mid_fusion_backbone, 0.02)
+        self.mid_fusion_backbone = mid_fusion_backbone
+
         decoder_layer_conf = RobertaConfig()
         decoder_layer_conf.hidden_size = embed_dim
         decoder_layer_conf.num_attention_heads = 16 if model_size == "large" else 12
@@ -616,8 +622,9 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
                                                  nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
         self.init_weights()
-        decoder_query = longformer.embeddings.position_embeddings.weight[:144, :decoder_layer_conf.hidden_size].detach().clone()
-        self.decoder_inputs = torch.nn.Parameter(decoder_query)
+        # decoder_query = longformer.embeddings.position_embeddings.weight[:image_grid*image_grid, :decoder_layer_conf.hidden_size].detach().clone()
+        decoder_query = build_2d_sincos_position_embedding(image_grid * image_grid, decoder_layer_conf.hidden_size, ).squeeze()
+        self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=True)
         self.grad_checkpointing = False
 
         self.longformer = longformer
@@ -708,10 +715,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             features = torch.cat([tabular_text_output, image_features], 1)
 
         s = features.size(1)
-        extra = 512 - s % 512
-        if extra > 0 and extra < 512:
-            features = torch.cat([features, torch.zeros(features.size(0), extra, features.size(2),
-                                                        dtype=features.dtype, device=features.device, requires_grad=False)], dim=1)
+        # extra = 512 - s % 512
+        # if extra > 0 and extra < 512:
+        #     features = torch.cat([features, torch.zeros(features.size(0), extra, features.size(2),
+        #                                                 dtype=features.dtype, device=features.device, requires_grad=False)], dim=1)
 
         attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         global_attention_mask = torch.zeros_like(attention_mask)
@@ -735,12 +742,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 global_attention_mask[:,  per_img_patches * ex] = 1.0
                 global_attention_mask[:, 1 + per_img_patches * ex] = 1.0
                 global_attention_mask[:, per_img_patches * (ex + 1) - 1] = 1.0
-
-
-
-        features = self.mid_fusion_backbone(features, attention_mask=attention_mask, global_attention_mask=global_attention_mask)[0]
-        if extra > 0 and extra < 512:
-            features = features[:, :-extra]
+        features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
+        # if extra > 0 and extra < 512:
+        #     features = features[:, :-extra]
+        assert s == features.size(1)
         image_out = None
         if image_features is not None:
             image_out = features[:, -image_features.size(1):]
