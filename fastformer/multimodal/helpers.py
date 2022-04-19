@@ -748,7 +748,6 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 global_attention_mask[:, per_img_patches * (i + 1) - 1] = 1.0
 
         features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
-        print("Mid fusion done")
         # if extra > 0 and extra < 512:
         #     features = features[:, :-extra]
         assert s == features.size(1)
@@ -775,12 +774,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
         full_reconstruction = None
         sketch_reconstruction = None
-        print("Before reconstruction")
         if activate_missing_image_generator:
             assert images is not None
             decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
             for dec in self.decoder:
-                print(decoder_output.size(), features.size())
                 decoder_output = dec(decoder_output, encoder_hidden_states=features)[0]
 
             # generate actual image by reshape-ing
