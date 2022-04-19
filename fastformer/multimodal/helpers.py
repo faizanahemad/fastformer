@@ -725,7 +725,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         global_attention_mask = torch.zeros_like(attention_mask)
         global_attention_mask[:, 0] = 1.0
         global_attention_mask[:, 1] = 1.0
-        global_attention_mask[:, s] = 1.0
+        global_attention_mask[:, s - 1] = 1.0
         if input_ids is None and tabular_input_ids is not None:
             global_attention_mask[:, tabular_text_output.size(1) - 1] = 1.0
             global_attention_mask[:, input_ids.size(1)] = 1.0
