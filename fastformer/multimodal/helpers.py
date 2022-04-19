@@ -749,6 +749,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 global_attention_mask[:, per_img_patches * (i + 1) - 1] = 1.0
         print("Mid fusion")
         features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
+        print("Mid fusion done")
         # if extra > 0 and extra < 512:
         #     features = features[:, :-extra]
         assert s == features.size(1)
