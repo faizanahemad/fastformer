@@ -582,7 +582,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             tokenizer = RobertaTokenizerFast.from_pretrained("roberta-large")
             vit = vit_large_patch32_384(True)
             mid_fusion_backbone_config = LongformerConfig.from_pretrained("allenai/longformer-large-4096")
-            mid_fusion_backbone_config.num_hidden_layers = 3
+            mid_fusion_backbone_config.num_hidden_layers = 6
         elif model_size == "base":
             longformer = RobertaModel.from_pretrained("roberta-base")
             # longformer = LongformerModel.from_pretrained("allenai/longformer-base-4096")
@@ -591,7 +591,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             embed_dim = 768
             vit = vit_base_patch32_384(True)
             mid_fusion_backbone_config = LongformerConfig.from_pretrained("allenai/longformer-base-4096")
-            mid_fusion_backbone_config.num_hidden_layers = 3
+            mid_fusion_backbone_config.num_hidden_layers = 6
         else:
             raise ValueError
         self.embed_dim = embed_dim
@@ -709,8 +709,29 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                                                         dtype=features.dtype, device=features.device, requires_grad=False)], dim=1)
 
         attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
+        global_attention_mask = torch.zeros_like(attention_mask)
+        global_attention_mask[:, 0] = 1.0
+        global_attention_mask[:, 1] = 1.0
+        global_attention_mask[:, s] = 1.0
+        if input_ids is None and tabular_input_ids is not None:
+            global_attention_mask[:, tabular_text_output.size(1) - 1] = 1.0
+            global_attention_mask[:, input_ids.size(1)] = 1.0
+            global_attention_mask[:, input_ids.size(1) + 1] = 1.0
 
-        features = self.mid_fusion_backbone(features, attention_mask=attention_mask)[0]
+        if images is not None and tabular_text_output is not None:
+            for i in range(ex):
+                global_attention_mask[:, tabular_text_output.size(1) + (image_grid * image_grid) * ex] = 1.0
+                global_attention_mask[:, tabular_text_output.size(1) + (image_grid * image_grid) * (ex + 1) - 1] = 1.0
+                global_attention_mask[:, tabular_text_output.size(1) + 1 + (image_grid * image_grid) * ex] = 1.0
+        elif images is not None:
+            for i in range(ex):
+                global_attention_mask[:,  (image_grid * image_grid) * ex] = 1.0
+                global_attention_mask[:, 1 + (image_grid * image_grid) * ex] = 1.0
+                global_attention_mask[:, (image_grid * image_grid) * (ex + 1) - 1] = 1.0
+
+
+
+        features = self.mid_fusion_backbone(features, attention_mask=attention_mask, global_attention_mask=global_attention_mask)[0]
         if extra > 0 and extra < 512:
             features = features[:, :-extra]
         image_out = None
