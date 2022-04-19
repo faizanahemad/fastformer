@@ -40,7 +40,7 @@ image_size = 384
 max_length = 512
 image_patch_size = 32
 image_grid = 12
-image_mask_proba = 0.75
+image_mask_proba = 0.5
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
