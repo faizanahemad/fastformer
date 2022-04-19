@@ -737,7 +737,6 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             for i in range(ex):
                 ep2 = (per_img_patches * i)
                 end = tabular_text_output.size(1) + ep2
-                print(i, ex, end, per_img_patches, ep2, tabular_text_output.size(), global_attention_mask.size()) # 0 4 1168 36 144 1024 1168
                 global_attention_mask[:, end] = 1.0
                 global_attention_mask[:, end + 1] = 1.0
                 end_2 = tabular_text_output.size(1) + (per_img_patches * (i + 1)) - 1
@@ -747,7 +746,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 global_attention_mask[:,  per_img_patches * i] = 1.0
                 global_attention_mask[:, 1 + per_img_patches * i] = 1.0
                 global_attention_mask[:, per_img_patches * (i + 1) - 1] = 1.0
-        print("Mid fusion")
+
         features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
         print("Mid fusion done")
         # if extra > 0 and extra < 512:
@@ -776,6 +775,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
         full_reconstruction = None
         sketch_reconstruction = None
+        print("Before reconstruction")
         if activate_missing_image_generator:
             assert images is not None
             decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
@@ -789,6 +789,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
             sketch_reconstruction = self.decoder_sketch_head(decoder_output)
             sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
+        print("After reconstruction")
         return dict(full_reconstruction=full_reconstruction, sketch_reconstruction=sketch_reconstruction,
                     image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
