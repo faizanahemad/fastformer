@@ -46,9 +46,13 @@ per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_gri
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
 def pil_loader(path: str) -> Image.Image:
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
-    with open(path, 'rb') as f:
-        img = Image.open(f)
-        return img.convert('RGB')
+    try:
+        with open(path, 'rb') as f:
+            img = Image.open(f)
+            return img.convert('RGB')
+    except Exception as e:
+        traceback.print_exc()
+        return None
 
 
 
@@ -413,7 +417,7 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         count_images = len(image_locations)
         random.shuffle(image_locations)
-        image_locations = list(map(pil_loader, image_locations))
+        image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
 
         one_image = None
         if self.save_one_image and count_images > 0:
