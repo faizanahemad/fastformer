@@ -40,6 +40,8 @@ image_size = 384
 max_length = 512
 image_patch_size = 32
 image_grid = 12
+image_mask_proba = 0.75
+per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
 def pil_loader(path: str) -> Image.Image:
@@ -245,7 +247,7 @@ class MultiModalTrainingDataset(Dataset):
                  columns, text_columns, tabular_columns, image_columns,
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
-                 word_mask_proba=0.15, image_mask_proba=0.75, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
+                 word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
                  total_image_panels=4,
                  ):
         self.tokenizer = tokenizer
@@ -268,10 +270,10 @@ class MultiModalTrainingDataset(Dataset):
                                                         std=torch.tensor(IMAGENET_DEFAULT_STD))
         self.total_image_panels = total_image_panels
         self.word_mask_proba = word_mask_proba
-        self.image_mask_proba = image_mask_proba
         self.image_patch_size = image_patch_size
         assert self.image_size % self.image_patch_size == 0
         self.num_patches = (self.image_size // self.image_patch_size) ** 2
+        assert self.num_patches == (image_grid * image_grid)
         self.image_mask_proba = image_mask_proba
         self.num_mask = int(self.image_mask_proba * self.num_patches)
         self.length = len(self)
@@ -722,15 +724,17 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             global_attention_mask[:, input_ids.size(1) + 1] = 1.0
 
         if images is not None and tabular_text_output is not None:
+            global_attention_mask[:, tabular_text_output.size(1)] = 1.0
+            global_attention_mask[:, tabular_text_output.size(1) + 1] = 1.0
             for i in range(ex):
-                global_attention_mask[:, tabular_text_output.size(1) + (image_grid * image_grid) * ex] = 1.0
-                global_attention_mask[:, tabular_text_output.size(1) + (image_grid * image_grid) * (ex + 1) - 1] = 1.0
-                global_attention_mask[:, tabular_text_output.size(1) + 1 + (image_grid * image_grid) * ex] = 1.0
+                global_attention_mask[:, tabular_text_output.size(1) + per_img_patches * ex] = 1.0
+                global_attention_mask[:, tabular_text_output.size(1) + per_img_patches * (ex + 1) - 1] = 1.0
+                global_attention_mask[:, tabular_text_output.size(1) + 1 + per_img_patches * ex] = 1.0
         elif images is not None:
             for i in range(ex):
-                global_attention_mask[:,  (image_grid * image_grid) * ex] = 1.0
-                global_attention_mask[:, 1 + (image_grid * image_grid) * ex] = 1.0
-                global_attention_mask[:, (image_grid * image_grid) * (ex + 1) - 1] = 1.0
+                global_attention_mask[:,  per_img_patches * ex] = 1.0
+                global_attention_mask[:, 1 + per_img_patches * ex] = 1.0
+                global_attention_mask[:, per_img_patches * (ex + 1) - 1] = 1.0
 
 
 
