@@ -624,7 +624,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                                                  nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
         self.init_weights()
         # decoder_query = longformer.embeddings.position_embeddings.weight[:image_grid*image_grid, :decoder_layer_conf.hidden_size].detach().clone()
-        decoder_query = build_2d_sincos_position_embedding(image_grid * image_grid, decoder_layer_conf.hidden_size, ).squeeze()
+        decoder_query = build_2d_sincos_position_embedding(image_grid * image_grid, decoder_layer_conf.hidden_size, )
         self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=True)
         self.grad_checkpointing = False
 
