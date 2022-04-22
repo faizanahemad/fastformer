@@ -1,4 +1,6 @@
 import argparse
+import copy
+import traceback
 from typing import Tuple, Dict, Any, Union, List
 
 from torch import nn
@@ -17,10 +19,12 @@ import os
 from PIL import Image
 import math
 import torchvision.transforms as transforms
+import wandb
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.transforms import ToTensor
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from transformers import PreTrainedTokenizerFast, PreTrainedTokenizer, PreTrainedModel, RobertaConfig, \
-    RobertaTokenizerFast
+    RobertaTokenizerFast, optimization
 from transformers import LongformerModel, LongformerTokenizer
 from transformers.models.longformer.modeling_longformer import LongformerEncoder, LongformerIntermediate, \
     LongformerOutput, LongformerPreTrainedModel, LongformerLMHead
@@ -34,7 +38,7 @@ import pandas as pd
 from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel
 from einops import rearrange
 
-from fastformer.utils import set_seeds, get_barrier, init_weights
+from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string
 
 image_size = 384
 max_length = 512
@@ -44,6 +48,8 @@ image_mask_proba = 0.5
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
+
+
 def pil_loader(path: str) -> Image.Image:
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
     try:
@@ -247,7 +253,7 @@ class MultiModalTrainingDataset(Dataset):
     Expects a header-less csv.
     Handle if a particular modality is not present at all.
     """
-    def __init__(self, tokenizer: PreTrainedTokenizerFast, tokenizer_args, data_csv, separator,
+    def __init__(self, tokenizer: PreTrainedTokenizerFast, tokenizer_args, images_path, data_csv, separator,
                  columns, text_columns, tabular_columns, image_columns,
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
@@ -944,8 +950,8 @@ def training_args():
     parser.add_argument('--wandb_name', required=False, type=str, default="",
                         help='wandb_name')
 
-    parser.add_argument('--total_steps', type=int, required=False,
-                        help='total_steps')
+    parser.add_argument('--epochs', type=int, required=True,
+                        help='epochs')
 
     parser.add_argument('--batch_size', required=True, type=int,
                         help='Batch Size')
@@ -972,14 +978,9 @@ def training_args():
 
     parser.add_argument('--model_save_dir', required=True, type=str,
                         help='Save Dir')
-    parser.add_argument('--model_save_name', required=True, type=str,
-                        help='Save Name')
 
     parser.add_argument('--wandb_dryrun', action="store_true", default=False,
                         help='WanDB Dryrun Only')
-
-    parser.add_argument('--sentence_order_w', type=float, required=False, default=1.0,
-                        help='sentence_order weight')
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
@@ -1013,8 +1014,11 @@ def training_args():
     parser.add_argument('--save_every_steps', type=int, default=1_000, metavar='N',
                         help='how many batches to wait before logging training status')
 
-    parser.add_argument('--dataset', required=False, type=str,
+    parser.add_argument('--dataset', required=True, type=str,
                         help='Dataset')
+    parser.add_argument('--images_path', required=True, type=str,
+                        help='images_path')
+
 
     args = parser.parse_args()
     args.world_size = args.nodes if args.cpu else (args.gpus_per_node * args.nodes)
@@ -1047,7 +1051,7 @@ def build_propreitery_dataset(location, tokenizer):
                                         image_size, image_patch_size, train_image_augments)
     return dataset
 
-def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, num_workers=None):
+def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, world_size=1, num_workers=None):
     single_node = world_size == 1
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
     COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
@@ -1064,12 +1068,12 @@ def build_propreitery_dataloader(location, batch_size, tokenizer, world_size=1, 
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
                'num_offers']
     image_columns = ["physical_id"]
-    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, ",", COLUMNS, textual, tabular,
+    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=True)
-    train_loader = DataLoader(dataset, sampler=sampler,
+    train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
                               batch_size=batch_size, shuffle=single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
@@ -1137,7 +1141,7 @@ def train(local_rank, args):
         trainer_weights = torch.load(args["load_trainer_model"], map_location='cpu')
         trainer.load_state_dict(trainer_weights)
 
-    model = model.train()
+    model = trainer.train()
     if args["world_size"] > 1:
         model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False,
                     bucket_cap_mb=10, gradient_as_bucket_view=True)  # find_unused_parameters=True
@@ -1152,11 +1156,10 @@ def train(local_rank, args):
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
          'weight_decay': 0.0}
     ]
-    torch.optim.AdamW(optimizer_grouped_parameters, **dict(lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"])))
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, **dict(lr=optc["lr"], eps=optc["eps"], weight_decay=optc["weight_decay"], betas=(optc["beta_1"], optc["beta_2"])))
     optimizer.zero_grad(set_to_none=True)
 
     model_save_dir = args["model_save_dir"]
-    model_save_name = args["model_save_name"]
 
     set_seeds(args["seed"] + rank)
     if local_rank == 0:
@@ -1164,10 +1167,81 @@ def train(local_rank, args):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
 
+    batch_size = args["batch_size"]
+    dataloader = build_propreitery_dataloader(args["dataset"], batch_size, encoder.tokenizer,)  # "/local/datasets/asin-images/combined-all.csv"
+    iter_size = max(args["accumulation_steps"], 1)
+    no_sync = iter_size > 1
+    steps_per_epoch = int(np.floor(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / (iter_size)))
+    total_steps = steps_per_epoch * args["epochs"]
+    div_factor = optc["lr"] / 1e-8
+    pct_start = min(0.04, 10_000 / total_steps)
+    scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
+    barrier()
+    gradient_clipping = optc["gradient_clipping"]
+    if local_rank == 0:
+        print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
+              (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
+    log_every_steps = args["log_every_steps"] * iter_size
+    save_every_steps = args["save_every_steps"]
+    gradient_clipping = optc["gradient_clipping"]
+    group = "%s-%sN-%s" % (args["wandb_name"], args["nodes"], time_string)
 
-
-
-
+    wandb_init_args = dict(project="fnd", name="%s-%s-%s-%s" % (group, args["nr"], rank, local_rank),
+                           group=group,
+                           id=f"{group}-{nr}X{rank}-{local_rank}",
+                           config={"args": args, "optimizer_config": optc},
+                           settings=wandb.Settings(start_method="fork"))
+    activate_wandb_log = local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8
+    if activate_wandb_log:
+        wandb.init(**wandb_init_args)
+    full_times = []
+    batch_times = []
+    model_times = []
+    logs_save = []
+    model.zero_grad(set_to_none=True)
+    samples_processed = 0
+    samples_processed_this_log_iter = 0
+    if args["detect_anomaly"]:
+        torch.autograd.set_detect_anomaly(True)
+    steps_done = 0
+    step = 0
+    for epoch in range(args["epochs"]):
+        random.seed(args["seed"] + rank + epoch)
+        set_seeds(args["seed"] + rank + epoch)
+        if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
+            dataloader.sampler.set_epoch(epoch)
+        for batch in dataloader:
+            key = list(batch.keys())[0]
+            batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
+            if (steps_done + 1) % save_every_steps == 0:
+                state_dict = getattr(model, "module", model).state_dict()
+                encoder_state_dict = getattr(getattr(model, "module", model), "encoder",
+                                     getattr(model, "module", model)).state_dict()
+                if local_rank == 0:
+                    torch.save(state_dict, os.path.join(model_save_dir, "trainer-%s.pth" % steps_done))
+                    torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
+                    torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
+                    torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
+                del state_dict
+                del encoder_state_dict
+                clean_memory()
+                barrier()
+            samples_processed += int(batch[key].size(0))
+            samples_processed_this_log_iter += int(batch[key].size(0))
+            validation_iter = (step + 1) % log_every_steps == 0 or step == 0
+            if no_sync and (step + 1) % iter_size != 0 and hasattr(model, "no_sync"):
+                with model.no_sync():
+                    pass
+            else:
+                pass
+                optimizer.zero_grad(set_to_none=True)
+                model.zero_grad(set_to_none=True)
+                steps_done += 1
+            step += 1
+            del batch
+            if validation_iter:
+                clean_memory()
+                steps_remaining = total_steps - steps_done
 
 
 
