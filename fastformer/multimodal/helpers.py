@@ -1266,7 +1266,7 @@ def train(local_rank, args):
                 steps_done += 1
             step += 1
             del batch
-            output = {k: float(v) for k, v in model_output.items() if float_detect(v)}
+            output = {k: float(v) for k, v in model_output.items() if try_float(v) and v is not None}
             wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, updates_done=steps_done,
                              samples_processed=samples_processed,
                              steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
