@@ -1266,6 +1266,7 @@ def train(local_rank, args):
                 steps_done += 1
             step += 1
             del batch
+            steps_remaining = total_steps - steps_done
             output = {k: float(v) for k, v in model_output.items() if try_float(v) and v is not None}
             wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, updates_done=steps_done,
                              samples_processed=samples_processed,
@@ -1275,7 +1276,6 @@ def train(local_rank, args):
             logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
             if validation_iter:
                 clean_memory()
-                steps_remaining = total_steps - steps_done
                 printed = pd.concat(logs_save, axis=1)
                 printed["mean"] = printed.mean(1)
                 logs_save = []
