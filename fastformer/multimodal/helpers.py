@@ -38,7 +38,7 @@ import pandas as pd
 from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel
 from einops import rearrange
 
-from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string
+from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float
 
 image_size = 384
 max_length = 512
@@ -202,6 +202,20 @@ def gray_scale(im: Image.Image) -> np.ndarray:
         kernel_size = kernel_size + 1
     np_array = cv2.cvtColor(cv2.cvtColor(cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2BGR), (kernel_size, kernel_size), sigmaX=0, sigmaY=0), cv2.COLOR_BGR2RGB), cv2.COLOR_RGB2GRAY)
     return np_array / 255.0
+
+
+def save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done):
+    state_dict = getattr(model, "module", model).state_dict()
+    encoder_state_dict = getattr(getattr(model, "module", model), "encoder",
+                                 getattr(model, "module", model)).state_dict()
+    if local_rank == 0:
+        torch.save(state_dict, os.path.join(model_save_dir, "trainer-%s.pth" % steps_done))
+        torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
+        torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
+        torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
+    del state_dict
+    del encoder_state_dict
+    clean_memory()
 
 
 def float_detect(v):
@@ -1214,37 +1228,70 @@ def train(local_rank, args):
             key = list(batch.keys())[0]
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             if (steps_done + 1) % save_every_steps == 0:
-                state_dict = getattr(model, "module", model).state_dict()
-                encoder_state_dict = getattr(getattr(model, "module", model), "encoder",
-                                     getattr(model, "module", model)).state_dict()
-                if local_rank == 0:
-                    torch.save(state_dict, os.path.join(model_save_dir, "trainer-%s.pth" % steps_done))
-                    torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
-                    torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
-                    torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
-                del state_dict
-                del encoder_state_dict
-                clean_memory()
+                save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done)
                 barrier()
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
             validation_iter = (step + 1) % log_every_steps == 0 or step == 0
             if no_sync and (step + 1) % iter_size != 0 and hasattr(model, "no_sync"):
                 with model.no_sync():
-                    pass
+                    model_output = trainer(batch["text_masked_input_ids"], batch["text_masked_attention_mask"],
+                                           batch["tabular_student_masked_input_ids"],
+                                           batch["tabular_student_masked_attention_mask"],
+                                           batch["images"], batch["image_masks"], batch["image_labels"],
+                                           batch["text_input_ids"], batch["tabular_student_input_ids"],
+                                           batch["generated_image"]
+                                           )
+                    loss = model_output["loss"] / iter_size
+                    loss.backward()
             else:
-                pass
+                model_output = trainer(batch["text_masked_input_ids"], batch["text_masked_attention_mask"],
+                                       batch["tabular_student_masked_input_ids"],
+                                       batch["tabular_student_masked_attention_mask"],
+                                       batch["images"], batch["image_masks"], batch["image_labels"],
+                                       batch["text_input_ids"], batch["tabular_student_input_ids"],
+                                       batch["generated_image"]
+                                       )
+                loss = model_output["loss"] / iter_size
+                loss.backward()
+
+                optimizer.step()
+                if isinstance(scheduler, list):
+                    for sch in scheduler:
+                        sch.step()
+                else:
+                    scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
-                model.zero_grad(set_to_none=True)
+                # model.zero_grad(set_to_none=True)
                 steps_done += 1
             step += 1
             del batch
+            output = {k: float(v) for k, v in model_output.items() if float_detect(v)}
+            wandb_log = dict(lr=optimizer.param_groups[0]['lr'], step=step, updates_done=steps_done,
+                             samples_processed=samples_processed,
+                             steps_remaining=steps_remaining, pct_complete=(100 * steps_done / total_steps),
+                             epoch=epoch,
+                             **output)
+            logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
             if validation_iter:
                 clean_memory()
                 steps_remaining = total_steps - steps_done
-
-
-
+                printed = pd.concat(logs_save, axis=1)
+                printed["mean"] = printed.mean(1)
+                logs_save = []
+                if local_rank == 0:
+                    # print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
+                    print(("[Time = %s]" % get_time_string()) + ("-" * 80))
+                    print(printed)
+                if activate_wandb_log:
+                    time.sleep(random.random() * 0.1)
+                    wandb.log(wandb_log)
+            del output
+            del model_output
+    print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
+    save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done)
+    if args["world_size"] > 1:
+        dist.destroy_process_group()
 
 def train_catch_exception(local_rank, args):
     rank = args["nr"] * args["gpus_per_node"] + local_rank
