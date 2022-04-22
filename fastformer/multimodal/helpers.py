@@ -1147,11 +1147,11 @@ def train(local_rank, args):
     encoder = MultiModalEncoder(args["model_size"])
     trainer = MultiModalSelfSupervisedTrainerModel(0, args["image_mlm_w"], args["text_mlm_w"],
                                                    args["text_mlm_w"], args["image_generation_w"], encoder)
-    if "load_encoder" in args:
+    if "load_encoder" in args and args["load_encoder"] is not None:
         encoder_weights = torch.load(args["load_encoder"], map_location='cpu')
         encoder.load_state_dict(encoder_weights)
 
-    if "load_trainer_model" in args:
+    if "load_trainer_model" in args and args["load_trainer_model"] is not None:
         trainer_weights = torch.load(args["load_trainer_model"], map_location='cpu')
         trainer.load_state_dict(trainer_weights)
 
