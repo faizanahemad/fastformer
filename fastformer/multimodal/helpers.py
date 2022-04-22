@@ -1031,7 +1031,7 @@ def training_args():
     args.seed = seed
     return vars(args)
 
-def build_propreitery_dataset(location, tokenizer):
+def build_propreitery_dataset(location, images_path, tokenizer):
     COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
                'customer_review_count', 'customer_average_review_rating', 'browse_root_name',
                'browse_node_id', 'browse_node_ids', 'browse_node_name', 'browse_node_l2',
@@ -1046,7 +1046,7 @@ def build_propreitery_dataset(location, tokenizer):
                'instock_gv_count', 'gv_count', 'glance_view_band', 'total_ordered_units', 'instock_by_total_gv',
                'num_offers']
     image_columns = ["physical_id"]
-    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, location, ",", COLUMNS, textual, tabular,
+    dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
     return dataset
