@@ -265,6 +265,7 @@ class MultiModalTrainingDataset(Dataset):
         self.separator = separator
         self.columns = columns
         self.data_csv = data_csv
+        self.images_path = images_path
         self.text_columns = text_columns
         self.image_columns = image_columns
         self.joiner = f" {tokenizer.sep_token} "
@@ -388,7 +389,6 @@ class MultiModalTrainingDataset(Dataset):
             "attention_mask"].squeeze()
         assert text_masked_attention_mask.sum() == text_attention_mask.sum()
 
-
         tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
         tabular_to_text_for_teacher = ""
         for k, v in tabular:
@@ -407,7 +407,6 @@ class MultiModalTrainingDataset(Dataset):
         t2t_teacher_input_ids, t2t_teacher_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
             "attention_mask"].squeeze()
 
-
         tokenizer_outputs = tokenizer(tabular_to_text_for_student_output, return_offsets_mapping=False, **self.tokenizer_args)
         t2t_student_input_ids, t2t_student_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
             "attention_mask"].squeeze()
@@ -423,6 +422,7 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         count_images = len(image_locations)
         random.shuffle(image_locations)
+        image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
 
         one_image = None
@@ -1168,7 +1168,7 @@ def train(local_rank, args):
         assert os.path.exists(model_save_dir)
 
     batch_size = args["batch_size"]
-    dataloader = build_propreitery_dataloader(args["dataset"], batch_size, encoder.tokenizer,)  # "/local/datasets/asin-images/combined-all.csv"
+    dataloader = build_propreitery_dataloader(args["dataset"], args["images_path"], batch_size, encoder.tokenizer,)  # "/local/datasets/asin-images/combined-all.csv"
     iter_size = max(args["accumulation_steps"], 1)
     no_sync = iter_size > 1
     steps_per_epoch = int(np.floor(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / (iter_size)))
