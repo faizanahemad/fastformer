@@ -65,7 +65,7 @@ def pil_loader(path: str) -> Image.Image:
 
 
 train_image_augments = transforms.Compose([
-    transforms.Resize(image_size + 64),
+    transforms.Resize((image_size + 64, image_size + 64)),
     transforms.RandomChoice([
         transforms.RandomPerspective(distortion_scale=0.2, p=1.0, ),
         transforms.RandomRotation(15, expand=True, ),
@@ -83,17 +83,17 @@ train_image_augments = transforms.Compose([
                                  transforms.RandomPosterize(bits=3, p=1.0),
                                  transforms.RandomPosterize(bits=4, p=1.0),
                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
-    transforms.Resize(image_size),
+    transforms.Resize((image_size, image_size)),
 ])
 
-one_image_shape_augments = transforms.Resize(image_size//2)
+one_image_shape_augments = transforms.Resize([image_size//2, image_size//2])
 
 inference_image_shape_augments = transforms.Compose([
         transforms.Resize(image_size+image_patch_size//2),
         transforms.CenterCrop(image_size),
 ])
 
-panel_combine_resize = transforms.Resize(image_size//2)
+panel_combine_resize = transforms.Resize([image_size//2, image_size//2])
 
 def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
