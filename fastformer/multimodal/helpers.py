@@ -45,7 +45,7 @@ image_size = 384
 max_length = 512
 image_patch_size = 32
 image_grid = 12
-image_mask_proba = 0.5
+image_mask_proba = 0.75
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
@@ -205,7 +205,7 @@ def gray_scale(im: Image.Image) -> np.ndarray:
     return np_array / 255.0
 
 
-def save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done):
+def save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done):
     state_dict = getattr(model, "module", model).state_dict()
     encoder_state_dict = getattr(getattr(model, "module", model), "encoder",
                                  getattr(model, "module", model)).state_dict()
@@ -214,6 +214,7 @@ def save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_do
         torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
         torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
         torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
+        torch.save(metric_logger, os.path.join(model_save_dir, "metrics.pth"))
     del state_dict
     del encoder_state_dict
     clean_memory()
@@ -999,11 +1000,11 @@ def training_args():
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
-    parser.add_argument('--image_generation_w', type=float, required=False, default=1.0,
+    parser.add_argument('--image_generation_w', type=float, required=False, default=5.0,
                         help='image_generation_w weight')
     parser.add_argument('--tabular_mlm_w', type=float, required=False, default=1.0,
                         help='tabular_mlm_w weight')
-    parser.add_argument('--image_mlm_w', type=float, required=False, default=1.0,
+    parser.add_argument('--image_mlm_w', type=float, required=False, default=5.0,
                         help='image_mlm_w weight')
 
     parser.add_argument('--cpu', action="store_true", default=False,
@@ -1157,10 +1158,10 @@ def train(local_rank, args):
         trainer_weights = torch.load(args["load_trainer_model"], map_location='cpu')
         trainer.load_state_dict(trainer_weights)
 
-    model = trainer.train()
+    model = trainer.train().to(device)
     if args["world_size"] > 1:
         model = DDP(model, device_ids=None if args["cpu"] else [gpu_device], find_unused_parameters=False,
-                    bucket_cap_mb=10, gradient_as_bucket_view=True)  # find_unused_parameters=True
+                    bucket_cap_mb=10, gradient_as_bucket_view=True, static_graph=True)  # find_unused_parameters=True
     clean_memory()
     barrier()
     optc = copy.deepcopy(optimizer_config)
@@ -1235,7 +1236,7 @@ def train(local_rank, args):
             key = list(batch.keys())[0]
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             if (steps_done + 1) % save_every_steps == 0:
-                save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done)
+                save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done)
                 barrier()
             samples_processed += int(batch[key].size(0))
             samples_processed_this_log_iter += int(batch[key].size(0))
@@ -1308,7 +1309,8 @@ def train(local_rank, args):
             del output
             del model_output
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
-    save_model(model_save_dir, model, optimizer, scheduler, local_rank, steps_done)
+    save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done)
+    metric_logger.synchronize_between_processes()
     if args["world_size"] > 1:
         dist.destroy_process_group()
 

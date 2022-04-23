@@ -1977,15 +1977,18 @@ class SmoothedValue(object):
 class MetricLogger(object):
     def __init__(self, delimiter="\t", plots=["loss"]):
         from uniplot import plot
+        # https://github.com/olavolav/uniplot
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
         self.plots = plots
 
     def plot(self):
         from uniplot import plot
+        # https://github.com/olavolav/uniplot
         for p in self.plots:
             assert p in self.meters
             values = self.meters[p].long_storage
+            values = pd.Series(values).ewm(alpha=0.25).mean().values
             if len(values) > 100_000:
                 indices = np.arange(0, len(values) + 1, 10)
                 values = np.array(values)[indices]
