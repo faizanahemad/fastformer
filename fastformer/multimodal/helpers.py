@@ -1279,6 +1279,7 @@ def train(local_rank, args):
             if np.isnan(loss_float):
                 es = "[Train-Exception]: Time = %s, NAN Loss, loss_dict = %s, lr = %s" % (
                     get_time_string(), model_output, optimizer.param_groups[0]['lr'])
+                torch.save(batch, os.path.join(model_save_dir, "bad-batch.pth"))
                 raise ValueError(es)
             metric_logger.update(loss=model_output["loss"])
             metric_logger.update(lr=optimizer.param_groups[0]['lr'])
