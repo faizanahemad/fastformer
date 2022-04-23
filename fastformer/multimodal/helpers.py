@@ -65,7 +65,6 @@ def pil_loader(path: str) -> Image.Image:
 
 
 train_image_augments = transforms.Compose([
-    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
     transforms.RandomPerspective(distortion_scale=0.2, p=0.5,),
     transforms.RandomRotation(15, expand=True,),
     transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
@@ -80,7 +79,8 @@ train_image_augments = transforms.Compose([
                                  transforms.RandomPosterize(bits=3, p=1.0),
                                  transforms.RandomPosterize(bits=4, p=1.0),
                                  transforms.GaussianBlur(7, sigma=(0.5, 4.0)),
-                                 transforms.GaussianBlur(21, sigma=(0.5, 4.0))],)
+                                 transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
 ])
 
 one_image_shape_augments = transforms.Compose([
