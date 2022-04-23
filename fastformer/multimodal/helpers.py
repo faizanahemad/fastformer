@@ -72,6 +72,7 @@ train_image_augments = transforms.Compose([
         transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
         transforms.RandomApply([transforms.GaussianBlur(7)], 1.0),
+        transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
     ]),
     transforms.RandomChoice([transforms.TrivialAugmentWide(),
                                  transforms.RandomAutocontrast(p=1.0),
@@ -82,23 +83,17 @@ train_image_augments = transforms.Compose([
                                  transforms.RandomPosterize(bits=3, p=1.0),
                                  transforms.RandomPosterize(bits=4, p=1.0),
                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
-    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
+    transforms.Resize(image_size),
 ])
 
-one_image_shape_augments = transforms.Compose([
-        transforms.Resize(image_size//2+image_patch_size//2),
-        transforms.CenterCrop(image_size//2),
-])
+one_image_shape_augments = transforms.Resize(image_size//2)
 
 inference_image_shape_augments = transforms.Compose([
         transforms.Resize(image_size+image_patch_size//2),
         transforms.CenterCrop(image_size),
 ])
 
-panel_combine_resize = transforms.Compose([
-        transforms.Resize((image_size+image_patch_size//2)//2),
-        transforms.CenterCrop(image_size//2),
-])
+panel_combine_resize = transforms.Resize(image_size//2)
 
 def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
