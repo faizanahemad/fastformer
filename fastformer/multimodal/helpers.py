@@ -86,6 +86,8 @@ train_image_augments = transforms.Compose([
     transforms.Resize((image_size, image_size)),
 ])
 
+train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
+
 one_image_shape_augments = transforms.Resize([image_size//2, image_size//2])
 
 inference_image_shape_augments = transforms.Compose([
