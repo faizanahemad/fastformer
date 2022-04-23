@@ -39,7 +39,7 @@ from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaMo
 from einops import rearrange
 
 from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float, \
-    worker_init_fn, numel
+    worker_init_fn, numel, MetricLogger, SmoothedValue
 
 image_size = 384
 max_length = 512
@@ -1211,6 +1211,10 @@ def train(local_rank, args):
     activate_wandb_log = local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8
     if activate_wandb_log:
         wandb.init(**wandb_init_args)
+    metric_logger = MetricLogger(delimiter="  ", plots=["loss", "mlm_accuracy",
+                                                        "tabular_mlm_accuracy",
+                                                        "image_mlm_loss", "reconstruction_loss"])
+    metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
     full_times = []
     batch_times = []
     model_times = []
@@ -1227,7 +1231,7 @@ def train(local_rank, args):
         set_seeds(args["seed"] + rank + epoch)
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
-        for batch in dataloader:
+        for ix, batch in enumerate(metric_logger.log_every(dataloader, log_every_steps, header = 'Epoch: [{}]'.format(epoch))):
             key = list(batch.keys())[0]
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
             if (steps_done + 1) % save_every_steps == 0:
@@ -1267,6 +1271,15 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 # model.zero_grad(set_to_none=True)
                 steps_done += 1
+            metric_logger.update(loss=model_output["loss"])
+            metric_logger.update(lr=optimizer.param_groups[0]['lr'])
+            metric_logger.update(tabular_mlm_accuracy=model_output["tabular_mlm_accuracy"])
+            metric_logger.update(mlm_accuracy=model_output["mlm_accuracy"])
+            metric_logger.update(mlm_loss=model_output["mlm_loss"])
+            metric_logger.update(tabular_mlm_loss=model_output["tabular_mlm_loss"])
+            metric_logger.update(image_mlm_loss=model_output["image_mlm_loss"])
+            metric_logger.update(reconstruction_loss=model_output["reconstruction_loss"])
+
             step += 1
             del batch
             steps_remaining = total_steps - steps_done
@@ -1282,10 +1295,13 @@ def train(local_rank, args):
                 printed = pd.concat(logs_save, axis=1)
                 printed["mean"] = printed.mean(1)
                 logs_save = []
+                metric_logger.synchronize_between_processes()
                 if local_rank == 0:
                     # print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
                     print(("[Time = %s]" % get_time_string()) + ("-" * 80))
                     print(printed)
+                    print("Averaged stats:", metric_logger)
+                    metric_logger.plot()
                 if activate_wandb_log:
                     time.sleep(random.random() * 0.1)
                     wandb.log(wandb_log)

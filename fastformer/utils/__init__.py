@@ -1912,12 +1912,14 @@ class SmoothedValue(object):
         if fmt is None:
             fmt = "{median:.4f} ({global_avg:.4f})"
         self.deque = deque(maxlen=window_size)
+        self.long_storage = []
         self.total = 0.0
         self.count = 0
         self.fmt = fmt
 
     def update(self, value, n=1):
         self.deque.append(value)
+        self.long_storage.append(value)
         self.count += n
         self.total += value * n
 
@@ -1931,8 +1933,15 @@ class SmoothedValue(object):
         dist.barrier()
         dist.all_reduce(t)
         t = t.tolist()
+
+        long_storage = torch.tensor(self.long_storage, dtype=torch.float64, device='cuda')
+        dist.barrier()
+        dist.all_reduce(long_storage)
+        long_storage = long_storage.tolist()
+
         self.count = int(t[0])
         self.total = t[1]
+        self.long_storage = long_storage
 
     @property
     def median(self):
@@ -1966,9 +1975,23 @@ class SmoothedValue(object):
 
 
 class MetricLogger(object):
-    def __init__(self, delimiter="\t"):
+    def __init__(self, delimiter="\t", plots=["loss"]):
+        from uniplot import plot
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
+        self.plots = plots
+
+    def plot(self):
+        from uniplot import plot
+        for p in self.plots:
+            assert p in self.meters
+            values = self.meters[p].long_storage
+            if len(values) > 100_000:
+                indices = np.arange(0, len(values) + 1, 10)
+                values = np.array(values)[indices]
+                plot(xs=indices, ys=values, lines=True, title=p)
+            else:
+                plot(values, lines=True, title=p)
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
