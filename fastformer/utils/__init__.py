@@ -1936,7 +1936,7 @@ class SmoothedValue(object):
 
         long_storage = torch.tensor(self.long_storage, dtype=torch.float64, device='cuda')
         dist.barrier()
-        dist.all_reduce(long_storage)
+        dist.all_reduce(long_storage, torch.distributed.ReduceOp.AVG)
         long_storage = long_storage.tolist()
 
         self.count = int(t[0])

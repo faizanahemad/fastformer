@@ -1275,6 +1275,11 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 # model.zero_grad(set_to_none=True)
                 steps_done += 1
+            loss_float = model_output["loss"].item()
+            if np.isnan(loss_float):
+                es = "[Train-Exception]: Time = %s, NAN Loss, loss_dict = %s, lr = %s" % (
+                    get_time_string(), model_output, optimizer.param_groups[0]['lr'])
+                raise ValueError(es)
             metric_logger.update(loss=model_output["loss"])
             metric_logger.update(lr=optimizer.param_groups[0]['lr'])
             metric_logger.update(tabular_mlm_accuracy=model_output["tabular_mlm_accuracy"])
