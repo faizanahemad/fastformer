@@ -446,7 +446,7 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
-        image_attention_mask = np.zeros(image_grid * image_grid * total_image_panels, dtype=np.float)
+        # image_attention_mask = np.zeros(image_grid * image_grid * total_image_panels, dtype=np.float)
         if num_images > total_image_panels:
             extra_images = num_images - total_image_panels
             panel_distribution = [1] * total_image_panels
@@ -478,11 +478,11 @@ class MultiModalTrainingDataset(Dataset):
                             raise ValueError
                     panels.append(sample_panel)
             image_locations = panels
-            image_attention_mask[:] = 1.0
+            # image_attention_mask[:] = 1.0
             assert len(image_locations) == total_image_panels
 
         if len(image_locations) < self.total_image_panels:
-            image_attention_mask[: image_grid * image_grid * len(image_locations)] = 1.0
+            # image_attention_mask[: image_grid * image_grid * len(image_locations)] = 1.0
             image_locations.extend([Image.fromarray(np.zeros((image_size, image_size, 3)).astype(np.uint8)) for _ in range(self.total_image_panels - len(image_locations))])
         image_locations = list(map(self.image_to_vector, image_locations))
         image_locations = list(map(self.imagenet_normalization, image_locations))
