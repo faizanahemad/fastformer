@@ -63,19 +63,13 @@ def pil_loader(path: str) -> Image.Image:
 
 
 
-image_shape_augments = transforms.Compose([
-        transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
-        transforms.RandomPerspective(distortion_scale=0.1, p=0.5,),
-        transforms.RandomRotation(15, expand=True,),
-        transforms.RandomAffine(0, translate=None, scale=None, shear=[-5, 5, -5, 5],)
-])
 
 train_image_augments = transforms.Compose([
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
     transforms.RandomPerspective(distortion_scale=0.2, p=0.5,),
     transforms.RandomRotation(15, expand=True,),
     transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
     transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
-    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
     transforms.RandomApply([transforms.GaussianBlur(7)], 0.25),
     transforms.RandomChoice([transforms.TrivialAugmentWide(),
                                  transforms.RandomAutocontrast(p=1.0),
@@ -406,10 +400,10 @@ class MultiModalTrainingDataset(Dataset):
         assert text_masked_attention_mask.sum() == text_attention_mask.sum()
 
         tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
-        tabular_to_text_for_teacher = ""
-        for k, v in tabular:
-            k = k.replace("_", " ")
-            tabular_to_text_for_teacher = tabular_to_text_for_teacher + " " + k + " = " + float_format(v) + " ;"
+        # tabular_to_text_for_teacher = ""
+        # for k, v in tabular:
+        #     k = k.replace("_", " ")
+        #     tabular_to_text_for_teacher = tabular_to_text_for_teacher + " " + k + " = " + float_format(v) + " ;"
         tabular_to_text_for_student_input = ""
         tabular_to_text_for_student_output = ""
         for k, v in tabular:
@@ -419,9 +413,8 @@ class MultiModalTrainingDataset(Dataset):
             tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + float_format(v)))) if random.random() < self.tabular_feature_mask_proba and not isnan(v) else float_format(v)) + " ;"
             tabular_to_text_for_student_output = tabular_to_text_for_student_output + " " + k + " = " + float_format(v) + " ;"
 
-        tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
-        t2t_teacher_input_ids, t2t_teacher_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
-            "attention_mask"].squeeze()
+        # tokenizer_outputs = tokenizer(tabular_to_text_for_teacher, return_offsets_mapping=False, **self.tokenizer_args)
+        # t2t_teacher_input_ids, t2t_teacher_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs["attention_mask"].squeeze()
 
         tokenizer_outputs = tokenizer(tabular_to_text_for_student_output, return_offsets_mapping=False, **self.tokenizer_args)
         t2t_student_input_ids, t2t_student_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
@@ -431,7 +424,7 @@ class MultiModalTrainingDataset(Dataset):
         t2t_student_masked_input_ids, t2t_student_masked_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
             "attention_mask"].squeeze()
         assert t2t_student_masked_attention_mask.sum() == t2t_student_attention_mask.sum()
-        assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
+        # assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
 
         image_locations = item[self.image_columns].values[0]
         image_locations = " ".join(image_locations)
@@ -516,8 +509,8 @@ class MultiModalTrainingDataset(Dataset):
                     tabular_student_masked_attention_mask=t2t_student_masked_attention_mask,
                     tabular_student_input_ids=t2t_student_input_ids,
                     tabular_student_attention_mask=t2t_student_attention_mask,
-                    tabular_teacher_input_ids=t2t_teacher_input_ids,
-                    tabular_teacher_attention_mask=t2t_teacher_attention_mask,
+                    # tabular_teacher_input_ids=t2t_teacher_input_ids,
+                    # tabular_teacher_attention_mask=t2t_teacher_attention_mask,
                     text_input_ids=text_input_ids, text_attention_mask=text_attention_mask,
                     text_masked_input_ids=text_masked_input_ids, text_masked_attention_mask=text_masked_attention_mask)
 
