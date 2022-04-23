@@ -71,8 +71,8 @@ train_image_augments = transforms.Compose([
         transforms.RandomRotation(15, expand=True, ),
         transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
+        transforms.RandomApply([transforms.GaussianBlur(7)], 1.0),
     ]),
-    transforms.RandomApply([transforms.GaussianBlur(7)], 0.25),
     transforms.RandomChoice([transforms.TrivialAugmentWide(),
                                  transforms.RandomAutocontrast(p=1.0),
                                  transforms.RandomAdjustSharpness(2, p=1.0),
@@ -81,7 +81,6 @@ train_image_augments = transforms.Compose([
                                  transforms.RandomAdjustSharpness(32, p=1.0),
                                  transforms.RandomPosterize(bits=3, p=1.0),
                                  transforms.RandomPosterize(bits=4, p=1.0),
-                                 transforms.GaussianBlur(7, sigma=(0.5, 4.0)),
                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
 ])
