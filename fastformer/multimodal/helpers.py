@@ -441,7 +441,7 @@ class MultiModalTrainingDataset(Dataset):
             # one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
             # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             # one_image = torch.cat([one_image_p1, one_image_p2], 0)
-            one_image = sketch_transform(one_image)
+            one_image = torch.tensor(sketch_transform(one_image), dtype=torch.float32)
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
