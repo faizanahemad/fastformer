@@ -419,7 +419,7 @@ class MultiModalTrainingDataset(Dataset):
         for ix, (k, v) in enumerate(tabular):
             k = k.replace("_", " ")
             v = float_format(v)
-            if random.random() < self.tabular_feature_drop_proba:
+            if random.random() < self.tabular_feature_drop_proba and (ix < len(tabular) - 1 or not not_masked):
                 continue
             if (random.random() < self.tabular_feature_mask_proba and not isnan(v)) or (not_masked and ix == len(tabular) - 1):
                 tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + v)))) + " ;"
