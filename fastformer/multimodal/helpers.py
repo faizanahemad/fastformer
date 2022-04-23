@@ -246,14 +246,21 @@ def text_masking(text: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedToke
     mask = tokenizer.mask_token
     words = text.split()
     masked_words = []
+    no_mask = True
     for ix, w in enumerate(words):
         if random.random() < mask_probability:
             tokens = tokenizer.tokenize((w if ix == 0 else " "+w))
             ln = len(tokens)
             # print(w, ln, tokens)
             masked_words.extend([mask] * ln)
+            no_mask = False
         else:
             masked_words.append(w)
+    if no_mask:
+        w = masked_words.pop()
+        tokens = tokenizer.tokenize((w if ix == 0 else " " + w))
+        ln = len(tokens)
+        masked_words.extend([mask] * ln)
     return " ".join(masked_words), " ".join(words)
 
 
@@ -388,6 +395,8 @@ class MultiModalTrainingDataset(Dataset):
                            header=0)
         text = [str(t) for t in item[self.text_columns].values[0]]
         text = self.joiner.join(text)
+        if len(text) == 0:
+            text = "<empty text>"
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
         text_input_ids, text_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
