@@ -485,17 +485,16 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(map(self.image_to_vector, image_locations))
         image_locations = list(map(self.imagenet_normalization, image_locations))
         image_inputs = torch.tensor(np.stack(image_locations))
-
-
         masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).bool()
         image_locations = torch.tensor(np.stack(image_locations))
-        images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,
+        images_patch = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=image_patch_size,
                                    p2=image_patch_size)
-        images_norm = images_squeeze
+        # images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,p2=image_patch_size)
+
         # images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
         # we find that the mean is about 0.48 and standard deviation is about 0.08.
-        images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
+        # images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
         B, _, C = images_patch.shape
         image_labels = images_patch.view(-1, C)[image_masks.view(-1)].reshape(B, -1, C)  # 2D indexing isn't working so bring index to 1D
 
