@@ -39,7 +39,7 @@ from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaMo
 from einops import rearrange
 
 from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float, \
-    worker_init_fn
+    worker_init_fn, numel
 
 image_size = 384
 max_length = 512
@@ -392,7 +392,7 @@ class MultiModalTrainingDataset(Dataset):
         mask = self.tokenizer.mask_token
         item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
                            header=0)
-        text = item[self.text_columns].values[0]
+        text = [str(t) for t in item[self.text_columns].values[0]]
         text = self.joiner.join(text)
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
@@ -1015,7 +1015,7 @@ def training_args():
     parser.add_argument('--optimizer', required=False, type=str, default="adamw",
                         help='optimizer')
 
-    parser.add_argument('--num_workers', required=False, type=int, default=4,
+    parser.add_argument('--num_workers', required=False, type=int, default=8,
                         help='Dataloader workers')
 
     parser.add_argument('--master_addr', type=str, required='MASTER_ADDR' not in os.environ,
@@ -1147,6 +1147,8 @@ def train(local_rank, args):
     encoder = MultiModalEncoder(args["model_size"])
     trainer = MultiModalSelfSupervisedTrainerModel(0, args["image_mlm_w"], args["text_mlm_w"],
                                                    args["text_mlm_w"], args["image_generation_w"], encoder)
+    encoder_param_count = numel(encoder)
+    trainer_param_count = numel(trainer)
     if "load_encoder" in args and args["load_encoder"] is not None:
         encoder_weights = torch.load(args["load_encoder"], map_location='cpu')
         encoder.load_state_dict(encoder_weights)
@@ -1193,6 +1195,7 @@ def train(local_rank, args):
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
     barrier()
     if local_rank == 0:
+        print("[Train]: Model initialized, encoder_param_count = %s, trainer_param_count = %s, trainer - encoder = %s" % (encoder_param_count, trainer_param_count, trainer_param_count - encoder_param_count))
         print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
               (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
     log_every_steps = args["log_every_steps"] * iter_size
