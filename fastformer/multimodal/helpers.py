@@ -436,13 +436,15 @@ class MultiModalTrainingDataset(Dataset):
         if self.save_one_image and count_images > 0:
             one_image = image_locations.pop()
             one_image = one_image_shape_augments(one_image)
-            one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
-                                                  sketch_transform(one_image)]) * 255).transpose(1, 2, 0).astype(np.uint8))
-            one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
-            one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
-            one_image = torch.cat([one_image_p1, one_image_p2], 0)
+            # one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
+            #                                       sketch_transform(one_image)]) * 255).transpose(1, 2, 0).astype(np.uint8))
+            # one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
+            # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
+            # one_image = torch.cat([one_image_p1, one_image_p2], 0)
+            one_image = sketch_transform(one_image)
         else:
-            one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
+            # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
+            one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
@@ -637,9 +639,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         decoder_layer_conf.add_cross_attention = True
         decoder_layer_conf.is_decoder = True
         self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
-        self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
-        self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
-                                                 nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
+        self.decoder_head = nn.Linear(embed_dim, (image_patch_size // 2) * (image_patch_size // 2) * 1)
+        # self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
+        # self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
+        #                                          nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
         self.init_weights()
         # decoder_query = longformer.embeddings.position_embeddings.weight[:image_grid*image_grid, :decoder_layer_conf.hidden_size].detach().clone()
         decoder_query = build_2d_sincos_position_embedding(image_grid, decoder_layer_conf.hidden_size, )
@@ -802,10 +805,17 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             ips = image_patch_size // 2
             full_reconstruction = self.decoder_head(decoder_output)  # bx144*image_patch_size*image_patch_size*3
             # rearrange(full_reconstruction, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', h=image_grid, w=image_grid, p1=image_patch_size, p2=image_patch_size)
-            full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
-            sketch_reconstruction = self.decoder_sketch_head(decoder_output)
-            sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
-        return dict(full_reconstruction=full_reconstruction, sketch_reconstruction=sketch_reconstruction,
+            full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips * ips * 1).reshape(b,
+                                                                                                                image_grid,
+                                                                                                                image_grid,
+                                                                                                                ips,
+                                                                                                                ips).permute(
+                0, 1, 3, 2, 4).reshape(b, image_grid * ips, image_grid * ips)
+            # full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
+            # sketch_reconstruction = self.decoder_sketch_head(decoder_output)
+            # sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
+        return dict(full_reconstruction=full_reconstruction,
+                    # sketch_reconstruction=sketch_reconstruction,
                     image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
                     unimodal_tabular_features=tabular_features,)
@@ -929,8 +939,9 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"] + encoder_out["unimodal_image_features"])
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
                                                 image_masks, image_labels)
-        reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
-        reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
+        # reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
+        # reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
+        reconstruction_loss = self.image_generation_w * self.mse(input=encoder_out["full_reconstruction"], target=generated_image)
         loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + reconstruction_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
