@@ -811,7 +811,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 assert tabular_output.size(1) == tabular_features.size(1) == tabular_input_ids.size(1)
 
         full_reconstruction = None
-        sketch_reconstruction = None
+        # sketch_reconstruction = None
         if activate_missing_image_generator:
             assert images is not None
             decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
@@ -864,7 +864,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.image_generation_w = image_generation_w
         decoder_embed_dim = self.encoder.embed_dim
         self.decoder_embed_dim = decoder_embed_dim
-        self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False)
+        self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False) if decoder_embed_dim != self.encoder.embed_dim else nn.Identity()
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         init_weights(self.encoder_to_decoder)
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
@@ -885,7 +885,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         decoder_layer_conf.is_decoder = False
         self.decoder = nn.ModuleList(
             [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
-             RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
+             # RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)
+             ])
         init_weights(self.decoder, std=.02)
         self.decoder_head = nn.Sequential(nn.Linear(decoder_embed_dim, decoder_embed_dim * 4), nn.GELU(), nn.Linear(decoder_embed_dim * 4, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
