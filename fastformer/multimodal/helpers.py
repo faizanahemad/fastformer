@@ -274,7 +274,7 @@ class MultiModalTrainingDataset(Dataset):
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
                  word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
-                 total_image_panels=4,
+                 total_image_panels=3,
                  ):
         self.tokenizer = tokenizer
         self.tokenizer_args = tokenizer_args
