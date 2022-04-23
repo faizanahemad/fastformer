@@ -160,6 +160,10 @@ def numel(m: torch.nn.Module, only_trainable: bool = True):
     unique = dict((p.data_ptr(), p) for p in parameters).values()
     return sum(p.numel() for p in unique)
 
+def worker_init_fn():
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 def set_seeds(seed=0):
     torch.manual_seed(seed)

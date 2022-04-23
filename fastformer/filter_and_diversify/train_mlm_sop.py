@@ -1208,7 +1208,7 @@ def build_dataloader(location, shuffle_dataset, batch_size, tokenizer, mlm_sop_e
     else:
         sampler = None if single_node else DistributedSampler(dataset, shuffle=shuffle_dataset)
 
-    train_loader = DataLoader(dataset, sampler=sampler,
+    train_loader = DataLoader(dataset, sampler=sampler, worker_init_fn=worker_init_fn,
                               batch_size=batch_size, shuffle=shuffle_dataset and single_node,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 

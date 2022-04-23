@@ -38,7 +38,8 @@ import pandas as pd
 from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel
 from einops import rearrange
 
-from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float
+from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float, \
+    worker_init_fn
 
 image_size = 384
 max_length = 512
@@ -1088,7 +1089,7 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
     kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=True)
     train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
-                              batch_size=batch_size, shuffle=single_node,
+                              batch_size=batch_size, shuffle=single_node, worker_init_fn=worker_init_fn,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
     return train_loader
@@ -1106,7 +1107,6 @@ def train(local_rank, args):
     os.environ["NCCL_DEBUG"] = "WARN"
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     # gpu_device = 0
-    gpu_device = local_rank
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     gpu_device = local_rank
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -1180,9 +1180,10 @@ def train(local_rank, args):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         assert os.path.exists(model_save_dir)
+        torch.save(args, os.path.join(model_save_dir, "args.pth"))
 
     batch_size = args["batch_size"]
-    dataloader = build_propreitery_dataloader(args["dataset"], args["images_path"], batch_size, encoder.tokenizer,)  # "/local/datasets/asin-images/combined-all.csv"
+    dataloader = build_propreitery_dataloader(args["dataset"], args["images_path"], batch_size, encoder.tokenizer, args["world_size"], args["num_workers"],)  # "/local/datasets/asin-images/combined-all.csv"
     iter_size = max(args["accumulation_steps"], 1)
     no_sync = iter_size > 1
     steps_per_epoch = int(np.floor(len(dataloader.sampler) / (batch_size * iter_size)) if dataloader.sampler is not None else (len(dataloader) / (iter_size)))
@@ -1191,7 +1192,6 @@ def train(local_rank, args):
     pct_start = min(0.04, 10_000 / total_steps)
     scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
     barrier()
-    gradient_clipping = optc["gradient_clipping"]
     if local_rank == 0:
         print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
               (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
@@ -1254,7 +1254,7 @@ def train(local_rank, args):
                                        )
                 loss = model_output["loss"] / iter_size
                 loss.backward()
-
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
                 optimizer.step()
                 if isinstance(scheduler, list):
                     for sch in scheduler:
