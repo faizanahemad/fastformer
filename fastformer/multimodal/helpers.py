@@ -256,11 +256,15 @@ def text_masking(text: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedToke
             no_mask = False
         else:
             masked_words.append(w)
-    if no_mask:
-        w = masked_words.pop()
-        tokens = tokenizer.tokenize((w if ix == 0 else " " + w))
-        ln = len(tokens)
-        masked_words.extend([mask] * ln)
+    try:
+        if no_mask:
+            w = masked_words.pop()
+            tokens = tokenizer.tokenize((w if ix == 0 else " " + w))
+            ln = len(tokens)
+            masked_words.extend([mask] * ln)
+    except Exception as e:
+        print("[text_masking]: original text = %s, masked words = %s, split = %s" % (text, masked_words, words))
+        raise e
     return " ".join(masked_words), " ".join(words)
 
 
@@ -395,8 +399,8 @@ class MultiModalTrainingDataset(Dataset):
                            header=0)
         text = [str(t) for t in item[self.text_columns].values[0]]
         text = self.joiner.join(text)
-        if len(text) == 0:
-            text = "<empty text>"
+        if len(text) == 0 or len(text.split()) == 0:
+            text += " <empty text> <empty text>"
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
         text_input_ids, text_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
@@ -1108,7 +1112,7 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
     dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
-    kwargs = dict(prefetch_factor=4, persistent_workers=True) if num_workers > 0 else dict()
+    kwargs = dict(prefetch_factor=2, persistent_workers=True) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=True)
     train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
                               batch_size=batch_size, shuffle=single_node, worker_init_fn=worker_init_fn,
