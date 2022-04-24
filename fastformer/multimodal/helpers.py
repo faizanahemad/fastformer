@@ -450,11 +450,17 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = " ".join(image_locations)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
+        if len(image_locations) > 0:
+            first_im = image_locations[0]
+            image_locations = image_locations[1:]
+            random.shuffle(image_locations)
+            image_locations = [first_im] + image_locations[:6]
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
         count_images = len(image_locations)
 
         if self.save_one_image and count_images > 0:
-            one_image = image_locations.pop()
+            one_image = image_locations[0]
+            image_locations = image_locations[1:]
             one_image = one_image_shape_augments(one_image)
             # one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
             #                                       sketch_transform(one_image)]) * 255).transpose(1, 2, 0).astype(np.uint8))
@@ -465,8 +471,6 @@ class MultiModalTrainingDataset(Dataset):
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
-        random.shuffle(image_locations)
-        image_locations = image_locations[:6]
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
