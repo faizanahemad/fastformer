@@ -1257,6 +1257,7 @@ def train(local_rank, args):
         set_seeds(args["seed"] + rank + epoch)
         if hasattr(dataloader, "sampler") and hasattr(dataloader.sampler, "set_epoch"):
             dataloader.sampler.set_epoch(epoch)
+        print("[Train]: Starting epoch number = %s of %s" % (epoch + 1, args["epochs"]))
         for ix, batch in enumerate(metric_logger.log_every(dataloader, log_every_steps, header = 'Epoch: [{}]'.format(epoch))):
             key = list(batch.keys())[0]
             batch = {k: v.to(device, non_blocking=True) if hasattr(v, "to") else v for k, v in batch.items()}
