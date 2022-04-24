@@ -399,7 +399,7 @@ class MultiModalTrainingDataset(Dataset):
                            header=0)
         text = [str(t) for t in item[self.text_columns].values[0]]
         text = self.joiner.join(text)
-        if len(text) == 0 or len(text.split()) == 0:
+        if len(text) == 0 or len(text.split()) < 2:
             text += " <empty text> <empty text>"
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
