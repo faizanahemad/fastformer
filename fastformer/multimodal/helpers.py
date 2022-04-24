@@ -449,7 +449,6 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = item[self.image_columns].values[0]
         image_locations = " ".join(image_locations)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
-        random.shuffle(image_locations)
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
         count_images = len(image_locations)
@@ -466,6 +465,8 @@ class MultiModalTrainingDataset(Dataset):
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
+        random.shuffle(image_locations)
+        image_locations = image_locations[:6]
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
@@ -1131,11 +1132,11 @@ def train(local_rank, args):
     os.environ['MASTER_ADDR'] = args["master_addr"]
     os.environ['MASTER_PORT'] = args["master_port"]
     os.environ["NCCL_DEBUG"] = "WARN"
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     # gpu_device = 0
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     gpu_device = local_rank
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
         os.environ["WANDB_SILENT"] = "true"
