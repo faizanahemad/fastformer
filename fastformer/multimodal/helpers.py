@@ -1139,7 +1139,7 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
     dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
                                         image_size, image_patch_size, train_image_augments)
-    kwargs = dict(prefetch_factor=1, persistent_workers=False) if num_workers > 0 else dict()
+    kwargs = dict(prefetch_factor=2, persistent_workers=False) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=True)
     train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
                               batch_size=batch_size, shuffle=single_node, worker_init_fn=worker_init_fn,
