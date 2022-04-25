@@ -89,6 +89,17 @@ train_image_augments = transforms.Compose([
 
 train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
+train_image_augments = transforms.Compose([
+    transforms.RandomChoice([
+        transforms.RandomPerspective(distortion_scale=0.2, p=1.0, ),
+        transforms.RandomRotation(30, expand=True, ),
+        transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
+        transforms.RandomPosterize(bits=3, p=1.0),
+        transforms.TrivialAugmentWide(),
+    ]),
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2)),
+])
+
 one_image_shape_augments = transforms.Resize([image_size//2, image_size//2])
 
 inference_image_shape_augments = transforms.Compose([
@@ -279,7 +290,7 @@ class MultiModalTrainingDataset(Dataset):
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
                  word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
-                 total_image_panels=3,
+                 total_image_panels=4,
                  ):
         self.tokenizer = tokenizer
         self.tokenizer_args = tokenizer_args
@@ -476,7 +487,7 @@ class MultiModalTrainingDataset(Dataset):
             first_im = image_locations[0]
             image_locations = image_locations[1:]
             random.shuffle(image_locations)
-            image_locations = [first_im] + image_locations[:6]
+            image_locations = [first_im] + image_locations[:8]
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
         count_images = len(image_locations)
 
