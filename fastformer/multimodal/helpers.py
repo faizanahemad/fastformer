@@ -37,6 +37,7 @@ import cv2
 import pandas as pd
 from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel
 from einops import rearrange
+from datasets import load_dataset
 
 from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float, \
     worker_init_fn, numel, MetricLogger, SmoothedValue
@@ -308,6 +309,7 @@ class MultiModalTrainingDataset(Dataset):
         self.image_mask_proba = image_mask_proba
         self.num_mask = int(self.image_mask_proba * self.num_patches)
         self.length = len(self)
+        self.dataset = load_dataset('csv', data_files=self.data_csv)["train"]
 
     def __get_image_mask__(self):
         mask = np.hstack([
@@ -391,14 +393,34 @@ class MultiModalTrainingDataset(Dataset):
         return dict(item=item, text=text, tabular=tabular, image_locations=image_locations)
 
 
+    def get_text_from_item(self, item):
+        text = [str(item[col]) for col in self.text_columns]
+        text = self.joiner.join(text)
+        # text = [str(t) for t in item[self.text_columns].values[0]]
+        # text = self.joiner.join(text)
+        return text
+
+    def get_tabular_from_item(self, item):
+        tabular = list(zip(self.tabular_columns, [item[col] for col in self.tabular_columns]))
+        # tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
+        return tabular
+
+    def get_image_locations_from_item(self, item):
+        image_locations = " ".join([str(item[col]) for col in self.image_columns])
+        # image_locations = item[self.image_columns].values[0]
+        # image_locations = [str(im) for im in image_locations]
+        # image_locations = " ".join(image_locations)
+        return image_locations
+
     def __getitem__(self, item):
 
         tokenizer = self.tokenizer
         mask = self.tokenizer.mask_token
-        item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
-                           header=0)
-        text = [str(t) for t in item[self.text_columns].values[0]]
-        text = self.joiner.join(text)
+        # item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
+        #                    header=0)
+        item = self.dataset[item]
+        text = self.get_text_from_item(item)
+
         if len(text) == 0 or len(text.split()) < 2:
             text += " <empty text> <empty text>"
         masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
@@ -411,7 +433,8 @@ class MultiModalTrainingDataset(Dataset):
             "attention_mask"].squeeze()
         assert text_masked_attention_mask.sum() == text_attention_mask.sum()
 
-        tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
+        # tabular = list(zip(self.tabular_columns, list(item[self.tabular_columns].to_records()[0])[1:]))
+        tabular = self.get_tabular_from_item(item)
         # tabular_to_text_for_teacher = ""
         # for k, v in tabular:
         #     k = k.replace("_", " ")
@@ -446,9 +469,7 @@ class MultiModalTrainingDataset(Dataset):
         assert t2t_student_masked_attention_mask.sum() == t2t_student_attention_mask.sum()
         # assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
 
-        image_locations = item[self.image_columns].values[0]
-        image_locations = [str(im) for im in image_locations]
-        image_locations = " ".join(image_locations)
+        image_locations = self.get_image_locations_from_item(item)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
         if len(image_locations) > 0:
