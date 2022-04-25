@@ -447,6 +447,7 @@ class MultiModalTrainingDataset(Dataset):
         # assert t2t_teacher_attention_mask.sum() >= t2t_student_attention_mask.sum()
 
         image_locations = item[self.image_columns].values[0]
+        image_locations = [str(im) for im in image_locations]
         image_locations = " ".join(image_locations)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
