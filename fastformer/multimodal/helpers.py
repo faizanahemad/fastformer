@@ -429,6 +429,7 @@ class MultiModalTrainingDataset(Dataset):
         mask = self.tokenizer.mask_token
         # item = pd.read_csv(self.data_csv, names=self.columns, sep=self.separator, low_memory=False, skiprows=item, nrows=1,
         #                    header=0)
+        item_idx = item
         item = self.dataset[item]
         text = self.get_text_from_item(item)
 
@@ -504,6 +505,14 @@ class MultiModalTrainingDataset(Dataset):
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
+        image_locations_new = []
+        for im in image_locations:
+            try:
+                im = self.image_augments(im)
+            except Exception as e:
+                print("[ERROR][Dataset]: Failed image augmentation of item_idx = %s" % (item_idx,))
+            image_locations_new.append(im)
+        image_locations = image_locations_new
         image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
@@ -1065,7 +1074,7 @@ def training_args():
                         help='text_mlm_w weight')
     parser.add_argument('--image_generation_w', type=float, required=False, default=5.0,
                         help='image_generation_w weight')
-    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=1.0,
+    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.5,
                         help='tabular_mlm_w weight')
     parser.add_argument('--image_mlm_w', type=float, required=False, default=5.0,
                         help='image_mlm_w weight')
@@ -1263,7 +1272,7 @@ def train(local_rank, args):
         print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
               (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
     log_every_steps = args["log_every_steps"] * iter_size
-    save_every_steps = args["save_every_steps"]
+    save_every_steps = args["save_every_steps"] * iter_size
     gradient_clipping = optc["gradient_clipping"]
     group = "%s-%sN-%s" % (args["wandb_name"], args["nodes"], time_string)
 
