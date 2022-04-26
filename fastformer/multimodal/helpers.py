@@ -1264,7 +1264,12 @@ def train(local_rank, args):
     total_steps = steps_per_epoch * args["epochs"]
     div_factor = optc["lr"] / 1e-8
     pct_start = min(0.04, 10_000 / total_steps)
-    scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
+    # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=total_steps,
+                                                    div_factor=100., three_phase=False, pct_start=0.04,
+                                                    base_momentum=0.75,
+                                                    anneal_strategy="cos", cycle_momentum=True)
+
     barrier()
     if local_rank == 0:
         print("[Train]: Model initialized, encoder_param_count = %s, trainer_param_count = %s, trainer - encoder = %s" % (encoder_param_count, trainer_param_count, trainer_param_count - encoder_param_count))
