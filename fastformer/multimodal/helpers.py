@@ -1238,7 +1238,7 @@ def train(local_rank, args):
 
     if "load_trainer_model" in args and args["load_trainer_model"] is not None:
         trainer_weights = torch.load(args["load_trainer_model"], map_location='cpu')
-        trainer.load_state_dict(trainer_weights)
+        trainer.load_state_dict(trainer_weights, strict=False)
 
     model = trainer.train().to(device)
     if args["world_size"] > 1:
