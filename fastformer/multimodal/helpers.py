@@ -947,6 +947,11 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.decoder_head = nn.Sequential(nn.Linear(decoder_embed_dim, decoder_embed_dim * 4), nn.GELU(), nn.Linear(decoder_embed_dim * 4, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
         self.mse = nn.MSELoss()
+        self.mse_reconstruct = nn.MSELoss(reduction="none")
+        half_image_size = image_size // 2
+        centered_reconstruction_weights = torch.tensor(np.interp(np.arange(0, half_image_size), [0, 95, half_image_size-1], [1, 2, 1])).unsqueeze(0).repeat(half_image_size, 1)
+        centered_reconstruction_weights = centered_reconstruction_weights * centered_reconstruction_weights.T
+        self.centered_reconstruction_weights = nn.Parameter(centered_reconstruction_weights, requires_grad=False)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -1015,7 +1020,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
                                                 image_masks, image_labels)
         # reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
         # reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
-        reconstruction_loss = self.image_generation_w * self.mse(input=encoder_out["full_reconstruction"], target=generated_image)
+        reconstruction_loss = self.image_generation_w * (self.mse_reconstruct(input=encoder_out["full_reconstruction"], target=generated_image) * self.centered_reconstruction_weights.unsqueeze(0)).mean()
         loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + reconstruction_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
@@ -1077,11 +1082,11 @@ def training_args():
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
-    parser.add_argument('--image_generation_w', type=float, required=False, default=5.0,
+    parser.add_argument('--image_generation_w', type=float, required=False, default=20.0,
                         help='image_generation_w weight')
-    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.5,
+    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.25,
                         help='tabular_mlm_w weight')
-    parser.add_argument('--image_mlm_w', type=float, required=False, default=5.0,
+    parser.add_argument('--image_mlm_w', type=float, required=False, default=20.0,
                         help='image_mlm_w weight')
 
     parser.add_argument('--cpu', action="store_true", default=False,
