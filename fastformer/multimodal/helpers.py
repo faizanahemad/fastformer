@@ -1086,7 +1086,7 @@ def training_args():
                         help='image_generation_w weight')
     parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.25,
                         help='tabular_mlm_w weight')
-    parser.add_argument('--image_mlm_w', type=float, required=False, default=20.0,
+    parser.add_argument('--image_mlm_w', type=float, required=False, default=10.0,
                         help='image_mlm_w weight')
 
     parser.add_argument('--cpu', action="store_true", default=False,
