@@ -513,7 +513,6 @@ class MultiModalTrainingDataset(Dataset):
                 print("[ERROR][Dataset]: Failed image augmentation of item_idx = %s" % (item_idx,))
             image_locations_new.append(im)
         image_locations = image_locations_new
-        image_locations = list(map(self.image_augments, image_locations))
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
         # image_attention_mask = np.zeros(image_grid * image_grid * total_image_panels, dtype=np.float)
