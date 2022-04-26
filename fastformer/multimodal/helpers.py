@@ -100,10 +100,13 @@ train_image_augments = transforms.Compose([
     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2)),
 ])
 
-one_image_shape_augments = transforms.Resize([image_size//2, image_size//2])
+one_image_shape_augments = transforms.Compose([
+    transforms.Resize([image_size//2 +32, image_size//2 +32]),
+    transforms.CenterCrop(image_size//2),
+])
 
 inference_image_shape_augments = transforms.Compose([
-        transforms.Resize(image_size+image_patch_size//2),
+        transforms.Resize(image_size+image_patch_size),
         transforms.CenterCrop(image_size),
 ])
 
@@ -501,7 +504,7 @@ class MultiModalTrainingDataset(Dataset):
             # one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
             # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             # one_image = torch.cat([one_image_p1, one_image_p2], 0)
-            one_image = torch.tensor(sketch_transform(one_image), dtype=torch.float32)
+            one_image = torch.tensor(gray_scale(one_image), dtype=torch.float32)
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
@@ -1265,6 +1268,7 @@ def train(local_rank, args):
     div_factor = optc["lr"] / 1e-8
     pct_start = min(0.04, 10_000 / total_steps)
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
+    # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=total_steps,
                                                     div_factor=100., three_phase=False, pct_start=0.04,
                                                     base_momentum=0.75,
