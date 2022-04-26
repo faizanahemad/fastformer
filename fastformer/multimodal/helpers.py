@@ -110,7 +110,10 @@ inference_image_shape_augments = transforms.Compose([
         transforms.CenterCrop(image_size),
 ])
 
-panel_combine_resize = transforms.Resize([image_size//2, image_size//2])
+panel_combine_resize = transforms.Compose([
+    transforms.Resize([image_size//2 +32, image_size//2 +32]),
+    transforms.CenterCrop(image_size//2),
+])
 
 def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
