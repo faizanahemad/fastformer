@@ -221,10 +221,12 @@ def save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local
     encoder_state_dict = getattr(getattr(model, "module", model), "encoder",
                                  getattr(model, "module", model)).state_dict()
     if local_rank == 0:
-        torch.save(state_dict, os.path.join(model_save_dir, "trainer-%s.pth" % steps_done))
-        torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
-        torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
-        torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
+        torch.save(state_dict, os.path.join(model_save_dir, "trainer.pth"))
+        torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder.pth"))
+        # torch.save(state_dict, os.path.join(model_save_dir, "trainer-%s.pth" % steps_done))
+        # torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
+        # torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
+        # torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
         torch.save(metric_logger, os.path.join(model_save_dir, "metrics.pth"))
     del state_dict
     del encoder_state_dict

@@ -1988,7 +1988,7 @@ class MetricLogger(object):
         for p in self.plots:
             assert p in self.meters
             values = self.meters[p].long_storage
-            values = pd.Series(values).ewm(alpha=0.25).mean().values
+            values = pd.Series(values).ewm(alpha=0.1).mean().values
             if len(values) > 100_000:
                 indices = np.arange(0, len(values) + 1, 10)
                 values = np.array(values)[indices]
