@@ -46,7 +46,7 @@ image_size = 384
 max_length = 512
 image_patch_size = 32
 image_grid = 12
-image_mask_proba = 0.75
+image_mask_proba = 0.5
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
@@ -65,40 +65,40 @@ def pil_loader(path: str) -> Image.Image:
 
 
 
-train_image_augments = transforms.Compose([
-    transforms.Resize((image_size + 64, image_size + 64)),
-    transforms.RandomChoice([
-        transforms.RandomPerspective(distortion_scale=0.2, p=1.0, ),
-        transforms.RandomRotation(15, expand=True, ),
-        transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
-        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
-        transforms.RandomApply([transforms.GaussianBlur(7)], 1.0),
-        transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
-    ]),
-    transforms.RandomChoice([transforms.TrivialAugmentWide(),
-                                 transforms.RandomAutocontrast(p=1.0),
-                                 transforms.RandomAdjustSharpness(2, p=1.0),
-                                 transforms.RandomAdjustSharpness(4, p=1.0),
-                                 transforms.RandomAdjustSharpness(16, p=1.0),
-                                 transforms.RandomAdjustSharpness(32, p=1.0),
-                                 transforms.RandomPosterize(bits=3, p=1.0),
-                                 transforms.RandomPosterize(bits=4, p=1.0),
-                                 transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
-    transforms.Resize((image_size, image_size)),
-])
+# train_image_augments = transforms.Compose([
+#     transforms.Resize((image_size + 64, image_size + 64)),
+#     transforms.RandomChoice([
+#         transforms.RandomPerspective(distortion_scale=0.2, p=1.0, ),
+#         transforms.RandomRotation(15, expand=True, ),
+#         transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
+#         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
+#         transforms.RandomApply([transforms.GaussianBlur(7)], 1.0),
+#         transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
+#     ]),
+#     transforms.RandomChoice([transforms.TrivialAugmentWide(),
+#                                  transforms.RandomAutocontrast(p=1.0),
+#                                  transforms.RandomAdjustSharpness(2, p=1.0),
+#                                  transforms.RandomAdjustSharpness(4, p=1.0),
+#                                  transforms.RandomAdjustSharpness(16, p=1.0),
+#                                  transforms.RandomAdjustSharpness(32, p=1.0),
+#                                  transforms.RandomPosterize(bits=3, p=1.0),
+#                                  transforms.RandomPosterize(bits=4, p=1.0),
+#                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
+#     transforms.Resize((image_size, image_size)),
+# ])
+#
+# train_image_augments = transforms.Compose([
+#     transforms.RandomChoice([
+#         transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
+#         transforms.RandomRotation(10, expand=True, ),
+#         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-2, 2, -2, 2], fill=120),
+#         transforms.RandomPosterize(bits=3, p=1.0),
+#         transforms.TrivialAugmentWide(),
+#     ]),
+#     transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1)),
+# ])
 
-train_image_augments = transforms.Compose([
-    transforms.RandomChoice([
-        transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
-        transforms.RandomRotation(10, expand=True, ),
-        transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-2, 2, -2, 2], fill=120),
-        transforms.RandomPosterize(bits=3, p=1.0),
-        transforms.TrivialAugmentWide(),
-    ]),
-    transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1)),
-])
-
-train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1))
+# train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1))
 
 train_image_augments = transforms.Resize([image_size, image_size])
 
@@ -378,6 +378,9 @@ class MultiModalTrainingDataset(Dataset):
         all_patch[~image_masks.view(-1)] = rearrange(actual_images, 'b c (h p1) (w p2) -> b (h w) p1 p2 c', p1=image_patch_size,
                                    p2=image_patch_size).view(-1, C)[~image_masks.view(-1)]
         all_patch = all_patch.reshape(B, S, C).reshape(B, S, image_patch_size, image_patch_size, 3)
+        all_patch = rearrange(all_patch, 'b (h w) p1 p2 c -> b (h w) (p1 p2) c', h=image_grid, w=image_grid)
+        all_patch = all_patch * x["image_patch_std"] + x["image_patch_mean"]
+        all_patch = rearrange(all_patch, 'b (h w) (p1 p2) c -> b (h w) p1 p2 c', h=image_grid, w=image_grid, p1=image_patch_size, p2=image_patch_size)
         all_patch = rearrange(all_patch, 'b (h w) p1 p2 c -> b (h p1) (w p2) c', h=image_grid, w=image_grid)
         all_patch = (all_patch.permute(0, 3, 1, 2) * std + mean).permute(0, 2, 3, 1)
 
@@ -511,7 +514,9 @@ class MultiModalTrainingDataset(Dataset):
             # one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
             # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             # one_image = torch.cat([one_image_p1, one_image_p2], 0)
+            # TODO: perform patchwise normalization for generated image as well.
             one_image = torch.tensor(gray_scale(one_image), dtype=torch.float32)
+
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
             one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
@@ -574,7 +579,9 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = torch.tensor(np.stack(image_locations))
         # images_patch = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=image_patch_size, p2=image_patch_size)
         images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,p2=image_patch_size)
-        images_norm = (images_squeeze - images_squeeze.mean(dim=-2, keepdim=True)) / (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
+        image_patch_mean = images_squeeze.mean(dim=-2, keepdim=True)
+        image_patch_std = (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
+        images_norm = (images_squeeze - image_patch_mean) / image_patch_std
         # we find that the mean is about 0.48 and standard deviation is about 0.08.
         images_patch = rearrange(images_norm, 'b n p c -> b n (p c)')
         B, _, C = images_patch.shape
@@ -588,6 +595,8 @@ class MultiModalTrainingDataset(Dataset):
                     tabular_student_masked_attention_mask=t2t_student_masked_attention_mask,
                     tabular_student_input_ids=t2t_student_input_ids,
                     tabular_student_attention_mask=t2t_student_attention_mask,
+                    image_patch_mean=image_patch_mean,
+                    image_patch_std=image_patch_std,
                     # tabular_teacher_input_ids=t2t_teacher_input_ids,
                     # tabular_teacher_attention_mask=t2t_teacher_attention_mask,
                     text_input_ids=text_input_ids, text_attention_mask=text_attention_mask,
