@@ -355,8 +355,7 @@ class MultiModalTrainingDataset(Dataset):
         student_input_tabular = tokenizer.decode(x["tabular_student_input_ids"][:x["tabular_student_attention_mask"].sum()])
         student_input_masked_tabular = tokenizer.decode(
             x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()])
-        input_tabular = tokenizer.decode(
-            x["tabular_teacher_input_ids"][:x["tabular_teacher_attention_mask"].sum()])
+        # input_tabular = tokenizer.decode(x["tabular_teacher_input_ids"][:x["tabular_teacher_attention_mask"].sum()])
         generated_image_actual = None
         sketch_components_of_generated = None
         if x["generated_image"] is not None:
@@ -392,7 +391,8 @@ class MultiModalTrainingDataset(Dataset):
         return dict(input_text=input_text, masked_text=masked_text, sketch_components_of_generated=sketch_components_of_generated,
                     text_coincide=text_coincide, text_zipped_ids=text_zipped_ids, tabular_coincide=tabular_coincide, tabular_zipped_ids=tabular_zipped_ids,
                     student_input_tabular=student_input_tabular, student_input_masked_tabular=student_input_masked_tabular,
-                    input_tabular=input_tabular, generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
+                    # input_tabular=input_tabular,
+                    generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
 
 
     def __len__(self):
