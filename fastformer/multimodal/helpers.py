@@ -580,6 +580,7 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = list(map(self.image_to_vector, image_locations))
         image_locations = list(map(self.imagenet_normalization, image_locations))
         image_inputs = torch.tensor(np.stack(image_locations))
+
         masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).bool()
         image_locations = torch.tensor(np.stack(image_locations))
@@ -988,6 +989,35 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
 
+    def image_mlm_forward_with_decode(self, x_vis, mask, image_unmasked_patches, image_patch_mean, image_patch_std, imagenet_mean=IMAGENET_DEFAULT_MEAN,
+                          imagenet_std=IMAGENET_DEFAULT_STD):
+        B_init = x_vis.size(0)
+        loss, mask, x_full, mask_count = self.image_mlm_forward(x_vis, mask, image_unmasked_patches)
+        x = torch.zeros_like(x_full)
+        x[~mask] = x_full[:, :-mask_count].reshape(-1, x_full.size(-1))
+        x[mask] = x_full[:, -mask_count:].reshape(-1, x_full.size(-1))
+        x = x.reshape(x.shape[0], x.shape[1], 32, 32, 3)
+        image_patch_mean = image_patch_mean.flatten(0, 1).unsqueeze(2)
+        image_patch_std = image_patch_std.flatten(0, 1).unsqueeze(2)
+        x = x * image_patch_std + image_patch_mean
+        x = x.reshape(x.shape[0], 12, 12, 32, 32, 3)
+        x = x.permute(0, 1, 3, 2, 4, 5)
+        x = x.reshape(B_init, -1, 384, 384, 3)
+
+        im = x.permute(0, 1, 4, 2, 3)
+        mean = torch.as_tensor(imagenet_mean)[None, None, :, None, None]
+        std = torch.as_tensor(imagenet_std)[None, None, :, None, None]
+
+        im = ((im * std + mean) * 255).clip(0, 255).detach().permute(0, 1, 3, 4, 2).numpy().astype(np.uint8)
+        images = []
+        for b in range(len(im)):
+            ims_arr = []
+            for p in range(im.shape[1]):
+                ims_arr.append(Image.fromarray(im[b][p]))
+            images.append(ims_arr)
+
+        return loss, images
+
     def image_mlm_forward(self, x_vis, mask, image_unmasked_patches):
         mask = mask.view(-1, *mask.shape[2:])
         x_vis = self.encoder_to_decoder(x_vis).reshape(-1, x_vis.shape[2], self.decoder_embed_dim)
@@ -997,9 +1027,6 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
         expand_pos_embed = self.image_mlm_ln3(self.pos_embed).expand(B, -1, -1).type_as(x_vis)
-        # expand_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x_vis).to(x_vis.device).clone().detach()
-        # expand_pos_embed_trainable = self.pos_embed_trainable.expand(B, -1, -1).type_as(x_vis).to(x_vis.device)
-        # expand_pos_embed = expand_pos_embed + expand_pos_embed_trainable
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
         x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
@@ -1012,7 +1039,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         else:
             x_full = self.decoder_head(x_full)
         loss = self.mse(input=x_full, target=image_unmasked_patches)
-        return loss
+        return loss, mask, x_full, mask_count
 
     def forward(self, input_ids, attention_mask,
                 tabular_input_ids, tabular_attention_mask,
@@ -1037,7 +1064,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         tabular_mlm_accuracy = (tabular_lm_out.argmax(dim=-1) == label_tabular_input_ids).float().mean().item()
         image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"] + encoder_out["unimodal_image_features"])
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
-                                                image_masks, image_labels)
+                                                image_masks, image_labels)[0]
         # reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
         # reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
         reconstruction_loss = self.image_generation_w * (self.mse_reconstruct(input=encoder_out["full_reconstruction"], target=generated_image) * self.centered_reconstruction_weights.unsqueeze(0)).mean()
