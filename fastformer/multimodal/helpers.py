@@ -1034,11 +1034,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         for blk in self.decoder:
             x_full = blk(x_full)[0]
         mask_count = pos_emd_mask.shape[1]
-        if mask_count > 0:
-            x_full = self.decoder_head(x_full[:, -mask_count:])
-        else:
-            x_full = self.decoder_head(x_full)
-        loss = self.mse(input=x_full, target=image_unmasked_patches)
+        x_full = self.decoder_head(x_full)
+        loss = self.mse(input=x_full[:, -mask_count:], target=image_unmasked_patches)
         return loss, mask, x_full, mask_count
 
     def forward(self, input_ids, attention_mask,
