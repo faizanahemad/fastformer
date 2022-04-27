@@ -331,6 +331,8 @@ class MultiModalTrainingDataset(Dataset):
         self.num_mask = int(self.image_mask_proba * self.num_patches)
         self.length = len(self)
         self.dataset = load_dataset('csv', data_files=self.data_csv)["train"]
+        self.imagenet_gray_mean = np.mean(IMAGENET_DEFAULT_MEAN)
+        self.imagenet_gray_std = np.mean(IMAGENET_DEFAULT_STD)
 
     def __get_image_mask__(self):
         mask = np.hstack([
@@ -359,11 +361,12 @@ class MultiModalTrainingDataset(Dataset):
         generated_image_actual = None
         sketch_components_of_generated = None
         if x["generated_image"] is not None:
-            generated_image_actual = x["generated_image"][3:] * std[0] + mean[0]
-            sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
-            generated_image_actual = (generated_image_actual.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8)
+            # generated_image_actual = x["generated_image"][3:] * std[0] + mean[0]
+            # sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
+            # generated_image_actual = (generated_image_actual.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8)
+            # sketch_components_of_generated = Image.fromarray(sketch_components_of_generated)
+            generated_image_actual = x["generated_image"] * self.imagenet_gray_std + self.imagenet_gray_mean
             generated_image_actual = Image.fromarray(generated_image_actual)
-            sketch_components_of_generated = Image.fromarray(sketch_components_of_generated)
         image_labels = x["image_labels"]
         image_masks = x["image_masks"]
         all_patch = torch.zeros(image_masks.shape[0], image_masks.shape[1], image_patch_size * image_patch_size * 3)
@@ -388,7 +391,8 @@ class MultiModalTrainingDataset(Dataset):
         all_patch = [(x * 255).clip(0, 255).numpy().astype(np.uint8) for x in all_patch]
         actual_images = [Image.fromarray(x) for x in actual_images]
         all_patch = [Image.fromarray(x) for x in all_patch]
-        return dict(input_text=input_text, masked_text=masked_text, sketch_components_of_generated=sketch_components_of_generated,
+        return dict(input_text=input_text, masked_text=masked_text,
+                    # sketch_components_of_generated=sketch_components_of_generated,
                     text_coincide=text_coincide, text_zipped_ids=text_zipped_ids, tabular_coincide=tabular_coincide, tabular_zipped_ids=tabular_zipped_ids,
                     student_input_tabular=student_input_tabular, student_input_masked_tabular=student_input_masked_tabular,
                     # input_tabular=input_tabular,
@@ -516,6 +520,7 @@ class MultiModalTrainingDataset(Dataset):
             # one_image = torch.cat([one_image_p1, one_image_p2], 0)
             # TODO: perform patchwise normalization for generated image as well.
             one_image = torch.tensor(gray_scale(one_image), dtype=torch.float32)
+            one_image = (one_image - self.imagenet_gray_mean) / self.imagenet_gray_std
 
         else:
             # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
