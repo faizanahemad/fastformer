@@ -363,9 +363,10 @@ class MultiModalTrainingDataset(Dataset):
         if x["generated_image"] is not None:
             # generated_image_actual = x["generated_image"][3:] * std[0] + mean[0]
             # sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
-            # generated_image_actual = (generated_image_actual.permute(1, 2, 0) * 255).clip(0, 255).numpy().astype(np.uint8)
             # sketch_components_of_generated = Image.fromarray(sketch_components_of_generated)
+            # generated_image_actual = generated_image_actual.permute(1, 2, 0)
             generated_image_actual = x["generated_image"] * self.imagenet_gray_std + self.imagenet_gray_mean
+            generated_image_actual = (generated_image_actual * 255).clip(0, 255).numpy().astype(np.uint8)
             generated_image_actual = Image.fromarray(generated_image_actual)
         image_labels = x["image_labels"]
         image_masks = x["image_masks"]
