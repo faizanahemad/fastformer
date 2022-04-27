@@ -1128,7 +1128,7 @@ def training_args():
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
-    parser.add_argument('--image_generation_w', type=float, required=False, default=20.0,
+    parser.add_argument('--image_generation_w', type=float, required=False, default=2.0,
                         help='image_generation_w weight')
     parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.25,
                         help='tabular_mlm_w weight')
@@ -1334,7 +1334,7 @@ def train(local_rank, args):
         print("[Train]: Time = %s, Optimizer and Scheduler Initialised, max lr = %.5f, steps_per_epoch = %s, batch size = %s, dataloader length = %s, Sampler Present = %s, Sampler Length = %s" %
               (get_time_string(), optc["lr"], steps_per_epoch, batch_size, len(dataloader), dataloader.sampler is not None, len(dataloader.sampler) if dataloader.sampler is not None else -1))
     log_every_steps = args["log_every_steps"] * iter_size
-    save_every_steps = args["save_every_steps"] * iter_size
+    save_every_steps = args["save_every_steps"]
     gradient_clipping = optc["gradient_clipping"]
     group = "%s-%sN-%s" % (args["wandb_name"], args["nodes"], time_string)
 
