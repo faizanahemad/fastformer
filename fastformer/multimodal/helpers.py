@@ -1447,6 +1447,7 @@ def train(local_rank, args):
                     wandb.log(wandb_log)
             del output
             del model_output
+        save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done)
     print("Time = %s, Finished Training for Rank = %s" % (get_time_string(), rank))
     save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done)
     metric_logger.synchronize_between_processes()
