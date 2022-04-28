@@ -1,5 +1,6 @@
 import argparse
 import functools
+import traceback
 from collections import defaultdict
 from typing import Iterable
 
@@ -805,7 +806,12 @@ class Norm(nn.Module):
 def init_weights(mod, std=None):
     from functools import partial
     iw = partial(init_weights_internal, std=std)
-    mod.apply(iw)
+    try:
+        mod.apply(iw)
+    except Exception as e:
+        print("Module of type %s is not support as it is not a subclass of nn.Module" % (type(mod)))
+        traceback.print_exc()
+        iw(mod)
 
 def init_weights_internal(module, std=None):
     if std is None:
