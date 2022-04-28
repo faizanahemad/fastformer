@@ -219,6 +219,7 @@ def gray_scale(im: Image.Image) -> np.ndarray:
     np_array = cv2.cvtColor(cv2.cvtColor(cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_RGB2BGR), (kernel_size, kernel_size), sigmaX=0, sigmaY=0), cv2.COLOR_BGR2RGB), cv2.COLOR_RGB2GRAY)
     return np_array / 255.0
 
+gray_scale_no_blur = transforms.Grayscale()
 
 def save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local_rank, steps_done):
     state_dict = getattr(model, "module", model).state_dict()
@@ -532,7 +533,7 @@ class MultiModalTrainingDataset(Dataset):
             # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
             # one_image = torch.cat([one_image_p1, one_image_p2], 0)
             # TODO: perform patchwise normalization for generated image as well.
-            one_image = torch.tensor(gray_scale(one_image), dtype=torch.float32)
+            one_image = self.image_to_vector(gray_scale_no_blur(one_image)).squeeze(0)
             one_image = (one_image - self.imagenet_gray_mean) / self.imagenet_gray_std
 
         else:
@@ -744,9 +745,20 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         decoder_layer_conf.num_attention_heads = 16 if model_size == "large" else 12
         decoder_layer_conf.add_cross_attention = True
         decoder_layer_conf.is_decoder = True
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        init_weights(self.mask_token)
+        trunc_normal_(self.mask_token, std=.02)
         self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
                                       RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
-        self.decoder_head = nn.Linear(embed_dim, (image_patch_size // 2) * (image_patch_size // 2) * 1)
+        self.decoder_head = nn.Sequential(nn.Linear(embed_dim, embed_dim * 4), nn.GELU(), nn.Linear(embed_dim * 4, (image_patch_size // 2) * (image_patch_size // 2) * 1))
+        init_weights(self.decoder, std=.02)
+        init_weights(self.decoder_head, std=.02)
+        self.image_mlm_ln2 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
+        self.image_mlm_ln3 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
+
+        init_weights(self.image_mlm_ln2)
+        init_weights(self.image_mlm_ln3)
+
         # self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
         # self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
         #                                          nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
@@ -877,10 +889,11 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             for i in range(ex):
                 global_attention_positions.extend([per_img_patches * i, 1 + per_img_patches * i, per_img_patches * (i + 1) - 1])
         global_attention_positions = list(set(global_attention_positions))
-        if len(global_attention_positions) % 8 != 0:
-            extra_positions_needed = len(global_attention_positions) + 8 - len(global_attention_positions) % 8
+        gap_mod = 32
+        if len(global_attention_positions) % gap_mod != 0:
+            extra_positions_needed = len(global_attention_positions) + gap_mod - len(global_attention_positions) % gap_mod
             global_attention_positions.extend([i for i in range(2, 2 + extra_positions_needed)])
-            assert len(global_attention_positions) % 8 == 0
+            assert len(global_attention_positions) % gap_mod == 0
         global_attention_positions = sorted(global_attention_positions)
         global_attention_mask[:, global_attention_positions] = 1.0
 
@@ -914,9 +927,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         # sketch_reconstruction = None
         if activate_missing_image_generator:
             assert images is not None
-            decoder_output = self.decoder_inputs.expand(features.shape[0], -1, -1)
+            decoder_output = self.image_mlm_ln3(self.decoder_inputs).expand(features.shape[0], -1, -1)
+            decoder_output = self.image_mlm_ln2(self.mask_token + decoder_output)
             for dec in self.decoder:
-                decoder_output = dec(decoder_output, encoder_hidden_states=features)[0]
+                decoder_output = dec(decoder_output, encoder_hidden_states=global_tokens)[0]
 
             # generate actual image by reshape-ing
             ips = image_patch_size // 2
@@ -964,30 +978,13 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.image_generation_w = image_generation_w
         decoder_embed_dim = self.encoder.embed_dim
         self.decoder_embed_dim = decoder_embed_dim
-        self.encoder_to_decoder = nn.Linear(self.encoder.embed_dim, decoder_embed_dim, bias=False) if decoder_embed_dim != self.encoder.embed_dim else nn.Identity()
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-        init_weights(self.encoder_to_decoder)
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
-        self.image_mlm_ln2 = nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"])
-        self.image_mlm_ln3 = nn.LayerNorm(decoder_embed_dim, optimizer_config["eps"])
+        init_weights(self.image_mlm_ln1)
         self.text_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
+        init_weights(self.text_mlm_ln)
+        init_weights(self.tabular_mlm_ln)
 
-        self.pos_embed = build_2d_sincos_position_embedding(image_grid, decoder_embed_dim,)
-        # self.pos_embed = get_sinusoid_encoding_table(image_grid * image_grid, decoder_embed_dim)
-
-        trunc_normal_(self.mask_token, std=.02)
-
-        decoder_layer_conf = RobertaConfig()
-        decoder_layer_conf.hidden_size = decoder_embed_dim
-        decoder_layer_conf.num_attention_heads = 16 if self.encoder.model_size == "large" else 12
-        decoder_layer_conf.add_cross_attention = False
-        decoder_layer_conf.is_decoder = False
-        self.decoder = nn.ModuleList(
-            [RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
-             # RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)
-             ])
-        init_weights(self.decoder, std=.02)
         self.decoder_head = nn.Sequential(nn.Linear(decoder_embed_dim, decoder_embed_dim * 4), nn.GELU(), nn.Linear(decoder_embed_dim * 4, image_patch_size*image_patch_size*3))
         init_weights(self.decoder_head, std=.02)
         self.mse = nn.MSELoss()
@@ -1043,18 +1040,18 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
     def image_mlm_forward(self, x_vis, mask, image_unmasked_patches):
         mask = mask.view(-1, *mask.shape[2:])
-        x_vis = self.encoder_to_decoder(x_vis).reshape(-1, x_vis.shape[2], self.decoder_embed_dim)
+        x_vis = x_vis.reshape(-1, x_vis.shape[2], self.decoder_embed_dim)
         image_unmasked_patches = image_unmasked_patches.view(-1, *image_unmasked_patches.shape[2:])
         B, N, C = x_vis.shape
 
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
-        expand_pos_embed = self.image_mlm_ln3(self.pos_embed).expand(B, -1, -1).type_as(x_vis)
+        expand_pos_embed = self.encoder.image_mlm_ln3(self.encoder.decoder_inputs).expand(B, -1, -1)
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
-        x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
-        x_full = self.image_mlm_ln2(x_full)
-        for blk in self.decoder:
+        x_full = torch.cat([x_vis + pos_emd_vis, self.encoder.mask_token + pos_emd_mask], dim=1)
+        x_full = self.encoder.image_mlm_ln2(x_full)
+        for blk in self.encoder.decoder:
             x_full = blk(x_full)[0]
         mask_count = pos_emd_mask.shape[1]
         x_full = self.decoder_head(x_full)
