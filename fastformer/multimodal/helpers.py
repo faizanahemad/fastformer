@@ -504,12 +504,22 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = self.get_image_locations_from_item(item)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
-        if len(image_locations) > 0:
-            first_im = image_locations[0]
-            image_locations = image_locations[1:]
-            random.shuffle(image_locations)
-            image_locations = [first_im] + image_locations[:8]
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
+        image_std = [np.array(im).std() / np.array(im).mean() for im in image_locations]
+        image_locations, image_std = zip(*sorted(zip(image_locations, image_std), key=lambda x: x[1]))
+        if len(image_locations) > 0:
+            if random.random() < 0.75:
+                first_im = image_locations.pop()
+            else:
+                temp_im = image_locations.pop()
+                if len(image_locations) > 0:
+                    first_im = image_locations.pop()
+                    image_locations.append(temp_im)
+                else:
+                    first_im = temp_im
+            image_locations = list(reversed(image_locations))  # We try to give high variance images single panels
+            image_locations = [first_im] + image_locations
+
         count_images = len(image_locations)
 
         if self.save_one_image and count_images > 0:
