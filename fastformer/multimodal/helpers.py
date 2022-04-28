@@ -505,11 +505,11 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = self.get_image_locations_from_item(item)
         image_locations = list(image_locations.split())  # Assuming all images are separated in their columns by space
         image_locations = [os.path.join(self.images_path, im) for im in image_locations if im is not None]
-        image_locations = [im for im in map(pil_loader, image_locations) if im is not None]
-        image_std = [np.array(im).std() / np.array(im).mean() for im in image_locations]
-        image_locations, image_std = zip(*sorted(zip(image_locations, image_std), key=lambda x: x[1]))
-        image_locations = list(image_locations)
+        image_locations = [im for im in map(pil_loader, image_locations) if im is not None and str(im).lower() != "none"]
         if len(image_locations) > 0:
+            image_std = [np.array(im).std() / np.array(im).mean() for im in image_locations]
+            image_locations, image_std = zip(*sorted(zip(image_locations, image_std), key=lambda x: x[1]))
+            image_locations = list(image_locations)
             if random.random() < 0.75:
                 first_im = image_locations.pop()
             else:
