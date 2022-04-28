@@ -734,7 +734,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         decoder_layer_conf.num_attention_heads = 16 if model_size == "large" else 12
         decoder_layer_conf.add_cross_attention = True
         decoder_layer_conf.is_decoder = True
-        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
+        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
+                                      RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
         self.decoder_head = nn.Linear(embed_dim, (image_patch_size // 2) * (image_patch_size // 2) * 1)
         # self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
         # self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
@@ -742,7 +743,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         self.init_weights()
         # decoder_query = longformer.embeddings.position_embeddings.weight[:image_grid*image_grid, :decoder_layer_conf.hidden_size].detach().clone()
         decoder_query = build_2d_sincos_position_embedding(image_grid, decoder_layer_conf.hidden_size, )
-        self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=True)
+        self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=False)
         self.grad_checkpointing = False
 
         self.longformer = longformer
