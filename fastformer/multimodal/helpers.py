@@ -772,6 +772,9 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             module.gradient_checkpointing = value
         self.grad_checkpointing = True
 
+    def image_generation_forward(self):
+        pass
+
     def forward(self, input_ids=None, attention_mask=None,
                 tabular_input_ids=None, tabular_attention_mask=None,
                 images=None, mask=None, activate_missing_image_generator: bool = True):
@@ -807,14 +810,22 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             text_output = tabular_text_output[:input_ids.size(0)]
             tabular_output = tabular_text_output[input_ids.size(0):]
             tabular_text_output = torch.cat([text_output, tabular_output], 1)
+            tabular_text_output_attention_mask = lf_attention_mask
+            global_attention_positions = [0, 1, input_ids.size(1), input_ids.size(1)+1]
         elif input_ids is not None and tabular_input_ids is None:
             tabular_text_output = self.longformer(input_ids=input_ids, attention_mask=attention_mask, )[
                 "last_hidden_state"]
+            tabular_text_output_attention_mask = attention_mask
+            global_attention_positions = [0]
         elif input_ids is None and tabular_input_ids is not None:
             tabular_text_output = self.longformer(input_ids=tabular_input_ids, attention_mask=tabular_attention_mask, )[
                 "last_hidden_state"]
+            tabular_text_output_attention_mask = tabular_attention_mask
+            global_attention_positions = [0]
         else:
             tabular_text_output = None
+            tabular_text_output_attention_mask = None
+            global_attention_positions = None
 
         if images is not None:
             b, ex, c, h, w = images.shape
@@ -828,10 +839,15 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
         if image_features is None:
             features = tabular_text_output
+            attention_mask = tabular_text_output_attention_mask
         elif tabular_text_output is None:
             features = image_features
+            attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         else:
             features = torch.cat([tabular_text_output, image_features], 1)
+            attention_mask = torch.cat([tabular_text_output_attention_mask, torch.ones(image_features.shape[:2], dtype=torch.long, device=features.device,
+                                        requires_grad=False)], 1)
+            global_attention_positions.extend([tabular_text_output.size(1), tabular_text_output.size(1)+1])
 
         s = features.size(1)
         # extra = 512 - s % 512
@@ -839,31 +855,24 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         #     features = torch.cat([features, torch.zeros(features.size(0), extra, features.size(2),
         #                                                 dtype=features.dtype, device=features.device, requires_grad=False)], dim=1)
 
-        attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         global_attention_mask = torch.zeros_like(attention_mask)
-        global_attention_mask[:, 0] = 1.0
-        global_attention_mask[:, 1] = 1.0
-        global_attention_mask[:, s - 1] = 1.0
-        if input_ids is None and tabular_input_ids is not None:
-            global_attention_mask[:, tabular_text_output.size(1) - 1] = 1.0
-            global_attention_mask[:, input_ids.size(1)] = 1.0
-            global_attention_mask[:, input_ids.size(1) + 1] = 1.0
 
         if images is not None and tabular_text_output is not None:
-            global_attention_mask[:, tabular_text_output.size(1)] = 1.0
-            global_attention_mask[:, tabular_text_output.size(1) + 1] = 1.0
             for i in range(ex):
                 ep2 = (per_img_patches * i)
                 end = tabular_text_output.size(1) + ep2
-                global_attention_mask[:, end] = 1.0
-                global_attention_mask[:, end + 1] = 1.0
                 end_2 = tabular_text_output.size(1) + (per_img_patches * (i + 1)) - 1
-                global_attention_mask[:, end_2] = 1.0
+                global_attention_positions.extend([end, end + 1, end_2])
         elif images is not None:
             for i in range(ex):
-                global_attention_mask[:,  per_img_patches * i] = 1.0
-                global_attention_mask[:, 1 + per_img_patches * i] = 1.0
-                global_attention_mask[:, per_img_patches * (i + 1) - 1] = 1.0
+                global_attention_positions.extend([per_img_patches * i, 1 + per_img_patches * i, per_img_patches * (i + 1) - 1])
+        global_attention_positions = list(set(global_attention_positions))
+        if len(global_attention_positions) % 8 != 0:
+            extra_positions_needed = len(global_attention_positions) + 8 - len(global_attention_positions) % 8
+            global_attention_positions.extend([i for i in range(2, 2 + extra_positions_needed)])
+            assert len(global_attention_positions) % 8 == 0
+        global_attention_positions = sorted(global_attention_positions)
+        global_attention_mask[:, global_attention_positions] = 1.0
 
         features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
         # if extra > 0 and extra < 512:
@@ -890,6 +899,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 tabular_features = tabular_text_output[:, -tabular_input_ids.size(1):]
                 assert tabular_output.size(1) == tabular_features.size(1) == tabular_input_ids.size(1)
 
+        global_tokens = features[:, global_attention_positions]
         full_reconstruction = None
         # sketch_reconstruction = None
         if activate_missing_image_generator:
