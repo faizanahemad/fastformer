@@ -810,7 +810,7 @@ def init_weights(mod, std=None):
         mod.apply(iw)
     except Exception as e:
         print("Module of type %s is not support as it is not a subclass of nn.Module" % (type(mod)))
-        traceback.print_exc()
+        # traceback.print_exc()
         iw(mod)
 
 def init_weights_internal(module, std=None):
