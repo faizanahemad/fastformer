@@ -98,9 +98,9 @@ def pil_loader(path: str) -> Image.Image:
 #     transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1)),
 # ])
 
-# train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1))
+train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
-train_image_augments = transforms.Resize([image_size, image_size])
+# train_image_augments = transforms.Resize([image_size, image_size])
 
 one_image_shape_augments = transforms.Compose([
     transforms.Resize([image_size//2 +32, image_size//2 +32]),
@@ -1076,7 +1076,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
 
-optimizer_config = dict(lr=1e-4, eps=1e-8, weight_decay=1e-3, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
+optimizer_config = dict(lr=5e-5, eps=1e-8, weight_decay=1e-3, beta_1=0.9, beta_2=0.98, gradient_clipping=1.0)
 
 
 def training_args():
@@ -1324,7 +1324,7 @@ def train(local_rank, args):
     # scheduler = optimization.get_constant_schedule_with_warmup(optimizer, int(pct_start * total_steps))
     # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, optc["lr"], total_steps=total_steps,
-                                                    div_factor=100., three_phase=False, pct_start=0.04,
+                                                    div_factor=100., three_phase=False, pct_start=0.08,
                                                     base_momentum=0.75,
                                                     anneal_strategy="cos", cycle_momentum=True)
 
