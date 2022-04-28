@@ -1346,7 +1346,7 @@ def train(local_rank, args):
     activate_wandb_log = local_rank <= (8 // args["world_size"]) or args["world_size"] <= 8
     if activate_wandb_log:
         wandb.init(**wandb_init_args)
-    metric_logger = MetricLogger(delimiter="  ", plots=["loss", "mlm_accuracy",
+    metric_logger = MetricLogger(delimiter="  ", plots=["loss", "lr", "mlm_accuracy",
                                                         "tabular_mlm_accuracy",
                                                         "image_mlm_loss", "reconstruction_loss"])
     metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
