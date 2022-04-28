@@ -894,7 +894,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         gap_mod = 32
         if len(global_attention_positions) % gap_mod != 0:
             extra_positions_needed = len(global_attention_positions) + gap_mod - len(global_attention_positions) % gap_mod
-            global_attention_positions.extend([i for i in range(2, 2 + extra_positions_needed)])
+            print(gap_mod, len(global_attention_positions), extra_positions_needed)
+            new_positions = [i for i in range(2, 2 + extra_positions_needed)]
+            global_attention_positions.extend(new_positions)
+            print(len(global_attention_positions), new_positions, global_attention_positions)
             assert len(global_attention_positions) % gap_mod == 0
         global_attention_positions = sorted(global_attention_positions)
         global_attention_mask[:, global_attention_positions] = 1.0
