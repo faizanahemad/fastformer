@@ -1994,12 +1994,13 @@ class MetricLogger(object):
         for p in self.plots:
             assert p in self.meters
             values = self.meters[p].long_storage
-            values = pd.Series(values).ewm(alpha=0.01).mean().values
             if len(values) > 100_000:
                 indices = np.arange(10000, len(values), 100)
                 values = np.array(values)[indices]
+                values = pd.Series(values).ewm(alpha=0.1).mean().values
                 plot(xs=indices, ys=values, lines=True, title=p)
             else:
+                values = pd.Series(values).ewm(alpha=0.01).mean().values
                 plot(values, lines=True, title=p)
 
     def update(self, **kwargs):
