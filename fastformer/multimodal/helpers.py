@@ -868,8 +868,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         else:
             features = torch.cat([tabular_text_output, image_features], 1)
-            attention_mask = torch.cat([tabular_text_output_attention_mask, torch.ones(image_features.shape[:2], dtype=torch.long, device=features.device,
-                                        requires_grad=False)], 1)
+            image_attention_mask = torch.ones(image_features.shape[:2], dtype=torch.long, device=features.device,
+                                        requires_grad=False)
+            print(image_attention_mask.size(), tabular_text_output_attention_mask.size())
+            attention_mask = torch.cat([tabular_text_output_attention_mask, image_attention_mask], 1)
             global_attention_positions.extend([tabular_text_output.size(1), tabular_text_output.size(1)+1])
 
         s = features.size(1)
