@@ -35,7 +35,7 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import trunc_normal_
 import cv2
 import pandas as pd
-from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel
+from transformers.models.roberta.modeling_roberta import RobertaLayer, RobertaModel, RobertaEncoder
 from einops import rearrange
 from datasets import load_dataset
 
@@ -61,9 +61,6 @@ def pil_loader(path: str) -> Image.Image:
     except Exception as e:
         traceback.print_exc()
         return None
-
-
-
 
 # train_image_augments = transforms.Compose([
 #     transforms.Resize((image_size + 64, image_size + 64)),
@@ -101,11 +98,6 @@ def pil_loader(path: str) -> Image.Image:
 train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
 # train_image_augments = transforms.Resize([image_size, image_size])
-
-one_image_shape_augments = transforms.Compose([
-    transforms.Resize([image_size//2 +32, image_size//2 +32]),
-    transforms.CenterCrop(image_size//2),
-])
 
 inference_image_shape_augments = transforms.Compose([
         transforms.Resize(image_size+image_patch_size),
@@ -302,7 +294,7 @@ class MultiModalTrainingDataset(Dataset):
                  columns, text_columns, tabular_columns, image_columns,
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
-                 word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1, save_one_image=True,
+                 word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1,
                  total_image_panels=4,
                  ):
         self.tokenizer = tokenizer
@@ -320,7 +312,6 @@ class MultiModalTrainingDataset(Dataset):
         self.tabular_feature_mask_proba = tabular_feature_mask_proba
         self.image_augments = image_augments
         self.image_size = image_size
-        self.save_one_image = save_one_image
         self.image_to_vector = transforms.ToTensor()
         self.imagenet_normalization = transforms.Normalize(mean=torch.tensor(IMAGENET_DEFAULT_MEAN),
                                                         std=torch.tensor(IMAGENET_DEFAULT_STD))
@@ -361,16 +352,6 @@ class MultiModalTrainingDataset(Dataset):
         student_input_masked_tabular = tokenizer.decode(
             x["tabular_student_masked_input_ids"][:x["tabular_student_masked_attention_mask"].sum()])
         # input_tabular = tokenizer.decode(x["tabular_teacher_input_ids"][:x["tabular_teacher_attention_mask"].sum()])
-        generated_image_actual = None
-        sketch_components_of_generated = None
-        if x["generated_image"] is not None:
-            # generated_image_actual = x["generated_image"][3:] * std[0] + mean[0]
-            # sketch_components_of_generated = (x["generated_image"][:3].permute(1,2,0) * 255).clip(0, 255).numpy().astype(np.uint8)
-            # sketch_components_of_generated = Image.fromarray(sketch_components_of_generated)
-            # generated_image_actual = generated_image_actual.permute(1, 2, 0)
-            generated_image_actual = x["generated_image"] * self.imagenet_gray_std + self.imagenet_gray_mean
-            generated_image_actual = (generated_image_actual * 255).clip(0, 255).numpy().astype(np.uint8)
-            generated_image_actual = Image.fromarray(generated_image_actual)
         image_labels = x["image_labels"]
         image_masks = x["image_masks"]
         all_patch = torch.zeros(image_masks.shape[0], image_masks.shape[1], image_patch_size * image_patch_size * 3)
@@ -396,11 +377,10 @@ class MultiModalTrainingDataset(Dataset):
         actual_images = [Image.fromarray(x) for x in actual_images]
         all_patch = [Image.fromarray(x) for x in all_patch]
         return dict(input_text=input_text, masked_text=masked_text,
-                    # sketch_components_of_generated=sketch_components_of_generated,
                     text_coincide=text_coincide, text_zipped_ids=text_zipped_ids, tabular_coincide=tabular_coincide, tabular_zipped_ids=tabular_zipped_ids,
                     student_input_tabular=student_input_tabular, student_input_masked_tabular=student_input_masked_tabular,
                     # input_tabular=input_tabular,
-                    generated_image_actual=generated_image_actual, all_patch=all_patch, actual_images=actual_images)
+                    all_patch=all_patch, actual_images=actual_images)
 
 
     def __len__(self):
@@ -508,38 +488,10 @@ class MultiModalTrainingDataset(Dataset):
         image_locations = [im for im in map(pil_loader, image_locations) if im is not None and str(im).lower() != "none"]
         if len(image_locations) > 0:
             image_std = [np.array(im).std() / np.array(im).mean() for im in image_locations]
-            image_locations, image_std = zip(*sorted(zip(image_locations, image_std), key=lambda x: x[1]))
-            image_locations = list(image_locations)
-            if random.random() < 0.75:
-                first_im = image_locations.pop()
-            else:
-                temp_im = image_locations.pop()
-                if len(image_locations) > 0:
-                    first_im = image_locations.pop()
-                    image_locations.append(temp_im)
-                else:
-                    first_im = temp_im
-            image_locations = list(reversed(image_locations))  # We try to give high variance images single panels
-            image_locations = [first_im] + image_locations
-
+            image_locations, image_std = zip(*sorted(zip(image_locations, image_std), key=lambda x: x[1], reverse=True))
+            image_locations = list(image_locations)  # We try to give high variance images single panels
         count_images = len(image_locations)
 
-        if self.save_one_image and count_images > 0:
-            one_image = image_locations[0]
-            image_locations = image_locations[1:]
-            one_image = one_image_shape_augments(one_image)
-            # one_image_p1 = Image.fromarray((np.stack([canny_edge_detector(one_image), gray_scale(one_image),
-            #                                       sketch_transform(one_image)]) * 255).transpose(1, 2, 0).astype(np.uint8))
-            # one_image_p1 = self.imagenet_normalization(self.image_to_vector(one_image_p1))
-            # one_image_p2 = self.imagenet_normalization(self.image_to_vector(one_image))
-            # one_image = torch.cat([one_image_p1, one_image_p2], 0)
-            # TODO: perform patchwise normalization for generated image as well.
-            one_image = self.image_to_vector(gray_scale_no_blur(one_image)).squeeze(0)
-            one_image = (one_image - self.imagenet_gray_mean) / self.imagenet_gray_std
-
-        else:
-            # one_image = torch.zeros((6, image_size//2, image_size//2), dtype=torch.float32)
-            one_image = torch.zeros((image_size // 2, image_size // 2), dtype=torch.float32)
         image_locations_new = []
         for im in image_locations:
             try:
@@ -611,7 +563,7 @@ class MultiModalTrainingDataset(Dataset):
         # assert (text_attention_mask.sum() == text_masked_attention_mask.sum()).item()
         # assert (tabular_student_attention_mask.sum() == tabular_student_masked_attention_mask.sum()).item()
         return dict(num_images=num_images, image_labels=image_labels,
-                    image_masks=image_masks, images=image_inputs, generated_image=one_image,
+                    image_masks=image_masks, images=image_inputs,
                     tabular_student_masked_input_ids=t2t_student_masked_input_ids,
                     tabular_student_masked_attention_mask=t2t_student_masked_attention_mask,
                     tabular_student_input_ids=t2t_student_input_ids,
@@ -702,8 +654,9 @@ def checkpoint_seq(
 
 
 class MultiModalEncoder(LongformerPreTrainedModel):
-    def __init__(self, model_size="large",):
-        super().__init__(LongformerConfig.from_pretrained("allenai/longformer-large-4096" if model_size == "large" else "allenai/longformer-base-4096"))
+    def __init__(self, model_size="large", grad_checkpointing=False):
+        config = LongformerConfig.from_pretrained("allenai/longformer-large-4096" if model_size == "large" else "allenai/longformer-base-4096")
+        super().__init__(config)
         # TODO: check gradient checkpointing first
         # TODO: check layer_norm_eps for fp16 support
         self.model_size = model_size
@@ -741,33 +694,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         init_weights(mid_fusion_backbone, 0.02)
         self.mid_fusion_backbone = mid_fusion_backbone
 
-        decoder_layer_conf = RobertaConfig()
-        decoder_layer_conf.hidden_size = embed_dim
-        decoder_layer_conf.num_attention_heads = 16 if model_size == "large" else 12
-        decoder_layer_conf.add_cross_attention = True
-        decoder_layer_conf.is_decoder = True
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        init_weights(self.mask_token)
-        trunc_normal_(self.mask_token, std=.02)
-        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
-                                      RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
-        self.decoder_head = nn.Sequential(nn.Linear(embed_dim, embed_dim * 4), nn.GELU(), nn.Linear(embed_dim * 4, (image_patch_size // 2) * (image_patch_size // 2) * 1))
-        init_weights(self.decoder, std=.02)
-        init_weights(self.decoder_head, std=.02)
-        self.image_mlm_ln2 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
-        self.image_mlm_ln3 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
-
-        init_weights(self.image_mlm_ln2)
-        init_weights(self.image_mlm_ln3)
-
-        # self.decoder_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config), nn.Linear(embed_dim, (image_patch_size//2)*(image_patch_size//2)*3))
-        # self.decoder_sketch_head = nn.Sequential(LongformerFFN(mid_fusion_backbone_config),
-        #                                          nn.Linear(embed_dim, (image_patch_size//2) * (image_patch_size//2) * 3))
-        self.init_weights()
-        # decoder_query = longformer.embeddings.position_embeddings.weight[:image_grid*image_grid, :decoder_layer_conf.hidden_size].detach().clone()
-        decoder_query = build_2d_sincos_position_embedding(image_grid, decoder_layer_conf.hidden_size, )
-        self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=False)
-        self.grad_checkpointing = False
+        self.grad_checkpointing = grad_checkpointing
+        self.supports_gradient_checkpointing = True
+        config.grad_checkpointing = grad_checkpointing
+        self.post_init()
 
         self.longformer = longformer
         self.vit = vit  # TODO: checkout get_pretrained_deit from utils, forward_features from vit.
@@ -791,16 +721,13 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         return x_vis
 
     def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, (LongformerEncoder, MultiModalEncoder)):
+        if isinstance(module, (LongformerEncoder, MultiModalEncoder, RobertaEncoder)):
             module.gradient_checkpointing = value
         self.grad_checkpointing = True
 
-    def image_generation_forward(self):
-        pass
-
     def forward(self, input_ids=None, attention_mask=None,
                 tabular_input_ids=None, tabular_attention_mask=None,
-                images=None, mask=None, activate_missing_image_generator: bool = True):
+                images=None, mask=None):
         """
         We do image masking after image patch embedding.
         @param tabular_attention_mask:
@@ -815,8 +742,6 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         @type images: torch.Tensor
         @param tabular_input_ids: dimensions = `Batch x Sequence`
         @type tabular_input_ids: torch.Tensor
-        @param activate_missing_image_generator:
-        @type activate_missing_image_generator: Boolean
         @return: dict(text_embedding [both text+tabular], images_embedding [(Batch x Images Per Example) x S x d],
         text_mem_tokens, image_mem_tokens, missing_image_generator_tokens, image_mask_locations)
         @rtype:
@@ -927,33 +852,9 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 assert tabular_output.size(1) == tabular_features.size(1) == tabular_input_ids.size(1)
 
         global_tokens = features[:, global_attention_positions]
-        full_reconstruction = None
-        # sketch_reconstruction = None
-        if activate_missing_image_generator:
-            assert images is not None
-            decoder_output = self.image_mlm_ln3(self.decoder_inputs).expand(features.shape[0], -1, -1)
-            decoder_output = self.image_mlm_ln2(self.mask_token + decoder_output)
-            for dec in self.decoder:
-                decoder_output = dec(decoder_output, encoder_hidden_states=global_tokens)[0]
-
-            # generate actual image by reshape-ing
-            ips = image_patch_size // 2
-            full_reconstruction = self.decoder_head(decoder_output)  # bx144*image_patch_size*image_patch_size*3
-            # rearrange(full_reconstruction, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', h=image_grid, w=image_grid, p1=image_patch_size, p2=image_patch_size)
-            full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips * ips * 1).reshape(b,
-                                                                                                                image_grid,
-                                                                                                                image_grid,
-                                                                                                                ips,
-                                                                                                                ips).permute(
-                0, 1, 3, 2, 4).reshape(b, image_grid * ips, image_grid * ips)
-            # full_reconstruction = full_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
-            # sketch_reconstruction = self.decoder_sketch_head(decoder_output)
-            # sketch_reconstruction = sketch_reconstruction.reshape(b, image_grid, image_grid, ips*ips*3).reshape(b, image_grid, image_grid, ips, ips, 3).permute(0, 5, 1, 3, 2, 4).reshape(b, 3, image_grid*ips, image_grid*ips)
-        return dict(full_reconstruction=full_reconstruction,
-                    # sketch_reconstruction=sketch_reconstruction,
-                    image_output=image_out, text_output=text_output, tabular_output=tabular_output,
+        return dict(image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
-                    unimodal_tabular_features=tabular_features,)
+                    unimodal_tabular_features=tabular_features, global_tokens=global_tokens)
 
 
 class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
@@ -965,7 +866,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
     # Dropout modality rate -> used with student teacher
     # For canny, gray_scale and sketch transforms of output image
     # Weigh non-zero elements in image generator output for loss more highly by loss = loss.mean() + loss[non_zero_loc].mean(),
-    def __init__(self, teacher_student_loss_w, image_mlm_w, text_mlm_w, tabular_mlm_w, image_generation_w,
+    def __init__(self, teacher_student_loss_w, image_mlm_w, text_mlm_w, tabular_mlm_w,
                  encoder: MultiModalEncoder):
         super().__init__(encoder.longformer.config)
         self.encoder = encoder
@@ -979,7 +880,6 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.text_mlm_w = text_mlm_w
         self.tabular_mlm_w = tabular_mlm_w
         self.image_mlm_w = image_mlm_w
-        self.image_generation_w = image_generation_w
         decoder_embed_dim = self.encoder.embed_dim
         self.decoder_embed_dim = decoder_embed_dim
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
@@ -989,8 +889,28 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         init_weights(self.text_mlm_ln)
         init_weights(self.tabular_mlm_ln)
 
+        embed_dim = decoder_embed_dim
+        decoder_layer_conf = RobertaConfig()
+        decoder_layer_conf.hidden_size = embed_dim
+        decoder_layer_conf.num_attention_heads = 16 if self.encoder.model_size == "large" else 12
+        decoder_layer_conf.add_cross_attention = False
+        decoder_layer_conf.is_decoder = False
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        init_weights(self.mask_token)
+        trunc_normal_(self.mask_token, std=.02)
+        self.decoder = nn.ModuleList([RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf),
+                                      RobertaLayer(decoder_layer_conf), RobertaLayer(decoder_layer_conf)])
+
         self.decoder_head = nn.Sequential(nn.Linear(decoder_embed_dim, decoder_embed_dim * 4), nn.GELU(), nn.Linear(decoder_embed_dim * 4, image_patch_size*image_patch_size*3))
+        init_weights(self.decoder, std=.02)
         init_weights(self.decoder_head, std=.02)
+        self.image_mlm_ln2 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
+        self.image_mlm_ln3 = nn.LayerNorm(embed_dim, optimizer_config["eps"])
+        init_weights(self.image_mlm_ln2)
+        init_weights(self.image_mlm_ln3)
+        decoder_query = build_2d_sincos_position_embedding(image_grid, decoder_layer_conf.hidden_size, )
+        self.decoder_inputs = torch.nn.Parameter(decoder_query, requires_grad=False)
+
         self.mse = nn.MSELoss()
         self.mse_reconstruct = nn.MSELoss(reduction="none")
         half_image_size = image_size // 2
@@ -1050,12 +970,12 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         # we don't unshuffle the correct visible token order,
         # but shuffle the pos embedding accorddingly.
-        expand_pos_embed = self.encoder.image_mlm_ln3(self.encoder.decoder_inputs).expand(B, -1, -1)
+        expand_pos_embed = self.image_mlm_ln3(self.decoder_inputs).expand(B, -1, -1)
         pos_emd_vis = expand_pos_embed[~mask].reshape(B, -1, C)
         pos_emd_mask = expand_pos_embed[mask].reshape(B, -1, C)
-        x_full = torch.cat([x_vis + pos_emd_vis, self.encoder.mask_token + pos_emd_mask], dim=1)
-        x_full = self.encoder.image_mlm_ln2(x_full)
-        for blk in self.encoder.decoder:
+        x_full = torch.cat([x_vis + pos_emd_vis, self.mask_token + pos_emd_mask], dim=1)
+        x_full = self.image_mlm_ln2(x_full)
+        for blk in self.decoder:
             x_full = blk(x_full)[0]
         mask_count = pos_emd_mask.shape[1]
         x_full = self.decoder_head(x_full)
@@ -1065,7 +985,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
     def forward(self, input_ids, attention_mask,
                 tabular_input_ids, tabular_attention_mask,
                 images=None, image_masks=None, image_labels=None,
-                label_input_ids=None, label_tabular_input_ids=None, generated_image=None):
+                label_input_ids=None, label_tabular_input_ids=None):
         encoder_out = self.encoder(input_ids=input_ids, attention_mask=attention_mask,
                                    tabular_input_ids=tabular_input_ids,
                                    tabular_attention_mask=tabular_attention_mask, images=images, mask=image_masks)
@@ -1086,14 +1006,10 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"] + encoder_out["unimodal_image_features"])
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
                                                 image_masks, image_labels)[0]
-        # reconstruction = torch.cat([encoder_out["sketch_reconstruction"], encoder_out["full_reconstruction"]], 1)
-        # reconstruction_loss = self.image_generation_w * self.mse(input=reconstruction, target=generated_image)
-        reconstruction_loss = self.image_generation_w * (self.mse_reconstruct(input=encoder_out["full_reconstruction"], target=generated_image) * self.centered_reconstruction_weights.unsqueeze(0)).mean()
-        loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + reconstruction_loss
+        loss = mlm_loss + tabular_mlm_loss + image_mlm_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
-                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss,
-                    image_mlm_loss=image_mlm_loss, reconstruction_loss=reconstruction_loss)
+                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss)
 
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
@@ -1150,8 +1066,6 @@ def training_args():
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
-    parser.add_argument('--image_generation_w', type=float, required=False, default=2.0,
-                        help='image_generation_w weight')
     parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.25,
                         help='tabular_mlm_w weight')
     parser.add_argument('--image_mlm_w', type=float, required=False, default=10.0,
@@ -1297,7 +1211,7 @@ def train(local_rank, args):
 
     encoder = MultiModalEncoder(args["model_size"])
     trainer = MultiModalSelfSupervisedTrainerModel(0, args["image_mlm_w"], args["text_mlm_w"],
-                                                   args["text_mlm_w"], args["image_generation_w"], encoder)
+                                                   args["text_mlm_w"], encoder)
     encoder_param_count = numel(encoder)
     trainer_param_count = numel(trainer)
     if "load_encoder" in args and args["load_encoder"] is not None:
@@ -1370,11 +1284,8 @@ def train(local_rank, args):
         wandb.init(**wandb_init_args)
     metric_logger = MetricLogger(delimiter="  ", plots=["loss", "lr", "mlm_accuracy",
                                                         "tabular_mlm_accuracy",
-                                                        "image_mlm_loss", "reconstruction_loss"])
+                                                        "image_mlm_loss"])
     metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    full_times = []
-    batch_times = []
-    model_times = []
     logs_save = []
     model.zero_grad(set_to_none=True)
     samples_processed = 0
@@ -1404,8 +1315,7 @@ def train(local_rank, args):
                                            batch["tabular_student_masked_input_ids"],
                                            batch["tabular_student_masked_attention_mask"],
                                            batch["images"], batch["image_masks"], batch["image_labels"],
-                                           batch["text_input_ids"], batch["tabular_student_input_ids"],
-                                           batch["generated_image"]
+                                           batch["text_input_ids"], batch["tabular_student_input_ids"]
                                            )
                     loss = model_output["loss"] / iter_size
                     loss.backward()
@@ -1414,8 +1324,7 @@ def train(local_rank, args):
                                        batch["tabular_student_masked_input_ids"],
                                        batch["tabular_student_masked_attention_mask"],
                                        batch["images"], batch["image_masks"], batch["image_labels"],
-                                       batch["text_input_ids"], batch["tabular_student_input_ids"],
-                                       batch["generated_image"]
+                                       batch["text_input_ids"], batch["tabular_student_input_ids"]
                                        )
                 loss = model_output["loss"] / iter_size
                 loss.backward()
@@ -1442,7 +1351,6 @@ def train(local_rank, args):
             metric_logger.update(mlm_loss=model_output["mlm_loss"])
             metric_logger.update(tabular_mlm_loss=model_output["tabular_mlm_loss"])
             metric_logger.update(image_mlm_loss=model_output["image_mlm_loss"])
-            metric_logger.update(reconstruction_loss=model_output["reconstruction_loss"])
 
             step += 1
             del batch
