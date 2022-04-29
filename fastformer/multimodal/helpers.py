@@ -1338,6 +1338,7 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 # model.zero_grad(set_to_none=True)
                 steps_done += 1
+            if validation_iter or (step + 1) % iter_size == 0:
                 metric_logger.update(loss=model_output["loss"])
                 metric_logger.update(lr=optimizer.param_groups[0]['lr'])
                 metric_logger.update(tabular_mlm_accuracy=model_output["tabular_mlm_accuracy"])
