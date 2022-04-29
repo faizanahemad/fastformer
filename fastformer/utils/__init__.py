@@ -2001,6 +2001,7 @@ class MetricLogger(object):
         from uniplot import plot
         # https://github.com/olavolav/uniplot
         for p in self.plots:
+            print(self.plots, list(self.meters.keys()))
             assert p in self.meters
             values = self.meters[p].long_storage
             if len(values) > 100_000:
