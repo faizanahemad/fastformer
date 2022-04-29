@@ -224,7 +224,7 @@ def save_model(model_save_dir, model, optimizer, scheduler, metric_logger, local
         # torch.save(encoder_state_dict, os.path.join(model_save_dir, "encoder-%s.pth" % steps_done))
         # torch.save(optimizer.state_dict(), os.path.join(model_save_dir, "optimizer-%s.pth" % steps_done))
         # torch.save(scheduler.state_dict(), os.path.join(model_save_dir, "scheduler-%s.pth" % steps_done))
-        torch.save(metric_logger, os.path.join(model_save_dir, "metrics.pth"))
+        torch.save(metric_logger.meters, os.path.join(model_save_dir, "metrics.pth"))
     del state_dict
     del encoder_state_dict
     clean_memory()
@@ -1338,19 +1338,20 @@ def train(local_rank, args):
                 optimizer.zero_grad(set_to_none=True)
                 # model.zero_grad(set_to_none=True)
                 steps_done += 1
+                metric_logger.update(loss=model_output["loss"])
+                metric_logger.update(lr=optimizer.param_groups[0]['lr'])
+                metric_logger.update(tabular_mlm_accuracy=model_output["tabular_mlm_accuracy"])
+                metric_logger.update(mlm_accuracy=model_output["mlm_accuracy"])
+                metric_logger.update(mlm_loss=model_output["mlm_loss"])
+                metric_logger.update(tabular_mlm_loss=model_output["tabular_mlm_loss"])
+                metric_logger.update(image_mlm_loss=model_output["image_mlm_loss"])
+
             loss_float = model_output["loss"].item()
             if np.isnan(loss_float):
                 es = "[Train-Exception]: Time = %s, NAN Loss, loss_dict = %s, lr = %s" % (
                     get_time_string(), model_output, optimizer.param_groups[0]['lr'])
                 torch.save(batch, os.path.join(model_save_dir, "bad-batch-%s.pth" % local_rank))
                 raise ValueError(es)
-            metric_logger.update(loss=model_output["loss"])
-            metric_logger.update(lr=optimizer.param_groups[0]['lr'])
-            metric_logger.update(tabular_mlm_accuracy=model_output["tabular_mlm_accuracy"])
-            metric_logger.update(mlm_accuracy=model_output["mlm_accuracy"])
-            metric_logger.update(mlm_loss=model_output["mlm_loss"])
-            metric_logger.update(tabular_mlm_loss=model_output["tabular_mlm_loss"])
-            metric_logger.update(image_mlm_loss=model_output["image_mlm_loss"])
 
             step += 1
             del batch
