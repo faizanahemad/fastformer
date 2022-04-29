@@ -1373,7 +1373,7 @@ def train(local_rank, args):
                     # print(json.dumps(dict(time=get_time_string(), **wandb_log), skipkeys=True, indent=2, sort_keys=True))
                     print(("[Time = %s]" % get_time_string()) + ("-" * 80))
                     print(printed)
-                    print("Averaged stats:", metric_logger)
+                    print("Averaged stats: \n", metric_logger)
                     metric_logger.plot()
                 if activate_wandb_log:
                     time.sleep(random.random() * 0.1)
