@@ -1365,7 +1365,7 @@ def train(local_rank, args):
                              **output)
             logs_save.append(pd.DataFrame.from_records([wandb_log]).T)
             if validation_iter:
-                clean_memory()
+                # clean_memory()
                 printed = pd.concat(logs_save, axis=1)
                 printed["mean"] = printed.mean(1)
                 logs_save = []
