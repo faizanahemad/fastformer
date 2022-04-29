@@ -1009,7 +1009,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         loss = mlm_loss + tabular_mlm_loss + image_mlm_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
-                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss)
+                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss, image_mlm_loss=image_mlm_loss)
 
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
