@@ -1916,18 +1916,14 @@ class SmoothedValue(object):
 
     def __init__(self, window_size=20, fmt=None):
         if fmt is None:
-            fmt = "{median:.4f} ({global_avg:.4f})"
+            fmt = "{median:.4f} ({max:.4f})"
         self.deque = deque(maxlen=window_size)
         self.long_storage = []
-        self.total = 0.0
-        self.count = 0
         self.fmt = fmt
 
     def update(self, value, n=1):
         self.deque.append(value)
         self.long_storage.append(value)
-        self.count += n
-        self.total += value * n
 
     def synchronize_between_processes(self):
         """
@@ -1935,18 +1931,12 @@ class SmoothedValue(object):
         """
         if not is_dist_avail_and_initialized():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
-        dist.barrier()
-        dist.all_reduce(t)
-        t = t.tolist()
 
         long_storage = torch.tensor(self.long_storage, dtype=torch.float64, device='cuda')
         dist.barrier()
         dist.all_reduce(long_storage, torch.distributed.ReduceOp.AVG)
         long_storage = long_storage.tolist()
 
-        self.count = int(t[0])
-        self.total = t[1]
         self.long_storage = long_storage
 
     @property
@@ -1966,10 +1956,6 @@ class SmoothedValue(object):
             return 0.0
 
     @property
-    def global_avg(self):
-        return self.total / (self.count if self.count != 0 else 1.0)
-
-    @property
     def max(self):
         return max(self.deque) if len(self.deque) > 0 else 0.0
 
@@ -1984,7 +1970,6 @@ class SmoothedValue(object):
         return self.fmt.format(
             median=self.median,
             avg=self.avg,
-            global_avg=self.global_avg,
             max=self.max,
             value=self.value)
 
