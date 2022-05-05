@@ -727,7 +727,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
     def forward(self, input_ids=None, attention_mask=None,
                 tabular_input_ids=None, tabular_attention_mask=None,
-                images=None, mask=None):
+                images=None, mask=None, output_attentions=None):
         """
         We do image masking after image patch embedding.
         @param tabular_attention_mask:
@@ -826,7 +826,11 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         global_attention_positions = sorted(global_attention_positions)
         global_attention_mask[:, global_attention_positions] = 1.0
 
-        features = self.mid_fusion_backbone(attention_mask=attention_mask, global_attention_mask=global_attention_mask, inputs_embeds=features)[0]
+        mid_fusion_out = self.mid_fusion_backbone(attention_mask=attention_mask,
+                                            global_attention_mask=global_attention_mask,
+                                            inputs_embeds=features, output_attentions=output_attentions)
+        attentions = mid_fusion_out["attentions"]
+        features = mid_fusion_out[0]
         # if extra > 0 and extra < 512:
         #     features = features[:, :-extra]
         assert s == features.size(1)
@@ -854,7 +858,9 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         global_tokens = features[:, global_attention_positions]
         return dict(image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
-                    unimodal_tabular_features=tabular_features, global_tokens=global_tokens)
+                    unimodal_tabular_features=tabular_features, global_tokens=global_tokens,
+                    attentions=attentions, global_attention_positions=global_attention_positions,
+                    global_attention_mask=global_attention_mask)
 
 
 class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
