@@ -827,9 +827,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         global_attention_mask[:, global_attention_positions] = 1.0
 
         mid_fusion_out = self.mid_fusion_backbone(attention_mask=attention_mask,
-                                            global_attention_mask=global_attention_mask,
-                                            inputs_embeds=features, output_attentions=output_attentions)
+                                                  global_attention_mask=global_attention_mask,
+                                                  inputs_embeds=features, output_attentions=output_attentions)
         attentions = mid_fusion_out["attentions"]
+        global_attentions = mid_fusion_out["global_attentions"]
         features = mid_fusion_out[0]
         # if extra > 0 and extra < 512:
         #     features = features[:, :-extra]
@@ -859,7 +860,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         return dict(image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
                     unimodal_tabular_features=tabular_features, global_tokens=global_tokens,
-                    attentions=attentions, global_attention_positions=global_attention_positions,
+                    attentions=attentions, global_attentions=global_attentions,
+                    global_attention_positions=global_attention_positions,
                     global_attention_mask=global_attention_mask)
 
 
