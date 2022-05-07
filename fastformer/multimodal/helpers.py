@@ -829,8 +829,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         mid_fusion_out = self.mid_fusion_backbone(attention_mask=attention_mask,
                                                   global_attention_mask=global_attention_mask,
                                                   inputs_embeds=features, output_attentions=output_attentions)
-        attentions = mid_fusion_out["attentions"]
-        global_attentions = mid_fusion_out["global_attentions"]
+        attentions = mid_fusion_out["attentions"] if output_attentions else None
+        global_attentions = mid_fusion_out["global_attentions"] if output_attentions else None
         features = mid_fusion_out[0]
         # if extra > 0 and extra < 512:
         #     features = features[:, :-extra]
