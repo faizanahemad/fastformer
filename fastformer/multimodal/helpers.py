@@ -59,7 +59,7 @@ def pil_loader(path: str) -> Image.Image:
             img = Image.open(f)
             return img.convert('RGB')
     except Exception as e:
-        traceback.print_exc()
+        # traceback.print_exc()
         return None
 
 # train_image_augments = transforms.Compose([
