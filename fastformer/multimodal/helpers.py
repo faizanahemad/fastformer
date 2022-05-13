@@ -812,7 +812,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             else:
                 image_mid_in = image_features.clone()
             image_mid_in = image_mid_in + self.panel_id_emb
-            image_mid_in = image_mid_in.reshape(b, -1, image_mid_in.shape[2])
+            image_mid_in = image_mid_in.reshape(b, -1, image_mid_in.shape[-1])
             image_mid_in = image_mid_in + self.image_seg_token
         else:
             image_features = None
