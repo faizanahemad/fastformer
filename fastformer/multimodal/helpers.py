@@ -874,7 +874,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             rdict["attentions"] = attentions
             rdict["global_attentions"] = global_attentions
             rdict["global_attention_positions"] = global_attention_positions
-        return
+        return rdict
 
 
 class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
