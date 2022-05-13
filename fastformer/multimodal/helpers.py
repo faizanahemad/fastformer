@@ -780,8 +780,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             lf_attention_mask = torch.cat([attention_mask, tabular_attention_mask], 0)
             tabular_text_output = self.longformer(input_ids=lf_input_ids, attention_mask=lf_attention_mask, )["last_hidden_state"]
             text_features = tabular_text_output[:input_ids.size(0)]
-            tabular_output = tabular_text_output[input_ids.size(0):]
-            tabular_text_output = torch.cat([text_features + self.text_seg_token, tabular_output + self.tabular_seg_token], 1)
+            tabular_features = tabular_text_output[input_ids.size(0):]
+            tabular_text_output = torch.cat([text_features + self.text_seg_token, tabular_features + self.tabular_seg_token], 1)
             tabular_text_output_attention_mask = torch.cat([attention_mask, tabular_attention_mask], 1)
             global_attention_positions = [0, input_ids.size(1)]
         elif input_ids is not None and tabular_input_ids is None:
