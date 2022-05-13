@@ -83,17 +83,18 @@ def pil_loader(path: str) -> Image.Image:
 #                                  transforms.GaussianBlur(21, sigma=(0.5, 4.0))],),
 #     transforms.Resize((image_size, image_size)),
 # ])
-#
-# train_image_augments = transforms.Compose([
-#     transforms.RandomChoice([
-#         transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
-#         transforms.RandomRotation(10, expand=True, ),
-#         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-2, 2, -2, 2], fill=120),
-#         transforms.RandomPosterize(bits=3, p=1.0),
-#         transforms.TrivialAugmentWide(),
-#     ]),
-#     transforms.RandomResizedCrop(image_size, scale=(0.85, 1.0), ratio=(0.9, 1.1)),
-# ])
+
+train_image_augments = transforms.Compose([
+    transforms.RandomChoice([
+        transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
+        transforms.RandomRotation(10, expand=True, ),
+        transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=120),
+        transforms.RandomPosterize(bits=3, p=1.0),
+        transforms.TrivialAugmentWide(),
+        transforms.GaussianBlur(3),
+    ]),
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
+])
 
 train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
@@ -759,7 +760,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             tabular_output = tabular_text_output[input_ids.size(0):]
             tabular_text_output = torch.cat([text_output, tabular_output], 1)
             tabular_text_output_attention_mask = torch.cat([attention_mask, tabular_attention_mask], 1)
-            global_attention_positions = [0, 1, input_ids.size(1), input_ids.size(1)+1]
+            global_attention_positions = [0, input_ids.size(1)]
         elif input_ids is not None and tabular_input_ids is None:
             tabular_text_output = self.longformer(input_ids=input_ids, attention_mask=attention_mask, )[
                 "last_hidden_state"]
@@ -811,19 +812,19 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 ep2 = (per_img_patches * i)
                 end = tabular_text_output.size(1) + ep2
                 end_2 = tabular_text_output.size(1) + (per_img_patches * (i + 1)) - 1
-                global_attention_positions.extend([end, end + 1, end_2])
+                global_attention_positions.extend([end, end_2])
         elif images is not None:
             for i in range(ex):
                 global_attention_positions.extend([per_img_patches * i, 1 + per_img_patches * i, per_img_patches * (i + 1) - 1])
         global_attention_positions = list(set(global_attention_positions))
-        gap_mod = 32
-        gap_len = len(global_attention_positions)
-        if gap_len % gap_mod != 0:
-            extra_positions_needed = gap_mod - (gap_len % gap_mod)
-            new_positions = [i for i in range(2, 2 + extra_positions_needed)]
-            global_attention_positions.extend(new_positions)
-            assert len(global_attention_positions) % gap_mod == 0
-        global_attention_positions = sorted(global_attention_positions)
+        # gap_mod = 32
+        # gap_len = len(global_attention_positions)
+        # if gap_len % gap_mod != 0:
+        #     extra_positions_needed = gap_mod - (gap_len % gap_mod)
+        #     new_positions = [i for i in range(2, 2 + extra_positions_needed)]
+        #     global_attention_positions.extend(new_positions)
+        #     assert len(global_attention_positions) % gap_mod == 0
+        # global_attention_positions = sorted(global_attention_positions)
         global_attention_mask[:, global_attention_positions] = 1.0
 
         mid_fusion_out = self.mid_fusion_backbone(attention_mask=attention_mask,
