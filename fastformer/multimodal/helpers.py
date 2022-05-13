@@ -436,7 +436,10 @@ class MultiModalTrainingDataset(Dataset):
 
         if len(text) == 0 or len(text.split()) < 2:
             text += " <empty text> <empty text>"
-        masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
+        if self.training:
+            masked_text, text = text_masking(text, tokenizer, self.word_mask_proba)
+        else:
+            masked_text = text
         tokenizer_outputs = tokenizer(text, return_offsets_mapping=False, **self.tokenizer_args)
         text_input_ids, text_attention_mask = tokenizer_outputs["input_ids"].squeeze(), tokenizer_outputs[
             "attention_mask"].squeeze()
@@ -459,9 +462,9 @@ class MultiModalTrainingDataset(Dataset):
         for ix, (k, v) in enumerate(tabular):
             k = k.replace("_", " ")
             v = float_format(v)
-            if random.random() < self.tabular_feature_drop_proba and (ix < len(tabular) - 1 or not not_masked):
+            if random.random() < self.tabular_feature_drop_proba and (ix < len(tabular) - 1 or not not_masked) and self.training:
                 continue
-            if (random.random() < self.tabular_feature_mask_proba and not isnan(v)) or (not_masked and ix == len(tabular) - 1):
+            if (random.random() < self.tabular_feature_mask_proba and not isnan(v)) or (not_masked and ix == len(tabular) - 1) and self.training:
                 tabular_to_text_for_student_input = tabular_to_text_for_student_input + " " + k + " = " + (" ".join([mask] * len(tokenizer.tokenize(" " + v)))) + " ;"
                 not_masked = False
             else:
@@ -1139,7 +1142,7 @@ def build_propreitery_dataset(location, images_path, tokenizer):
                                         image_size, image_patch_size, train_image_augments)
     return dataset
 
-def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, world_size=1, num_workers=None, shuffle=True):
+def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, world_size=1, num_workers=None, shuffle=True, training=True):
     single_node = world_size == 1
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
     COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
@@ -1158,7 +1161,7 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
     image_columns = ["physical_id"]
     dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
-                                        image_size, image_patch_size, train_image_augments)
+                                        image_size, image_patch_size, train_image_augments, training=training)
     kwargs = dict(prefetch_factor=2, persistent_workers=False) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=shuffle)
     train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
