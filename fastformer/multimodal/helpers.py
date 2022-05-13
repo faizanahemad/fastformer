@@ -46,6 +46,7 @@ image_size = 384
 max_length = 512
 image_patch_size = 32
 image_grid = 12
+total_image_panels = 4
 image_mask_proba = 0.75
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
@@ -296,7 +297,7 @@ class MultiModalTrainingDataset(Dataset):
                  image_size, image_patch_size, image_augments, image_to_vector=transforms.ToTensor(),
                  training=True,
                  word_mask_proba=0.15, image_mask_proba=image_mask_proba, tabular_feature_mask_proba=0.2, tabular_feature_drop_proba=0.1,
-                 total_image_panels=4,
+                 total_image_panels=total_image_panels,
                  ):
         self.tokenizer = tokenizer
         self.tokenizer_args = tokenizer_args
@@ -512,9 +513,9 @@ class MultiModalTrainingDataset(Dataset):
         total_image_panels = self.total_image_panels
         num_images = len(image_locations)
         # image_attention_mask = np.zeros(image_grid * image_grid * total_image_panels, dtype=np.float)
+        panel_distribution = [1] * total_image_panels
         if num_images > total_image_panels:
             extra_images = num_images - total_image_panels
-            panel_distribution = [1] * total_image_panels
             j = 0
             for i in range(extra_images):
                 if panel_distribution[j] < 4:
@@ -579,6 +580,7 @@ class MultiModalTrainingDataset(Dataset):
                     tabular_student_attention_mask=t2t_student_attention_mask,
                     image_patch_mean=image_patch_mean,
                     image_patch_std=image_patch_std,
+                    panel_distribution=torch.tensor(panel_distribution, dtype=torch.long),
                     # tabular_teacher_input_ids=t2t_teacher_input_ids,
                     # tabular_teacher_attention_mask=t2t_teacher_attention_mask,
                     text_input_ids=text_input_ids, text_attention_mask=text_attention_mask,
@@ -702,7 +704,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         mid_fusion_backbone.pooler = None
         init_weights(mid_fusion_backbone, 0.02)
         self.mid_fusion_backbone = mid_fusion_backbone
-
+        self.panel_count_emb = nn.Embedding(4, embed_dim)
+        init_weights(self.panel_count_emb)
+        self.panel_id_emb = nn.Parameter(torch.zeros(1, total_image_panels, 1, embed_dim))
+        init_weights(self.panel_id_emb)
         self.text_seg_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
         init_weights(self.text_seg_token)
 
@@ -745,7 +750,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
     def forward(self, input_ids=None, attention_mask=None,
                 tabular_input_ids=None, tabular_attention_mask=None,
-                images=None, mask=None, output_attentions=None):
+                images=None, panel_distribution=None, mask=None, output_attentions=None):
         """
         We do image masking after image patch embedding.
         @param tabular_attention_mask:
@@ -800,9 +805,17 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             b, ex, c, h, w = images.shape
             images = images.view(-1, c, h, w)
             image_features = self.vit_forward(images, mask)
-            image_features = image_features.reshape(b, -1, image_features.shape[2])
+            if panel_distribution is not None:
+                pdist = self.panel_count_emb(panel_distribution)[:, :, None, :]
+                image_mid_in = image_features + pdist
+            else:
+                image_mid_in = image_features.clone()
+            image_mid_in = image_mid_in + self.panel_id_emb
+            image_mid_in = image_mid_in.reshape(b, -1, image_mid_in.shape[2])
+            image_mid_in = image_mid_in + self.image_seg_token
         else:
             image_features = None
+            image_mid_in = None
 
         assert image_features is not None or tabular_text_output is not None
 
@@ -810,11 +823,11 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             features = tabular_text_output
             attention_mask = tabular_text_output_attention_mask
         elif tabular_text_output is None:
-            features = image_features + self.image_seg_token
+            features = image_mid_in
             attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         else:
-            features = torch.cat([tabular_text_output, image_features + self.image_seg_token], 1)
-            image_attention_mask = torch.ones(image_features.shape[:2], dtype=torch.long, device=features.device,
+            features = torch.cat([tabular_text_output, image_mid_in], 1)
+            image_attention_mask = torch.ones(image_mid_in.shape[:2], dtype=torch.long, device=features.device,
                                         requires_grad=False)
             attention_mask = torch.cat([tabular_text_output_attention_mask, image_attention_mask], 1)
             global_attention_positions.extend([tabular_text_output.size(1), tabular_text_output.size(1)+1])
@@ -858,9 +871,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         assert s == features.size(1)
         image_out = None
         if image_features is not None:
-            image_out = features[:, -image_features.size(1):]
+            image_out = features[:, -image_mid_in.size(1):]
             image_out = image_out.reshape(b, ex, -1, image_out.shape[2])
-            image_features = image_features.reshape(b, ex, -1, image_features.shape[2])
 
         text_output = None
         tabular_output = None
@@ -1013,11 +1025,11 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
     def forward(self, input_ids, attention_mask,
                 tabular_input_ids, tabular_attention_mask,
-                images=None, image_masks=None, image_labels=None,
+                images=None, panel_distribution=None, image_masks=None, image_labels=None,
                 label_input_ids=None, label_tabular_input_ids=None):
         encoder_out = self.encoder(input_ids=input_ids, attention_mask=attention_mask,
                                    tabular_input_ids=tabular_input_ids,
-                                   tabular_attention_mask=tabular_attention_mask, images=images, mask=image_masks)
+                                   tabular_attention_mask=tabular_attention_mask, images=images, panel_distribution=panel_distribution, mask=image_masks)
         # TODO: masked and non-masked tokens must coincide properly
         masked_lm = input_ids == self.mask_token_id
         lm_feats = self.text_mlm_ln(encoder_out["text_output"] + encoder_out["unimodal_text_features"])[masked_lm]
@@ -1344,7 +1356,7 @@ def train(local_rank, args):
                     model_output = trainer(batch["text_masked_input_ids"], batch["text_masked_attention_mask"],
                                            batch["tabular_student_masked_input_ids"],
                                            batch["tabular_student_masked_attention_mask"],
-                                           batch["images"], batch["image_masks"], batch["image_labels"],
+                                           batch["images"], batch["panel_distribution"], batch["image_masks"], batch["image_labels"],
                                            batch["text_input_ids"], batch["tabular_student_input_ids"]
                                            )
                     loss = model_output["loss"] / iter_size
@@ -1353,7 +1365,7 @@ def train(local_rank, args):
                 model_output = trainer(batch["text_masked_input_ids"], batch["text_masked_attention_mask"],
                                        batch["tabular_student_masked_input_ids"],
                                        batch["tabular_student_masked_attention_mask"],
-                                       batch["images"], batch["image_masks"], batch["image_labels"],
+                                       batch["images"], batch["panel_distribution"], batch["image_masks"], batch["image_labels"],
                                        batch["text_input_ids"], batch["tabular_student_input_ids"]
                                        )
                 loss = model_output["loss"] / iter_size
