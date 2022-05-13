@@ -804,7 +804,8 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         if images is not None:
             b, ex, c, h, w = images.shape
             images = images.view(-1, c, h, w)
-            image_features = self.vit_forward(images, mask)
+            image_features = self.vit_forward(images, mask)  # (B x ex), Seq, Dim
+            image_features = image_features.reshape(b, ex, -1, image_features.shape[-1])
             if panel_distribution is not None:
                 pdist = self.panel_count_emb(panel_distribution)[:, :, None, :]
                 image_mid_in = image_features + pdist
