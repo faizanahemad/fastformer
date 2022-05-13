@@ -99,10 +99,10 @@ train_image_augments = transforms.Compose([
 
 # train_image_augments = transforms.Resize([image_size, image_size])
 
-inference_image_shape_augments = transforms.Compose([
-        transforms.Resize(image_size+image_patch_size),
-        transforms.CenterCrop(image_size),
-])
+# inference_image_shape_augments = transforms.Compose([
+#         transforms.Resize(image_size+image_patch_size),
+#         transforms.CenterCrop(image_size),
+# ])
 
 # panel_combine_resize = transforms.Compose([
 #     transforms.Resize([image_size//2 +32, image_size//2 +32]),
@@ -110,6 +110,7 @@ inference_image_shape_augments = transforms.Compose([
 # ])
 
 panel_combine_resize = transforms.Resize([image_size//2, image_size//2])
+inference_image_shape_augments = transforms.Resize([image_size, image_size])
 
 def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
@@ -327,6 +328,7 @@ class MultiModalTrainingDataset(Dataset):
         self.dataset = load_dataset('csv', data_files=self.data_csv)["train"]
         self.imagenet_gray_mean = np.mean(IMAGENET_DEFAULT_MEAN)
         self.imagenet_gray_std = np.mean(IMAGENET_DEFAULT_STD)
+        self.inference_image_shape_augments = inference_image_shape_augments
 
     def __get_image_mask__(self):
         mask = np.hstack([
@@ -498,9 +500,13 @@ class MultiModalTrainingDataset(Dataset):
         image_locations_new = []
         for im in image_locations:
             try:
-                im = self.image_augments(im)
+                if self.training:
+                    im = self.image_augments(im)
+                else:
+                    im = self.inference_image_shape_augments(im)
             except Exception as e:
                 print("[ERROR][Dataset]: Failed image augmentation of item_idx = %s" % (item_idx,))
+                traceback.print_exc()
             image_locations_new.append(im)
         image_locations = image_locations_new
         total_image_panels = self.total_image_panels
@@ -1161,7 +1167,8 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
     image_columns = ["physical_id"]
     dataset = MultiModalTrainingDataset(tokenizer, tokenizer_args, images_path, location, ",", COLUMNS, textual, tabular,
                                         image_columns,
-                                        image_size, image_patch_size, train_image_augments, training=training)
+                                        image_size, image_patch_size, train_image_augments,
+                                        training=training)
     kwargs = dict(prefetch_factor=2, persistent_workers=False) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=shuffle)
     train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
