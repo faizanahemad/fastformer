@@ -1216,6 +1216,8 @@ def train(local_rank, args):
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank)
     # gpu_device = 0
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    if args["detect_anomaly"]:
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     gpu_device = local_rank
     if args["wandb_dryrun"]:
         os.environ["WANDB_MODE"] = "dryrun"
@@ -1228,6 +1230,7 @@ def train(local_rank, args):
         assert args["world_size"] == 1
         device = torch.device("cpu")
     else:
+        print("For Node Rank = %s, setting device to %s" % (nr, gpu_device))
         device = torch.device(f'cuda:{gpu_device}')  # Unique only on individual node.
         torch.cuda.set_device(device)
     # init_method = "tcp://%s:%s" % (args["master_addr"], args["master_port"])
