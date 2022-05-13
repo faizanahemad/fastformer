@@ -866,12 +866,15 @@ class MultiModalEncoder(LongformerPreTrainedModel):
                 assert tabular_output.size(1) == tabular_features.size(1) == tabular_input_ids.size(1)
 
         global_tokens = features[:, global_attention_positions]
-        return dict(image_output=image_out, text_output=text_output, tabular_output=tabular_output,
+        rdict = dict(image_output=image_out, text_output=text_output, tabular_output=tabular_output,
                     unimodal_image_features=image_features, unimodal_text_features=text_features,
                     unimodal_tabular_features=tabular_features, global_tokens=global_tokens,
-                    attentions=attentions, global_attentions=global_attentions,
-                    global_attention_positions=global_attention_positions,
                     global_attention_mask=global_attention_mask)
+        if output_attentions:
+            rdict["attentions"] = attentions
+            rdict["global_attentions"] = global_attentions
+            rdict["global_attention_positions"] = global_attention_positions
+        return
 
 
 class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
