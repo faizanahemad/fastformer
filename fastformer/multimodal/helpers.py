@@ -90,7 +90,6 @@ train_image_augments = transforms.Compose([
         transforms.RandomRotation(10, expand=True, ),
         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=120),
         transforms.RandomPosterize(bits=3, p=1.0),
-        transforms.TrivialAugmentWide(),
         transforms.GaussianBlur(3),
     ]),
     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
