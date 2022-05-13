@@ -96,7 +96,7 @@ train_image_augments = transforms.Compose([
     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
 ])
 
-train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
+# train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
 # train_image_augments = transforms.Resize([image_size, image_size])
 
