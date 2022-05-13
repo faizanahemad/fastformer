@@ -703,6 +703,15 @@ class MultiModalEncoder(LongformerPreTrainedModel):
         init_weights(mid_fusion_backbone, 0.02)
         self.mid_fusion_backbone = mid_fusion_backbone
 
+        self.text_seg_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
+        init_weights(self.text_seg_token)
+
+        self.tabular_seg_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
+        init_weights(self.tabular_seg_token)
+
+        self.image_seg_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
+        init_weights(self.image_seg_token)
+
         self.grad_checkpointing = grad_checkpointing
         self.supports_gradient_checkpointing = True
         config.grad_checkpointing = grad_checkpointing
@@ -758,25 +767,28 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
         # Assert at least one modality present.
         assert images is not None or input_ids is not None or tabular_input_ids is not None
-
+        text_features = None
+        tabular_features = None
         if input_ids is not None and tabular_input_ids is not None:
             assert input_ids.size(1) == tabular_input_ids.size(1)
             lf_input_ids = torch.cat([input_ids, tabular_input_ids], 0)
             lf_attention_mask = torch.cat([attention_mask, tabular_attention_mask], 0)
             tabular_text_output = self.longformer(input_ids=lf_input_ids, attention_mask=lf_attention_mask, )["last_hidden_state"]
-            text_output = tabular_text_output[:input_ids.size(0)]
+            text_features = tabular_text_output[:input_ids.size(0)]
             tabular_output = tabular_text_output[input_ids.size(0):]
-            tabular_text_output = torch.cat([text_output, tabular_output], 1)
+            tabular_text_output = torch.cat([text_features + self.text_seg_token, tabular_output + self.tabular_seg_token], 1)
             tabular_text_output_attention_mask = torch.cat([attention_mask, tabular_attention_mask], 1)
             global_attention_positions = [0, input_ids.size(1)]
         elif input_ids is not None and tabular_input_ids is None:
-            tabular_text_output = self.longformer(input_ids=input_ids, attention_mask=attention_mask, )[
+            text_features = self.longformer(input_ids=input_ids, attention_mask=attention_mask, )[
                 "last_hidden_state"]
+            tabular_text_output = text_features + self.text_seg_token
             tabular_text_output_attention_mask = attention_mask
             global_attention_positions = [0]
         elif input_ids is None and tabular_input_ids is not None:
-            tabular_text_output = self.longformer(input_ids=tabular_input_ids, attention_mask=tabular_attention_mask, )[
+            tabular_features = self.longformer(input_ids=tabular_input_ids, attention_mask=tabular_attention_mask, )[
                 "last_hidden_state"]
+            tabular_text_output = tabular_features + self.tabular_seg_token
             tabular_text_output_attention_mask = tabular_attention_mask
             global_attention_positions = [0]
         else:
@@ -798,10 +810,10 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             features = tabular_text_output
             attention_mask = tabular_text_output_attention_mask
         elif tabular_text_output is None:
-            features = image_features
+            features = image_features + self.image_seg_token
             attention_mask = torch.ones(features.shape[:2], dtype=torch.long, device=features.device, requires_grad=False)
         else:
-            features = torch.cat([tabular_text_output, image_features], 1)
+            features = torch.cat([tabular_text_output, image_features + self.image_seg_token], 1)
             image_attention_mask = torch.ones(image_features.shape[:2], dtype=torch.long, device=features.device,
                                         requires_grad=False)
             attention_mask = torch.cat([tabular_text_output_attention_mask, image_attention_mask], 1)
@@ -852,17 +864,14 @@ class MultiModalEncoder(LongformerPreTrainedModel):
 
         text_output = None
         tabular_output = None
-        text_features = None
-        tabular_features = None
+
         if tabular_text_output is not None:
             tabular_text_final = features[:, :tabular_text_output.size(1)]
             if input_ids is not None:
                 text_output = tabular_text_final[:, :input_ids.size(1)]
-                text_features = tabular_text_output[:, :input_ids.size(1)]
                 assert text_output.size(1) == text_features.size(1) == input_ids.size(1)
             if tabular_input_ids is not None:
                 tabular_output = tabular_text_final[:, -tabular_input_ids.size(1):]
-                tabular_features = tabular_text_output[:, -tabular_input_ids.size(1):]
                 assert tabular_output.size(1) == tabular_features.size(1) == tabular_input_ids.size(1)
 
         global_tokens = features[:, global_attention_positions]
