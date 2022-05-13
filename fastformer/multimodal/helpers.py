@@ -84,18 +84,18 @@ def pil_loader(path: str) -> Image.Image:
 #     transforms.Resize((image_size, image_size)),
 # ])
 
-train_image_augments = transforms.Compose([
-    transforms.RandomChoice([
-        transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
-        transforms.RandomRotation(10, expand=True, ),
-        transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=120),
-        transforms.RandomPosterize(bits=3, p=1.0),
-        transforms.GaussianBlur(3),
-    ]),
-    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
-])
+# train_image_augments = transforms.Compose([
+#     transforms.RandomChoice([
+#         transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
+#         transforms.RandomRotation(10, expand=True, ),
+#         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=120),
+#         transforms.RandomPosterize(bits=3, p=1.0),
+#         transforms.GaussianBlur(3),
+#     ]),
+#     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
+# ])
 
-# train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
+train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
 # train_image_augments = transforms.Resize([image_size, image_size])
 
