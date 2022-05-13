@@ -807,7 +807,7 @@ class MultiModalEncoder(LongformerPreTrainedModel):
             image_features = self.vit_forward(images, mask)  # (B x ex), Seq, Dim
             image_features = image_features.reshape(b, ex, -1, image_features.shape[-1])
             if panel_distribution is not None:
-                pdist = self.panel_count_emb(panel_distribution)[:, :, None, :]
+                pdist = self.panel_count_emb(panel_distribution - 1)[:, :, None, :]
                 image_mid_in = image_features + pdist
             else:
                 image_mid_in = image_features.clone()
