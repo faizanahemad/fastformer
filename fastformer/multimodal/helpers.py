@@ -52,6 +52,15 @@ per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_gri
 
 tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
 
+import torchvision.transforms.functional as F
+
+class SquarePad:
+    def __call__(self, image):
+        max_wh = max(image.size)
+        p_left, p_top = [(max_wh - s) // 2 for s in image.size]
+        p_right, p_bottom = [max_wh - (s+pad) for s, pad in zip(image.size, [p_left, p_top])]
+        padding = (p_left, p_top, p_right, p_bottom)
+        return F.pad(image, padding, 255, 'constant')
 
 def pil_loader(path: str) -> Image.Image:
     # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
@@ -68,7 +77,7 @@ def pil_loader(path: str) -> Image.Image:
 #     transforms.RandomChoice([
 #         transforms.RandomPerspective(distortion_scale=0.2, p=1.0, ),
 #         transforms.RandomRotation(15, expand=True, ),
-#         transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=120),
+#         transforms.RandomAffine(0, translate=(0.1, 0.1), scale=(0.8, 1.1), shear=[-5, 5, -5, 5], fill=255),
 #         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.1, hue=0.1),
 #         transforms.RandomApply([transforms.GaussianBlur(7)], 1.0),
 #         transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.9, 1.1)),
@@ -85,18 +94,20 @@ def pil_loader(path: str) -> Image.Image:
 #     transforms.Resize((image_size, image_size)),
 # ])
 
-# train_image_augments = transforms.Compose([
-#     transforms.RandomChoice([
-#         transforms.RandomPerspective(distortion_scale=0.1, p=1.0, ),
-#         transforms.RandomRotation(10, expand=True, ),
-#         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=120),
-#         transforms.RandomPosterize(bits=3, p=1.0),
-#         transforms.GaussianBlur(3),
-#     ]),
-#     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
-# ])
+train_image_augments = transforms.Compose([
+    transforms.RandomChoice([
+        transforms.RandomPerspective(distortion_scale=0.1, p=1.0, fill=255),
+        transforms.RandomRotation(10, expand=True, fill=255),
+        transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=255),
+        transforms.RandomPosterize(bits=3, p=1.0),
+        transforms.GaussianBlur(3),
+    ]),
+    SquarePad(),
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
+    # transforms.Resize([image_size, image_size])
+])
 
-train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
+# train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2))
 
 # train_image_augments = transforms.Resize([image_size, image_size])
 
@@ -111,7 +122,10 @@ train_image_augments = transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0
 # ])
 
 panel_combine_resize = transforms.Resize([image_size//2, image_size//2])
-inference_image_shape_augments = transforms.Resize([image_size, image_size])
+inference_image_shape_augments = transforms.Compose([
+    SquarePad(),
+    transforms.Resize([image_size, image_size]),
+    ])
 
 def build_2d_sincos_position_embedding(grid_size, embed_dim, cls_tokens=0, temperature=1000., requires_grad = False):
     h, w = grid_size, grid_size
