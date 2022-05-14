@@ -1108,7 +1108,7 @@ def training_args():
 
     parser.add_argument('--text_mlm_w', type=float, required=False, default=1.0,
                         help='text_mlm_w weight')
-    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.25,
+    parser.add_argument('--tabular_mlm_w', type=float, required=False, default=0.2,
                         help='tabular_mlm_w weight')
     parser.add_argument('--image_mlm_w', type=float, required=False, default=10.0,
                         help='image_mlm_w weight')
