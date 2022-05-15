@@ -951,14 +951,14 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         init_weights(self.text_mlm_ln)
         init_weights(self.tabular_mlm_ln)
+        embed_dim = decoder_embed_dim
+        self.embed_dim = embed_dim
         self.contrastive_temp = 0.25
 
         self.contrast_loss = nn.BCEWithLogitsLoss()
         self.contrast_ffn = nn.Sequential(nn.LayerNorm(embed_dim, optimizer_config["eps"]), LongformerFFN(self.encoder.longformer.config), nn.Dropout(0.1), nn.Linear(decoder_embed_dim, decoder_embed_dim * 2), nn.GELU(), nn.Linear(decoder_embed_dim * 2, decoder_embed_dim))
         init_weights(self.contrast_ffn)
 
-        embed_dim = decoder_embed_dim
-        self.embed_dim = embed_dim
         decoder_layer_conf = RobertaConfig()
         decoder_layer_conf.hidden_size = embed_dim
         decoder_layer_conf.num_attention_heads = 16 if self.encoder.model_size == "large" else 12
