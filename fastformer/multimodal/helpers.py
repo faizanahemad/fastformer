@@ -40,7 +40,7 @@ from einops import rearrange
 from datasets import load_dataset
 
 from fastformer.utils import set_seeds, get_barrier, init_weights, clean_memory, get_time_string, try_float, \
-    worker_init_fn, numel, MetricLogger, SmoothedValue
+    worker_init_fn, numel, MetricLogger, SmoothedValue, is_dist_avail_and_initialized
 
 image_size = 384
 max_length = 512
@@ -951,7 +951,11 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         init_weights(self.text_mlm_ln)
         init_weights(self.tabular_mlm_ln)
 
+        self.contrast_loss = nn.BCEWithLogitsLoss()
+        self.contrast_ffn = nn.Sequential(LongformerFFN(self.encoder.longformer.config), nn.Dropout(0.1), nn.Linear(decoder_embed_dim, decoder_embed_dim * 2), nn.GELU(), nn.Linear(decoder_embed_dim * 2, decoder_embed_dim))
+
         embed_dim = decoder_embed_dim
+        self.embed_dim = embed_dim
         decoder_layer_conf = RobertaConfig()
         decoder_layer_conf.hidden_size = embed_dim
         decoder_layer_conf.num_attention_heads = 16 if self.encoder.model_size == "large" else 12
@@ -1068,10 +1072,37 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         image_mlm_features = self.image_mlm_ln1(encoder_out["image_output"] + encoder_out["unimodal_image_features"])
         image_mlm_loss = self.image_mlm_w * self.image_mlm_forward(image_mlm_features,
                                                 image_masks, image_labels)[0]
-        loss = mlm_loss + tabular_mlm_loss + image_mlm_loss
+
+        image_vec = encoder_out["image_output"][:, :, 0]
+        text_vec = encoder_out["text_output"][:, 0].unsqueeze(1)
+        contrastive_vec = self.contrast_ffn(torch.cat([text_vec, image_vec], 1))
+        contrastive_vec = contrastive_vec / contrastive_vec.norm(dim=-1, keepdim=True).clamp(min=1e-5)
+        contrastive_loss = 0
+        if is_dist_avail_and_initialized():
+            ws = torch.distributed.get_world_size(group=None)
+            rnk = torch.distributed.get_rank(group=None)
+        else:
+            ws = 1
+            rnk = 0
+
+        bs = input_ids.shape[0]
+        contrast_elems = total_image_panels+1
+        t = torch.zeros(ws, bs, contrast_elems, self.embed_dim, device=input_ids.device)
+        t[rnk] = t[rnk] + contrastive_vec.unsqueeze(0)
+        torch.distributed.all_reduce(t)
+        contrastive_vec[0]
+        mm = torch.einsum('w b i d, b j d -> w b i j', t, contrastive_vec) / 0.1
+        mm = mm ** 2
+        labels = torch.zeros_like(mm)
+        A = torch.ones(bs, contrast_elems, contrast_elems, device=input_ids.device)
+        B = torch.block_diag(*A)
+        labels[rnk] = labels[rnk] + B
+        contrastive_loss = self.contrast_loss(mm, labels)
+        loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + contrastive_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
-                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss, image_mlm_loss=image_mlm_loss)
+                    mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss, image_mlm_loss=image_mlm_loss,
+                    contrastive_loss=contrastive_loss, mm=mm, labels=labels, contrastive_vec=contrastive_vec, t=t)
 
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
