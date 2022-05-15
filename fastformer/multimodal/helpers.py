@@ -1092,12 +1092,12 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         t[rnk] = t[rnk] + contrastive_vec.unsqueeze(0)
         if is_dist:
             torch.distributed.all_reduce(t)
-        contrastive_vec[0]
-        mm = torch.einsum('w b i d, b j d -> w b i j', t, contrastive_vec) / 0.1
+        mm = torch.einsum('w x i d, y j d -> w x y i j', t, contrastive_vec) / 0.1
         mm = mm ** 2
         labels = torch.zeros_like(mm)
         A = torch.ones(bs, contrast_elems, contrast_elems, device=input_ids.device)
         B = torch.block_diag(*A)
+        B = B.reshape(bs, contrast_elems, bs*contrast_elems).permute(0, 2, 1).reshape(bs, bs, contrast_elems, contrast_elems)
         labels[rnk] = labels[rnk] + B
         contrastive_loss = self.contrast_loss(mm, labels)
         loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + contrastive_loss
