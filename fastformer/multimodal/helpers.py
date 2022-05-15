@@ -951,7 +951,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         init_weights(self.text_mlm_ln)
         init_weights(self.tabular_mlm_ln)
-        self.contrastive_temp = 0.2
+        self.contrastive_temp = 0.25
 
         self.contrast_loss = nn.BCEWithLogitsLoss()
         self.contrast_ffn = nn.Sequential(nn.LayerNorm(embed_dim, optimizer_config["eps"]), LongformerFFN(self.encoder.longformer.config), nn.Dropout(0.1), nn.Linear(decoder_embed_dim, decoder_embed_dim * 2), nn.GELU(), nn.Linear(decoder_embed_dim * 2, decoder_embed_dim))
