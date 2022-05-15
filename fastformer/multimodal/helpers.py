@@ -95,12 +95,13 @@ def pil_loader(path: str) -> Image.Image:
 # ])
 
 train_image_augments = transforms.Compose([
+    SquarePad(),
     transforms.RandomChoice([
         transforms.RandomPerspective(distortion_scale=0.1, p=1.0, fill=255),
         transforms.RandomRotation(10, expand=True, fill=255),
         transforms.RandomAffine(0, translate=(0.05, 0.05), scale=(0.9, 1.1), shear=[-5, 5, -5, 5], fill=255),
         transforms.RandomPosterize(bits=3, p=1.0),
-        transforms.Compose([SquarePad(), transforms.Resize([image_size, image_size]), transforms.GaussianBlur(7)]),
+        transforms.Compose([transforms.Resize([image_size, image_size]), transforms.GaussianBlur(7)]),
     ]),
     SquarePad(),
     transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2)),
