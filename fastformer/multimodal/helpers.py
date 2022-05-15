@@ -1078,7 +1078,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         contrastive_vec = self.contrast_ffn(torch.cat([text_vec, image_vec], 1))
         contrastive_vec = contrastive_vec / contrastive_vec.norm(dim=-1, keepdim=True).clamp(min=1e-5)
         contrastive_loss = 0
-        if is_dist_avail_and_initialized():
+        is_dist = is_dist_avail_and_initialized()
+        if is_dist:
             ws = torch.distributed.get_world_size(group=None)
             rnk = torch.distributed.get_rank(group=None)
         else:
@@ -1089,7 +1090,8 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         contrast_elems = total_image_panels+1
         t = torch.zeros(ws, bs, contrast_elems, self.embed_dim, device=input_ids.device)
         t[rnk] = t[rnk] + contrastive_vec.unsqueeze(0)
-        torch.distributed.all_reduce(t)
+        if is_dist:
+            torch.distributed.all_reduce(t)
         contrastive_vec[0]
         mm = torch.einsum('w b i d, b j d -> w b i j', t, contrastive_vec) / 0.1
         mm = mm ** 2
