@@ -1973,6 +1973,9 @@ class SmoothedValue(object):
             max=self.max,
             value=self.value)
 
+    def __len__(self):
+        return len(self.deque)
+
 
 class MetricLogger(object):
     def __init__(self, delimiter="\t", plots=["loss"]):
@@ -1989,9 +1992,9 @@ class MetricLogger(object):
             assert p in self.meters
             values = self.meters[p].long_storage
             if len(values) > 100_000:
-                indices = np.arange(10000, len(values), 100)
+                indices = np.arange(10000, len(values), 10)
                 values = np.array(values)[indices]
-                values = pd.Series(values).ewm(alpha=0.1).mean().values
+                values = pd.Series(values).ewm(alpha=0.05).mean().values
                 plot(xs=indices, ys=values, lines=True, title=p)
             else:
                 values = pd.Series(values).ewm(alpha=0.01).mean().values
