@@ -928,7 +928,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
     # Dropout modality rate -> used with student teacher
     # For canny, gray_scale and sketch transforms of output image
     # Weigh non-zero elements in image generator output for loss more highly by loss = loss.mean() + loss[non_zero_loc].mean(),
-    def __init__(self, teacher_student_loss_w, image_mlm_w, text_mlm_w, tabular_mlm_w,
+    def __init__(self, contrastive_loss_w, image_mlm_w, text_mlm_w, tabular_mlm_w,
                  encoder: MultiModalEncoder):
         super().__init__(encoder.longformer.config)
         self.encoder = encoder
@@ -942,6 +942,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.text_mlm_w = text_mlm_w
         self.tabular_mlm_w = tabular_mlm_w
         self.image_mlm_w = image_mlm_w
+        self.contrastive_loss_w = contrastive_loss_w
         decoder_embed_dim = self.encoder.embed_dim
         self.decoder_embed_dim = decoder_embed_dim
         self.image_mlm_ln1 = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
@@ -950,6 +951,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         self.tabular_mlm_ln = nn.LayerNorm(encoder.embed_dim, optimizer_config["eps"])
         init_weights(self.text_mlm_ln)
         init_weights(self.tabular_mlm_ln)
+        self.contrastive_temp = 0.2
 
         self.contrast_loss = nn.BCEWithLogitsLoss()
         self.contrast_ffn = nn.Sequential(LongformerFFN(self.encoder.longformer.config), nn.Dropout(0.1), nn.Linear(decoder_embed_dim, decoder_embed_dim * 2), nn.GELU(), nn.Linear(decoder_embed_dim * 2, decoder_embed_dim))
@@ -1092,14 +1094,14 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
         t[rnk] = t[rnk] + contrastive_vec.unsqueeze(0)
         if is_dist:
             torch.distributed.all_reduce(t)
-        mm = torch.einsum('w x i d, y j d -> w x y i j', t, contrastive_vec) / 0.2
+        mm = torch.einsum('w x i d, y j d -> w x y i j', t, contrastive_vec) / self.contrastive_temp
         mm = mm ** 2
         labels = torch.zeros_like(mm)
         A = torch.ones(bs, contrast_elems, contrast_elems, device=input_ids.device)
         B = torch.block_diag(*A)
         B = B.reshape(bs, contrast_elems, bs*contrast_elems).permute(0, 2, 1).reshape(bs, bs, contrast_elems, contrast_elems)
         labels[rnk] = labels[rnk] + B
-        contrastive_loss = self.contrast_loss(mm, labels)
+        contrastive_loss = self.contrastive_loss_w * self.contrast_loss(mm, labels)
         loss = mlm_loss + tabular_mlm_loss + image_mlm_loss + contrastive_loss
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
@@ -1165,6 +1167,8 @@ def training_args():
                         help='tabular_mlm_w weight')
     parser.add_argument('--image_mlm_w', type=float, required=False, default=10.0,
                         help='image_mlm_w weight')
+    parser.add_argument('--contrastive_loss_w', type=float, required=False, default=1.0,
+                        help='contrastive_loss_w weight')
 
     parser.add_argument('--cpu', action="store_true", default=False,
                         help='Train on CPU')
@@ -1309,7 +1313,7 @@ def train(local_rank, args):
     optimizer_config["eps"] = 1e-8
 
     encoder = MultiModalEncoder(args["model_size"])
-    trainer = MultiModalSelfSupervisedTrainerModel(0, args["image_mlm_w"], args["text_mlm_w"],
+    trainer = MultiModalSelfSupervisedTrainerModel(args["contrastive_loss_w"], args["image_mlm_w"], args["text_mlm_w"],
                                                    args["text_mlm_w"], encoder)
     encoder_param_count = numel(encoder)
     trainer_param_count = numel(trainer)
