@@ -955,6 +955,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         self.contrast_loss = nn.BCEWithLogitsLoss()
         self.contrast_ffn = nn.Sequential(LongformerFFN(self.encoder.longformer.config), nn.Dropout(0.1), nn.Linear(decoder_embed_dim, decoder_embed_dim * 2), nn.GELU(), nn.Linear(decoder_embed_dim * 2, decoder_embed_dim))
+        init_weights(self.contrast_ffn)
 
         embed_dim = decoder_embed_dim
         self.embed_dim = embed_dim
@@ -1106,7 +1107,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
                     mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss, image_mlm_loss=image_mlm_loss,
-                    contrastive_loss=contrastive_loss, mm=mm, labels=labels, contrastive_vec=contrastive_vec, t=t)
+                    contrastive_loss=contrastive_loss)
 
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
@@ -1387,7 +1388,7 @@ def train(local_rank, args):
         wandb.init(**wandb_init_args)
     metric_logger = MetricLogger(delimiter="  ", plots=["loss", "lr", "mlm_accuracy",
                                                         "tabular_mlm_accuracy",
-                                                        "image_mlm_loss"])
+                                                        "image_mlm_loss", "contrastive_loss"])
     metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
     logs_save = []
     model.zero_grad(set_to_none=True)
@@ -1449,6 +1450,7 @@ def train(local_rank, args):
                 metric_logger.update(mlm_loss=model_output["mlm_loss"])
                 metric_logger.update(tabular_mlm_loss=model_output["tabular_mlm_loss"])
                 metric_logger.update(image_mlm_loss=model_output["image_mlm_loss"])
+                metric_logger.update(contrastive_loss=model_output["contrastive_loss"])
 
             loss_float = model_output["loss"].item()
             if np.isnan(loss_float):
