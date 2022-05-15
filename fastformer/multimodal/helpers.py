@@ -103,7 +103,7 @@ train_image_augments = transforms.Compose([
         transforms.GaussianBlur(3),
     ]),
     SquarePad(),
-    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.75, 1.25)),
+    transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0), ratio=(0.8, 1.2)),
     # transforms.Resize([image_size, image_size])
 ])
 
@@ -574,8 +574,13 @@ class MultiModalTrainingDataset(Dataset):
         masks = [self.__get_image_mask__() for _ in range(len(image_locations))]
         image_masks = torch.tensor(np.stack(masks)).bool()
         image_locations = torch.tensor(np.stack(image_locations))
-        # images_patch = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=image_patch_size, p2=image_patch_size)
-        images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,p2=image_patch_size)
+        try:
+            # images_patch = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=image_patch_size, p2=image_patch_size)
+            images_squeeze = rearrange(image_locations, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=image_patch_size,p2=image_patch_size)
+        except Exception as e:
+            print(item)
+            print("[Dataset] [Error] Item index = %s" % item_idx)
+            raise e
         image_patch_mean = images_squeeze.mean(dim=-2, keepdim=True)
         image_patch_std = (images_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
         images_norm = (images_squeeze - image_patch_mean) / image_patch_std
@@ -1163,7 +1168,7 @@ def training_args():
     os.environ['MASTER_PORT'] = args.master_port
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
-    seed = 79739567
+    seed = 75139563
     args.seed = seed
     return vars(args)
 
