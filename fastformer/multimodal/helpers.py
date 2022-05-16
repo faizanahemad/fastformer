@@ -1065,7 +1065,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
                 label_input_ids=None, label_tabular_input_ids=None):
         if random.random() < 0.1 and image_masks is not None:
             new_masks = torch.zeros_like(image_masks)
-            bs, ps = images.shape[:2]
+            bs, ps = image_masks.shape[:2]
             for i in range(bs):
                 for j in range(ps):
                     new_mask = get_image_mask(image_grid * image_grid, int(0.25 * (image_grid * image_grid)))
