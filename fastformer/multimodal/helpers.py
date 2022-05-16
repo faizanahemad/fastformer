@@ -302,6 +302,14 @@ def text_masking(text: str, tokenizer: Union[PreTrainedTokenizer, PreTrainedToke
     return " ".join(masked_words), " ".join(words)
 
 
+def get_image_mask(num_patches, num_mask):
+    mask = np.hstack([
+        np.zeros(num_patches - num_mask),
+        np.ones(num_mask),
+    ])
+    np.random.shuffle(mask)
+    return mask
+
 class MultiModalTrainingDataset(Dataset):
     """
     Expects a header-less csv.
@@ -1055,6 +1063,14 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
                 tabular_input_ids, tabular_attention_mask,
                 images=None, panel_distribution=None, image_masks=None, image_labels=None,
                 label_input_ids=None, label_tabular_input_ids=None):
+        if random.random() < 0.1 and image_masks is not None:
+            new_masks = torch.zeros_like(image_masks)
+            bs, ps = images.shape[:2]
+            for i in range(bs):
+                for j in range(ps):
+                    new_mask = get_image_mask(image_grid * image_grid, (0.25 * (image_grid * image_grid)))
+                    new_masks[bs][ps] = torch.tensor(new_mask, device=image_masks.device)
+            image_masks = new_masks
         encoder_out = self.encoder(input_ids=input_ids, attention_mask=attention_mask,
                                    tabular_input_ids=tabular_input_ids,
                                    tabular_attention_mask=tabular_attention_mask, images=images, panel_distribution=panel_distribution, mask=image_masks)
@@ -1107,7 +1123,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
 
         return dict(loss=loss, tabular_mlm_accuracy=tabular_mlm_accuracy, mlm_accuracy=mlm_accuracy,
                     mlm_loss=mlm_loss, tabular_mlm_loss=tabular_mlm_loss, image_mlm_loss=image_mlm_loss,
-                    contrastive_loss=contrastive_loss)
+                    contrastive_loss=contrastive_loss, image_masks=image_masks)
 
         # TODO: to optimize tabular we need to write separate collate fn. For starters keep text size and table size = 512.
 
