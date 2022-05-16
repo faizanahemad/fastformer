@@ -1247,7 +1247,7 @@ def build_propreitery_dataset(location, images_path, tokenizer):
                                         image_size, image_patch_size, train_image_augments)
     return dataset
 
-def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, world_size=1, num_workers=None, shuffle=True, training=True):
+def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, world_size=1, num_workers=None, shuffle=True, training=True, drop_last=True,):
     single_node = world_size == 1
     num_workers = min(max(os.cpu_count() // 2, 1), 4) if num_workers is None else num_workers
     COLUMNS = ['asin', 'text', 'price', 'has_customer_reviews',
@@ -1270,7 +1270,7 @@ def build_propreitery_dataloader(location, images_path, batch_size, tokenizer, w
                                         training=training)
     kwargs = dict(prefetch_factor=2, persistent_workers=False) if num_workers > 0 else dict()
     sampler = None if single_node else DistributedSampler(dataset, shuffle=shuffle)
-    train_loader = DataLoader(dataset, sampler=sampler, drop_last=True,
+    train_loader = DataLoader(dataset, sampler=sampler, drop_last=drop_last,
                               batch_size=batch_size, shuffle=single_node and shuffle, worker_init_fn=worker_init_fn,
                               num_workers=num_workers, pin_memory=True, **kwargs)
 
