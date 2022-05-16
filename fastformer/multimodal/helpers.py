@@ -1068,7 +1068,7 @@ class MultiModalSelfSupervisedTrainerModel(LongformerPreTrainedModel):
             bs, ps = images.shape[:2]
             for i in range(bs):
                 for j in range(ps):
-                    new_mask = get_image_mask(image_grid * image_grid, (0.25 * (image_grid * image_grid)))
+                    new_mask = get_image_mask(image_grid * image_grid, int(0.25 * (image_grid * image_grid)))
                     new_masks[bs][ps] = torch.tensor(new_mask, device=image_masks.device)
             image_masks = new_masks
         encoder_out = self.encoder(input_ids=input_ids, attention_mask=attention_mask,
