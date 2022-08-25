@@ -829,6 +829,9 @@ def init_weights_internal(module, std=None):
     elif isinstance(module, nn.Parameter):
         trunc_normal_(module, std=std)
         # module.data.normal_(mean=0.0, std=std)
+    elif isinstance(module, nn.modules.rnn.LSTM):
+        for name, param in module.named_parameters():
+            trunc_normal_(param, std=std)
     elif isinstance(module, nn.Embedding):
         trunc_normal_(module.weight, std=std)
         # module.weight.data.normal_(mean=0.0, std=std)
@@ -836,7 +839,7 @@ def init_weights_internal(module, std=None):
             module.weight.data[module.padding_idx].zero_()
     elif hasattr(module, "weight") and module.weight is not None:
         trunc_normal_(module.weight, std=std)
-    if hasattr(module, "bias") and module.bias is not None:
+    if hasattr(module, "bias") and module.bias is not None and not isinstance(module, nn.modules.rnn.LSTM):
         nn.init.constant_(module.bias, 0.0)
 
 

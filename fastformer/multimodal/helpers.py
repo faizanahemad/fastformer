@@ -50,7 +50,7 @@ total_image_panels = 4
 image_mask_proba = 0.75
 per_img_patches = int((image_grid * image_grid) - (image_mask_proba * (image_grid * image_grid)))
 
-tokenizer_args=dict(padding="max_length", truncation=True, return_tensors="pt", max_length=max_length)
+tokenizer_args=dict(padding=True, truncation=True, return_tensors="pt", max_length=max_length)
 
 import torchvision.transforms.functional as F
 
@@ -1350,7 +1350,7 @@ def train(local_rank, args):
     barrier()
     optc = copy.deepcopy(optimizer_config)
     model.zero_grad(set_to_none=True)
-    no_decay = ['bias', 'LayerNorm.weight']
+    no_decay = ['bias', 'LayerNorm.weight', "embeddings"]
     optimizer_grouped_parameters = [
         {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
          'weight_decay': args["weight_decay"]},

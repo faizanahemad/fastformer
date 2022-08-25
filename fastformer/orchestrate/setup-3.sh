@@ -96,7 +96,7 @@ echo "Your public key for use:"
 cat ~/.ssh/id_rsa.pub
 ~/jupyter_start.sh
 
-pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer jsonlines imgaug albumentations attrdict > /dev/null
+pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U tqdm wandb dataclasses dataclasses-json transformers datasets tokenizers dill nltk more-itertools gpustat nlpaug pyarrow pytorch-fast-transformers pytorch-ranger sacrebleu sacremoses sentencepiece snakeviz torch-optimizer jsonlines imgaug albumentations attrdict uniplot > /dev/null
 pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U dataclasses-json einops nlpaug pytorch-fast-transformers timm attrdict tabulate > /dev/null
 pip install --use-feature=fast-deps --use-deprecated=legacy-resolver -U unidecode einops nlpaug pyarrow pytorch-fast-transformers transformers datasets wandb tqdm tokenizers pytorch-ranger torch-optimizer dataclasses-json > /dev/null
 

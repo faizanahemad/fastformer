@@ -21,6 +21,8 @@ sudo yum -y install llvm clang llvm-devel llvm-libs llvm-static
 sudo yum-config-manager --add-repo http://dev-desktop-repos.amazon.com/Amazon-Dev-Desktop-GUI.repo
 sudo yum -y install amazon-midway-init
 sudo yum -y remove nvidia-dkms nvidia
+sudo yum -y install htop
+sudo yum -y install nfs-utils nfs-utils-lib portmap
 
 cd /home/ahemf
 wget https://developer.download.nvidia.com/compute/cuda/11.4.0/local_installers/cuda_11.4.0_470.42.01_linux.run > /dev/null
