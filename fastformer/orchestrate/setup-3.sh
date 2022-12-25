@@ -137,6 +137,8 @@ python -c "import wandb; wandb.login(\"never\", \"7fcf597a1a07dcb2e98622a96838a7
 #pip freeze | grep fairscale
 #pip freeze | grep torch
 
+sudo yum -y install mlocate
+sudo updatedb
 
 
 exit
