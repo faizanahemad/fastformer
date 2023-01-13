@@ -48,6 +48,14 @@ sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.
 # chmod +x cuda_11.2.1_460.32.03_linux.run
 # sudo sudo sh cuda_11.2.1_460.32.03_linux.run --silent --driver --toolkit
 
+#######
+# Cuda for detectron2 and torch 1.10
+#######
+# wget https://developer.download.nvidia.com/compute/cuda/11.3.0/local_installers/cuda_11.3.0_465.19.01_linux.run > /dev/null
+# chmod +x cuda_11.3.0_465.19.01_linux.run
+# sudo sudo sh cuda_11.3.0_465.19.01_linux.run --silent --driver --toolkit
+# sudo nvidia-smi daemon
+
 #######################
 
 #wget https://developer.download.nvidia.com/compute/cuda/10.2/Prod/local_installers/cuda_10.2.89_440.33.01_linux.run
