@@ -1,6 +1,5 @@
-mkdir -p /home/ahemf/processed_datasets
-mkdir -p /home/ahemf/model_save_dir
-mkdir -p /home/ahemf/torch_distributed_init
+# Need to change PATH and LD_LIBRARY_PATH if you install Cuda at a different location
+mkdir -p /home/$USER/processed_datasets
 cat > ~/.zshrc << "EOF"
 
 export ZSH=/home/$USER/.oh-my-zsh
@@ -24,10 +23,11 @@ alias grep='nocorrect grep --color=auto'
 alias nvkill="nvidia-smi | grep 'python' | awk '{ print $3 }' | xargs -n1 kill -9"
 alias mpkill="kill $(ps aux | grep multiprocessing | grep -v grep | awk '{print $2}')"
 setopt HIST_VERIFY
-export PATH="$PATH":~/bin
-export PATH="$PATH:/usr/local/cuda-11.2/bin"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda-11.2/lib64"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda-11.2/lib"
+export PATH="$PATH:/usr/local/cuda-11.6/bin"
+export PATH="$PATH:/home/$USER/nvidia/toolkit/bin"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda-11.6/lib64"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/$USER/nvidia/toolkit/lib64"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda-11.6/lib"
 export PATH="$PATH:/usr/lib64"
 export HISTSIZE=10000
 export SAVEHIST=10000
@@ -40,18 +40,25 @@ DISABLE_AUTO_UPDATE="true"
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('/home/ahemf/anaconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
+conda_path="/home/$USER/anaconda3"
+conda_str="$conda_path/bin/conda"
+__conda_setup="$($conda_str 'shell.zsh' 'hook' 2> /dev/null)"
 if [ $? -eq 0 ]; then
     eval "$__conda_setup"
 else
-    if [ -f "/home/ahemf/anaconda3/etc/profile.d/conda.sh" ]; then
-        . "/home/ahemf/anaconda3/etc/profile.d/conda.sh"
+    if [ -f "$conda_path/etc/profile.d/conda.sh" ]; then
+        . "$conda_path/etc/profile.d/conda.sh"
     else
-        export PATH="/home/ahemf/anaconda3/bin:$PATH"
+        export PATH="$conda_path/bin:$PATH"
     fi
 fi
 unset __conda_setup
 # <<< conda initialize <<<
+
+mkdir -p $HOME/tmp
+mkdir -p $HOME/cache
+export TMPDIR=$HOME/tmp
+export TMP=$HOME/tmp
 
 EOF
 
@@ -67,6 +74,11 @@ set incsearch
 set hlsearch
 EOF
 
-wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh > /dev/null
-sh Anaconda3-2022.10-Linux-x86_64.sh -b
+wget https://repo.anaconda.com/archive/Anaconda3-2023.03-Linux-x86_64.sh > /dev/null
+sh Anaconda3-2023.03-Linux-x86_64.sh -b
 . ~/.zshrc
+
+# Setup docker location
+# https://linuxconfig.org/how-to-move-docker-s-default-var-lib-docker-to-another-directory-on-ubuntu-debian-linux
+# sudo systemctl daemon-reload
+# sudo systemctl restart docker
